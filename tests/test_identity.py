@@ -396,6 +396,9 @@ class ReviewTest(Base):
         for t in threads:
             t.join()
         self.assertLessEqual(results.count(401), 5)                                  # at most the limit got hashed
+        # a guess turned away as busy gives its attempt back, so the burst may leave fewer than 5 on the name
+        for _ in range(5 - results.count(401)):
+            i.sign_in("owner", "wrong guess", "10.1.1.4")
         self.assertEqual(i.sign_in("owner", "correct horse battery", "10.1.1.2").status, 429)   # name locked
         ok = self.ident(signin=True)
         self.assertEqual(ok.sign_in("owner", "correct horse battery", "10.1.1.3").status, 200)
