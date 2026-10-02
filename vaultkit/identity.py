@@ -1,4 +1,4 @@
-"""One identity for every room (docs/plans/identity.md): who is calling, and what they may do.
+"""One identity for every room (docs/identity.md): who is calling, and what they may do.
 
 The identity file is TOML, read-only to the rooms (MACHIYA_IDENTITY_FILE), edited on its host with
 `python3 -m vaultkit.identity`. It names principals (people, agents, services) and their grants; it holds no secret in
@@ -205,12 +205,13 @@ def check_bind(auth, bind, behind_proxy=False):
 class Principal:
     """Who is calling: a name, a kind, and what they may do. `via` says how it was proven (for logs only)."""
 
-    def __init__(self, name, kind, owner=False, grants=None, limits=None, via="", uid=""):
+    def __init__(self, name, kind, owner=False, grants=None, limits=None, via="", uid="", tailscale=()):
         self.name, self.kind, self.owner = name, kind, owner
         self.uid = uid or name          # the file's id (a person's is random): what rooms key stored data on
         self.grants = grants or {}      # {room: {"actions": set, "vaults": tuple|None}}
         self.limits = dict(limits or {})
         self.via = via
+        self.tailscale = tuple(tailscale)   # the file's Tailscale logins (finds preferences stored before the file)
 
     def can(self, room, action):
         if self.owner:
@@ -228,7 +229,7 @@ class Principal:
         return grant["vaults"] if grant["vaults"] is not None else DEFAULT_VAULTS
 
     def with_via(self, via):
-        return Principal(self.name, self.kind, self.owner, self.grants, self.limits, via, self.uid)
+        return Principal(self.name, self.kind, self.owner, self.grants, self.limits, via, self.uid, self.tailscale)
 
     def __repr__(self):
         return "Principal(%s, %s%s)" % (self.name, self.kind, ", owner" if self.owner else "")
@@ -384,7 +385,8 @@ class Config:
         revoked = p.get("revoked_devices", [])
         if not isinstance(revoked, list) or not all(isinstance(d, str) for d in revoked):
             raise IdentityError("%s: revoked_devices must be a list of device ids" % where)
-        self.principals[name] = Principal(name, kind, owner, grants, limits, uid=uid)
+        self.principals[name] = Principal(name, kind, owner, grants, limits, uid=uid,
+                                          tailscale=[v.strip() for v in p.get("tailscale", [])])
         self.raw[name] = {"password": p.get("password"), "epoch": epoch, "revoked": frozenset(revoked), "uid": uid}
 
     def pair_entry(self, i, e):
@@ -473,6 +475,36 @@ HASHING = threading.BoundedSemaphore(4)     # scrypt costs 16 MiB and ~50 ms: at
 
 # auth=open: everyone, as before identities; ":open" is an id no name in a file can be
 OPEN_OWNER = Principal("local", "person", owner=True, via="open", uid=":open")
+
+
+def tailscale_uid(login):
+    """The preferences key of a Tailscale login without an identity file: "ts:" + the first 32 hex digits of the
+    SHA-256 of the login, trimmed and lowercased (Tailscale logins are case-insensitive). Always hashed: it fits
+    Prefs' 64 characters however long the login, and the room's SQLite file holds no email address."""
+    return "ts:" + hashlib.sha256(login.strip().lower().encode("utf-8")).hexdigest()[:32]
+
+
+def ambient(auth, headers):
+    """A principal for preferences in a room WITHOUT an identity file (load_for gave None). The room's old gate
+    (*_USERS, or open mode's Host allow-list) decides who gets in; this only names whose preferences these are, so the
+    room calls it only after that gate admitted the request. Never a grant: it is the owner because the old gate
+    lets only the owner in.
+
+    auth "tailscale": the one Tailscale-User-Login (None when it is missing, empty, sent twice or holds a control
+    character), as Principal(login, "person", owner=True, via="tailscale", uid=tailscale_uid(login)).
+    auth "open": OPEN_OWNER (uid ":open"). Anything else: None (no preferences)."""
+    auth = (auth or "").strip().lower()
+    if auth == "open":
+        return OPEN_OWNER
+    if auth != "tailscale":
+        return None
+    values = Identity.header_values(headers, "Tailscale-User-Login")
+    if len(values) != 1 or not isinstance(values[0], str):
+        return None
+    login = values[0].strip()
+    if not login or any(ord(c) < 32 or ord(c) == 127 for c in login):
+        return None
+    return Principal(login, "person", owner=True, via="tailscale", uid=tailscale_uid(login), tailscale=(login,))
 
 
 class Result:
@@ -820,7 +852,7 @@ def toml_key(k):
 
 def dump(data):
     """The identity file's data -> TOML text, in a fixed order. Comments aren't kept (tomllib reads, never writes)."""
-    out = ["# Machiya identity file (docs/plans/identity.md). Written by `python3 -m vaultkit.identity`;",
+    out = ["# Machiya identity file (docs/identity.md). Written by `python3 -m vaultkit.identity`;",
            "# hand edits are fine, but the CLI rewrites the file and doesn't keep comments.", ""]
     for k in ("version", "session_key_file", "session_days", "tailscale_capability"):
         if k in data:
@@ -911,6 +943,10 @@ def new_pairing(data, name, label="", minutes=10):
 
 USAGE = """python3 -m vaultkit.identity [--file PATH] COMMAND   (PATH defaults to $MACHIYA_IDENTITY_FILE)
 
+  setup [--owner NAME] [--tailscale LOGIN] [--password] [--proxy LOGIN] [--rooms kura,niwa,konbini,mcp] [--yes]
+                                         first time: the file, its key and an owner who can sign in, then the
+                                         settings to paste into each room (PATH defaults to
+                                         ./machiya-identity/identity.toml); never overwrites, only adds logins
   init                                   a new file and session key (0600) next to it
   check                                  validate the file and key; print the principals
   add NAME --kind person|agent|service [--owner]
@@ -927,12 +963,177 @@ USAGE = """python3 -m vaultkit.identity [--file PATH] COMMAND   (PATH defaults t
 """
 
 
+SETUP_PATH = os.path.join(".", "machiya-identity", "identity.toml")
+# room -> (its settings' prefix, the setting that names its public URL)
+SETUP_ROOMS = {"kura": ("KURA", "KURA_PUBLIC_URL"), "niwa": ("NIWA", "NIWA_PUBLIC_URL"),
+               "konbini": ("KANBAN", "KANBAN_BOARD_URL"), "mcp": ("MCP", None)}
+SETUP_USAGE = ("setup [--owner NAME] [--tailscale LOGIN] [--password] [--proxy LOGIN] "
+               "[--rooms kura,niwa,konbini,mcp] [--yes]")
+
+
+def new_uid():
+    return "".join(secrets.choice("abcdefghijkmnpqrstuvwxyz23456789") for _ in range(16))
+
+
+def write_key(path):
+    """A new session key next to the identity file (0600), as init writes it; an existing key is kept."""
+    key = os.path.join(os.path.dirname(os.path.abspath(path)), "session.key")
+    if not os.path.exists(key):
+        fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(b64e(secrets.token_bytes(32)) + "\n")
+    return key
+
+
+def setup(path, args, interactive=None):
+    """`setup`: a first identity file with an owner who can sign in, and the settings for each room. Never overwrites
+    the file: on an existing one it adds only the requested logins to the owner. -> 0 ok, 2 usage, 1 refused."""
+    import getpass
+
+    def usage(why):
+        print("identity setup: %s\nusage: python3 -m vaultkit.identity [--file PATH] %s" % (why, SETUP_USAGE),
+              file=sys.stderr)
+        return 2
+
+    def refuse(why):
+        print("identity setup: refused: %s" % why, file=sys.stderr)
+        return 1
+
+    owner, tailscale, proxy, password, yes, rooms = "owner", None, None, False, False, list(SETUP_ROOMS)
+    rest = list(args)
+    while rest:
+        flag = rest.pop(0)
+        if flag in ("--password", "--yes"):
+            password, yes = password or flag == "--password", yes or flag == "--yes"
+            continue
+        if flag not in ("--owner", "--tailscale", "--proxy", "--rooms"):
+            return usage("unknown argument %r" % flag)
+        if not rest or not rest[0].strip() or rest[0].startswith("--"):
+            return usage("%s needs a value" % flag)
+        value = rest.pop(0).strip()
+        if flag == "--owner":
+            owner = value
+        elif flag == "--tailscale":
+            tailscale = value
+        elif flag == "--proxy":
+            proxy = value
+        else:
+            rooms = list(dict.fromkeys(r.strip().lower() for r in value.split(",") if r.strip()))
+            bad = [r for r in rooms if r not in SETUP_ROOMS]
+            if bad or not rooms:
+                return usage("--rooms takes %s, not %r" % (",".join(SETUP_ROOMS), value))
+    if not NAME_RE.match(owner) or len(owner) > MAX_NAME:
+        return usage("--owner: a name is lowercase letters, digits and -")
+    if tomllib is None:
+        return refuse("the identity file needs Python 3.11 or newer (tomllib)")
+    if interactive is None:
+        interactive = not (yes or tailscale or proxy or password) and sys.stdin.isatty()
+    if interactive:
+        try:
+            tailscale = input("Your Tailscale login (blank to skip): ").strip() or None
+            password = input("Set a password for the built-in sign-in? [y/N] ").strip().lower() in ("y", "yes")
+        except EOFError:
+            return refuse("no answer")
+
+    path = os.path.abspath(path)
+    folder = os.path.dirname(path)
+    exists = os.path.lexists(path)
+    if exists:
+        try:
+            config, _ = read_file(path)
+        except IdentityError as e:
+            return refuse("%s (fix it, or set --file to a new path)" % e)
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+        others = [n for n, p in config.principals.items() if p.owner and n != owner]
+        if others:
+            return refuse("%r is already the owner in %s; rerun with --owner %s" % (others[0], path, others[0]))
+        if owner in config.principals and not config.principals[owner].owner:
+            return refuse("%r exists in %s and isn't the owner; choose another --owner" % (owner, path))
+        if tailscale and config.by_login.get(tailscale.lower(), owner) != owner:
+            return refuse("the Tailscale login %r belongs to %r" % (tailscale, config.by_login[tailscale.lower()]))
+        if proxy and config.by_proxy.get(proxy, owner) != owner:
+            return refuse("the proxy login %r belongs to %r" % (proxy, config.by_proxy[proxy]))
+        if owner in config.principals and password and config.raw[owner]["password"]:
+            return refuse("%r already has a password; change it with passwd %s" % (owner, owner))
+        data.setdefault("principals", {})
+    else:
+        data = {"version": VERSION, "session_key_file": "session.key", "session_days": 30,
+                "tailscale_capability": CAPABILITY, "principals": {}}
+    found = owner in data["principals"]
+    before = dump(data)
+    p = data["principals"].setdefault(owner, {"id": new_uid(), "kind": "person", "owner": True})
+    if tailscale and tailscale.lower() not in {t.lower() for t in p.get("tailscale", [])}:
+        p["tailscale"] = sorted(set(p.get("tailscale", [])) | {tailscale})
+    if proxy:
+        p["proxy"] = sorted(set(p.get("proxy", [])) | {proxy})
+    if not (p.get("tailscale") or p.get("proxy") or password or p.get("password")):
+        return refuse("%r would have no way to sign in: give --tailscale LOGIN, --proxy LOGIN or --password" % owner)
+    if password:
+        pw = getpass.getpass("new password for %s: " % owner)
+        if len(pw) < 12:
+            return refuse("use at least 12 characters")
+        if getpass.getpass("again: ") != pw:
+            return refuse("the two passwords differ")
+        p["password"] = hash_password(pw)
+    try:
+        Config(tomllib.loads(dump(data)), folder)    # checked before anything is created
+    except IdentityError as e:
+        return refuse("not written: %s" % e)
+
+    if not exists:
+        if not os.path.isdir(folder):
+            os.makedirs(folder, mode=0o700)
+            os.chmod(folder, 0o700)                 # whatever the umask
+        key = write_key(path)
+        print("wrote %s and %s" % (path, key))
+    elif dump(data) == before:
+        print("%s: %r is already the owner; nothing to add" % (path, owner))
+    elif found:
+        print("%s: %r is already the owner; added only the logins asked for" % (path, owner))
+    else:
+        print("%s: added the owner %r" % (path, owner))
+    if not exists or dump(data) != before:          # an unchanged file isn't rewritten (it would lose its comments)
+        try:
+            write_file(path, data)
+        except IdentityError as e:
+            return refuse("not written: %s" % e)
+
+    signin = bool(p.get("password"))
+    print("\n# Paste into each room's settings (.env or the container's environment):")
+    for room in rooms:
+        prefix = SETUP_ROOMS[room][0]
+        print("\n# %s" % room.capitalize())
+        print("MACHIYA_IDENTITY_FILE=%s" % path)
+        if signin:
+            print("%s_SIGNIN=1" % prefix)
+        print("# (Docker or a sidecar: the proxy is the only way in)")
+        print("%s_BIND_BEHIND_PROXY=1" % prefix)
+    urls = [SETUP_ROOMS[r][1] for r in rooms if SETUP_ROOMS[r][1]]
+    cli = "python3 -m vaultkit.identity --file %s" % path
+    print("\nNotes:")
+    print("- Mount the directory, not the file, read-only into each room at the same path:")
+    print("    -v %s:%s:ro" % (folder, folder))
+    print("  (the CLI replaces the file atomically; a file mount would keep the old one). The directory is 0700 and")
+    print("  the files 0600: the rooms' user must be able to read them (chown -R, or chgrp -R and g+rX).")
+    if urls:
+        print("- Set each room's public URL (%s), so sign-in works over plain http." % ", ".join(urls))
+    print("- Next steps:")
+    print("    %s add mcp --kind agent" % cli)
+    print("    %s grant mcp konbini read write" % cli)
+    print("    %s token mint mcp --label mcp" % cli)
+    print("    %s pair %s --label phone     # a one-time code for Shiori" % (cli, owner))
+    return 0
+
+
 def main(argv=None):
     import getpass
     args = list(sys.argv[1:] if argv is None else argv)
     path = os.environ.get("MACHIYA_IDENTITY_FILE", "")
     if args[:1] == ["--file"] and len(args) > 1:
         path, args = args[1], args[2:]
+    if args[:1] == ["setup"]:
+        return setup(path or SETUP_PATH, args[1:])
     if not args or args[0] in ("-h", "--help") or not path:
         print(USAGE if path or args[:1] in (["-h"], ["--help"]) else "set --file or MACHIYA_IDENTITY_FILE\n\n" + USAGE)
         return 0 if args[:1] in (["-h"], ["--help"]) else 2
@@ -955,11 +1156,7 @@ def main(argv=None):
     if cmd == "init":
         if os.path.exists(path):
             raise SystemExit("%s exists" % path)
-        key = os.path.join(os.path.dirname(os.path.abspath(path)), "session.key")
-        if not os.path.exists(key):
-            fd = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "w") as f:
-                f.write(b64e(secrets.token_bytes(32)) + "\n")
+        key = write_key(path)
         write_file(path, {"version": VERSION, "session_key_file": os.path.basename(key), "session_days": 30,
                           "tailscale_capability": CAPABILITY, "principals": {}})
         print("wrote %s and %s" % (path, key))
@@ -994,8 +1191,7 @@ def main(argv=None):
             raise SystemExit("add NAME --kind person|agent|service [--owner]")
         if args[0] in data["principals"]:
             raise SystemExit("%r exists" % args[0])
-        uid = "".join(secrets.choice("abcdefghijkmnpqrstuvwxyz23456789") for _ in range(16))
-        data["principals"][args[0]] = {"id": uid, "kind": kind, **({"owner": True} if owner else {})}
+        data["principals"][args[0]] = {"id": new_uid(), "kind": kind, **({"owner": True} if owner else {})}
     elif cmd == "grant":
         vaults = opt("--vaults", many=True)
         if len(args) < 3:

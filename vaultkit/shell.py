@@ -240,10 +240,20 @@ def footer(room, status=None, links=()):
     return '<footer class="foot">%s</footer>' % "".join(parts)
 
 
+def prefs_meta(url):
+    """<meta name="machiya-prefs" content="/api/prefs">: this page's viewer has server-side preferences there, so
+    machiya.js syncs theme and text size with it. Only a local path ("/...", not "//..."); anything else is ""."""
+    if not isinstance(url, str) or not url.startswith("/") or url[1:2] in ("/", "\\") \
+            or any(c.isspace() or ord(c) < 32 for c in url):
+        return ""
+    return '<meta name="machiya-prefs" content="%s">\n' % e(url)
+
+
 def page(ctx, room, title, body, tabs=(), current="", links=None, head="", stylesheets=(), scripts=(), manifest=True,
-         icons=None):
+         icons=None, prefs_url=""):
     """The HTML5 document. stylesheets/scripts: the app's own (machiya.css and machiya.js come first); icons: the SVG
-    for each tab key (the room's own glyphs; GLYPH covers the rooms, rooms, gear)."""
+    for each tab key (the room's own glyphs; GLYPH covers the rooms, rooms, gear). prefs_url: the room's /api/prefs
+    when this request has a principal with preferences (prefs_meta); machiya.js then syncs theme and text size."""
     links = links if links is not None else rooms()
     theme = getattr(ctx, "theme", "system")
     theme = "system" if theme == "auto" else theme
@@ -267,11 +277,11 @@ def page(ctx, room, title, body, tabs=(), current="", links=None, head="", style
         '<link rel="apple-touch-icon" href="/static/icons/%s-apple-180.png">\n'
         '<meta name="apple-mobile-web-app-capable" content="yes">\n<meta name="mobile-web-app-capable" content="yes">\n'
         '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">\n'
-        '<meta name="apple-mobile-web-app-title" content="%s">\n%s%s%s'
+        '<meta name="apple-mobile-web-app-title" content="%s">\n%s%s%s%s'
         '</head>\n<body class="theme-%s room-%s" data-room="%s" data-text="%s"%s>\n%s\n%s\n</body>\n</html>\n'
     ) % (e(title), scheme, colors,
          '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">\n' if manifest else "",
-         room, room, e(name), css, js, head, theme, room, room, e(text),
+         room, room, e(name), prefs_meta(prefs_url) if prefs_url else "", css, js, head, theme, room, room, e(text),
          (' data-cookie-domain="%s"' % e(COOKIE_DOMAIN)) if COOKIE_DOMAIN else "", body,
          tabbar(tabs, current, room, links, icons) if tabs else "")
 

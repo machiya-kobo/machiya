@@ -1,4 +1,4 @@
-"""The built-in sign-in, Shiori device pairing and per-user preferences (docs/plans/identity.md, phase 6), for any room.
+"""The built-in sign-in, Shiori device pairing and per-user preferences (docs/identity.md, phase 6), for any room.
 
 Every function takes plain inputs (a headers mapping with .get, the request body as bytes, the client address) and
 returns `(status, [(header, value), ...], body bytes)`, so a room's handler stays a few lines (docs/vaultkit.md):
@@ -24,7 +24,7 @@ from contextlib import closing
 from urllib.parse import parse_qs, quote, urlsplit
 
 from . import shell
-from .identity import Identity
+from .identity import Identity, tailscale_uid
 
 MAX_FORM = 4096                 # name + password (<= 1024) + next, urlencoded
 MAX_PAIR = 1024                 # {"code": ..., "device": ...}
@@ -280,7 +280,13 @@ class Prefs:
     """A principal's preferences in the room's own SQLite file: table prefs(principal, key, value, updated), keyed by
     the principal's id (Principal.uid), so a name deleted and added again starts empty. Keys match
     KEY_RE, values are strings of at most MAX_VALUE bytes, at most MAX_KEYS keys per principal. Nothing here decides who
-    the principal is: the room passes the name `resolve` gave it."""
+    the principal is: the room passes the name `resolve` gave it.
+
+    `fallbacks` (get_all, put): ids the same person's preferences may have been stored under before (the ambient
+    "ts:..." key of a Tailscale login, from a room without an identity file). The first time a principal with
+    fallbacks is seen, if it has no preferences of its own, the first fallback that has some is copied to it, in the
+    same transaction; the old rows stay. Table prefs_moved(principal, source, moved) records that this was decided
+    (source "" when nothing was copied), so it happens once: preferences removed later never come back."""
 
     def __init__(self, path):
         self.path, self.lock = path, threading.Lock()
@@ -291,6 +297,8 @@ class Prefs:
         with self.lock, closing(self._db()) as db, db:
             db.execute("CREATE TABLE IF NOT EXISTS prefs (principal TEXT NOT NULL, key TEXT NOT NULL, "
                        "value TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (principal, key))")
+            db.execute("CREATE TABLE IF NOT EXISTS prefs_moved (principal TEXT PRIMARY KEY, source TEXT NOT NULL, "
+                       "moved INTEGER NOT NULL)")
 
     def _db(self):
         # autocommit (put() begins its own); a short wait, since the lock below is held meanwhile
@@ -302,14 +310,51 @@ class Prefs:
             raise PrefsError("no principal")
         return principal
 
-    def get_all(self, principal):
+    @staticmethod
+    def _fallbacks(principal, fallbacks):
+        return [f for f in fallbacks or () if isinstance(f, str) and f and len(f) <= 64 and f != principal]
+
+    @staticmethod
+    def _adopt(db, principal, fallbacks):
+        """Inside a transaction: the one-time copy from the first fallback with preferences (see the class)."""
+        if not fallbacks or db.execute("SELECT 1 FROM prefs_moved WHERE principal = ?", (principal,)).fetchone():
+            return
+        source = ""
+        if not db.execute("SELECT 1 FROM prefs WHERE principal = ? LIMIT 1", (principal,)).fetchone():
+            for f in fallbacks:
+                if db.execute("SELECT 1 FROM prefs WHERE principal = ? LIMIT 1", (f,)).fetchone():
+                    db.execute("INSERT INTO prefs (principal, key, value, updated) "
+                               "SELECT ?, key, value, updated FROM prefs WHERE principal = ?", (principal, f))
+                    source = f
+                    break
+        db.execute("INSERT INTO prefs_moved (principal, source, moved) VALUES (?, ?, ?)",
+                   (principal, source, int(time.time())))
+
+    @staticmethod
+    def _rollback(db):
+        try:
+            db.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass                        # the original error matters, not a failed rollback
+
+    def get_all(self, principal, fallbacks=()):
         principal = self._principal(principal)
+        fallbacks = self._fallbacks(principal, fallbacks)
         with self.lock, closing(self._db()) as db:
+            if fallbacks and not db.execute("SELECT 1 FROM prefs_moved WHERE principal = ?", (principal,)).fetchone():
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    self._adopt(db, principal, fallbacks)
+                    db.execute("COMMIT")
+                except BaseException:
+                    self._rollback(db)
+                    raise
             return dict(db.execute("SELECT key, value FROM prefs WHERE principal = ? ORDER BY key", (principal,)))
 
-    def put(self, principal, changes):
+    def put(self, principal, changes, fallbacks=()):
         """Set each key to its string value, or remove it when the value is None; all or nothing. -> get_all."""
         principal = self._principal(principal)
+        fallbacks = self._fallbacks(principal, fallbacks)
         if not isinstance(changes, dict):
             raise PrefsError("prefs must be an object of key: string")
         if len(changes) > MAX_KEYS:
@@ -331,6 +376,7 @@ class Prefs:
         with self.lock, closing(self._db()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
+                self._adopt(db, principal, fallbacks)
                 for k, v in changes.items():
                     if v is None:
                         db.execute("DELETE FROM prefs WHERE principal = ? AND key = ?", (principal, k))
@@ -343,10 +389,7 @@ class Prefs:
                     raise PrefsError("at most %d keys" % MAX_KEYS)
                 db.execute("COMMIT")
             except BaseException:
-                try:
-                    db.execute("ROLLBACK")
-                except sqlite3.Error:
-                    pass                # the original error matters, not a failed rollback
+                self._rollback(db)
                 raise
             return dict(db.execute("SELECT key, value FROM prefs WHERE principal = ? ORDER BY key", (principal,)))
 
@@ -362,12 +405,15 @@ def handle_prefs(prefs, principal, method, headers, body=b"", secure=True, origi
     """GET /api/prefs -> {"prefs": {key: value}}; PUT /api/prefs with JSON {"prefs": {key: value or null}} merges
     (null removes) and answers the same shape. `principal` is what the room's resolve gave (None: 401). A PUT not made
     with a token must be same-origin (403); `secure` is the room's (identity.secure). The room calls this only after
-    its own gate (the principal's read grant in the room): a principal with no grants here stores nothing."""
+    its own gate (the principal's read grant in the room): a principal with no grants here stores nothing. Without an
+    identity file the principal is identity.ambient's. A principal with Tailscale logins (principal.tailscale) gets,
+    once, the preferences its logins stored as ambient principals (Prefs' fallbacks)."""
     if principal is None:
         return _json(401, {"error": "sign in first"})
+    fallbacks = [tailscale_uid(login) for login in getattr(principal, "tailscale", ()) if login.strip()]
     if method == "GET":
         try:
-            return _json(200, {"prefs": prefs.get_all(principal.uid)})  # by id: a reused name starts empty
+            return _json(200, {"prefs": prefs.get_all(principal.uid, fallbacks)})  # by id: a reused name starts empty
         except sqlite3.Error:
             return _json(503, {"error": "preferences unavailable"})      # locked, full or read-only: never a crash
     if method != "PUT":
@@ -385,7 +431,7 @@ def handle_prefs(prefs, principal, method, headers, body=b"", secure=True, origi
     if not isinstance(data, dict) or set(data) != {"prefs"}:
         return _json(400, {"error": "send {\"prefs\": {key: value}}"})
     try:
-        return _json(200, {"prefs": prefs.put(principal.uid, data["prefs"])})
+        return _json(200, {"prefs": prefs.put(principal.uid, data["prefs"], fallbacks)})
     except PrefsError as e:
         return _json(400, {"error": str(e)})
     except sqlite3.Error:

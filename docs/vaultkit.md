@@ -10,7 +10,7 @@ The shared core of Machiya's vault services, in `vaultkit/` of this repo. Each s
 | `frontmatter.py` | `edit_front` (set/remove top-level keys or the tags block, touching nothing else), `merge_note` (three-way frontmatter merge), `version_of`, `EditError` |
 | `gitsync.py` | `GitSync`: a read-write clone a service commits to in batches (author, paths, an events log with union merge), pull with rebase and a file-by-file replay on conflict (never commits conflict markers), push |
 | `git.py` | `Git` (a runner) and `Mirror` (a read-only clone of an https/ssh/file remote kept up to date; a token travels as a header in git's environment, never in argv or `.git/config`) |
-| `identity.py` | who is calling and what they may do ([plans/identity.md](plans/identity.md)): the read-only TOML identity file, `Identity.resolve` (bearer tokens, Tailscale logins and tagged nodes, a trusted proxy header, the built-in sign-in's session cookie), grants, sign-in and device pairing with throttling, and the CLI `python3 -m vaultkit.identity` |
+| `identity.py` | who is calling and what they may do ([identity.md](identity.md)): the read-only TOML identity file, `Identity.resolve` (bearer tokens, Tailscale logins and tagged nodes, a trusted proxy header, the built-in sign-in's session cookie), grants, sign-in and device pairing with throttling, and the CLI `python3 -m vaultkit.identity` |
 | `signin.py` | the built-in sign-in page and its POST, sign-out, Shiori's device pairing (`POST /api/pair`) and per-user preferences (`Prefs`, `GET/PUT /api/prefs`) over `identity.py`, as plain functions a room wires in a few lines |
 | `verify.py` | drift check for a vendored copy |
 
@@ -39,6 +39,25 @@ v.revision = head                   # the index rebuilds when this changes
 v.index()
 html = v.render(v.get("Projects/Kura"), "", mode="all")
 ```
+
+Turning identity on for the first time is one command:
+
+```sh
+python3 -m vaultkit.identity [--file PATH] setup [--owner NAME] [--tailscale LOGIN] [--password] [--proxy LOGIN] \
+    [--rooms kura,niwa,konbini,mcp] [--yes]
+```
+
+PATH defaults to `$MACHIYA_IDENTITY_FILE`, else `./machiya-identity/identity.toml` (the directory is created 0700).
+A new file and its `session.key` are written as `init` writes them (0600), with an owner (`owner` unless `--owner`: a
+person, `owner = true`, a random id) and the logins asked for; `--password` asks twice (at least 12 characters). On a
+TTY with none of these flags (and no `--yes`) it asks for a Tailscale login and whether to set a password. It never
+overwrites: on an existing file it validates it, refuses when another principal is the owner, and only adds the
+requested logins to the owner (a login another principal holds, or replacing a password, is refused). It also refuses
+to leave the owner with no way to sign in. Then it prints, per room in `--rooms`, the lines to paste
+(`MACHIYA_IDENTITY_FILE=<absolute path>`, `<PREFIX>_SIGNIN=1` when the owner has a password,
+`<PREFIX>_BIND_BEHIND_PROXY=1`; prefixes `KURA`, `NIWA`, `KANBAN`, `MCP`) and the next steps: mount the directory
+read-only, set `KURA_PUBLIC_URL` / `NIWA_PUBLIC_URL` / `KANBAN_BOARD_URL`, then `add`, `grant`, `token mint` and `pair`.
+It never prints a password, hash or key. Exit codes: 0 done, 2 usage, 1 refused (nothing written).
 
 A room's owner gate, once it reads an identity file (`MACHIYA_IDENTITY_FILE`):
 
@@ -91,8 +110,15 @@ the client address, and returns `(status, [(header, value), ...], body bytes)`:
   answers None for a larger, chunked or short body: answer 413 and close the connection.
 - **Preferences** (`Prefs(path)`): table `prefs(principal, key, value, updated)` keyed by the principal's id in the room's own SQLite file (its
   `*_DB` is fine). Keys `[a-z0-9_.-]{1,64}`, values strings of at most 4 KB, at most 100 keys per principal;
-  `get_all(principal)`, `put(principal, changes)` (raises `PrefsError`). Shared ones (theme, text size) keep syncing
-  through the `machiya_*` cookies as before; the server copy follows the person to a new device.
+  `get_all(principal, fallbacks=())`, `put(principal, changes, fallbacks=())` (raises `PrefsError`). Shared ones
+  (theme, text size) keep syncing through the `machiya_*` cookies as before; the server copy follows the person to a
+  new device.
+- **Moving to an identity file:** preferences stored without a file sit under the ambient key `ts:<hash>` of a
+  Tailscale login (below). `handle_prefs` passes `tailscale_uid` of each of the principal's own Tailscale logins
+  (`principal.tailscale`, from the file) as `fallbacks`: the first time that principal reads or writes, if it has no
+  preferences yet, the first fallback that has some is copied to its id in the same transaction; the old rows stay.
+  `prefs_moved(principal, source, moved)` records the decision, so it happens once (removed preferences never come
+  back) and later requests cost one lookup.
 - Sign-in pages answer `Cache-Control: no-store` and refuse framing (`X-Frame-Options: DENY`,
   `frame-ancestors 'none'`). Every JSON answer is `no-store`.
 
@@ -134,6 +160,25 @@ if path == "/api/prefs":
 Behind a proxy, `client` is the proxy's address for everyone, so the per-address throttles (20 sign-in failures, 5
 pairing tries per window) are shared; the per-name one (5) still holds. A room with sign-in on links to `/signin` from
 its 401 page and offers a sign-out button (a same-origin form post) in its settings.
+
+**Preferences without an identity file.** A room with no `MACHIYA_IDENTITY_FILE` (`load_for` gave None) keeps its
+old gate (`*_USERS`, or open mode's Host allow-list), and that alone decides who gets in. `identity.ambient(auth,
+headers)` only names whose preferences these are, so the room calls it only after the old gate admitted the request:
+
+- `"tailscale"`: the one `Tailscale-User-Login` as `Principal(login, "person", owner=True, via="tailscale",
+  uid=tailscale_uid(login), tailscale=(login,))`; None when the header is missing, empty, sent twice or holds a
+  control character. `tailscale_uid(login)` is always `"ts:"` + the first 32 hex digits of the SHA-256 of the
+  trimmed, lowercased login: 35 characters however long the login, and no email address in the room's database.
+- `"open"`: `OPEN_OWNER` (uid `":open"`).
+- anything else: None (no preferences: `handle_prefs` answers 401).
+
+```python
+# /api/prefs without an identity file: after the room's *_USERS gate admitted the request
+who = identity.ambient(AUTH, self.headers)                  # AUTH: the room's own tailscale | open setting
+status, headers, out = signin.handle_prefs(prefs, who, self.command, self.headers, body, SECURE, ORIGINS)
+```
+
+These principals are not bearer, so a PUT still needs same-origin with the room's `origins`.
 
 Konbini subclasses `Vault` to plug in its own cache: `key()` returns the board's HEAD + revision, and `source()` returns its timeline's note list.
 

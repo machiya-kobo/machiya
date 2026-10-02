@@ -1,4 +1,4 @@
-"""vaultkit.identity (docs/plans/identity.md): python3 -m unittest tests.test_identity (standard library only)."""
+"""vaultkit.identity (docs/identity.md): python3 -m unittest tests.test_identity (standard library only)."""
 import datetime
 import io
 import json
@@ -249,6 +249,53 @@ class ResolveTest(Base):
                                           bind="0.0.0.0"))
         with self.assertRaises(idn.IdentityError):
             idn.load_for("kura", {"MACHIYA_IDENTITY_FILE": self.path, "KURA_AUTH": "magic"}, bind="127.0.0.1")
+
+
+class AmbientTest(Base):
+    """identity.ambient: whose preferences, in a room without an identity file (its old gate decides access)."""
+
+    @staticmethod
+    def msg(*logins):
+        from http.client import HTTPMessage
+        m = HTTPMessage()
+        for login in logins:
+            m["Tailscale-User-Login"] = login
+        return m
+
+    def test_tailscale(self):
+        p = idn.ambient("tailscale", self.msg(" Owner@Example.com "))
+        self.assertEqual((p.name, p.kind, p.owner, p.via, p.tailscale),
+                         ("Owner@Example.com", "person", True, "tailscale", ("Owner@Example.com",)))
+        self.assertEqual(p.uid, idn.tailscale_uid("owner@example.com"))             # case-insensitive, trimmed
+        self.assertRegex(p.uid, r"\Ats:[0-9a-f]{32}\Z")
+        self.assertNotIn("example", p.uid)                                          # no email in the prefs file
+        self.assertEqual(idn.ambient("Tailscale", headers(Tailscale_User_Login="owner@example.com")).uid, p.uid)
+        self.assertNotEqual(idn.ambient("tailscale", self.msg("partner@example.com")).uid, p.uid)
+        self.assertTrue(p.can("kura", "read"))
+        self.assertEqual(p.with_via("x").tailscale, p.tailscale)
+
+    def test_tailscale_refusals(self):
+        for h in (self.msg(), self.msg(""), self.msg("   "), self.msg("a@example.com", "b@example.com"),
+                  self.msg("a@example.com", "a@example.com"), self.msg("a\x00b@example.com"), headers()):
+            self.assertIsNone(idn.ambient("tailscale", h), msg=str(h.items()))
+
+    def test_long_login(self):
+        login = "someone." + "x" * 300 + "@example.com"
+        p = idn.ambient("tailscale", self.msg(login))
+        self.assertEqual(len(p.uid), 35)
+        self.assertEqual(p.name, login)
+
+    def test_open_and_others(self):
+        self.assertIs(idn.ambient("open", headers()), idn.OPEN_OWNER)
+        self.assertEqual(idn.ambient("open", self.msg("a@example.com")).uid, ":open")
+        for auth in ("header", "", None, "users", "tailscale2"):
+            self.assertIsNone(idn.ambient(auth, self.msg("a@example.com")), msg=auth)
+
+    def test_file_principals_carry_their_logins(self):
+        r = self.ident().resolve(headers(Tailscale_User_Login="owner@example.com"))
+        self.assertEqual(r.principal.tailscale, ("Owner@Example.com",))
+        self.assertEqual(r.principal.uid, "ownerid00000000a")
+        self.assertEqual(self.ident().config.principals["vm"].tailscale, ())
 
 
 class SessionTest(Base):
@@ -659,6 +706,126 @@ class CliTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 self.cli("passwd", "p")                                              # typed differently
         self.assertIn("ok:", self.cli("check")[1])
+
+    # -- setup
+
+    def setup_cli(self, *args, passwords=None, tty=False):
+        """`setup` with the file in a new subdirectory; -> (exit code, stdout, stderr)."""
+        self.path = os.path.join(self.dir, "machiya-identity", "identity.toml")
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err), \
+                mock.patch("getpass.getpass", side_effect=passwords or []), \
+                mock.patch.object(sys.stdin, "isatty", return_value=tty, create=True):
+            code = idn.main(["--file", self.path, "setup"] + list(args))
+        return code, out.getvalue(), err.getvalue()
+
+    def owners(self):
+        config, _ = idn.read_file(self.path)
+        return config, [p for p in config.principals.values() if p.owner]
+
+    def test_setup_fresh_with_a_tailscale_login(self):
+        code, out, err = self.setup_cli("--tailscale", "Me@Example.com")
+        self.assertEqual(code, 0, err)
+        folder = os.path.dirname(self.path)
+        self.assertEqual(stat.S_IMODE(os.stat(folder).st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(os.stat(self.path).st_mode), 0o600)
+        key = os.path.join(folder, "session.key")
+        self.assertEqual(stat.S_IMODE(os.stat(key).st_mode), 0o600)
+        config, owners = self.owners()
+        self.assertEqual([(p.name, p.kind) for p in owners], [("owner", "person")])
+        self.assertRegex(config.raw["owner"]["uid"], r"^[a-z0-9]{16}$")
+        self.assertEqual(config.by_login["me@example.com"], "owner")
+        self.assertIn("MACHIYA_IDENTITY_FILE=%s\n" % os.path.abspath(self.path), out)
+        for prefix in ("KURA", "NIWA", "KANBAN", "MCP"):
+            self.assertIn("%s_BIND_BEHIND_PROXY=1" % prefix, out)
+            self.assertNotIn("%s_SIGNIN" % prefix, out)                              # no password, no sign-in
+        self.assertIn("(Docker or a sidecar: the proxy is the only way in)", out)
+        for setting in ("KURA_PUBLIC_URL", "NIWA_PUBLIC_URL", "KANBAN_BOARD_URL", "token mint", "grant", "pair"):
+            self.assertIn(setting, out)
+        with open(key) as f:
+            self.assertNotIn(f.read().strip(), out + err)                           # no secret printed
+        self.assertNotIn("scrypt", out + err)
+
+    def test_setup_with_a_password(self):
+        pw = "a long passphrase"
+        code, out, err = self.setup_cli("--password", "--owner", "me", passwords=[pw, pw])
+        self.assertEqual(code, 0, err)
+        for prefix in ("KURA", "NIWA", "KANBAN", "MCP"):
+            self.assertIn("%s_SIGNIN=1" % prefix, out)
+        self.assertNotIn(pw, out + err)
+        self.assertNotIn("scrypt", out + err)
+        r = idn.Identity(self.path, "kura", signin=True).sign_in("me", pw, "10.0.0.1")
+        self.assertEqual((r.status, r.principal.name, r.principal.owner), (200, "me", True))
+        code, _, err = self.setup_cli("--password", "--owner", "me", passwords=["x" * 12, "x" * 12])
+        self.assertEqual(code, 1)                                                    # never replaces a password
+        self.assertEqual(self.setup_cli("--password", "--owner", "you", passwords=["short", "short"])[0], 1)
+
+    def test_setup_reruns_add_logins_only(self):
+        self.assertEqual(self.setup_cli("--tailscale", "me@example.com")[0], 0)
+        with open(self.path) as f:
+            before = f.read()
+        uid = self.owners()[0].raw["owner"]["uid"]
+        key = os.path.join(os.path.dirname(self.path), "session.key")
+        with open(key) as f:
+            secret = f.read()
+        code, out, err = self.setup_cli("--proxy", "me")
+        self.assertEqual(code, 0, err)
+        self.assertIn("already the owner", out)
+        config, owners = self.owners()
+        self.assertEqual(config.raw["owner"]["uid"], uid)                           # the same owner, not a new one
+        self.assertEqual((config.by_login["me@example.com"], config.by_proxy["me"]), ("owner", "owner"))
+        with open(key) as f:
+            self.assertEqual(f.read(), secret)                                      # the key is kept
+        with open(self.path + ".bak") as f:
+            self.assertEqual(f.read(), before)
+        with open(self.path, "rb") as f:
+            data = idn.tomllib.load(f)
+        data["principals"]["partner"] = {"id": "partnerid0000000", "kind": "person", "tailscale": ["p@example.com"],
+                                         "proxy": ["partner"]}
+        idn.write_file(self.path, data)
+        with open(self.path) as f:
+            before = f.read()
+        for flag, login in (("--tailscale", "P@example.com"), ("--proxy", "partner")):
+            code, _, err = self.setup_cli(flag, login)
+            self.assertEqual(code, 1, flag)
+            self.assertIn("belongs to 'partner'", err)
+        self.assertEqual(self.setup_cli("--owner", "partner", "--proxy", "x")[0], 1)   # exists, not the owner
+        with open(self.path) as f:
+            self.assertEqual(f.read(), before)                                      # nothing written
+
+    def test_setup_refuses_a_second_owner(self):
+        self.assertEqual(self.setup_cli("--tailscale", "me@example.com")[0], 0)
+        with open(self.path) as f:
+            before = f.read()
+        code, out, err = self.setup_cli("--owner", "someone", "--tailscale", "x@example.com")
+        self.assertEqual(code, 1)
+        self.assertIn("'owner' is already the owner", err)
+        with open(self.path) as f:
+            self.assertEqual(f.read(), before)
+
+    def test_setup_refuses_an_owner_with_no_way_in(self):
+        for args in ((), ("--yes",), ("--owner", "me", "--rooms", "kura")):
+            code, out, err = self.setup_cli(*args)
+            self.assertEqual(code, 1, args)
+            self.assertIn("no way to sign in", err)
+        self.assertFalse(os.path.exists(os.path.dirname(self.path)))                # nothing created
+        with mock.patch("builtins.input", side_effect=["", "n"]):                   # interactive, every answer no
+            self.assertEqual(self.setup_cli(tty=True)[0], 1)
+        with mock.patch("builtins.input", side_effect=["me@example.com", "y"]):
+            code, out, err = self.setup_cli(tty=True, passwords=["a long passphrase"] * 2)
+        self.assertEqual(code, 0, err)
+        self.assertIn("KURA_SIGNIN=1", out)
+        self.assertEqual(self.owners()[0].by_login["me@example.com"], "owner")
+
+    def test_setup_rooms_and_usage(self):
+        code, out, err = self.setup_cli("--tailscale", "me@example.com", "--rooms", "kura")
+        self.assertEqual(code, 0, err)
+        self.assertIn("KURA_BIND_BEHIND_PROXY=1", out)
+        self.assertIn("KURA_PUBLIC_URL", out)
+        for other in ("NIWA", "KANBAN", "MCP_"):
+            self.assertNotIn(other, out)
+        for bad in (("--rooms", "kura,hister"), ("--tailscale",), ("--owner", "Not_A_Name"), ("--frobnicate",)):
+            self.assertEqual(self.setup_cli(*bad)[0], 2, bad)
 
 
 if __name__ == "__main__":

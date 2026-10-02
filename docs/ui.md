@@ -30,6 +30,11 @@ This is how the web rooms (Kura, Niwa, Konbini) put the [design language](design
 - Unset (standalone on its own host): per-room cookies, as before.
 - Shiori's web app reads the same `machiya_theme`, `machiya_textSize` and `machiya_show_*` cookies.
 
+**Server preferences (theme and text size follow the person to a new device).**
+- A room that serves `/api/prefs` (`vaultkit.signin.handle_prefs`, with an identity file or `identity.ambient`) passes `prefs_url="/api/prefs"` to `shell.page` on every page whose request has a principal. The page then carries `<meta name="machiya-prefs" content="/api/prefs">` (`shell.prefs_meta`; a local path only). Leave it out where nobody is signed in (the sign-in page, a 401), so a stranger's page never asks.
+- machiya.js then GETs it on load (`credentials: "same-origin"`): when the server's `theme` / `text_size` differ from the cookies, it writes the cookies as the settings page does (`machiya_<key>` on `MACHIYA_COOKIE_DOMAIN`, else the room's own) and applies them without a reload. A change of theme or text size on `/settings` is also PUT there as `{"prefs": {"theme": …, "text_size": …}}` (JSON, same-origin, so the room's `origins` rule passes). Only known values are applied: theme `system`/`night`/`day`, text size `xsmall`/`small`/`standard`/`large`/`xlarge`; anything else from the server is ignored. Every failure (offline, 401, 404, bad JSON) is silent: the cookies stay the fast path for the first paint and offline. A choice made on the page wins over a server answer that arrives later.
+- The service worker never touches `/api/prefs` (it is in the core's `bypass`; the rooms' `^/api/` covers it too), and the answer is `no-store`.
+
 **Room search (a room searches its own things, then hands off to Shiori).**
 - `shell.search_box(q, action="/search", placeholder="Search Cards")` goes in the header's `tools` (or at the top of your search page). machiya.js focuses it on `/`.
 - End your results with `shell.handoff(q, links)`, "Search everything in Shiori ›", which links to `<shiori>/#/search?q=<q>`. It's empty without a Shiori address or a query.
@@ -63,7 +68,7 @@ machiyaSW({"version": "<room build>-<core hash>", "precache": [...], "notes": {"
   |---|---|---|
   | `offline` | `/offline` | the page shown when a navigation has neither network nor a stored copy (precache it) |
   | `timeout` | `2500` | ms a navigation waits for the network before falling back |
-  | `bypass` | `/sw.js`, the manifest | path regexps the worker never touches (the APIs: `^/api/`) |
+  | `bypass` | `/sw.js`, the manifest, `/api/prefs` | path regexps the worker never touches (the APIs: `^/api/`) |
   | `network` | – | navigations never stored (`^/search$`, `^/settings$`): the network, else `/offline` |
   | `notes` | – | `{"match": "^/n/", "limit": 200}`: the notes kept for offline reading |
   | `pages` | `30` | other pages kept (home, lists) |

@@ -26,7 +26,8 @@ function machiyaSW(cfg) {
   const OURS = [STATIC, NOTES, PAGES, ASSETS];
   const TIMEOUT = cfg.timeout || 2500;
   const re = (list) => (list || []).map((s) => new RegExp(s));
-  const BYPASS = re(["^/sw\\.js$", "^/manifest\\.webmanifest$"].concat(cfg.bypass || []));   // never touched
+  // never touched; /api/prefs (per person, no-store) too, whatever a room's own list says
+  const BYPASS = re(["^/sw\\.js$", "^/manifest\\.webmanifest$", "^/api/prefs$"].concat(cfg.bypass || []));
   const NETWORK = re(cfg.network);          // navigations never stored (search, settings): network, else /offline
   const NOTE = re(cfg.notes ? [cfg.notes.match] : []);
   const ASSET = re(cfg.assetMatch);

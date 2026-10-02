@@ -350,6 +350,22 @@ class ShellTest(unittest.TestCase):
         self.assertLess(html.index("/static/machiya.css"), html.index("</head>"))
         self.assertRegex(html, r'/static/machiya\.css\?v=[0-9a-f]{10}"')              # versioned by content
 
+    def test_prefs_meta(self):
+        from vaultkit import shell
+        ctx = shell.Prefs()
+        plain = shell.page(ctx, "kura", "t", "b")
+        self.assertNotIn("machiya-prefs", plain)                                      # no principal: no sync
+        html = shell.page(ctx, "kura", "t", "b", prefs_url="/api/prefs")
+        self.assertIn('<meta name="machiya-prefs" content="/api/prefs">', html)
+        self.assertLess(html.index("machiya-prefs"), html.index("</head>"))
+        self.assertLess(html.index("machiya-prefs"), html.index("/static/machiya.js"))
+        self.assertEqual(html.replace('<meta name="machiya-prefs" content="/api/prefs">\n', ""), plain)
+        self.assertIn('content="/x/api/prefs?a=1&amp;b=&quot;"', shell.prefs_meta('/x/api/prefs?a=1&b="'))
+        for bad in ("https://evil.example/api/prefs", "//evil.example/p", "/\\evil", "api/prefs", "/a b", "/a\n",
+                    None, 5):
+            self.assertEqual(shell.prefs_meta(bad), "", msg=repr(bad))
+            self.assertEqual(shell.page(ctx, "kura", "t", "b", prefs_url=bad), plain, msg=repr(bad))
+
     def test_settings_page(self):
         from vaultkit import shell
         ctx = shell.Prefs("day", "small")
