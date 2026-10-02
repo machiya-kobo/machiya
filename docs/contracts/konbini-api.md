@@ -3,7 +3,9 @@
 JSON on the board's host (`https://konbini.example.ts.net`), owner-only. Writes come from the web UI or `pm`.
 
 **Access** (`KANBAN_AUTH`): `tailscale` (the default) admits only requests whose `Tailscale-User-Login` is in `KANBAN_TAILNET_USERS`, anything else gets 403; `open` (localhost or a trusted LAN only) admits every request with a startup warning; the `Tailscale-User-Login` header is ignored there (nothing vouches for it) and every event names `local`. Any other value refuses to start. `/api/health` reports the mode as `auth`. In both modes form posts must be same-origin, and API callers name themselves with `X-Agent`. `KANBAN_BIND` sets the listener's address (a native install behind `tailscale serve` binds `127.0.0.1`).
- Agents may move cards and edit board fields, but get 403 for `publish` and the other garden fields, for new `area/*` tags, and for unknown `topic/*` tags. The exact fields are in `app/app.py` and `app/store.py` (`parse_note`) in [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini).
+ Agents may move cards and edit board fields, but get 403 for `publish` and the other garden fields, for new `area/*` tags, and for unknown `topic/*` tags.
+
+**With Machiya's identity file** (`MACHIYA_IDENTITY_FILE`, [identity.md](../identity.md)) the file replaces `KANBAN_TAILNET_USERS` and the `X-Agent` test: a caller proves who it is (`Authorization: Bearer mch_…` or `mcd_…`, a Tailscale login or tagged node, a proxy header with `KANBAN_AUTH=header`, or the `machiya_session` cookie with `KANBAN_SIGNIN=1`), and the `konbini` grants decide: `read` for pages and read APIs, `write` for every change (cards, comments, claims, the board's forms), `areas` for new `area/*` lanes and new tags. No proof or a bad one is **401**, a missing grant **403**; an event's actor is the principal, and `X-Agent` stays a label. With the file the board also answers `POST /api/pair` and `GET`/`PUT /api/prefs` (404 without it). The exact fields are in `app/app.py` and `app/store.py` (`parse_note`) in [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini).
 
 ## Read by other services
 

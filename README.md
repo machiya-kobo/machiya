@@ -51,9 +51,41 @@ The same invented vault in every app (a paper-lantern workshop and a trip to Kyo
 
 ## Quickstart
 
-Run the whole stack on one machine in about ten minutes, with a small invented vault (a paper-lantern workshop and a trip to Kyoto), nothing to sign in to, everything on `127.0.0.1`. Every block below marked `quickstart:` is run by [`tools/quickstart-test`](tools/quickstart-test) on a fresh clone, so these are exactly the commands that were tested. To run one service by itself instead, use its own Quickstart: [Kura](https://github.com/machiya-kobo/kura#quickstart), [Niwa](https://github.com/machiya-kobo/niwa#quickstart), [Konbini](https://github.com/machiya-kobo/konbini#quickstart), [Shiori](https://github.com/machiya-kobo/shiori#quickstart).
+The whole stack on one machine, on your own vault, every room bound to `127.0.0.1` with nothing to sign in to. You need `git` and Docker with Compose 2.20+ (or Podman: `podman compose`).
 
-### Run the whole stack
+```bash
+mkdir machiya-stack && cd machiya-stack
+for r in machiya kura niwa konbini; do git clone https://github.com/machiya-kobo/$r.git; done
+cd machiya/compose
+cp .env.example .env
+```
+
+Edit `.env`:
+
+| Setting | Set it to |
+|---|---|
+| `VAULT_REPO_URL`, `VAULT_GIT`, `VAULT_SUBDIR` | your vault as a bare git repository Niwa and Konbini can push to (`file:///srv/machiya/vault.git`, and the same folder in `VAULT_GIT`), and the folder in it that holds the notes ([other URLs](#use-your-own-vault)) |
+| `KONBINI_REPO` | a clone of the vault for the board to write to (`git clone <vault> /srv/machiya/konbini-repo`) |
+| `SEARXNG_SECRET` | `openssl rand -hex 32` |
+| `MACHIYA_UID`, `MACHIYA_GID` | `id -u`, `id -g` |
+
+Start it, choosing the rooms with profiles (leave one out and the others carry on):
+
+```bash
+docker compose --profile engines --profile kura --profile niwa --profile konbini up -d --build --wait
+```
+
+| Kura 蔵 | Niwa 庭 | Konbini コンビニ | Hister | SearXNG |
+|---|---|---|---|---|
+| http://localhost:8083/ | http://localhost:8082/ | http://localhost:8081/ | http://localhost:4433/ | http://localhost:8888/ |
+
+- **Run just one room:** each has its own Quickstart, no stack needed: [Kura](https://github.com/machiya-kobo/kura#quickstart), [Niwa](https://github.com/machiya-kobo/niwa#quickstart), [Konbini](https://github.com/machiya-kobo/konbini#quickstart), [Shiori](https://github.com/machiya-kobo/shiori#quickstart).
+- **Try it first with a sample vault:** the walkthrough below sets everything up with one script.
+- **Add people, agents or sign-in:** [docs/identity.md](docs/identity.md).
+
+### Try it with the sample vault
+
+The whole stack with a small invented vault (a paper-lantern workshop and a trip to Kyoto), in about ten minutes. Every block below marked `quickstart:` is run by [`tools/quickstart-test`](tools/quickstart-test) on a fresh clone, so these are exactly the commands that were tested.
 
 **You need:** `git`, `curl`, and a container engine with Compose: **Docker Engine 24+ with Compose 2.20+**, or rootless **Podman 4.9+** with the `docker-compose` plugin and its API socket on (`systemctl --user enable --now podman.socket`; then use `podman compose` wherever the commands say `docker compose`). About 2 GB of disk for the images, and these ports free on `127.0.0.1`: 8081, 8082, 8083, 4433, 8888, 1965 and 7070 (the compose can move any of them: [`compose/.env.example`](compose/.env.example)).
 
@@ -196,7 +228,7 @@ rm -rf data .env
 
 ### Use your own vault
 
-Copy `compose/.env.example` to a file called `.env` beside it (instead of running `demo-init`) and set `VAULT_REPO_URL` (an https, ssh or `file://` URL), `VAULT_SUBDIR` (the folder in the repository that holds the notes, if it is not the root), and Konbini's own clone in `KONBINI_REPO`. Niwa pushes the garden's fields back to the vault, so it needs write access (an ssh deploy key; Kura only reads). To let other people in, put a proxy that sets a `Tailscale-User-Login` header in front (a Tailscale sidecar does, and terminates TLS) and switch `KURA_AUTH`, `NIWA_AUTH` and `KONBINI_AUTH` from `open` to `tailscale`, listing who may sign in. The compose's header comments and the [service docs](docs/services/) cover the rest; native installs (no containers) are in [docs/install/](docs/install/), including the BSDs.
+Copy `compose/.env.example` to a file called `.env` beside it (instead of running `demo-init`) and set `VAULT_REPO_URL` (an https, ssh or `file://` URL), `VAULT_SUBDIR` (the folder in the repository that holds the notes, if it is not the root), and Konbini's own clone in `KONBINI_REPO`. Niwa pushes the garden's fields back to the vault, so it needs write access (an ssh deploy key; Kura only reads). To reach the rooms from other devices, put a proxy that sets a `Tailscale-User-Login` header in front (a Tailscale sidecar does, and terminates TLS) and switch `KURA_AUTH`, `NIWA_AUTH` and `KONBINI_AUTH` from `open` to `tailscale`, listing your login in the `*_USERS`. For other people, agents or sign-in without Tailscale, see [docs/identity.md](docs/identity.md). The compose's header comments and the [service docs](docs/services/) cover the rest; native installs (no containers) are in [docs/install/](docs/install/), including the BSDs.
 
 ### The other half: Shiori
 
@@ -213,7 +245,7 @@ Shiori is a client, not a service: the search front door for iPhone, iPad, Mac, 
 - **[ui/](ui/)** — the shared stylesheet and script of the web rooms (themes, tab bar, rooms switcher, offline shell), vendored with vaultkit; see [docs/ui.md](docs/ui.md).
 - **[stack/](stack/)** — small services that run beside the rooms: `mcp/` (machiya-mcp, one MCP endpoint for the whole stack, [docs/services/mcp.md](docs/services/mcp.md)), `smallweb/` (Gemini and Gopher search for Shiori) and `vault-mirror/` (one shared clone of the vault for the readers).
 - **[plugins/machiya/](plugins/machiya/)** — a Claude Code plugin: the MCP connection and cross-room skills (backlog, weekly review, recall, garden suggestions, tidying saved-page labels).
-- **[compose/](compose/)** — a reference compose file for the engines, Kura and Konbini (Niwa and Shiori are not in it).
+- **[compose/](compose/)** — a reference compose file for the engines, Kura, Niwa and Konbini (Shiori is a client and not in it).
 - **[config/](config/)** — reference configuration for Hister and SearXNG, as they run in this stack.
 - **[sample-vault/](sample-vault/)** — a small demo vault, to run the stack without real notes.
 

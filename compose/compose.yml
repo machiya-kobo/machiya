@@ -16,6 +16,8 @@
 # binds 127.0.0.1. To let other people in, put a proxy in front that sets a Tailscale-User-Login header (a Tailscale
 # sidecar does, and terminates TLS too), set KURA_AUTH/NIWA_AUTH/KONBINI_AUTH=tailscale and list the logins in
 # KURA_USERS/NIWA_USERS/KONBINI_USERS. One vault copy for the whole stack: add mirror.yml (see it).
+# Identity (optional, off by default): people, agents and sign-in from one identity file. Set MACHIYA_IDENTITY_DIR and
+# MACHIYA_IDENTITY_FILE in .env; the directory is mounted read-only at the same path. See docs/identity.md.
 name: machiya
 
 x-room: &room
@@ -85,6 +87,10 @@ services:
     environment:
       - KURA_AUTH=${KURA_AUTH:-open}
       - KURA_USERS=${KURA_USERS:-}
+      - MACHIYA_IDENTITY_FILE=${MACHIYA_IDENTITY_FILE:-}       # docs/identity.md; empty = off
+      - KURA_SIGNIN=${KURA_SIGNIN:-}
+      - KURA_AUTH_HEADER=${KURA_AUTH_HEADER:-}
+      - KURA_BIND_BEHIND_PROXY=${KURA_BIND_BEHIND_PROXY:-}
       - KURA_REPO_URL=${VAULT_REPO_URL:-}
       - KURA_REPO_SUBDIR=${VAULT_SUBDIR:-}
       - KURA_REPO_USER=${VAULT_REPO_USER:-}
@@ -100,6 +106,7 @@ services:
       - ${KURA_DATA:-./data/kura}:/data
       - ${VAULT_TOKEN_FILE:-/dev/null}:/secrets/vault-token:ro
       - ${VAULT_GIT:-/dev/null}:${VAULT_GIT:-/vault-git-unused}:ro
+      - ${MACHIYA_IDENTITY_DIR:-/dev/null}:${MACHIYA_IDENTITY_DIR:-/identity-unused}:ro
     depends_on:
       hister: {condition: service_started, required: false}      # push the notes only once Hister is up (if it is in the stack)
     ports: ["127.0.0.1:${KURA_PORT:-8083}:8080"]
@@ -119,6 +126,11 @@ services:
     environment:
       - NIWA_AUTH=${NIWA_AUTH:-open}
       - NIWA_USERS=${NIWA_USERS:-}
+      - MACHIYA_IDENTITY_FILE=${MACHIYA_IDENTITY_FILE:-}
+      - NIWA_SIGNIN=${NIWA_SIGNIN:-}
+      - NIWA_AUTH_HEADER=${NIWA_AUTH_HEADER:-}
+      - NIWA_BIND_BEHIND_PROXY=${NIWA_BIND_BEHIND_PROXY:-}
+      - NIWA_PUBLIC_URL=${NIWA_PUBLIC_URL:-http://localhost:8082}   # its web address (the sign-in's origin over http)
       - NIWA_HOST=${NIWA_HOST:-localhost}            # the name in the gemini certificate and the gopher menus
       - NIWA_REPO_URL=${VAULT_REPO_URL:-}            # it pushes the garden's fields here: needs write access
       - NIWA_REPO_SUBDIR=${VAULT_SUBDIR:-}
@@ -133,6 +145,7 @@ services:
     volumes:
       - ${NIWA_DATA:-./data/niwa}:/data
       - ${VAULT_GIT:-/dev/null}:${VAULT_GIT:-/vault-git-unused}
+      - ${MACHIYA_IDENTITY_DIR:-/dev/null}:${MACHIYA_IDENTITY_DIR:-/identity-unused}:ro
     ports:
       - "127.0.0.1:${NIWA_PORT:-8082}:8080"                       # the web garden
       - "127.0.0.1:${NIWA_GEMINI_PORT:-1965}:1965"                       # gemini
@@ -154,6 +167,10 @@ services:
       - KANBAN_AUTH=${KONBINI_AUTH:-open}
       - KANBAN_ALLOWED_HOSTS=konbini                 # open mode answers only known names: Niwa calls http://konbini:8081
       - KANBAN_TAILNET_USERS=${KONBINI_USERS:-}
+      - MACHIYA_IDENTITY_FILE=${MACHIYA_IDENTITY_FILE:-}
+      - KANBAN_SIGNIN=${KONBINI_SIGNIN:-}
+      - KANBAN_AUTH_HEADER=${KONBINI_AUTH_HEADER:-}
+      - KANBAN_BIND_BEHIND_PROXY=${KONBINI_BIND_BEHIND_PROXY:-}
       - KANBAN_REPO=/repo                            # its own read-write clone of the vault (demo-init makes it)
       - KANBAN_DB=/data/kanban.sqlite3
       - KANBAN_REPO_SUBDIR=${VAULT_SUBDIR:-}
@@ -170,5 +187,6 @@ services:
       - ${KONBINI_DATA:-./data/konbini}:/data
       - ${KONBINI_REPO:-./data/konbini-repo}:/repo
       - ${VAULT_GIT:-/dev/null}:${VAULT_GIT:-/vault-git-unused}      # the clone's origin, so the board can push
+      - ${MACHIYA_IDENTITY_DIR:-/dev/null}:${MACHIYA_IDENTITY_DIR:-/identity-unused}:ro
     ports: ["127.0.0.1:${KONBINI_PORT:-8081}:8081"]
     restart: unless-stopped

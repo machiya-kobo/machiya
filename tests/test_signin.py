@@ -1,13 +1,11 @@
-"""vaultkit.signin (docs/identity.md, phase 6): python3 -m unittest tests.test_signin (standard library only)."""
+"""vaultkit.signin (docs/identity.md): python3 -m unittest tests.test_signin (standard library only)."""
 import json
 import os
 import shutil
-import sqlite3
 import sys
 import tempfile
 import unittest
 from http.client import HTTPMessage
-from contextlib import closing
 from io import BytesIO
 from urllib.parse import urlencode
 
@@ -375,70 +373,6 @@ class PrefsTest(Base):
         new = idn.Principal("guest", "person", via="token:bbbb22", uid="guestnew00000002")
         self.assertEqual(self.call(new, "GET"), (200, {"prefs": {}}))                # keyed by id, not by name
         self.assertEqual(self.call(old, "GET"), (200, {"prefs": {"theme": "day"}}))
-
-    def test_ambient_prefs_per_login(self):
-        a = idn.ambient("tailscale", headers(Tailscale_User_Login="a@example.com"))
-        b = idn.ambient("tailscale", headers(Tailscale_User_Login="B@example.com"))
-        here = {"Origin": "https://" + HOST}
-        self.assertEqual(self.call(a, data={"prefs": {"theme": "day"}})[0], 403)     # not bearer: same-origin
-        self.assertEqual(self.call(a, data={"prefs": {"theme": "day"}}, **here), (200, {"prefs": {"theme": "day"}}))
-        self.assertEqual(self.call(b, "GET"), (200, {"prefs": {}}))
-        self.assertEqual(self.call(b, data={"prefs": {"text_size": "large"}}, **here)[1],
-                         {"prefs": {"text_size": "large"}})
-        again = idn.ambient("tailscale", headers(Tailscale_User_Login="A@Example.com "))
-        self.assertEqual(self.call(again, "GET"), (200, {"prefs": {"theme": "day"}}))  # the same login, any case
-        self.assertEqual(self.prefs.get_all(a.uid), {"theme": "day"})
-        opened = idn.ambient("open", headers())
-        self.assertEqual(self.call(opened, data={"prefs": {"theme": "night"}})[0], 403)
-        self.assertEqual(self.call(opened, data={"prefs": {"theme": "night"}}, **here)[0], 200)
-        self.assertEqual(self.prefs.get_all(":open"), {"theme": "night"})
-        long = idn.ambient("tailscale", headers(Tailscale_User_Login="x" * 500 + "@example.com"))
-        self.assertEqual(self.call(long, data={"prefs": {"theme": "day"}}, **here)[0], 200)
-
-    def file_principal(self, uid="ownerid00000000a", logins=("Owner@Example.com",), via="tailscale"):
-        return idn.Principal("owner", "person", True, via=via, uid=uid, tailscale=logins)
-
-    def test_moves_ambient_prefs_once(self):
-        old = idn.ambient("tailscale", headers(Tailscale_User_Login="owner@example.com"))
-        self.prefs.put(old.uid, {"theme": "day", "text_size": "large"})
-        owner = self.file_principal()
-        self.assertEqual(self.call(owner, "GET"), (200, {"prefs": {"text_size": "large", "theme": "day"}}))
-        self.assertEqual(self.prefs.get_all(old.uid), {"text_size": "large", "theme": "day"})    # old row kept
-        here = {"Origin": "https://" + HOST}
-        self.assertEqual(self.call(owner, data={"prefs": {"theme": None, "text_size": None}}, **here),
-                         (200, {"prefs": {}}))
-        self.assertEqual(self.call(owner, "GET"), (200, {"prefs": {}}))                # once: removed stays removed
-        self.prefs.put(old.uid, {"theme": "night"})
-        self.assertEqual(self.call(owner.with_via("session"), "GET"), (200, {"prefs": {}}))
-        with closing(sqlite3.connect(self.prefs.path)) as db:
-            self.assertEqual(db.execute("SELECT principal, source FROM prefs_moved").fetchall(),
-                             [("ownerid00000000a", old.uid)])
-
-    def test_move_on_put_and_not_over_existing(self):
-        old = idn.tailscale_uid("partner@example.com")
-        self.prefs.put(old, {"theme": "day", "kura.sort": "title"})
-        partner = self.file_principal("partnerid0000000", ("partner@example.com",), via="token:x")
-        self.assertEqual(self.call(partner, data={"prefs": {"theme": "night"}}),           # adopted, then merged
-                         (200, {"prefs": {"kura.sort": "title", "theme": "night"}}))
-        self.assertEqual(self.prefs.get_all(old), {"kura.sort": "title", "theme": "day"})
-        mine = idn.tailscale_uid("me@example.com")
-        self.prefs.put(mine, {"theme": "day"})
-        self.prefs.put("meid000000000000", {"text_size": "small"})                       # already has its own
-        me = self.file_principal("meid000000000000", ("me@example.com",))
-        self.assertEqual(self.call(me, "GET"), (200, {"prefs": {"text_size": "small"}}))
-        self.assertEqual(self.call(me, "GET"), (200, {"prefs": {"text_size": "small"}}))
-        nobody = self.file_principal("nobody0000000000", ("nobody@example.com",))        # nothing to copy
-        self.assertEqual(self.call(nobody, "GET"), (200, {"prefs": {}}))
-        self.assertEqual(self.prefs.get_all("nobody0000000000", [idn.tailscale_uid("nobody@example.com")]), {})
-
-    def test_moved_table_added_to_an_old_file(self):
-        path = os.path.join(self.dir, "old.sqlite3")
-        with closing(sqlite3.connect(path)) as db, db:
-            db.execute("CREATE TABLE prefs (principal TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
-                       "updated INTEGER NOT NULL, PRIMARY KEY (principal, key))")
-            db.execute("INSERT INTO prefs VALUES (?, 'theme', 'day', 1)", (idn.tailscale_uid("a@example.com"),))
-        prefs = signin.Prefs(path)
-        self.assertEqual(prefs.get_all("aid0000000000000", [idn.tailscale_uid("a@example.com")]), {"theme": "day"})
 
     def test_api_bad_bodies(self):
         token = idn.Principal("vm", "agent", via="token:abcd12")

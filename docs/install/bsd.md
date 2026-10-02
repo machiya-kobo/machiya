@@ -216,6 +216,20 @@ For NetBSD's npf, add a `block in final … port { 8080, 8081, 1965, 7070 }` rul
   - delete `/var/db/<app>`, the env file and the user.
   - The vault clone holds your notes, so delete it deliberately.
 
+## 11. Identity (optional)
+
+Skip this for one owner on the tailnet: `*_USERS` (§6) is enough. For other people, agents, sign-in without Tailscale or Shiori devices, add the identity file ([identity.md](../identity.md)). Every package Python above is 3.11 or newer, which the CLI needs.
+
+```sh
+mkdir -p /usr/local/etc/machiya                                   # NetBSD, OpenBSD: /etc/machiya
+cd /usr/local/share/kura/app && python3 -m vaultkit.identity --file /usr/local/etc/machiya/identity.toml setup --tailscale you@example.com
+```
+
+- Each app runs as its own user, so give the file and its `session.key` a group the three users share, mode `0640`: `chgrp machiya` and `chmod 0640` both (make the group and add `kura`, `niwa` and `konbini` to it; on OpenBSD `_kura` and so on). The CLI keeps the mode and owner when it rewrites the file; a new key needs them again.
+- Add the printed lines to each app's env file (`MACHIYA_IDENTITY_FILE=…`, and `<APP>_SIGNIN=1` for the built-in sign-in), then restart it. With the file, `*_USERS` is unused.
+- Keep `<APP>_BIND=127.0.0.1` (§1): in `tailscale` or `header` mode the apps refuse any other address unless `<APP>_BIND_BEHIND_PROXY=1`.
+- The CLI comes with the apps once they vendor vaultkit 0.12.0; until then run it from a checkout of the Machiya repository.
+
 ## Niwa and Konbini extras
 
 - **Niwa's gemini certificate** is made once with `openssl req -x509 -newkey ec …`. On OpenBSD that's LibreSSL; its manual documents the same options, but this is untested. If it fails, create `gemini.crt`/`gemini.key` next to `NIWA_DB` by hand and Niwa keeps them.

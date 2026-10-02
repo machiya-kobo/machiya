@@ -41,7 +41,7 @@ Kura can serve several vaults. The first one configured is the **default vault**
 
 ## Identity
 
-With Machiya's identity file (`MACHIYA_IDENTITY_FILE`, [plans/identity.md](../plans/identity.md)) Kura asks it who is
+With Machiya's identity file (`MACHIYA_IDENTITY_FILE`, [identity.md](../identity.md)) Kura asks it who is
 calling instead of `KURA_USERS`. Without the file nothing here applies and the API is as above.
 
 - **Proofs:** `Authorization: Bearer mch_…` (a stored token: agents, services, scripts) or `Bearer mcd_…` (a paired

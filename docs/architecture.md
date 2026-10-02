@@ -93,6 +93,15 @@ flowchart LR
     app -->|"login in allow-list?"| ok{{"200 / 403"}}
 ```
 
+This is the default: one owner, no identity file. The optional **identity file** ([identity.md](identity.md)) changes only the last step. Each room reads the same read-only file and asks *who* (a token, a Tailscale login or tagged node, a trusted proxy's header, or the built-in sign-in's cookie) and then *what* (the principal's grants in this room): no proof is 401, no grant 403. Agents get tokens and only their grants; Kura cuts every answer to the vaults a principal may read, so work notes never reach an agent that isn't granted them. machiya-mcp checks its own callers against the file and calls the rooms as one principal, `mcp`.
+
+```mermaid
+flowchart LR
+    who["browser · Shiori · agent"] -->|"token, login, proxy header or session cookie"| room["room"]
+    file[("identity file<br/>read-only, every room")] -.-> room
+    room -->|"principal + grant?"| ok{{"200 / 401 / 403"}}
+```
+
 - Every name is a **Tailscale Service** served by a tagged sidecar, one Service per room. Tailscale terminates TLS and adds `Tailscale-User-Login`.
 - The **tailnet policy** grants these services to the owner only. Other users (for example a household) can be granted SearXNG only, and nothing else in Machiya.
 - A service checks the header against its allow-list. Server-to-server calls in the example deployment either stay on a Docker network (Kura to Hister over a shared network, with no identity involved) or go out through the host's own tailscaled. The web server that hosts Shiori's pages works that way, so the call arrives as the owner's machine.
