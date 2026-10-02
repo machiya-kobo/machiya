@@ -39,7 +39,7 @@ See [contracts/kura-api.md](../contracts/kura-api.md): `/api/search`, `/api/note
 | `KURA_REPO_TOKEN_FILE`, `KURA_REPO_USER` | — | https token (a file, e.g. a rendered secret) and its user |
 | `KURA_POLL` | `60` | seconds between fetches |
 | `KURA_USERS` | — | allowed `Tailscale-User-Login`s, comma-separated; `*` = anyone; unset = nobody |
-| `KURA_PUBLIC_URL` | from `Host` | the base for URLs in API answers |
+| `KURA_PUBLIC_URL` | from `Host` | the base for URLs in API answers: an origin, never a path (`https://kura.example.ts.net`); Kura refuses to start otherwise (0.5.0), since clients tell a work note by `/v/` at the start of its path |
 | `KURA_NIWA_URL`, `KURA_KONBINI_URL` | — | sister links ("in the garden", "card on Konbini", the header apps) |
 | `KURA_HISTER_URL` | — | push every note into Hister as `label:vault` (needs `KURA_PUBLIC_URL`) |
 | `KURA_DB` | `/data/kura.sqlite3` | the push log (URL + hash per note) |

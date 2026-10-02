@@ -96,7 +96,7 @@ flowchart LR
 - Every name is a **Tailscale Service** served by a tagged sidecar, one Service per room. Tailscale terminates TLS and adds `Tailscale-User-Login`.
 - The **tailnet policy** grants these services to the owner only. Other users (for example a household) can be granted SearXNG only, and nothing else in Machiya.
 - A service checks the header against its allow-list. Server-to-server calls in the example deployment either stay on a Docker network (Kura to Hister over a shared network, with no identity involved) or go out through the host's own tailscaled. The web server that hosts Shiori's pages works that way, so the call arrives as the owner's machine.
-- Shiori's hosted pages reach the other services through same-origin routes on that web server (`/searx/`, `/konbini/`, `/kura/`), and never add or rewrite `Origin`.
+- Shiori's hosted pages reach the other services through same-origin routes on that web server (`/searx/`, `/konbini/`, `/kura/`), and never add or rewrite `Origin`. `/kura/` passes Kura's API only, never its reader pages ([Kura contract](contracts/kura-api.md#vaults)).
 
 ## Example deployment
 

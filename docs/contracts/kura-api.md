@@ -7,7 +7,7 @@ Shiori's hosted pages reach it at `/kura/api/…` on their own host. Serving sev
 ## Conventions
 
 - **A note's identity is its path** in the vault: `Projects/Example-Project.md`. `slug` is the path without `.md`. With several vaults, the identity is `(vault, path)` (see [Vaults](#vaults)); for the default vault nothing changes.
-- **`url`** is always `https://kura…/n/<slug>` (percent-encoded) for the default vault, exactly as the reader serves it, and `https://kura…/v/<vault>/n/<slug>` for any other vault. Shiori's history and marks, and Hister documents, key on it; a note's `url` never changes.
+- **`url`** is always `https://kura…/n/<slug>` (percent-encoded) for the default vault, exactly as the reader serves it, and `https://kura…/v/<vault>/n/<slug>` for any other vault. Shiori's history and marks, and Hister documents, key on it; a note's `url` never changes. `https://kura…` is Kura's public address (`KURA_PUBLIC_URL`, else `https://<Host>`), an **origin with no path**: Kura refuses to start with a path in it (0.5.0), so `/n/` or `/v/` always starts a note's path.
 - **Dates** are unix seconds: `changed` is the exact time of the note's latest commit; `created` is UTC midnight of the note's `date:` frontmatter day. `null` when unknown.
 - **Snippets** are HTML in which only `<mark>` is markup; everything else is escaped, the same as Hister's snippets.
 - **Paging:** `limit` (default 20, max 100) and `offset`. `total` is always exact. `total: 0` means "found nothing", which is what triggers Shiori's respelling retry.
@@ -20,6 +20,8 @@ Kura can serve several vaults. The first one configured is the **default vault**
 
 - Every note object has **`"vault": "<name>"`**.
 - `url`: `https://kura…/n/<slug>` for the default vault (unchanged, for good), `https://kura…/v/<vault>/n/<slug>` for the others. `/v/<default>/n/X` answers 301 to `/n/X`. **That is the only new note URL shape.** A work note's images in `html` are `…/v/<vault>/a/…`, and the reader's other pages move under `/v/<vault>/` the same way (`f/`, `t/`, `search`, `recent`), but none of them is a note's `url`.
+- **Reading a URL for `/v/`.** Kura serves `/v/` however a path reaches it: its HTTP server folds a leading `//` and it decodes `%XX` once, so `//v/work/n/X` and `/%76/work/n/X` are the same work note as `/v/work/n/X`. A client that keeps work notes out by their address (Shiori's `isPrivateNote`, the MCP server's guard) folds and decodes the path the same way before it looks, and counts a vault name it can't decode as another vault's. `/V/` and a double-encoded `%2576` aren't `/v/` to Kura.
+- **Kura's reader stays at Kura's own address.** A web server routing to Kura under a path (Shiori's hosted pages' `/kura/`) passes only the API it needs (`api/search`, `api/recent`, `api/note`, `api/vaults`, `feed.xml`), never the reader: under a prefix a work note's page wouldn't start with `/v/`.
 - A note in any vault but the default always has `published: false` and `card_url: null`, whatever its frontmatter says: Niwa and Konbini read the default vault only, so other vaults (shared or private) get no Niwa or Konbini links.
 - **The `vault` parameter**: one name, a comma list, or `all`; omitted = the default vault; an unknown name is a 400.
   - `/api/search`, `/api/recent`: a list or `all`.

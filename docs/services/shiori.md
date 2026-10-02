@@ -20,7 +20,7 @@
 | To | How |
 |---|---|
 | Hister | apps: directly; hosted pages: same origin. Always `Origin: hister://`. |
-| Kura | apps: `kura.*` directly; hosted pages: `/kura/` route on the hosting web server; the extension needs a host permission. |
+| Kura | apps: `kura.*` directly; hosted pages: `/kura/` route on the hosting web server, for Kura's API only (`api/search`, `api/recent`, `api/note`, `api/vaults`, `feed.xml`), never its reader; the extension needs a host permission. |
 | SearXNG | apps: directly; hosted pages: `/searx/` route. JSON + the image-proxy plugin. |
 | Konbini | `/api/cards` (slug ↔ path) for notes met through Hister. |
 
