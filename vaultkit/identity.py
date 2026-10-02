@@ -763,7 +763,12 @@ class Identity:
 def load_for(room, env=None, bind="0.0.0.0", secure=True):
     """The room's Identity from MACHIYA_IDENTITY_FILE and <ROOM>_AUTH / _AUTH_HEADER / _SIGNIN / _BIND_BEHIND_PROXY /
     _ACCEPT_APP_CAPS,
-    or None when no identity file is set (the room keeps its old *_USERS gate). IdentityError for a bad setup."""
+    or None when no identity file is set (the room keeps its old *_USERS gate). IdentityError for a bad setup.
+
+    `secure` (default True) puts Secure on the session cookie, and vaultkit.signin then accepts only https pages as
+    same-origin. A room passes secure=False only when it is really served over plain http (no https public URL: a
+    localhost or LAN setup); a browser drops a Secure cookie set over http, so the sign-in would silently fail. Leave
+    it True whenever any proxy in front of the room speaks https."""
     env = os.environ if env is None else env
     path = (env.get("MACHIYA_IDENTITY_FILE") or "").strip()
     if not path:
