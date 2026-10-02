@@ -39,6 +39,25 @@ Kura can serve several vaults. The first one configured is the **default vault**
 3. Work notes never reach AI. Nothing that feeds a model (Shiori's AI features, the MCP server, a note search) sends `vault`; it gets the default vault, and drops any note whose `vault` isn't the default or a vault `/api/vaults` reports `private: false`, as defence in depth (when in doubt, drop it). **"AI" includes on-device models: Shiori doesn't offer Summarize, labels or AI Answer for a note in a private vault, even on Apple Intelligence.** Shiori's hosted pages' `/shiori/ai/*` read only from Hister, which never holds private-vault notes (it does hold shared ones).
 4. Clients must not send a private vault note's `url` or `title` to Hister (history, add, label, delete). Shiori's Remember What You Open is gated to the default vault and the shared ones.
 
+## Identity
+
+With Machiya's identity file (`MACHIYA_IDENTITY_FILE`, [plans/identity.md](../plans/identity.md)) Kura asks it who is
+calling instead of `KURA_USERS`. Without the file nothing here applies and the API is as above.
+
+- **Proofs:** `Authorization: Bearer mch_…` (a stored token: agents, services, scripts) or `Bearer mcd_…` (a paired
+  Shiori device), a Tailscale login or tagged node, a trusted proxy's login header, or the built-in sign-in's
+  `machiya_session` cookie. A proof that is present but invalid is a **401**, never ignored in favour of another.
+- **401** = no or a bad proof; **403** = proven, but the principal has no `kura` `read` grant (or no entry at all).
+  The body is a short plain-text reason.
+- **Vault scope:** a principal reads only the vaults its grant allows: `"default"`, `"shared"` (every shared vault)
+  and vault names. The owner reads all. **An agent's default is the default and shared vaults; a private vault only
+  when its grant names it.** Everything in [Vaults](#vaults) is cut to that scope: `/api/vaults` lists only those,
+  `vault=all` means all of those, and a vault outside the scope is treated exactly like one that doesn't exist (400
+  `no such vault` in the API, the same 404 page in the reader), so its name doesn't leak. A principal whose grant
+  leaves out the default vault gets 400 from an API call without `vault`, and 404 from `/n/…` and `/feed.xml`.
+- `/api/status` stays open; its full view (repo URL, folder, error texts) is the owner's only.
+- `default`, `shared` and `v` are never vault names.
+
 ## A note in a list
 
 ```json
@@ -114,7 +133,7 @@ The notes Kura's service worker keeps on a device for good (Machiya's shared wor
 
 ### `GET /api/status`
 
-→ `{"head": "<commit>", "synced_at": <unix>, "notes": 120, "version": "<kura version>", "vaultkit": "v0.1.0", "error": null, "auth": "tailscale"}`, plus `vaults` with several vaults ([Vaults](#vaults)). This one needs no identity and the monitoring probes use it, so it carries no configuration: an error reads `"sync failed"` (or `"push failed"` for the Hister push), and a private vault's entry is only `{"error": …}`. A request that passes the owner gate (every request when `KURA_AUTH=open`) also gets `"repo": "<url without credentials>"`, `"subdir": "<vault folder>"` and the full error texts. A probe matches `"ready": true` and fails on `"error": "`.
+→ `{"head": "<commit>", "synced_at": <unix>, "notes": 120, "version": "<kura version>", "vaultkit": "v0.1.0", "error": null, "auth": "tailscale"}`, plus `vaults` with several vaults ([Vaults](#vaults)). This one needs no identity and the monitoring probes use it, so it carries no configuration: an error reads `"sync failed"` (or `"push failed"` for the Hister push), and a private vault's entry is only `{"error": …}`. A request that passes the owner gate (every request when `KURA_AUTH=open`; with the identity file, the owner) also gets `"repo": "<url without credentials>"`, `"subdir": "<vault folder>"` and the full error texts. A probe matches `"ready": true` and fails on `"error": "`.
 
 ### `GET /feed.xml?q=&tag=&folder=`
 

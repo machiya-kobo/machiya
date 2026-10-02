@@ -275,7 +275,8 @@ as defence in depth.
 2. **vaultkit identity core + CLI** (in review: `vaultkit/identity.py`, `tests/test_identity.py`), with a test suite of its own (resolve order, invalid proof never falls through,
    constant-time compares, expiry, epochs, reload, throttling, malformed TOML refuses to start). Owner reviews; tag
    vaultkit.
-3. **Kura** (read-only, simplest; proves the API and the vault scoping).
+3. **Kura** (read-only, simplest; proves the API and the vault scoping). In review: machiya-kobo/kura, with the
+   contract's new "Identity" section.
 4. **Konbini and Niwa** (grants for owner powers; GET write removed; service token for Niwa → Konbini).
 5. **machiya-mcp** (callers by principal, its own token, delegation or not).
 6. **Built-in sign-in pages and per-user prefs** in all three rooms.
