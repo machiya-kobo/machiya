@@ -267,7 +267,7 @@ as defence in depth.
 ## Phases (one PR each, tests in each)
 
 1. **Design sign-off** (this document) and the Tailscale check (capabilities through `serve.json`/Services).
-2. **vaultkit identity core + CLI**, with a test suite of its own (resolve order, invalid proof never falls through,
+2. **vaultkit identity core + CLI** (in review: `vaultkit/identity.py`, `tests/test_identity.py`), with a test suite of its own (resolve order, invalid proof never falls through,
    constant-time compares, expiry, epochs, reload, throttling, malformed TOML refuses to start). Owner reviews; tag
    vaultkit.
 3. **Kura** (read-only, simplest; proves the API and the vault scoping).
