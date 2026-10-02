@@ -303,6 +303,12 @@ class Config:
             raise IdentityError("identity file: principals must be a table of tables")
         for name, p in principals.items():
             self.add(name, p)
+        uids = {}
+        for name in self.principals:            # ids key stored data (preferences): never two principals on one
+            uid = self.raw[name]["uid"]
+            if uid in uids:
+                raise IdentityError("principal %r: id %r is also %r's" % (name, uid, uids[uid]))
+            uids[uid] = name
         pairing = data.get("pairing", [])
         if not isinstance(pairing, list):
             raise IdentityError("identity file: pairing must be an array of tables ([[pairing]])")
@@ -465,7 +471,8 @@ HASHING = threading.BoundedSemaphore(4)     # scrypt costs 16 MiB and ~50 ms: at
 
 # -- resolving a request ---------------------------------------------------------------------------------------------
 
-OPEN_OWNER = Principal("local", "person", owner=True, via="open")    # auth=open: everyone, as before identities
+# auth=open: everyone, as before identities; ":open" is an id no name in a file can be
+OPEN_OWNER = Principal("local", "person", owner=True, via="open", uid=":open")
 
 
 class Result:

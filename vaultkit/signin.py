@@ -16,6 +16,7 @@ contains a password, a token's secret (except the one /api/pair hands out) or a 
 """
 import json
 import re
+import os
 import sqlite3
 import threading
 import time
@@ -68,10 +69,29 @@ def _one(headers, name):
     return values[0] if len(values) == 1 else None
 
 
-def same_origin(headers, secure=True):
-    """True when the request names its own site: Origin (or, without one, Referer) has the scheme and host:port of the
+def origin_of(url):
+    """'https://Host.example:443/x' -> 'https://host.example:443' (scheme://host[:port], lowercased);
+    "" if unreadable."""
+    try:
+        u = urlsplit((url or "").strip())
+        return "%s://%s" % (u.scheme.lower(), u.netloc.lower()) if u.scheme in ("http", "https") and u.netloc else ""
+    except ValueError:
+        return ""
+
+
+def same_origin(headers, secure=True, origins=()):
+    """True when the request names its own site: Origin (or, without one, Referer) is one of the room's own
+    `origins` (its public address(es), e.g. KURA_PUBLIC_URL), or without those has the scheme and host:port of the
     request's Host. Neither header, "null", a duplicate or anything unreadable is False. With `secure` the page must
-    be https (the room is served over https, so an http page claiming its host is someone in the middle)."""
+    be https. Over plain http without `origins` it is always False: there, Host and Origin both come from a page that
+    pointed its own name at the room (DNS rebinding), so they prove nothing; a room served over http passes origins."""
+    if origins:
+        source = _one(headers, "Origin")
+        source = source if source is not None else _one(headers, "Referer")
+        found = origin_of(source) if source else ""
+        return bool(found) and found in {origin_of(o) for o in origins} and (not secure or found.startswith("https:"))
+    if not secure:
+        return False
     host = (_one(headers, "Host") or "").strip().lower()
     if not host or len(host) > 255 or any(c.isspace() or ord(c) < 32 for c in host):
         return False
@@ -96,10 +116,13 @@ def read_body(headers, rfile, limit):
     doesn't decode chunked bodies) or ends early. On None a room answers 413 and closes the connection."""
     if headers.get("Transfer-Encoding"):
         return None
-    try:
-        length = int((headers.get("Content-Length") or "0").strip())
-    except ValueError:
-        return None
+    values = Identity.header_values(headers, "Content-Length")
+    if len(values) > 1:
+        return None                     # a duplicate is never half-read
+    raw = (values[0] if values else "0").strip()
+    if not re.fullmatch(r"[0-9]{1,9}", raw):
+        return None                     # int() would take "5_0", "+5" or other scripts' digits
+    length = int(raw)
     if length < 0 or length > limit:
         return None
     data = rfile.read(length) if length else b""
@@ -167,7 +190,7 @@ def _form(body):
     return {k: v[0] for k, v in form.items()}
 
 
-def handle_post(identity, headers, body, client=""):
+def handle_post(identity, headers, body, client="", origins=()):
     """POST /signin. Same-origin only (403); urlencoded and at most MAX_FORM bytes. Success: 303 to the safe `next`
     with the session cookie. A wrong name or password: the page again, 401, one message for both; too many tries:
     429. Sign-in off or no identity file: 404."""
@@ -175,7 +198,7 @@ def handle_post(identity, headers, body, client=""):
         return _text(404, "not found")
     if body is None or len(body) > MAX_FORM:
         return _text(413, "request body too large")
-    if not same_origin(headers, identity.secure):
+    if not same_origin(headers, identity.secure, origins):
         return _text(403, "cross-site sign-in refused")
     if _media(headers) != "application/x-www-form-urlencoded":
         return _text(415, "send the sign-in form")
@@ -195,17 +218,18 @@ def handle_post(identity, headers, body, client=""):
     return _text(result.status if 400 <= result.status < 600 else 500, result.error or "refused")
 
 
-def handle_signout(identity, headers):
+def handle_signout(identity, headers, origins=()):
     """POST /signout: same-origin only (403); clears the session cookie and goes to /."""
     if identity is None:
         return _text(404, "not found")
-    if not same_origin(headers, identity.secure):
+    if not same_origin(headers, identity.secure, origins):
         return _text(403, "cross-site sign-out refused")
     return _redirect("/", identity.sign_out())
 
 
 def handle_pair(identity, headers, body, client=""):
     """POST /api/pair, JSON {"code": "ABCD-EFGH", "device": "iPhone"} -> {"token": "mcd_...", "principal": name}.
+    `device` is informational and checked for shape only; the device id and label come from the CLI's pairing entry.
     No cookie is read or set, so no same-origin rule: the code is the proof (throttled, 5 per address per 10 minutes).
     Errors are {"error": ...} with 400, 401 (unknown or expired code), 413, 415, 429 or 503."""
     if identity is None:
@@ -248,12 +272,15 @@ class Prefs:
 
     def __init__(self, path):
         self.path, self.lock = path, threading.Lock()
+        if not os.path.exists(path):    # 0600: other local users don't read anyone's preferences
+            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
         with self.lock, closing(self._db()) as db, db:
             db.execute("CREATE TABLE IF NOT EXISTS prefs (principal TEXT NOT NULL, key TEXT NOT NULL, "
                        "value TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (principal, key))")
 
     def _db(self):
-        return sqlite3.connect(self.path, timeout=10, isolation_level=None)    # autocommit: put() begins its own
+        # autocommit (put() begins its own); a short wait, since the lock below is held meanwhile
+        return sqlite3.connect(self.path, timeout=2, isolation_level=None)
 
     @staticmethod
     def _principal(principal):
@@ -302,7 +329,10 @@ class Prefs:
                     raise PrefsError("at most %d keys" % MAX_KEYS)
                 db.execute("COMMIT")
             except BaseException:
-                db.execute("ROLLBACK")
+                try:
+                    db.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass                # the original error matters, not a failed rollback
                 raise
             return dict(db.execute("SELECT key, value FROM prefs WHERE principal = ? ORDER BY key", (principal,)))
 
@@ -314,7 +344,7 @@ def bearer(principal):
     return (getattr(principal, "via", "") or "").startswith(("token:", "device:"))
 
 
-def handle_prefs(prefs, principal, method, headers, body=b"", secure=True):
+def handle_prefs(prefs, principal, method, headers, body=b"", secure=True, origins=()):
     """GET /api/prefs -> {"prefs": {key: value}}; PUT /api/prefs with JSON {"prefs": {key: value or null}} merges
     (null removes) and answers the same shape. `principal` is what the room's resolve gave (None: 401). A PUT not made
     with a token must be same-origin (403); `secure` is the room's (identity.secure). The room calls this only after
@@ -322,10 +352,13 @@ def handle_prefs(prefs, principal, method, headers, body=b"", secure=True):
     if principal is None:
         return _json(401, {"error": "sign in first"})
     if method == "GET":
-        return _json(200, {"prefs": prefs.get_all(principal.uid)})      # by id: a reused name starts empty
+        try:
+            return _json(200, {"prefs": prefs.get_all(principal.uid)})  # by id: a reused name starts empty
+        except sqlite3.Error:
+            return _json(503, {"error": "preferences unavailable"})      # locked, full or read-only: never a crash
     if method != "PUT":
         return _json(405, {"error": "GET or PUT"}, [("Allow", "GET, PUT")])
-    if not bearer(principal) and not same_origin(headers, secure):
+    if not bearer(principal) and not same_origin(headers, secure, origins):
         return _json(403, {"error": "cross-site write refused"})
     if body is None or len(body) > MAX_PREFS:
         return _json(413, {"error": "request body too large"})
@@ -341,3 +374,5 @@ def handle_prefs(prefs, principal, method, headers, body=b"", secure=True):
         return _json(200, {"prefs": prefs.put(principal.uid, data["prefs"])})
     except PrefsError as e:
         return _json(400, {"error": str(e)})
+    except sqlite3.Error:
+        return _json(503, {"error": "preferences unavailable"})

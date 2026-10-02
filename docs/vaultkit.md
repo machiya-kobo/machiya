@@ -72,13 +72,16 @@ the client address, and returns `(status, [(header, value), ...], body bytes)`:
 | Route | Call | What it does |
 |---|---|---|
 | `GET /signin` | `handle_get(ident, headers, query)` | the form (name, password, a hidden `next`) in the shared shell; 404 when sign-in is off |
-| `POST /signin` | `handle_post(ident, headers, body, client)` | same-origin only (403); urlencoded, at most `MAX_FORM` (4 KB); 303 to the safe `next` with the session cookie; the page again with 401 (one message for a wrong name or password) or 429 (throttled) |
+| `POST /signin` | `handle_post(ident, headers, body, client, origins)` | same-origin only (403); urlencoded, at most `MAX_FORM` (4 KB); 303 to the safe `next` with the session cookie; the page again with 401 (one message for a wrong name or password) or 429 (throttled) |
 | `POST /signout` | `handle_signout(ident, headers)` | same-origin only (403); clears the cookie, 303 to `/` |
 | `POST /api/pair` | `handle_pair(ident, headers, body, client)` | `{"code", "device"}` (JSON, at most 1 KB) → `{"token": "mcd_…", "principal"}` or `{"error"}` with 401/429; no cookie, so no same-origin rule |
-| `GET/PUT /api/prefs` | `handle_prefs(prefs, principal, method, headers, body, secure)` | `{"prefs": {key: value}}`; a PUT merges (`null` removes), all or nothing |
+| `GET/PUT /api/prefs` | `handle_prefs(prefs, principal, method, headers, body, secure, origins)` | `{"prefs": {key: value}}`; a PUT merges (`null` removes), all or nothing |
 
-- **Same-origin** (`same_origin(headers, secure)`): `Origin`, or `Referer` when there's no `Origin`, must have the
-  request's own `Host` (and https when `secure`). Neither header, `null`, a duplicate or another host is a refusal.
+- **Same-origin** (`same_origin(headers, secure, origins)`): `Origin`, or `Referer` when there's no `Origin`, must
+  be one of the room's own `origins` (its public address(es); every handler takes `origins=`), or without those
+  have the request's own `Host`, over https only. **Over plain http a room must pass `origins`**: there `Host` and
+  `Origin` both come from whatever page pointed its name at the room (DNS rebinding), so without them every
+  same-origin check refuses. Neither header, `null`, a duplicate or another host is a refusal.
   A prefs PUT proven by a bearer token (`principal.via` `token:…`/`device:…`) needs no `Origin`; one made with a
   session cookie, a Tailscale or proxy login or open mode does (all of those ride along with any request a browser
   makes).

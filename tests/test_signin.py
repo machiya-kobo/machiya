@@ -98,7 +98,15 @@ class SameOriginTest(unittest.TestCase):
         ok = signin.same_origin
         self.assertTrue(ok(headers(Host=HOST, Origin="https://" + HOST)))
         self.assertTrue(ok(headers(Host=HOST, Referer="https://%s/signin?next=/" % HOST)))   # no Origin: Referer
-        self.assertTrue(ok(headers(Host="localhost:8080", Origin="http://localhost:8080"), secure=False))
+        # plain http: Host and Origin both come from the page (DNS rebinding), so only the room's own origins count
+        self.assertFalse(ok(headers(Host="localhost:8080", Origin="http://localhost:8080"), secure=False))
+        self.assertFalse(ok(headers(Host="evil.example:8080", Origin="http://evil.example:8080"), secure=False))
+        mine = ("http://localhost:8080",)
+        self.assertTrue(ok(headers(Host="localhost:8080", Origin="http://localhost:8080"), False, mine))
+        self.assertTrue(ok(headers(Host="localhost:8080", Referer="http://LOCALHOST:8080/x"), False, mine))
+        self.assertFalse(ok(headers(Host="evil.example:8080", Origin="http://evil.example:8080"), False, mine))
+        self.assertFalse(ok(headers(Host="localhost:8080", Origin="null"), False, mine))
+        self.assertFalse(ok(headers(Host=HOST, Origin="http://" + HOST), True, ("http://" + HOST,)))   # secure: https
         self.assertFalse(ok(headers(Host="localhost:8080", Origin="http://localhost:8080")))  # https room, http page
         self.assertFalse(ok(headers(Host=HOST)))                                            # neither
         self.assertFalse(ok(headers(Host=HOST, Origin="null")))
@@ -109,6 +117,50 @@ class SameOriginTest(unittest.TestCase):
         self.assertFalse(ok(headers(Origin="https://" + HOST)))                            # no Host
         self.assertFalse(ok(headers(("Host", HOST), ("Origin", "https://" + HOST), ("Origin", "https://evil.example"))))
         self.assertFalse(ok(headers(Host=HOST, Origin="https://[" + HOST)))                # unreadable
+
+
+class ReviewTest(Base):
+    """Regressions for the security review of the sign-in module."""
+
+    def test_prefs_db_errors_are_503(self):
+        import sqlite3
+        prefs = signin.Prefs(os.path.join(self.dir, "p.sqlite3"))
+        self.assertEqual(os.stat(prefs.path).st_mode & 0o777, 0o600)
+        token = idn.Principal("vm", "agent", via="token:abcd12")
+        hold = sqlite3.connect(prefs.path, isolation_level=None)
+        hold.execute("BEGIN EXCLUSIVE")
+        try:
+            for method in ("GET", "PUT"):
+                status, _, out = signin.handle_prefs(prefs, token, method, headers(Content_Type="application/json"),
+                                                     b'{"prefs": {"a": "1"}}')
+                self.assertEqual((status, json.loads(out)["error"]), (503, "preferences unavailable"), method)
+        finally:
+            hold.execute("ROLLBACK")
+            hold.close()
+
+    def test_content_length_is_digits_once(self):
+        import io
+        for bad in ("5_0", "+5", "\u0665", "-1", "1e1", " ", "9999999999"):
+            self.assertIsNone(signin.read_body(headers(Content_Length=bad), io.BytesIO(b"x" * 50), 100), bad)
+        self.assertIsNone(signin.read_body(headers(("Content-Length", "1"), ("Content-Length", "2")),
+                                           io.BytesIO(b"xx"), 100))
+        self.assertEqual(signin.read_body(headers(Content_Length="2"), io.BytesIO(b"xy"), 100), b"xy")
+
+    def test_ids_are_unique_and_open_has_its_own(self):
+        with open(self.path) as f:
+            text = f.read()
+        import re
+        uid = re.search(r'id = "([a-z0-9]{16})"', text).group(1)
+        def write(t):
+            with open(self.path, "w") as f:
+                f.write(t)
+        write(text + '\n[principals.bot]\nid = "%s"\nkind = "agent"\n' % uid)
+        with self.assertRaises(idn.IdentityError):
+            idn.read_file(self.path)
+        write(text + '\n[principals.%s]\nkind = "agent"\n' % uid)        # a name that is someone's id
+        with self.assertRaises(idn.IdentityError):
+            idn.read_file(self.path)
+        self.assertEqual(idn.OPEN_OWNER.uid, ":open")
 
 
 class SignInTest(Base):
