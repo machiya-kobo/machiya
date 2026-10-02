@@ -138,6 +138,34 @@ class ReviewTest(Base):
             hold.execute("ROLLBACK")
             hold.close()
 
+    def test_origins_normalise_and_refuse_junk(self):
+        ok = signin.same_origin
+        h = headers(Host=HOST, Origin="https://" + HOST)
+        self.assertTrue(ok(h, True, ("https://%s:443" % HOST,)))                   # default port = none
+        self.assertTrue(ok(headers(Host=HOST, Origin="https://%s:443" % HOST), True, ("https://" + HOST,)))
+        self.assertTrue(ok(h, True, "https://" + HOST))                             # one address as a string
+        self.assertFalse(ok(headers(Host=HOST, Origin="https://%s:8443" % HOST), True, ("https://" + HOST,)))
+        for junk in ("https://[::1]:x", "https://a b", "https://u@" + HOST, "ftp://" + HOST, ""):
+            self.assertEqual(signin.origin_of(junk), "", junk)
+        self.assertFalse(ok(h, True, ("https://a b",)))
+
+    def test_concurrent_prefs_files(self):
+        import threading
+        path = os.path.join(self.dir, "race.sqlite3")
+        errors = []
+
+        def make():
+            try:
+                signin.Prefs(path)
+            except Exception as e:
+                errors.append(e)
+        threads = [threading.Thread(target=make) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errors, [])
+
     def test_content_length_is_digits_once(self):
         import io
         for bad in ("5_0", "+5", "\u0665", "-1", "1e1", " ", "9999999999"):

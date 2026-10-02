@@ -74,7 +74,16 @@ def origin_of(url):
     "" if unreadable."""
     try:
         u = urlsplit((url or "").strip())
-        return "%s://%s" % (u.scheme.lower(), u.netloc.lower()) if u.scheme in ("http", "https") and u.netloc else ""
+        scheme = u.scheme.lower()
+        if scheme not in ("http", "https") or not u.hostname or u.username is not None or u.password is not None:
+            return ""
+        host, port = u.hostname.lower(), u.port               # a malformed port raises ValueError
+        if any(c.isspace() or c in "@\\" for c in host):
+            return ""
+        if port in (None, {"https": 443, "http": 80}[scheme]):  # the default port is the same origin as none
+            port = None
+        host = "[%s]" % host if ":" in host else host
+        return "%s://%s%s" % (scheme, host, ":%d" % port if port else "")
     except ValueError:
         return ""
 
@@ -85,11 +94,14 @@ def same_origin(headers, secure=True, origins=()):
     request's Host. Neither header, "null", a duplicate or anything unreadable is False. With `secure` the page must
     be https. Over plain http without `origins` it is always False: there, Host and Origin both come from a page that
     pointed its own name at the room (DNS rebinding), so they prove nothing; a room served over http passes origins."""
+    if isinstance(origins, str):        # one address passed as a string, not a list
+        origins = (origins,)
     if origins:
         source = _one(headers, "Origin")
         source = source if source is not None else _one(headers, "Referer")
         found = origin_of(source) if source else ""
-        return bool(found) and found in {origin_of(o) for o in origins} and (not secure or found.startswith("https:"))
+        return bool(found) and found in {origin_of(o) for o in origins} - {""} \
+            and (not secure or found.startswith("https:"))
     if not secure:
         return False
     host = (_one(headers, "Host") or "").strip().lower()
@@ -272,8 +284,10 @@ class Prefs:
 
     def __init__(self, path):
         self.path, self.lock = path, threading.Lock()
-        if not os.path.exists(path):    # 0600: other local users don't read anyone's preferences
+        try:                            # 0600: other local users don't read anyone's preferences
             os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        except FileExistsError:
+            pass                        # already there (or another process just made it): keep it as it is
         with self.lock, closing(self._db()) as db, db:
             db.execute("CREATE TABLE IF NOT EXISTS prefs (principal TEXT NOT NULL, key TEXT NOT NULL, "
                        "value TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (principal, key))")
