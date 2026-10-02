@@ -1,5 +1,11 @@
 # Changelog: machiya-mcp
 
+## Unreleased
+
+- **Identity** (phase 5 of the identity plan). With `MACHIYA_IDENTITY_FILE` callers are principals: a token, a Tailscale login or tagged node, or a trusted proxy's header (`MCP_AUTH=header`, only with the file); they need the `mcp` `use` grant (401 for no proof or a bad one, 403 without the grant). Buckets and apply tokens are per principal, its `limits` override the defaults, and the audit log records `principal` and `via`. Without the file nothing changes.
+- `MCP_TOKEN_FILE`: the `mcp` principal's own token, sent as `Authorization: Bearer` to Kura, Konbini and Niwa (never Hister); redirects are not followed with it.
+- vaultkit v0.10.0.
+
 ## 0.6.0
 
 - The notes folder defaults to the repository root: `MCP_NOTES_SUBDIR` and `MCP_NOTES_SPARSE` are empty unless set (a vault kept in a folder sets both to it). An empty subdirectory works throughout the notes tools.

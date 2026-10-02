@@ -256,7 +256,7 @@ as defence in depth.
   `KANBAN_TAILNET_USERS` keeps working as the no-file fallback.
 - **machiya-mcp:** authenticates callers by token or tagged node; grants and limits per caller principal; calls rooms
   as `mcp` with its own token (no delegation).
-  Re-vendor vaultkit (it's on v0.9.4).
+  Re-vendored at vaultkit v0.10.0.
 - **smallweb:** the same `resolve`; `save` grant.
 - **Shiori:**
   - App (macOS/iOS): a per-device token in the Keychain, sent as `Authorization` to Kura, Konbini, Niwa (never to
@@ -278,7 +278,8 @@ as defence in depth.
 3. **Kura** (read-only, simplest; proves the API and the vault scoping). In review: machiya-kobo/kura, with the
    contract's new "Identity" section.
 4. **Konbini and Niwa** (grants for owner powers; GET write removed; service token for Niwa → Konbini).
-5. **machiya-mcp** (callers by principal, its own token, delegation or not).
+5. **machiya-mcp** (callers by principal, its own token, no delegation). In review: `stack/mcp` (vaultkit v0.10.0,
+   `MCP_TOKEN_FILE`, limits from the file; docs/services/mcp.md).
 6. **Built-in sign-in pages and per-user prefs** in all three rooms.
 7. **Shiori** (app, extension, hosted pages, Linux).
 8. **Docs:** principles (owner gate → identity), contracts (401/403 shapes, `Authorization`, `/api/prefs`), install
