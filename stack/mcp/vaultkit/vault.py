@@ -26,7 +26,7 @@ from .notes import FRONT_RE, LINK_RE, Note, e, read_notes
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
 EMBED_RE = re.compile(r"!\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]")
 MDIMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
-CALLOUT_RE = re.compile(r"^> \[!(\w+)\][+-]?\s*(.*)$", re.M)
+CALLOUT_RE = re.compile(r"^> \[!(\w+)\][+-]?[ \t]*(.*)$", re.M)
 HIDDEN = ("Templates/",)
 IGNORED = ("CLAUDE.md",)            # agent instructions, not notes
 
@@ -81,7 +81,7 @@ class Vault:
         self._key = key
 
     def resolve(self, target):
-        t = target.strip().lower()
+        t = target.strip().rstrip("\\").strip().lower()     # Obsidian escapes the alias pipe inside a table: [[Note\|alias]]
         if t.endswith(".md"):
             t = t[:-3]
         return self.by_name.get(t) or self.by_name.get(t.split("/")[-1])
@@ -143,8 +143,8 @@ class Vault:
             return ('<img src="%s%s/a/%s" alt="%s">' % (base, prefix, quote(path), e(m.group(1) or name))) if path else ""
 
         def callout(m):
-            kind, title = m.group(1).lower(), m.group(2) or m.group(1).title()
-            return "> **%s:** %s" % (e(kind.title()), title)
+            kind, title = m.group(1).lower(), m.group(2)
+            return "> **%s:** %s" % (e(kind.title()), title) if title else "> **%s:**" % e(kind.title())
 
         body = EMBED_RE.sub(embed, body)
         body = MDIMG_RE.sub(mdimg, body)
@@ -158,6 +158,8 @@ class Vault:
 
     def link_md(self, target, anchor, alias, base, mode="garden", prefix=""):
         rel = self.resolve(target)
+        target = target.rstrip("\\")                      # the escaped alias pipe of a table cell leaves a backslash
+        anchor = anchor.rstrip("\\") if anchor else anchor
         label = alias or target.split("/")[-1]
         note = self.notes.get(rel) if rel else None
         if mode in ("all", "kura") and note and not note.rel.startswith(HIDDEN):    # every note links
