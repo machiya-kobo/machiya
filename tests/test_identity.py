@@ -169,7 +169,9 @@ class ResolveTest(Base):
         self.assertEqual(i.resolve(headers()).status, 401)
 
     def test_tagged_node_capability(self):
-        i = self.ident()
+        cap = json.dumps({idn.CAPABILITY: [{"principal": "mcp"}]})
+        self.assertEqual(self.ident().resolve(headers(Tailscale_App_Capabilities=cap)).status, 401)   # opt-in only
+        i = self.ident(accept_caps=True)
         cap = json.dumps({idn.CAPABILITY: [{"principal": "mcp"}]})
         self.assertEqual(i.resolve(headers(Tailscale_App_Capabilities=cap)).principal.name, "mcp")
         q = "=?utf-8?q?" + cap.replace(" ", "_").replace("=", "=3D") + "?="        # Serve may Q-encode it
@@ -312,7 +314,7 @@ class SessionTest(Base):
         self.assertEqual(renewed["auth"], t0 - 2 * 86400)                            # the sign-in time is kept
         self.assertGreaterEqual(renewed["exp"], t0 + 30 * 86400 - 5)
         first = t0 - 179 * 86400                                                     # signed in 179 days ago
-        late = idn.sign(KEY, "session", {"p": "owner", "e": 1, "iat": t0 - 2 * 86400, "auth": first,
+        late = idn.sign(KEY, "session", {"p": "owner", "u": "owner", "e": 1, "iat": t0 - 2 * 86400, "auth": first,
                                          "exp": t0 + 86400})
         capped = json.loads(idn.b64d(self.cookie_of(i.resolve(headers(Cookie="machiya_session=" + late)).cookies[0])
                                      .split(".")[0]))
@@ -371,6 +373,178 @@ class ReloadTest(Base):
         self.assertIn("keeping the last good identity file", err.getvalue())
 
 
+class ReviewTest(Base):
+    """Regressions for the security review of phase 2 (each named after its finding)."""
+
+    def test_h1_parallel_guesses_are_counted_before_hashing(self):
+        import threading
+        i = self.ident(signin=True)
+        results = []
+        go = threading.Event()
+
+        def guess():
+            go.wait()
+            results.append(i.sign_in("owner", "wrong guess", "10.1.1.1").status)
+        threads = [threading.Thread(target=guess) for _ in range(60)]
+        for t in threads:
+            t.start()
+        go.set()
+        for t in threads:
+            t.join()
+        self.assertLessEqual(results.count(401), 5)                                  # at most the limit got hashed
+        self.assertEqual(i.sign_in("owner", "correct horse battery", "10.1.1.2").status, 429)   # name locked
+        ok = self.ident(signin=True)
+        self.assertEqual(ok.sign_in("owner", "correct horse battery", "10.1.1.3").status, 200)
+        for _ in range(4):
+            ok.sign_in("owner", "wrong", "10.1.1.3")
+        self.assertEqual(ok.sign_in("owner", "correct horse battery", "10.1.1.3").status, 200)  # success forgives
+
+    def test_m1_rotating_or_removing_the_key_signs_everyone_out(self):
+        i = self.ident(signin=True)
+        value = i.sign_in("owner", "correct horse battery").cookies[0].split(";")[0].split("=", 1)[1]
+        with open(os.path.join(self.dir, "session.key"), "wb") as f:
+            f.write(b"n" * 43)
+        i.checked = 0
+        self.assertIsNone(i.resolve(headers(Cookie="machiya_session=" + value)).principal)
+        value = i.sign_in("owner", "correct horse battery").cookies[0].split(";")[0].split("=", 1)[1]
+        os.unlink(os.path.join(self.dir, "session.key"))
+        i.checked = 0
+        with redirect_stderr(io.StringIO()):
+            self.assertIsNone(i.resolve(headers(Cookie="machiya_session=" + value)).principal)
+            self.assertEqual(i.sign_in("owner", "correct horse battery").status, 503)
+        self.assertEqual(i.resolve(headers(Tailscale_User_Login="owner@example.com")).principal.name, "owner")
+
+    def test_m2_hostile_input_never_raises(self):
+        i = self.ident(signin=True, accept_caps=True)
+        for caps in ("=?utf-8?b?Q===?=", '"[' * 60000, json.dumps({idn.CAPABILITY: [{"principal": ["mcp"]}]}),
+                     json.dumps({idn.CAPABILITY: [{"principal": None}]}), "\x00", "=?x?q?y?="):
+            with redirect_stderr(io.StringIO()) as err:
+                self.assertIsNone(i.resolve(headers(Tailscale_App_Capabilities=caps)).principal, caps[:20])
+            self.assertEqual(err.getvalue(), "", caps[:20])                          # handled, not the safety net
+        for bad in (5, ["owner"], None, b"owner"):
+            self.assertEqual(i.sign_in(bad, "x").status, 401)
+            self.assertEqual(i.sign_in("owner", bad).status, 401)
+            self.assertEqual(i.pair(bad)[0].status, 401)
+        self.assertEqual(i.sign_in("o" * 10000, "x").status, 401)
+        for cookie in ("machiya_session=" + "a" * 100000, "machiya_session=..", "machiya_session=\x00.\x00"):
+            self.assertIsNone(i.resolve(headers(Cookie=cookie)).principal)
+        with open(self.path) as f:
+            good = f.read()
+        for text in ("principals = [1]\n", good + "\npairing = 5\n", good.replace("[[principals.vm.tokens]]",
+                     "tokens = 5\n[[principals.vm.tokens]]", 1), good + '\n[[pairing]]\nprincipal = ["a"]\n'):
+            self.write(text if text.startswith(("version", "\n")) or "version" in text else 'version = 1\n'
+                       'session_key_file = "session.key"\n' + text)
+            with self.assertRaises(idn.IdentityError, msg=text[:30]):
+                idn.read_file(self.path)
+        with open(self.path, "wb") as f:
+            f.write(b"version = 1\n\xff\xfe")
+        with self.assertRaises(idn.IdentityError):
+            idn.read_file(self.path)
+        i.checked = 0
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(i.resolve(headers(Tailscale_User_Login="owner@example.com")).principal.name, "owner")
+
+    def test_m3_write_file_never_follows_a_symlink(self):
+        with open(self.path, "rb") as f:
+            data = idn.tomllib.load(f)
+        os.chmod(self.path, 0o640)
+        victim = os.path.join(self.dir, "victim")
+        with open(victim, "w") as f:
+            f.write("keep me")
+        os.symlink(victim, self.path + ".bak")
+        idn.write_file(self.path, data)
+        with open(victim) as f:
+            self.assertEqual(f.read(), "keep me")                                    # the .bak symlink was replaced
+        self.assertFalse(os.path.islink(self.path + ".bak"))
+        self.assertEqual(stat.S_IMODE(os.stat(self.path).st_mode), 0o640)
+        self.assertEqual(stat.S_IMODE(os.stat(self.path + ".bak").st_mode), 0o640)
+        link = os.path.join(self.dir, "link.toml")
+        os.symlink(self.path, link)
+        with self.assertRaises(idn.IdentityError):
+            idn.write_file(link, data)
+        self.assertEqual([n for n in os.listdir(self.dir) if n.endswith(".tmp")], [])
+
+    def test_m4_a_reused_name_starts_afresh(self):
+        i = self.ident(signin=True)
+        value = i.sign_in("partner", "partner pass 1").cookies[0].split(";")[0].split("=", 1)[1]
+        with open(self.path) as f:
+            text = f.read()
+        self.write(text.replace("[principals.partner]", '[principals.partner]\nid = "a1b2c3d4e5f6a7b8"'))
+        i.checked = 0
+        self.assertIsNone(i.resolve(headers(Cookie="machiya_session=" + value)).principal)
+
+    def test_l1_a_signature_has_one_spelling(self):
+        i = self.ident(signin=True)
+        value = i.sign_in("owner", "correct horse battery").cookies[0].split(";")[0].split("=", 1)[1]
+        body, mac = value.split(".")
+        for v in (body + "." + mac[:10] + "!*~" + mac[10:], body + "." + mac + "=", body + "." + mac + "==",
+                  body + "." + mac.replace("-", "+").replace("_", "/"), body + "." + " ".join(mac)):
+            if v != value:
+                self.assertIsNone(i.resolve(headers(Cookie="machiya_session=" + v)).principal, v)
+
+    def test_l2_l3_names_and_keys_are_exact(self):
+        with open(self.path) as f:
+            good = f.read()
+        for bad in (good.replace("[principals.newbie]", '[principals."newbie\\n"]'),
+                    good.replace('tailscale_tag = "mcp"', 'tailscale_tag = "mcp\\n"'),
+                    good.replace('id = "abcd12"', "id = 123456"),
+                    good.replace('label = "claude VM"', 'label = "claude VM"\nowner = true')):
+            self.write(bad)
+            with self.assertRaises(idn.IdentityError):
+                idn.read_file(self.path)
+        with open(self.path, "w") as f:
+            f.write(good)
+        with open(self.path, "rb") as f:
+            data = idn.tomllib.load(f)
+        data["principals"]["mcp"]["limits"] = {"a = 1 }\nowner = true\n#": 1}
+        with self.assertRaises(idn.IdentityError):                                    # quoted, then refused
+            idn.write_file(self.path, data)
+        self.assertNotIn("owner = true\n#", idn.dump(data))
+
+    def test_l4_duplicates_and_exact_proxy_logins(self):
+        import email.message
+        m = email.message.Message()
+        m["Tailscale-User-Login"] = "partner@example.com"
+        m["Tailscale-User-Login"] = "owner@example.com"
+        self.assertEqual(self.ident().resolve(m).status, 401)
+        m = email.message.Message()
+        m["Authorization"] = "Bearer mch_abcd12_" + SECRET
+        m["Authorization"] = "Bearer junk"
+        self.assertEqual(self.ident().resolve(m).status, 401)
+        i = self.ident(auth="header", header="Remote-User")
+        self.assertEqual(i.resolve(headers(Remote_User="Owner")).status, 403)        # proxies compare exactly
+
+    def test_l5_the_throttle_stays_small(self):
+        t = idn.Throttle(5, 900)
+        for n in range(t.MAX_KEYS + 500):
+            t.take("10.%d" % n)
+        self.assertLessEqual(len(t.hits), t.MAX_KEYS)
+
+    def test_l6_only_the_clis_scrypt_parameters(self):
+        slow = "scrypt$131072$8$16$" + idn.b64e(b"s" * 16) + "$" + idn.b64e(b"d" * 32)
+        self.assertFalse(idn.check_password("x", slow))
+        with open(self.path) as f:
+            text = f.read()
+        self.write(text.replace(idn.hash_password("correct horse battery").split("$")[0] + "$16384$", "scrypt$131072$")
+                   .replace('password = "scrypt$16384$', 'password = "scrypt$131072$', 1))
+        with self.assertRaises(idn.IdentityError):
+            idn.read_file(self.path)                                                 # refused when the file loads
+
+    def test_l7_every_session_cookie_is_tried(self):
+        i = self.ident(signin=True)
+        value = i.sign_in("owner", "correct horse battery").cookies[0].split(";")[0].split("=", 1)[1]
+        r = i.resolve(headers(Cookie="machiya_session=junk; machiya_session=" + value))
+        self.assertEqual(r.principal.name, "owner")
+
+    def test_l8_an_empty_authorization_is_a_bad_proof(self):
+        self.assertEqual(self.ident().resolve(headers(Authorization="", Tailscale_User_Login="owner@example.com"))
+                         .status, 401)
+        o = self.ident(auth="open", signin=True)
+        r = o.resolve(headers(Cookie="machiya_session=junk"))
+        self.assertEqual(r.principal.name, "local")
+        self.assertIn("Max-Age=0", r.cookies[0])                                     # the bad cookie is cleared
+
+
 class CliTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()
@@ -409,7 +583,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("ok: 2 principals, 1 tokens, 1 pairing codes", out)
         self.assertTrue(os.path.exists(self.path + ".bak"))
 
-        i = idn.Identity(self.path, "konbini")
+        i = idn.Identity(self.path, "konbini", accept_caps=True)
         r = i.resolve(headers(Authorization="Bearer " + token))
         self.assertTrue(r.principal.can("konbini", "write") and not r.principal.can("konbini", "areas"))
         self.assertEqual(r.principal.vaults(), ("default", "shared"))

@@ -212,7 +212,8 @@ DB, for the CLI's `list` to show stale ones (optional).
 - In the tailnet policy, grant the rooms' services to that tag with the app capability:
   `{"src": ["tag:machiya-agent"], "dst": ["tag:machiya-room"], "app": {"github.com/machiya-kobo/cap/identity": [{"principal": "mcp"}]}}`.
 - Each room's Serve forwards it: `--accept-app-caps=github.com/machiya-kobo/cap/identity` (or `AcceptAppCaps` in the
-  room's serve config). Needs Tailscale **v1.92+**. To verify in phase 1: that the setting works through `serve.json`
+  room's serve config), and the room opts in with `<ROOM>_ACCEPT_APP_CAPS=1`. Off by default: a Serve older than
+  v1.92, or one without the setting, passes a client's own copy of the header straight through. Needs Tailscale **v1.92+**. To verify in phase 1: that the setting works through `serve.json`
   and Tailscale Services as Machiya deploys them.
 - The capability says *who*; the identity file says *what*. A capability naming a principal the file doesn't have is
   refused.
@@ -242,7 +243,9 @@ as defence in depth.
   `token revoke`, `pair`, `device revoke`, `epoch bump`, `check`, `whoami <headers>`). The CLI runs on the host that
   holds the file, and only there: nothing in the rooms can write identities. Tested on its own. Released with a vaultkit tag and
   vendored (this is the one place shared security code belongs).
-- **Kura:** replace `allowed()` with `resolve` + `read`; the `vault` parameter, `vault:` queries, `/v/` pages,
+- **Kura:** refuse `default` and `shared` as vault names in `KURA_VAULTS` (they are keywords in a grant's `vaults`,
+  so a private vault called `shared` would otherwise be granted to every agent); replace `allowed()` with
+  `resolve` + `read`; the `vault` parameter, `vault:` queries, `/v/` pages,
   `/api/notes` URLs and search rows are cut to the principal's `vaults`; a private vault not granted answers 404 (not
   403, so its name doesn't leak). `DefaultVaultOnlyTest` grows an agent-principal twin.
 - **Niwa:** owner powers (`publish`, `dismiss`, `meta`) need `niwa.publish`; `/api/suggest` needs `suggest`; the

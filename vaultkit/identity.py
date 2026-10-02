@@ -30,6 +30,7 @@ import json
 import os
 import re
 import secrets
+import stat
 import sys
 import threading
 import time
@@ -41,8 +42,12 @@ except ImportError:                     # Python < 3.11: the rooms' images are 3
 
 VERSION = 1
 CAPABILITY = "github.com/machiya-kobo/cap/identity"
-NAME_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*$")
-TOKEN_ID_RE = re.compile(r"[a-z0-9]{4,8}$")
+NAME_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")          # \Z, not $: "name\n" must not pass
+TOKEN_ID_RE = re.compile(r"[a-z0-9]{4,8}\Z")
+UID_RE = re.compile(r"[a-z0-9]{8,32}\Z")
+B64_RE = re.compile(r"[A-Za-z0-9_-]*\Z")
+BARE_KEY_RE = re.compile(r"[A-Za-z0-9_-]+\Z")
+MAX_NAME = 64                           # longer sign-in names can't exist; refused before any hashing
 KINDS = ("person", "agent", "service")
 # The rooms and what may be granted in each (the plan's table). Anything else in a file refuses to load.
 ACTIONS = {
@@ -72,8 +77,16 @@ def b64e(raw):
 
 
 def b64d(text):
-    text = text.encode() if isinstance(text, str) else text
-    return base64.urlsafe_b64decode(text + b"=" * (-len(text) % 4))
+    """Strict unpadded base64url: anything b64e wouldn't have written (padding, +/, spaces, junk) is a ValueError,
+    so a signature has exactly one spelling."""
+    if isinstance(text, bytes):
+        text = text.decode("ascii")
+    if not isinstance(text, str) or not B64_RE.match(text) or len(text) % 4 == 1:
+        raise ValueError("not base64url")
+    raw = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    if b64e(raw) != text:
+        raise ValueError("not canonical base64url")
+    return raw
 
 
 def now():
@@ -99,14 +112,23 @@ def hash_password(password, salt=None):
 def check_password(password, stored):
     """Constant-time check of `password` against hash_password's output. False on any malformed hash."""
     try:
-        kind, n, r, p, salt, digest = stored.split("$")
-        n, r, p = int(n), int(r), int(p)
-        if kind != "scrypt" or n > 1 << 20 or r > 32 or p > 16:
+        if not valid_hash(stored):
             return False
-        got = hashlib.scrypt(password.encode(), salt=b64d(salt), n=n, r=r, p=p, dklen=len(b64d(digest)),
-                             maxmem=256 * 1024 * 1024)
+        _, _, _, _, salt, digest = stored.split("$")
+        got = hashlib.scrypt(password.encode(), salt=b64d(salt), n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, dklen=32)
         return hmac.compare_digest(got, b64d(digest))
-    except (ValueError, TypeError, binascii.Error, AttributeError):
+    except (ValueError, TypeError, binascii.Error, AttributeError, UnicodeError):
+        return False
+
+
+def valid_hash(stored):
+    """hash_password's own format and parameters only: a hand-written hash can't make a room spend seconds or
+    hundreds of MiB per check."""
+    try:
+        kind, n, r, p, salt, digest = stored.split("$")
+        return (kind, n, r, p) == ("scrypt", str(SCRYPT_N), str(SCRYPT_R), str(SCRYPT_P)) \
+            and len(b64d(salt)) == 16 and len(b64d(digest)) == 32
+    except (ValueError, TypeError, AttributeError, binascii.Error, UnicodeError):
         return False
 
 
@@ -126,31 +148,35 @@ def sign(key, purpose, payload):
 
 def unsign(key, purpose, value):
     """The payload of sign()'s output, or None if it isn't one (or was signed for another purpose)."""
+    if not key or not isinstance(value, str):
+        return None                     # no usable key (it changed or vanished): no signed proof is good
     try:
         body, mac = value.split(".")
-        want = hmac.new(key, purpose.encode() + b"\0" + body.encode(), hashlib.sha256).digest()
-        if not hmac.compare_digest(want, b64d(mac)):
+        if not B64_RE.match(body):
+            return None
+        want = b64e(hmac.new(key, purpose.encode() + b"\0" + body.encode(), hashlib.sha256).digest())
+        if not hmac.compare_digest(want.encode(), mac.encode("ascii")):
             return None
         payload = json.loads(b64d(body))
         return payload if isinstance(payload, dict) else None
-    except (ValueError, TypeError, binascii.Error):
+    except (ValueError, TypeError, binascii.Error, UnicodeError, RecursionError):
         return None
 
 
 def capability_values(header, name=CAPABILITY):
-    """Tailscale-App-Capabilities (JSON, maybe RFC 2047 Q-encoded) -> the list of values granted under `name`."""
+    """Tailscale-App-Capabilities (JSON, maybe RFC 2047 encoded) -> the list of values granted under `name`.
+    IdentityError for anything unreadable, never another exception (hostile input from the network)."""
     if not header:
         return []
-    text = header.strip()
-    if text.startswith("=?"):
-        try:
+    try:
+        text = header.strip()
+        if text.startswith("=?"):
             text = "".join(part.decode(enc or "utf-8") if isinstance(part, bytes) else part
                            for part, enc in email.header.decode_header(text))
-        except (ValueError, LookupError, UnicodeDecodeError):
-            raise IdentityError("unreadable Tailscale-App-Capabilities")
-    try:
+        if len(text) > 16384:
+            raise ValueError("too long")
         caps = json.loads(text)
-    except ValueError:
+    except Exception:                   # HeaderParseError, LookupError, UnicodeError, ValueError, RecursionError...
         raise IdentityError("unreadable Tailscale-App-Capabilities")
     values = caps.get(name) if isinstance(caps, dict) else None
     return values if isinstance(values, list) else []
@@ -247,8 +273,10 @@ class Config:
     """The parsed identity file: principals and the lookups `resolve` needs. Built only from a valid file."""
 
     KNOWN_TOP = {"version", "session_key_file", "session_days", "tailscale_capability", "principals", "pairing"}
-    KNOWN = {"kind", "owner", "tailscale", "tailscale_tag", "proxy", "password", "session_epoch", "grants", "limits",
-             "tokens", "revoked_devices"}
+    KNOWN = {"id", "kind", "owner", "tailscale", "tailscale_tag", "proxy", "password", "session_epoch", "grants",
+             "limits", "tokens", "revoked_devices"}
+    KNOWN_TOKEN = {"id", "hash", "label", "expires"}
+    KNOWN_PAIRING = {"principal", "code", "device", "label", "expires"}
 
     def __init__(self, data, base_dir="."):
         self.data = data
@@ -269,11 +297,15 @@ class Config:
             raise IdentityError("identity file: tailscale_capability must look like domain/path")
         self.principals, self.by_login, self.by_tag, self.by_proxy, self.tokens = {}, {}, {}, {}, {}
         self.raw = {}
-        for name, p in (data.get("principals") or {}).items():
+        principals = data.get("principals", {})
+        if not isinstance(principals, dict):
+            raise IdentityError("identity file: principals must be a table of tables")
+        for name, p in principals.items():
             self.add(name, p)
-        self.pairing = []
-        for i, entry in enumerate(data.get("pairing") or []):
-            self.pairing.append(self.pair_entry(i, entry))
+        pairing = data.get("pairing", [])
+        if not isinstance(pairing, list):
+            raise IdentityError("identity file: pairing must be an array of tables ([[pairing]])")
+        self.pairing = [self.pair_entry(i, entry) for i, entry in enumerate(pairing)]
 
     def add(self, name, p):
         where = "principal %r" % name
@@ -292,21 +324,27 @@ class Config:
             raise IdentityError("%s: owner = true is for a person" % where)
         if "password" in p and kind != "person":
             raise IdentityError("%s: only a person signs in with a password" % where)
-        if "password" in p and not (isinstance(p["password"], str) and p["password"].startswith("scrypt$")):
-            raise IdentityError("%s: password must be a scrypt hash (use the CLI's passwd)" % where)
+        if "password" in p and not valid_hash(p["password"]):
+            raise IdentityError("%s: password must be the CLI's scrypt hash (use passwd)" % where)
+        uid = p.get("id", name)             # signed proofs carry it: a deleted name added again starts afresh
+        if not isinstance(uid, str) or not (uid == name or UID_RE.match(uid)):
+            raise IdentityError("%s: id is 8-32 lowercase letters and digits (the CLI's add sets it)" % where)
         epoch = p.get("session_epoch", 1)
         if not isinstance(epoch, int) or epoch < 1:
             raise IdentityError("%s: session_epoch must be a whole number from 1" % where)
         grants = parse_grants(where, p.get("grants", {}))
         limits = p.get("limits", {})
-        if not isinstance(limits, dict) or not all(isinstance(v, int) and v >= 0 for v in limits.values()):
-            raise IdentityError("%s: limits must be whole numbers" % where)
+        if not isinstance(limits, dict) or not all(
+                BARE_KEY_RE.match(k) and isinstance(v, int) and not isinstance(v, bool) and v >= 0
+                for k, v in limits.items()):
+            raise IdentityError("%s: limits are name = whole number" % where)
         for field, index in (("tailscale", self.by_login), ("proxy", self.by_proxy)):
             values = p.get(field, [])
             if not isinstance(values, list) or not all(isinstance(v, str) and v.strip() for v in values):
                 raise IdentityError("%s: %s must be a list of logins" % (where, field))
             for v in values:
-                key = v.strip().lower()
+                # Tailscale logins are case-insensitive; a proxy's are compared exactly (htpasswd users are not)
+                key = v.strip().lower() if field == "tailscale" else v.strip()
                 if key in index:
                     raise IdentityError("%s: %s login %r also belongs to %r" % (where, field, v, index[key]))
                 index[key] = name
@@ -317,9 +355,15 @@ class Config:
             if tag in self.by_tag:
                 raise IdentityError("%s: tailscale_tag %r also belongs to %r" % (where, tag, self.by_tag[tag]))
             self.by_tag[tag] = name
-        for t in p.get("tokens", []):
-            if not isinstance(t, dict) or not TOKEN_ID_RE.match(str(t.get("id", ""))):
+        tokens = p.get("tokens", [])
+        if not isinstance(tokens, list):
+            raise IdentityError("%s: tokens must be an array of tables" % where)
+        for t in tokens:
+            if not isinstance(t, dict) or not isinstance(t.get("id"), str) or not TOKEN_ID_RE.match(t["id"]):
                 raise IdentityError("%s: a token needs an id of 4-8 lowercase letters and digits" % where)
+            extra = sorted(set(t) - self.KNOWN_TOKEN)
+            if extra:
+                raise IdentityError("%s: token %s: unknown setting %r" % (where, t["id"], extra[0]))
             if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(t.get("hash", ""))):
                 raise IdentityError("%s: token %s needs a sha256 hash (use the CLI's token mint)" % (where, t["id"]))
             if t["id"] in self.tokens:
@@ -330,15 +374,17 @@ class Config:
         if not isinstance(revoked, list) or not all(isinstance(d, str) for d in revoked):
             raise IdentityError("%s: revoked_devices must be a list of device ids" % where)
         self.principals[name] = Principal(name, kind, owner, grants, limits)
-        self.raw[name] = {"password": p.get("password"), "epoch": epoch, "revoked": frozenset(revoked)}
+        self.raw[name] = {"password": p.get("password"), "epoch": epoch, "revoked": frozenset(revoked), "uid": uid}
 
     def pair_entry(self, i, e):
         where = "pairing entry %d" % (i + 1)
-        if not isinstance(e, dict) or e.get("principal") not in self.principals:
+        if not isinstance(e, dict) or not isinstance(e.get("principal"), str) or e["principal"] not in self.principals:
             raise IdentityError("%s: names no principal in this file" % where)
+        if set(e) - self.KNOWN_PAIRING:
+            raise IdentityError("%s: unknown setting %r" % (where, sorted(set(e) - self.KNOWN_PAIRING)[0]))
         if self.principals[e["principal"]].kind != "person":
             raise IdentityError("%s: only a person pairs a device" % where)
-        if not str(e.get("code", "")).startswith("scrypt$") or not TOKEN_ID_RE.match(str(e.get("device", ""))):
+        if not valid_hash(e.get("code")) or not isinstance(e.get("device"), str) or not TOKEN_ID_RE.match(e["device"]):
             raise IdentityError("%s: needs a code hash and a device id (use the CLI's pair)" % where)
         return {"principal": e["principal"], "code": e["code"], "device": e["device"],
                 "label": str(e.get("label", "")), "expires": utc(e.get("expires"))}
@@ -353,9 +399,14 @@ def read_file(path):
             data = tomllib.load(f)
     except OSError as e:
         raise IdentityError("identity file %s: %s" % (path, e.strerror or e))
-    except tomllib.TOMLDecodeError as e:
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         raise IdentityError("identity file %s: %s" % (path, e))
-    config = Config(data, os.path.dirname(os.path.abspath(path)))
+    try:
+        config = Config(data, os.path.dirname(os.path.abspath(path)))
+    except IdentityError:
+        raise
+    except (TypeError, AttributeError, ValueError, KeyError, RecursionError) as e:    # a shape Config didn't foresee
+        raise IdentityError("identity file %s: unexpected shape (%s)" % (path, type(e).__name__))
     try:
         with open(config.key_file, "rb") as f:
             key = f.read().strip()
@@ -369,28 +420,38 @@ def read_file(path):
 # -- throttling ------------------------------------------------------------------------------------------------------
 
 class Throttle:
-    """At most `limit` failures per key in `window` seconds, in memory (per room process)."""
+    """At most `limit` attempts per key in `window` seconds, in memory (per room process). An attempt is counted when
+    it starts (`take`), before the slow check, so parallel requests can't all slip past; a success gives it back
+    (`forgive`). At most MAX_KEYS keys are kept: past that the least recently used are forgotten."""
+
+    MAX_KEYS = 4096
 
     def __init__(self, limit, window):
         self.limit, self.window = limit, window
         self.hits, self.lock = {}, threading.Lock()
 
-    def blocked(self, key):
+    def take(self, key):
+        """Count an attempt for `key`; False (and nothing counted) when it's over the limit."""
         with self.lock:
-            cutoff = time.monotonic() - self.window
-            hits = [t for t in self.hits.get(key, ()) if t > cutoff]
-            if hits:
+            t = time.monotonic()
+            hits = [h for h in self.hits.pop(key, ()) if h > t - self.window]
+            if len(hits) >= self.limit:
                 self.hits[key] = hits
-            else:
-                self.hits.pop(key, None)
-            return len(hits) >= self.limit
+                return False
+            hits.append(t)
+            self.hits[key] = hits                  # re-inserted: the dict's order is least recently used first
+            while len(self.hits) > self.MAX_KEYS:
+                del self.hits[next(iter(self.hits))]
+            return True
 
-    def fail(self, key):
+    def forgive(self, key):
         with self.lock:
-            self.hits.setdefault(key, []).append(time.monotonic())
-            if len(self.hits) > 10000:              # a flood of addresses: forget the oldest windows
-                cutoff = time.monotonic() - self.window
-                self.hits = {k: v for k, v in self.hits.items() if v and v[-1] > cutoff}
+            hits = self.hits.get(key)
+            if hits:
+                hits.pop()
+
+
+HASHING = threading.BoundedSemaphore(4)     # scrypt costs 16 MiB and ~50 ms: at most four at once per room
 
 
 # -- resolving a request ---------------------------------------------------------------------------------------------
@@ -410,55 +471,99 @@ class Result:
         return self.principal is not None
 
 
+def whole(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
 class Identity:
     """A room's view of the identity file. `room` names the room (its grants); `auth`: tailscale | header | open;
     `header`: the proxy's login header for auth=header; `signin`: the built-in sign-in is on; `secure`: cookies get
-    Secure (the room is served over https); `cookie_domain`: MACHIYA_COOKIE_DOMAIN, so one sign-in covers every room."""
+    Secure (the room is served over https); `cookie_domain`: MACHIYA_COOKIE_DOMAIN, so one sign-in covers every room;
+    `accept_caps`: read Tailscale-App-Capabilities (tagged nodes). Only turn it on where Serve forwards and strips that
+    header (`--accept-app-caps`, Tailscale v1.92+): an older Serve passes a client's own copy straight through."""
 
-    def __init__(self, path, room, auth="tailscale", header="", signin=False, secure=True, cookie_domain=""):
+    def __init__(self, path, room, auth="tailscale", header="", signin=False, secure=True, cookie_domain="",
+                 accept_caps=False):
         if room not in ACTIONS:
             raise IdentityError("unknown room %r" % room)
         if auth not in ("tailscale", "header", "open"):
             raise IdentityError("auth must be tailscale, header or open, not %r" % auth)
         if auth == "header" and not re.fullmatch(r"[A-Za-z0-9-]+", header or ""):
             raise IdentityError("auth=header needs the proxy's login header name")
+        if cookie_domain and not re.fullmatch(r"\.?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", cookie_domain):
+            raise IdentityError("MACHIYA_COOKIE_DOMAIN must be a domain name, not %r" % cookie_domain)
         self.path, self.room, self.auth, self.header = path, room, auth, header
-        self.signin, self.secure, self.cookie_domain = signin, secure, cookie_domain
+        self.signin, self.secure, self.cookie_domain, self.accept_caps = signin, secure, cookie_domain, accept_caps
         self.lock = threading.Lock()
-        self.stamp, self.checked = None, 0.0
+        self.checked = 0.0
         self.config, self.key = read_file(path)
-        self.stamp = self._stamp()
+        self.stamp = self._stamp(self.config)
         self.signin_names = Throttle(5, 900)
         self.signin_addrs = Throttle(20, 900)
         self.pair_addrs = Throttle(5, 600)
 
-    def _stamp(self):
-        st = os.stat(self.path)
-        return (st.st_ino, st.st_mtime_ns, st.st_size)
+    def _stamp(self, config):
+        """The identity file's and the session key's (inode, mtime, size): a change to either is a reload."""
+        out = []
+        for path in (self.path, config.key_file):
+            try:
+                st = os.stat(path)
+                out.append((st.st_ino, st.st_mtime_ns, st.st_size))
+            except OSError:
+                out.append(None)
+        return tuple(out)
 
     def current(self):
-        """The config, re-read when the file changed (checked at most once a second). A file that turned invalid
-        keeps the last good one and says so on stderr: a typo never opens or locks the rooms mid-flight."""
+        """The config, re-read when the file or the key changed (checked at most once a second). A file that turned
+        invalid keeps the last good grants and says so on stderr (a typo never opens or locks the rooms mid-flight),
+        but a key that changed and can't be read drops the old key: no session or device token passes until it can."""
         with self.lock:
             if time.monotonic() - self.checked >= 1:
                 self.checked = time.monotonic()
-                try:
-                    stamp = self._stamp()
-                    if stamp != self.stamp:
-                        self.config, self.key = read_file(self.path)
+                stamp = self._stamp(self.config)
+                if stamp != self.stamp:
+                    try:
+                        config, key = read_file(self.path)
+                        self.config, self.key, self.stamp = config, key, self._stamp(config)
+                    except (OSError, IdentityError) as e:
+                        if stamp[1] != self.stamp[1]:
+                            self.key = None
                         self.stamp = stamp
-                except (OSError, IdentityError) as e:
-                    print("identity: keeping the last good identity file: %s" % e, file=sys.stderr, flush=True)
+                        print("identity: keeping the last good identity file%s: %s"
+                              % ("" if self.key else " without a session key", e), file=sys.stderr, flush=True)
             return self.config, self.key
 
     # -- the proofs
 
+    @staticmethod
+    def header_values(headers, name):
+        """Every value of a header (http.server's get_all), so a duplicate can be refused rather than half-read."""
+        get_all = getattr(headers, "get_all", None)
+        if get_all is not None:
+            return get_all(name) or []
+        value = headers.get(name)
+        return [] if value is None else [value]
+
     def resolve(self, headers, client=""):
-        """headers: a mapping with .get (case-insensitive, like http.server's). client: the peer address, for logs."""
+        """headers: http.server's message (or a mapping with .get). client: the peer address. Never raises: anything
+        unreadable is a 401."""
+        try:
+            return self._resolve(headers)
+        except Exception as e:          # a request thread must never die on hostile input
+            print("identity: refused an unreadable request (%s)" % type(e).__name__, file=sys.stderr, flush=True)
+            return Result(None, 401, "unreadable identity")
+
+    def _resolve(self, headers):
         config, key = self.current()
-        auth = (headers.get("Authorization") or "").strip()
-        if auth:
-            return self._bearer(config, key, auth)
+        names = ["Authorization", "Tailscale-User-Login", "Tailscale-App-Capabilities"]
+        if self.auth == "header":
+            names.append(self.header)
+        for name in names:
+            if len(self.header_values(headers, name)) > 1:
+                return Result(None, 401, "%s twice" % name)
+        auth = headers.get("Authorization")
+        if auth is not None:            # present, even empty, it's a proof to check, never one to skip
+            return self._bearer(config, key, auth.strip())
         if self.auth == "tailscale":
             login = (headers.get("Tailscale-User-Login") or "").strip()
             if login:
@@ -467,21 +572,22 @@ class Identity:
                     return Result(None, 403, "this login has no access")
                 return Result(config.principals[name].with_via("tailscale"))
             caps = headers.get("Tailscale-App-Capabilities")
-            if caps:
+            if caps and self.accept_caps:
                 return self._capability(config, caps)
         elif self.auth == "header":
             login = (headers.get(self.header) or "").strip()
             if login:
-                name = config.by_proxy.get(login.lower())
+                name = config.by_proxy.get(login)
                 if not name:
                     return Result(None, 403, "this login has no access")
                 return Result(config.principals[name].with_via("proxy"))
         if self.signin:
-            cookie = self.cookie_value(headers.get("Cookie"))
-            if cookie:
-                session = self._session(config, key, cookie)
+            cookies = self.cookie_values(headers.get("Cookie"))
+            if cookies:
+                session = self._session(config, key, cookies)
                 if session or self.auth != "open":
                     return session
+                return Result(OPEN_OWNER, 200, "", session.cookies)    # open mode: still clear the bad cookie
         if self.auth == "open":
             return Result(OPEN_OWNER)
         return Result(None, 401, "sign in first" if self.signin else "no identity")
@@ -489,7 +595,7 @@ class Identity:
     def _bearer(self, config, key, value):
         scheme, _, token = value.partition(" ")
         token = token.strip()
-        if scheme.lower() != "bearer" or not token:
+        if scheme.lower() != "bearer" or not token or len(token) > 4096:
             return Result(None, 401, "unreadable Authorization")
         if token.startswith("mch_"):
             tid, _, secret = token[4:].partition("_")
@@ -503,12 +609,15 @@ class Identity:
             return Result(config.principals[entry[0]].with_via("token:" + tid))
         if token.startswith("mcd_"):
             payload = unsign(key, "device", token[4:])
-            if not payload or payload.get("p") not in config.principals:
+            name = payload.get("p") if payload else None
+            if not isinstance(name, str) or name not in config.principals:
                 return Result(None, 401, "unknown device token")
-            raw = config.raw[payload["p"]]
-            if payload.get("e") != raw["epoch"] or payload.get("d") in raw["revoked"]:
+            raw = config.raw[name]
+            device = payload.get("d")
+            if payload.get("u") != raw["uid"] or not whole(payload.get("e")) or payload["e"] != raw["epoch"] \
+                    or not isinstance(device, str) or device in raw["revoked"]:
                 return Result(None, 401, "device signed out")
-            return Result(config.principals[payload["p"]].with_via("device:%s" % payload.get("d")))
+            return Result(config.principals[name].with_via("device:" + device))
         return Result(None, 401, "unknown token")
 
     def _capability(self, config, header):
@@ -516,38 +625,44 @@ class Identity:
             values = capability_values(header, config.capability)
         except IdentityError as e:
             return Result(None, 401, str(e))
-        names = {v.get("principal") for v in values if isinstance(v, dict)}
-        if len(names) != 1:
-            return Result(None, 401 if not names else 403, "the tailnet grant names no single principal")
-        name = config.by_tag.get(names.pop() or "")
+        named = [v.get("principal") for v in values if isinstance(v, dict) and "principal" in v]
+        if not named:
+            return Result(None, 401, "the tailnet grant names no principal")
+        if not all(isinstance(n, str) for n in named) or len(set(named)) != 1:
+            return Result(None, 403, "the tailnet grant names no single principal")
+        name = config.by_tag.get(named[0])
         if not name:
             return Result(None, 403, "this tagged node has no access")
         return Result(config.principals[name].with_via("tailscale-tag"))
 
-    def _session(self, config, key, cookie):
-        payload = unsign(key, "session", cookie)
-        clear = [self.cookie("", 0)]
-        if not payload or payload.get("p") not in config.principals:
-            return Result(None, 401, "sign in again", clear)
+    def _session(self, config, key, cookies):
+        """The first of the request's session cookies that holds (a sibling site on the shared domain may have set
+        another, narrower one); 401 and a cleared cookie when none does."""
         t = now()
-        if not isinstance(payload.get("exp"), int) or payload["exp"] <= t:
-            return Result(None, 401, "session expired", clear)
-        if payload.get("e") != config.raw[payload["p"]]["epoch"]:
-            return Result(None, 401, "signed out", clear)
-        cookies = []
-        if t - int(payload.get("iat", 0)) > RENEW_AFTER:
-            cookies = [self.issue(config, key, payload["p"], first=int(payload.get("auth", payload.get("iat", t))))]
-        return Result(config.principals[payload["p"]].with_via("session"), 200, "", cookies)
+        for cookie in cookies[:4]:
+            payload = unsign(key, "session", cookie)
+            name = payload.get("p") if payload else None
+            if not isinstance(name, str) or name not in config.principals:
+                continue
+            raw = config.raw[name]
+            if payload.get("u") != raw["uid"] or not all(whole(payload.get(k)) for k in ("e", "iat", "auth", "exp")):
+                continue
+            if payload["exp"] <= t or payload["e"] != raw["epoch"]:
+                continue
+            renew = [self.issue(config, key, name, first=payload["auth"])] if t - payload["iat"] > RENEW_AFTER else []
+            return Result(config.principals[name].with_via("session"), 200, "", renew)
+        return Result(None, 401, "sign in again", [self.cookie("", 0)])
 
     # -- sessions and the built-in sign-in
 
     @staticmethod
-    def cookie_value(header):
+    def cookie_values(header):
+        out = []
         for part in (header or "").split(";"):
             k, _, v = part.strip().partition("=")
-            if k == SESSION_COOKIE:
-                return v.strip()
-        return ""
+            if k == SESSION_COOKIE and v.strip():
+                out.append(v.strip())
+        return out
 
     def cookie(self, value, max_age):
         attrs = ["%s=%s" % (SESSION_COOKIE, value), "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=%d" % max_age]
@@ -562,7 +677,8 @@ class Identity:
         t = now()
         first = first or t
         exp = min(t + config.session_days * 86400, first + HARD_CAP_DAYS * 86400)
-        payload = {"p": name, "e": config.raw[name]["epoch"], "iat": t, "auth": first, "exp": exp}
+        payload = {"p": name, "u": config.raw[name]["uid"], "e": config.raw[name]["epoch"], "iat": t, "auth": first,
+                   "exp": exp}
         return self.cookie(sign(key, "session", payload), max(0, exp - t))
 
     def sign_in(self, name, password, client=""):
@@ -572,17 +688,31 @@ class Identity:
         behind a proxy every client shares the proxy's address."""
         if not self.signin:
             return Result(None, 404, "sign-in is off in this room")
-        config, key = self.current()
-        name = (name or "").strip().lower()
-        if self.signin_names.blocked(name) or self.signin_addrs.blocked(client):
-            return Result(None, 429, "too many tries; wait a few minutes")
-        p = config.principals.get(name)
-        stored = config.raw[name]["password"] if p else None
-        ok = check_password(password or "", stored or DUMMY_HASH) and bool(stored) and p.kind == "person"
-        if not ok:
-            self.signin_names.fail(name)
-            self.signin_addrs.fail(client)
+        if not isinstance(name, str) or not isinstance(password, str):
             return Result(None, 401, "wrong name or password")
+        config, key = self.current()
+        name = name.strip().lower()
+        if not NAME_RE.match(name) or len(name) > MAX_NAME or len(password) > 1024:
+            return Result(None, 401, "wrong name or password")      # no such principal can exist: no hashing
+        if not self.signin_addrs.take(client):
+            return Result(None, 429, "too many tries; wait a few minutes")
+        if not self.signin_names.take(name):
+            return Result(None, 429, "too many tries; wait a few minutes")
+        if not key:
+            return Result(None, 503, "sign-in is unavailable (no session key)")
+        if not HASHING.acquire(blocking=False):
+            self.signin_names.forgive(name)
+            self.signin_addrs.forgive(client)
+            return Result(None, 429, "busy; try again in a moment")
+        try:
+            p = config.principals.get(name)
+            stored = config.raw[name]["password"] if p else None
+            ok = check_password(password, stored or DUMMY_HASH) and bool(stored) and p.kind == "person"
+        finally:
+            HASHING.release()
+        if not ok:
+            return Result(None, 401, "wrong name or password")
+        self.signin_names.forgive(name)
         return Result(p.with_via("session"), 200, "", [self.issue(config, key, name)])
 
     def sign_out(self):
@@ -590,23 +720,34 @@ class Identity:
 
     def pair(self, code, client=""):
         """A Shiori device trades a one-time code (the CLI's `pair`) for a device token. -> (Result, token or "")."""
+        if not isinstance(code, str) or len(code) > 64:
+            return Result(None, 401, "unknown or expired code"), ""
         config, key = self.current()
-        if self.pair_addrs.blocked(client):
+        if not self.pair_addrs.take(client):
             return Result(None, 429, "too many tries; wait a few minutes"), ""
-        code = re.sub(r"[\s-]", "", code or "").upper()
+        if not key:
+            return Result(None, 503, "pairing is unavailable (no session key)"), ""
+        code = re.sub(r"[\s-]", "", code).upper()
         t = datetime.datetime.now(datetime.timezone.utc)
-        for e in config.pairing:
-            if e["expires"] > t and check_password(code, e["code"]):
-                payload = {"p": e["principal"], "d": e["device"], "e": config.raw[e["principal"]]["epoch"],
-                           "iat": now()}
-                return Result(config.principals[e["principal"]].with_via("device:" + e["device"])), \
-                    "mcd_" + sign(key, "device", payload)
-        self.pair_addrs.fail(client)
-        return Result(None, 401, "unknown or expired code"), ""
+        if not HASHING.acquire(blocking=False):
+            self.pair_addrs.forgive(client)
+            return Result(None, 429, "busy; try again in a moment"), ""
+        try:
+            found = next((e for e in config.pairing if e["expires"] > t and check_password(code, e["code"])), None)
+        finally:
+            HASHING.release()
+        if not found:
+            return Result(None, 401, "unknown or expired code"), ""
+        name = found["principal"]
+        payload = {"p": name, "u": config.raw[name]["uid"], "d": found["device"], "e": config.raw[name]["epoch"],
+                   "iat": now()}
+        token = "mcd_" + sign(key, "device", payload)
+        return Result(config.principals[name].with_via("device:" + found["device"])), token
 
 
 def load_for(room, env=None, bind="0.0.0.0", secure=True):
-    """The room's Identity from MACHIYA_IDENTITY_FILE and <ROOM>_AUTH / _AUTH_HEADER / _SIGNIN / _BIND_BEHIND_PROXY,
+    """The room's Identity from MACHIYA_IDENTITY_FILE and <ROOM>_AUTH / _AUTH_HEADER / _SIGNIN / _BIND_BEHIND_PROXY /
+    _ACCEPT_APP_CAPS,
     or None when no identity file is set (the room keeps its old *_USERS gate). IdentityError for a bad setup."""
     env = os.environ if env is None else env
     path = (env.get("MACHIYA_IDENTITY_FILE") or "").strip()
@@ -617,8 +758,9 @@ def load_for(room, env=None, bind="0.0.0.0", secure=True):
     signin = (env.get(prefix + "_SIGNIN") or "").strip().lower() in ("1", "on", "true", "yes")
     behind = (env.get(prefix + "_BIND_BEHIND_PROXY") or "").strip().lower() in ("1", "on", "true", "yes")
     check_bind(auth, bind, behind)
+    caps = (env.get(prefix + "_ACCEPT_APP_CAPS") or "").strip().lower() in ("1", "on", "true", "yes")
     return Identity(path, room, auth, (env.get(prefix + "_AUTH_HEADER") or "").strip(), signin, secure,
-                    (env.get("MACHIYA_COOKIE_DOMAIN") or "").strip())
+                    (env.get("MACHIYA_COOKIE_DOMAIN") or "").strip(), caps)
 
 
 # -- writing the file (the CLI) --------------------------------------------------------------------------------------
@@ -637,8 +779,15 @@ def toml_value(v):
     if isinstance(v, (list, tuple)):
         return "[" + ", ".join(toml_value(x) for x in v) + "]"
     if isinstance(v, dict):
-        return "{ " + ", ".join("%s = %s" % (k, toml_value(x)) for k, x in v.items()) + " }"
+        return "{ " + ", ".join("%s = %s" % (toml_key(k), toml_value(x)) for k, x in v.items()) + " }"
     raise IdentityError("can't write %r to TOML" % (v,))
+
+
+def toml_key(k):
+    """A key as TOML reads it back: bare when it can be, else quoted (a hand-written key never becomes syntax)."""
+    if not isinstance(k, str):
+        raise IdentityError("can't write the key %r to TOML" % (k,))
+    return k if BARE_KEY_RE.match(k) else json.dumps(k, ensure_ascii=False)
 
 
 def dump(data):
@@ -649,34 +798,57 @@ def dump(data):
         if k in data:
             out.append("%s = %s" % (k, toml_value(data[k])))
     for name, p in (data.get("principals") or {}).items():
-        out += ["", "[principals.%s]" % name]
+        out += ["", "[principals.%s]" % toml_key(name)]
         for k, v in p.items():
             if k != "tokens":
-                out.append("%s = %s" % (k, toml_value(v)))
+                out.append("%s = %s" % (toml_key(k), toml_value(v)))
         for t in p.get("tokens", []):
-            out += ["[[principals.%s.tokens]]" % name] + ["%s = %s" % (k, toml_value(v)) for k, v in t.items()]
+            out += ["[[principals.%s.tokens]]" % toml_key(name)] + \
+                ["%s = %s" % (toml_key(k), toml_value(v)) for k, v in t.items()]
     for e in data.get("pairing") or []:
-        out += ["", "[[pairing]]"] + ["%s = %s" % (k, toml_value(v)) for k, v in e.items()]
+        out += ["", "[[pairing]]"] + ["%s = %s" % (toml_key(k), toml_value(v)) for k, v in e.items()]
     return "\n".join(out) + "\n"
 
 
 def write_file(path, data):
-    """Check, then replace the file atomically, keeping its mode and a .bak of the old one. The rooms see the new file
-    within a second; mount its directory, not the file (a file mount keeps the old inode after a rename)."""
+    """Check, then replace the file atomically with the same mode and owner, keeping a .bak of the old one. Nothing is
+    written through a symlink: the new file is a fresh temp file in the same directory (mkstemp), and the .bak is
+    created anew with O_EXCL | O_NOFOLLOW. The rooms see the new file within a second; mount its directory, not the
+    file (a file mount keeps the old inode after a rename)."""
+    import tempfile
     text = dump(data)
     Config(tomllib.loads(text), os.path.dirname(os.path.abspath(path)))      # never write what a room would refuse
-    mode = os.stat(path).st_mode & 0o777 if os.path.exists(path) else 0o600
-    if os.path.exists(path):
-        with open(path, "rb") as f, open(path + ".bak", "wb") as b:
-            b.write(f.read())
-        os.chmod(path + ".bak", mode)
-    tmp = "%s.tmp%d" % (path, os.getpid())
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    folder = os.path.dirname(os.path.abspath(path))
+    old = os.lstat(path) if os.path.lexists(path) else None
+    if old is not None and not stat.S_ISREG(old.st_mode):
+        raise IdentityError("%s is not a regular file (a symlink?): not writing through it" % path)
+    mode = stat.S_IMODE(old.st_mode) if old else 0o600
+    if old is not None:
+        with open(path, "rb") as f:
+            previous = f.read()
+        bak = path + ".bak"
+        if os.path.lexists(bak):
+            os.unlink(bak)
+        fd = os.open(bak, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), mode)
+        with os.fdopen(fd, "wb") as b:
+            b.write(previous)
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".identity-", suffix=".tmp")
+    try:
+        os.fchmod(fd, mode)
+        if old is not None and (old.st_uid, old.st_gid) != (os.geteuid(), os.getegid()):
+            try:
+                os.fchown(fd, old.st_uid, old.st_gid)      # run as root over a room-readable file: keep it readable
+            except PermissionError:
+                pass
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 def new_token(data, name, label="", days=None):
@@ -793,7 +965,8 @@ def main(argv=None):
             raise SystemExit("add NAME --kind person|agent|service [--owner]")
         if args[0] in data["principals"]:
             raise SystemExit("%r exists" % args[0])
-        data["principals"][args[0]] = {"kind": kind, **({"owner": True} if owner else {})}
+        uid = "".join(secrets.choice("abcdefghijkmnpqrstuvwxyz23456789") for _ in range(16))
+        data["principals"][args[0]] = {"id": uid, "kind": kind, **({"owner": True} if owner else {})}
     elif cmd == "grant":
         vaults = opt("--vaults", many=True)
         if len(args) < 3:
