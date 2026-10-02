@@ -1,0 +1,106 @@
+/* smallweb: search first. Tokyo Night / Day with the house tokens (machiya.css), no script, served with a strict
+   CSP from its own origin. */
+:root { --bg: #1a1b26; --dark: #16161e; --hl: #292e42; --line: #232433; --line2: #33395a; --fg: #c0caf5; --fg2: #a9b1d6;
+  --muted: #8890b5; --comment: #565f89; --blue: #7aa2f7; --green: #9ece6a; --yellow: #e0af68; --orange: #ff9e64;
+  --magenta: #bb9af7; --house: var(--blue);
+  --fs-xs: 12px; --fs-s: 13px; --fs-m: 14px; --fs-l: 16px; --fs-xl: 20px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px; --r-s: 6px; --r-m: 10px; --r-pill: 999px;
+  --font: system-ui, -apple-system, "Segoe UI", "Inter", Roboto, sans-serif; --mono: ui-monospace, SFMono-Regular, Menlo, monospace; }
+@media (prefers-color-scheme: light) {
+  :root { --bg: #e1e2e7; --dark: #d0d5e3; --hl: #eef0f6; --line: #c4c8da; --line2: #aab1cb; --fg: #3760bf; --fg2: #4c5a8f;
+    --muted: #4c5a8f; --comment: #5a6391; --blue: #155fc5; --green: #506b34; --yellow: #7a5e36; --orange: #9a5000; --magenta: #802cee; }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; padding: 0 20px var(--sp-6); background: var(--bg); color: var(--fg);
+  font: var(--fs-m)/1.5 var(--font); overflow-wrap: break-word; -webkit-font-smoothing: antialiased; }
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+a.web::after { content: " ↗"; color: var(--muted); font-size: var(--fs-xs); }
+main { max-width: 760px; margin: 0 auto; }
+
+/* ---- header ------------------------------------------------------------------------------------------------ */
+header.top { display: flex; gap: var(--sp-4); align-items: center; min-height: 52px; margin: 0 -20px var(--sp-4);
+  padding: 0 20px; border-bottom: 1px solid var(--line); }
+.brand { font-weight: 700; font-size: 18px; color: var(--house); white-space: nowrap; }
+.brand:hover { text-decoration: none; }
+body.home header.top { border-bottom: 0; margin-bottom: 0; }
+
+/* ---- the search field: the page's one big field ------------------------------------------------------------ */
+form.find { margin: 0; }
+form.find .field { display: flex; gap: var(--sp-2); }
+form.find input[type=search] { flex: 1; min-width: 0; font: inherit; color: var(--fg); background: var(--dark);
+  border: 1px solid var(--line2); border-radius: var(--r-m); padding: 6px 12px; }
+form.find input[type=search]:focus { outline: 2px solid var(--house); outline-offset: 1px; border-color: transparent; }
+header form.find { flex: 1; max-width: 420px; margin-left: auto; }
+header form.find button { display: none; }                       /* Enter searches; the header stays quiet */
+form.find.big { margin: var(--sp-5) 0 var(--sp-4); }
+form.find.big input[type=search] { font-size: var(--fs-xl); padding: 12px 16px; border-radius: var(--r-m); }
+button { font: 600 var(--fs-s) var(--font); color: var(--bg); background: var(--blue); border: 0; border-radius: var(--r-m);
+  padding: 0 var(--sp-4); cursor: pointer; }
+button:hover { filter: brightness(1.08); }
+.engines-pick { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); margin: var(--sp-2) 2px 0; color: var(--muted); font-size: var(--fs-s); }
+.engine { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.engine input { accent-color: var(--house); margin: 0; }
+
+/* ---- results ------------------------------------------------------------------------------------------------- */
+.engines { color: var(--muted); font-size: var(--fs-xs); margin: 0 0 var(--sp-2); }
+ol.results { list-style: none; padding: 0; margin: 0; }
+ol.results li { padding: var(--sp-3) 0; border-bottom: 1px solid var(--line); }
+ol.results .title { font-weight: 600; font-size: var(--fs-l); }
+ol.results .url { display: block; margin-top: 2px; color: var(--green); font: var(--fs-xs) var(--mono); overflow-wrap: anywhere; }
+ol.results p { margin: var(--sp-1) 0; color: var(--fg2); }
+ol.results .meta { color: var(--muted); font-size: var(--fs-xs); }
+mark { background: color-mix(in srgb, var(--yellow) 30%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+.pager { margin: var(--sp-4) 0; display: flex; gap: var(--sp-4); }
+.empty { max-width: 520px; margin: var(--sp-6) auto; text-align: center; color: var(--muted); }
+.empty h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-l); color: var(--fg2); }
+.empty p { margin: 0; font-size: var(--fs-s); }
+
+/* ---- a rendered page: the address as a quiet line ------------------------------------------------------------ */
+.addr { margin: 0 0 var(--sp-4); color: var(--muted); font-size: var(--fs-xs); }
+.addr .url { font-family: var(--mono); color: var(--fg2); overflow-wrap: anywhere; user-select: all; }
+.addr .native { color: var(--green); }
+main p { margin: 0 0 6px; }
+main p.gap { height: 6px; }
+main p.link { margin: 4px 0; }
+main h1, main h2, main h3 { margin: 18px 0 8px; line-height: 1.25; }
+main h1 { font-size: 26px; } main h2 { font-size: var(--fs-xl); } main h3 { font-size: var(--fs-l); }
+body.reader main { font-size: var(--fs-l); line-height: 1.65; }
+blockquote { margin: var(--sp-2) 0; padding: 2px var(--sp-3); border-left: 3px solid var(--house); color: var(--fg2); }
+pre { background: var(--dark); padding: 10px 12px; border-radius: var(--r-m); overflow-x: auto; font: var(--fs-s)/1.45 var(--mono); }
+pre.menu, pre.text { background: none; padding: 0; }
+pre.text { white-space: pre-wrap; }
+pre.menu { white-space: pre; overflow-x: auto; }       /* gopher menus keep their ASCII layout and scroll on phones */
+pre.menu .t { display: inline-block; width: 4.5em; color: var(--muted); font-size: 11px; }
+pre.menu .info { color: var(--fg2); }
+pre.menu .err { color: var(--orange); }
+.gsearch { display: inline-flex; gap: 6px; margin: 0; }
+.gsearch input, .input input, .open-address input { font: var(--fs-s) var(--font); color: var(--fg); background: var(--dark);
+  border: 1px solid var(--line2); border-radius: 8px; padding: 5px 9px; }
+.gsearch input { width: 14em; }
+.other { color: var(--muted); border-bottom: 1px dotted var(--muted); }
+.notice { color: var(--yellow); }
+.input { display: flex; gap: var(--sp-2); align-items: end; margin: var(--sp-4) 0; }
+.input label { flex: 1; display: grid; gap: 4px; font-size: var(--fs-m); }
+.input input { font-size: var(--fs-l); padding: 8px 12px; }
+.input button, .open-address button { padding: 7px 14px; }
+
+/* ---- secondary: open an address -------------------------------------------------------------------------------- */
+.open-address { margin: var(--sp-6) 0 0; color: var(--muted); font-size: var(--fs-s); }
+.open-address summary { cursor: pointer; width: fit-content; }
+.open-address summary:hover { color: var(--fg); }
+.open-address form { display: flex; gap: var(--sp-2); margin: var(--sp-2) 0 0; }
+.open-address input { flex: 1; min-width: 0; font-family: var(--mono); }
+
+footer { max-width: 760px; margin: var(--sp-6) auto 0; padding-top: 10px; border-top: 1px solid var(--line); color: var(--comment); font-size: var(--fs-xs); }
+
+@media (max-width: 600px) {
+  body { padding: 0 14px var(--sp-6); }
+  header.top { margin: 0 -14px var(--sp-3); padding: 0 14px; gap: var(--sp-3); }
+  input, button { font-size: 16px !important; }                /* iOS zooms into fields under 16px */
+  form.find.big { margin-top: var(--sp-3); }
+  form.find.big input[type=search] { font-size: 18px !important; padding: 11px 14px; }
+  header form.find { max-width: none; }
+}

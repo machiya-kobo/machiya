@@ -1,0 +1,56 @@
+# Design language
+
+Machiya's apps are rooms in one house: each room is distinct, and they share a design language.
+
+## The house
+
+- **Tokyo Night / Tokyo Night Day** everywhere, with **Shiori's contrast-safe Day hues** (each ≥ 4.5:1 on `#e1e2e7`, checked by a contrast test) in every app.
+- **Blue is the house colour:** links, focus rings, primary buttons, and Shiori's native tint.
+- **One shared stylesheet, `ui/machiya.css`** in this repo, vendored into each web app at a tag with the same drift check as vaultkit (principle 8). It holds the tokens and the shared components; each app keeps only its own `<app>.css` for its room.
+- **Scales:**
+  - Type: 12 / 13 / 14 / 16 / 20 / 26. Reading rooms (Kura, Niwa) use a 16px note body at line-height 1.65; UI chrome stays at 13–14px.
+  - Spacing: 4 / 8 / 12 / 16 / 24 / 32.
+  - Radii: 6 / 10 / 16 / 999.
+  - Shadows: 2 levels.
+- **Motion:** short fades only, always behind `prefers-reduced-motion`.
+- **Wording:** Title Case labels and empty states, as in Shiori ("No Note Selected" plus one line). Links read "View in Kura", "View Card in Konbini".
+- **No textures.** Seals and accents only.
+
+## The rooms
+
+| Room | Seal | Accent | Character |
+|---|---|---|---|
+| Shiori, the front door | 栞 | blue, the house colour (yellow lens as its second hue) | quick and precise: one field first |
+| Konbini, the shop front | 店 | **magenta** (the status spectrum is its second voice) | busy, at-a-glance: lanes, counts, a status stripe |
+| Niwa, the inner garden | 庭 | green (teal second) | airy: a 68ch reading measure, stages as seasons |
+| Kura, the storehouse | 蔵 | orange (slate second) | dense, archival: three columns, tabular numbers |
+
+- **Things wear the colour of their room.** Notes are orange (Kura), cards are magenta (Konbini), published-garden links are green (Niwa). That applies in Shiori too: its Notes pill and chips become Kura orange.
+- **In Shiori:** notes are Kura orange everywhere (the Notes pill, cards, headings, the Kura swipe), Konbini links magenta, Niwa links green. To keep the colours distinct, Web and Images use Shiori's lens yellow, **Small Web (Gemini/Gopher) owns teal**, and Obsidian chips use the neutral secondary text colour (Obsidian isn't a room). Tokens: `--notes`, `--konbini`, `--niwa`, `--web`, `--obsidian`, all 4.5:1-tested. Every other hue already has a meaning (blue house/pages, cyan All, orange notes, magenta Konbini/Opened, green Niwa, yellow Web, red Videos), so a new source takes a neutral or needs a design decision. The switcher is a house button beside the gear on the search page, the extension and the web app, and a Rooms tab on phones; the native apps carry the colours and glyphs only.
+- **The header mark** is the room's own icon (its home-screen icon, from `icons/`) and its wordmark; the Rooms menu shows the same icons. The kanji (栞 店 庭 蔵) stay as the icons' tooltip and in About; they replace the older kanji squares.
+
+## Moving between rooms
+
+- **One switcher in every header**, and a **Rooms** tab on phones, the fifth tab, opening a sheet. It lists the rooms front to back, **Shiori · Konbini · Niwa · Kura**, then the neighbours, **Hister · SearXNG**.
+- **A footer status line** in every app, from its `/api/status`: e.g. "Kura · synced abc1234 3 min ago · 812 notes".
+- Each room's **`/settings` page** follows Shiori's Settings: sections Appearance (Theme: System / Tokyo Night / Tokyo Night Day, stored as `system`; Text Size), the room's own section, Apps, About. Settings are per device.
+
+## Who builds what
+
+`ui/` holds the shared tokens, components, seals, the switcher, the settings component and the footer, with a shared page shell in vaultkit, tagged with it. Each web room vendors them and moves its pages over. Shiori's native apps carry over what fits: the accent, glyph family, room colours and Title Case.
+
+## The Machiya icon
+
+`icons/machiya.svg`: a machiya front, a lattice upper floor under a low tiled eave, a koshi-lattice ground floor, and a three-panel noren on the Tokyo Night background. In the default **rooms** palette the eaves are Shiori's blue and the three noren panels carry the other rooms' colours: Kura's orange, Niwa's green and Konbini's magenta. Files in `icons/`:
+
+| File | For |
+|---|---|
+| `machiya.svg` | the source (rounded square) |
+| `machiya-maskable.svg` | the same house inside the central 80% of a full-bleed square, for Android and PWA masks and the iOS touch icon |
+| `machiya-avatar.svg` | a full-bleed square (no transparent corners) with the house enlarged to about 92% of the width, for avatars such as the GitHub organisation's (`png/machiya-avatar-512.png`) |
+| `machiya-small.svg` | the favicon sizes (16 to 48 px): the lattice dropped and the parts bold, so the eaves and the noren survive at 16 px |
+| `png/machiya-{16,32,48,64,96,128,180,192,256,512}.png` | 16 to 48 from the small variant, the rest from the source; 180 is the Apple touch size |
+| `png/machiya-maskable-{180,192,512}.png` | the maskable renders |
+| `png/favicon.ico` | 16, 32 and 48 px, from the small variant |
+
+The icons are generated: `python3 icons/build-icons.py [--palette rooms|blue|sunset|indigo|garden|sakura]` writes the three SVG forms and the PNG set (Inkscape and ImageMagick) from the templates in `icons/alt/_templates/`; the drawing never changes, only the colours. The other palettes are kept as alternatives, pre-rendered as `icons/alt/machiya-<palette>.svg` (`blue` is the original colouring). **The switcher keeps its plain house glyph:** eight line-art variants of the machiya front were drawn at 18 px and every one read as something else (a pagoda, a shop: Konbini's 店, a torii); the plain house is the clearest "home" and matches the other line glyphs. The full-colour icon is for installs, the README and the docs, not the header.

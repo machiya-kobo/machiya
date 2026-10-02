@@ -1,0 +1,7 @@
+{
+  "name": "machiya",
+  "version": "0.1.0",
+  "description": "Machiya for Claude Code: the MCP server (board, notes, saved pages, garden suggestions) and the skills that work across rooms: backlog-add, weekly-review, recall, garden-suggest, tidy-collections.",
+  "author": { "name": "Machiya" },
+  "license": "AGPL-3.0-or-later"
+}

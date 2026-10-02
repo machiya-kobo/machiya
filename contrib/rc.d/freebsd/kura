@@ -1,0 +1,50 @@
+#!/bin/sh
+#
+# PROVIDE: kura
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+#
+# Kura, the vault's reader, part of Machiya (docs/install/bsd.md). FreeBSD: rc.subr + daemon(8), which restarts it if it dies and
+# sends its output to syslog (tag kura).
+#
+#   sysrc kura_enable=YES
+#
+# Optional rc.conf settings (defaults in brackets):
+#   kura_runas   [kura]                        the unprivileged user it runs as
+#   kura_config  [/usr/local/etc/kura.env]     its settings, KEY=VALUE lines (read by the app: KURA_ENV_FILE)
+#   kura_dir     [/var/db/kura]                its data directory and HOME (owned by kura_runas)
+#   kura_code    [/usr/local/share/kura]       the app directory (owned by root)
+#   kura_python  [/usr/local/bin/python3.12]
+#
+# Not kura_user or kura_env_file: rc.subr would su on top of daemon -u, and would source the settings file as
+# shell (expanding $ and breaking on values with spaces). The app reads the file itself, literally.
+
+. /etc/rc.subr
+
+name=kura
+rcvar=kura_enable
+load_rc_config $name
+
+: ${kura_enable:=NO}
+: ${kura_runas:=kura}
+: ${kura_config:=/usr/local/etc/kura.env}
+: ${kura_dir:=/var/db/kura}
+: ${kura_code:=/usr/local/share/kura}
+: ${kura_python:=/usr/local/bin/python3.12}
+
+pidfile=/var/run/${name}.pid
+procname=/usr/sbin/daemon
+command=/usr/sbin/daemon
+command_args="-r -R 5 -S -T ${name} -P ${pidfile} -u ${kura_runas} \
+    /usr/bin/env HOME=${kura_dir} ${kura_python} -u ${kura_code}/kura.py --env-file ${kura_config}"
+start_precmd="kura_precmd"
+
+kura_precmd()
+{
+    if [ ! -r "${kura_config}" ]; then
+        err 1 "${kura_config} is missing (see docs/install/bsd.md)"
+    fi
+    cd "${kura_dir}" || err 1 "${kura_dir} is missing"
+}
+
+run_rc_command "$1"

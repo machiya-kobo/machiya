@@ -1,0 +1,27 @@
+#!/bin/ksh
+#
+# Kura, the vault's reader, part of Machiya (docs/install/bsd.md). OpenBSD: rc.d(8) + rc.subr(8); output to syslog
+# (daemon.info, /var/log/daemon). There's no supervisor: see the restart cron in the doc.
+#
+#   rcctl enable kura && rcctl start kura
+#
+# rc.d can't give a daemon environment variables, so the settings live in /etc/kura.env (KEY=VALUE lines) and the
+# app reads them itself (--env-file, or KURA_ENV_FILE). Change the flags with `rcctl set kura flags ...`.
+# The user _kura has HOME=/var/db/kura (useradd -d), which is also its data directory.
+
+daemon="/usr/local/bin/python3"
+daemon_flags="-u /usr/local/share/kura/kura.py --env-file /etc/kura.env"
+daemon_user="_kura"
+daemon_logger="daemon.info"
+daemon_execdir="/var/db/kura"
+
+. /etc/rc.d/rc.subr
+
+rc_bg=YES
+rc_reload=NO
+
+rc_pre() {
+    [ -r /etc/kura.env ] || { echo "/etc/kura.env is missing (see docs/install/bsd.md)"; return 1; }
+}
+
+rc_cmd $1

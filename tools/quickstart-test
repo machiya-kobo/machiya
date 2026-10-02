@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Micheal Waltz and Machiya contributors
+"""quickstart-test - run the README's stack Quickstart exactly as written, from fresh clones, and check what it says
+you should see.
+
+    tools/quickstart-test [--only stack|mirror|all] [--compose "docker compose"] [--siblings DIR] [--worktree]
+                          [--with-packages] [--keep] [--dry-run]
+
+The README marks each runnable block with an HTML comment on the line above its fence:
+
+    <!-- quickstart: NAME [background] -->
+    ```bash
+    ...commands...
+    ```
+
+and the output it promises with `<!-- quickstart-expect: NAME -->` above a ```text fence (each non-empty line must
+appear, in order, in the output of the block NAME). The blocks of a scenario run in ONE `sh -e` session, in order, in a
+throwaway directory under $QUICKSTART_TMP (default: /var/tmp, disk-backed): the way a reader runs them. Scenarios:
+
+    stack    clone*, init, up, check, try, stop        (the whole stack, every service with its own copy of the vault)
+    mirror   mirror                                    (the shared vault copy; starts from the clean state `stop` leaves)
+
+*The `clone` block is not run: the test builds the same layout itself, from a fresh `git clone --local` of this
+repository (or, with --worktree, a copy of the working tree, to test README changes before they are committed) and of
+the kura, niwa and konbini repositories found in --siblings (default: next to this one). `docker compose` in the blocks
+becomes --compose (default: `docker compose` if the docker engine answers, else `podman compose`; rootless podman needs
+its API socket: `systemctl --user enable --now podman.socket`, or point DOCKER_HOST at one).
+
+--with-packages first runs the README's `packages-debian` block (apt and sudo: on a clean Debian or Ubuntu machine), then
+the scenarios in a shell that has the `docker` group the block just gave your user (`sg docker`).
+
+The stack is always taken down, and the images this run built removed, even when a step fails. The exit code is 1 only
+if a step fails. Standard library only; needs git, curl and a container engine with Compose.
+"""
+import argparse
+import os
+import re
+import shlex
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+PORTS = (8081, 8082, 8083, 4433, 8888, 1965, 7070)
+IMAGES = ("machiya-kura", "machiya-niwa", "machiya-konbini", "machiya-vault-mirror")
+BLOCK_RE = re.compile(r"<!--\s*quickstart:\s*(\S+)((?:\s+\S+)*?)\s*-->\s*\n```[a-z]*\n(.*?)\n```", re.S)
+EXPECT_RE = re.compile(r"<!--\s*quickstart-expect:\s*(\S+)\s*-->\s*\n```[a-z]*\n(.*?)\n```", re.S)
+SCENARIOS = {
+    "stack": ["clone", "init", "up", "check", "try", "stop"],
+    "mirror": ["mirror"],
+}
+
+
+def parse(readme):
+    text = open(readme, encoding="utf-8").read()
+    blocks = {m.group(1): {"flags": m.group(2).split(), "code": m.group(3)} for m in BLOCK_RE.finditer(text)}
+    expects = {m.group(1): [l for l in m.group(2).splitlines() if l.strip()] for m in EXPECT_RE.finditer(text)}
+    return blocks, expects
+
+
+def default_compose():
+    if shutil.which("docker") and subprocess.run(["docker", "info"], capture_output=True).returncode == 0 \
+            and subprocess.run(["docker", "compose", "version"], capture_output=True).returncode == 0:
+        return "docker compose"
+    if shutil.which("podman"):
+        return "podman compose"
+    return None
+
+
+def busy_ports():
+    out = []
+    for p in PORTS:
+        with socket.socket() as s:
+            s.settimeout(1)
+            if s.connect_ex(("127.0.0.1", p)) == 0:
+                out.append(p)
+    return out
+
+
+def fresh_copy(src, dest, worktree):
+    if worktree:
+        files = subprocess.run(["git", "-C", src, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                               capture_output=True, check=True).stdout.split(b"\0")
+        for f in filter(None, files):
+            path = os.path.join(src, f.decode())
+            if os.path.isfile(path):
+                os.makedirs(os.path.dirname(os.path.join(dest, f.decode())), exist_ok=True)
+                shutil.copy2(path, os.path.join(dest, f.decode()))
+    else:
+        subprocess.run(["git", "clone", "--quiet", "--local", "--no-hardlinks", src, dest], check=True)
+
+
+def expect_ok(lines, output):
+    pos = 0
+    for line in lines:
+        i = output.find(line, pos)
+        if i < 0:
+            return False, line
+        pos = i + len(line)
+    return True, ""
+
+
+def images_present(compose):
+    eng = compose.split()[0]
+    try:
+        return {i for i in IMAGES if subprocess.run([eng, "image", "inspect", i], capture_output=True).returncode == 0}
+    except FileNotFoundError:                    # the engine is not installed yet (--with-packages installs it)
+        return set()
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--only", choices=["all", "stack", "mirror"], default="all")
+    ap.add_argument("--compose", help='the compose command, default: autodetected ("docker compose" or "podman compose")')
+    ap.add_argument("--siblings", default=os.path.dirname(ROOT), help="where the kura, niwa and konbini repositories are")
+    ap.add_argument("--worktree", action="store_true", help="test a copy of this working tree instead of a fresh clone of HEAD")
+    ap.add_argument("--with-packages", action="store_true", help="first run the (privileged) package-install block")
+    ap.add_argument("--keep", action="store_true", help="keep the temporary directory")
+    ap.add_argument("--dry-run", action="store_true", help="list the steps and exit")
+    a = ap.parse_args()
+
+    blocks, expects = parse(os.path.join(ROOT, "README.md"))
+    chosen = [n for n in SCENARIOS if a.only in ("all", n)]
+    for name in chosen:
+        print("scenario %s:" % name)
+        for step in SCENARIOS[name]:
+            b = blocks.get(step)
+            if b is None:
+                print("  %-8s MISSING in the README" % step)
+                continue
+            print("  %-8s %s%s%s" % (step, "(not run: the test builds the layout) " if step == "clone" else "",
+                                     b["code"].splitlines()[0], "  (+expected output)" if step in expects else ""))
+    if a.dry_run:
+        return 0
+    missing = sorted({s for n in chosen for s in SCENARIOS[n] if s not in blocks} | ({"packages-debian"} - set(blocks) if a.with_packages else set()))
+    if missing:
+        print("README has no block named: " + ", ".join(missing))
+        return 1
+    compose = a.compose or ("docker compose" if a.with_packages else default_compose())    # the package block installs it
+    if not compose:
+        print("neither docker nor podman is installed")
+        return 1
+    for repo in ("kura", "niwa", "konbini"):
+        if not os.path.isdir(os.path.join(a.siblings, repo, ".git")):
+            print("no %s repository in %s (--siblings)" % (repo, a.siblings))
+            return 1
+    busy = busy_ports()
+    if busy:
+        print("ports in use on this machine: %s; stop what listens there first" % ", ".join(map(str, busy)))
+        return 1
+
+    # /var/tmp is disk-backed; /tmp is often a small tmpfs (and a hard link to it from a clone elsewhere fails)
+    base = os.environ.get("QUICKSTART_TMP") or os.path.join("/var/tmp" if os.path.isdir("/var/tmp") else tempfile.gettempdir(),
+                                                           "machiya-quickstart")
+    os.makedirs(base, exist_ok=True)
+    before = images_present(compose)
+    failed = []
+    packages_done = False
+    for name in chosen:
+        work = tempfile.mkdtemp(prefix=name + "-", dir=base)
+        try:
+            print("\n== scenario %s (%s, %s)" % (name, work, compose))
+            fresh_copy(ROOT, os.path.join(work, "machiya"), a.worktree)
+            for repo in ("kura", "niwa", "konbini"):
+                fresh_copy(os.path.join(a.siblings, repo), os.path.join(work, repo), False)
+            steps = [s for s in SCENARIOS[name] if s != "clone"]
+            script = ["cd machiya/compose"] if name != "stack" else []     # the stack's init block does its own cd
+            for s in steps:
+                code = blocks[s]["code"].replace("docker compose", compose)
+                script.append('echo "@@begin %s"\n%s\necho "@@end %s"' % (s, code, s))
+            env = dict(os.environ)
+            cmd = ["sh", "-ec", "\n".join(script)]
+            if a.with_packages and not packages_done:
+                print("-- packages-debian", flush=True)
+                pk = subprocess.run(["sh", "-ec", blocks["packages-debian"]["code"]], cwd=work, env=env, capture_output=True,
+                                    text=True, timeout=1800)
+                if pk.returncode != 0:
+                    print(pk.stdout[-1500:], pk.stderr[-1500:])
+                    failed.append("%s/packages-debian: exit %d" % (name, pk.returncode))
+                    continue
+                packages_done = True
+            if a.with_packages and shutil.which("sg"):            # the docker group the block just added applies to new shells
+                cmd = ["sg", "docker", "-c", "sh -ec " + shlex.quote("\n".join(script))]
+            proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=2400)
+            out = proc.stdout
+            for s in steps:
+                m = re.search(r"@@begin %s\n(.*?)(?:@@end %s|\Z)" % (s, s), out, re.S)
+                if not m:
+                    continue
+                done = ("@@end %s" % s) in out
+                print("-- %s%s" % (s, "" if done else "  (did not finish)"))
+                if s in expects and done:
+                    ok, line = expect_ok(expects[s], m.group(1))
+                    if not ok:
+                        print(m.group(1)[-1500:])
+                        failed.append("%s/%s: expected %r in the output" % (name, s, line))
+                        break
+                    print("   output matches the README (%d lines)" % len(expects[s]))
+            if proc.returncode != 0:
+                print(out[-2000:])
+                print(proc.stderr[-2500:])
+                failed.append("%s: the shell session exited %d" % (name, proc.returncode))
+            if not any(f.startswith(name) for f in failed):
+                print("== scenario %s: PASS" % name)
+        except Exception as exc:  # a crash is a failure, and the cleanup still runs
+            failed.append("%s: %s" % (name, exc))
+        finally:
+            comp_dir = os.path.join(work, "machiya", "compose")
+            if os.path.isdir(comp_dir):
+                subprocess.run("%s down -v >/dev/null 2>&1; true" % compose, shell=True, cwd=comp_dir)
+            if not a.keep:
+                shutil.rmtree(work, ignore_errors=True)
+            if any(f.startswith(name) for f in failed):
+                print("== scenario %s: FAIL" % name)
+            for _ in range(30):                                          # the ports are free again before the next scenario
+                if not busy_ports():
+                    break
+                time.sleep(1)
+    eng = compose.split()[0]
+    for image in images_present(compose) - before:                      # the images this run built
+        subprocess.run([eng, "rmi", "-f", image], capture_output=True)
+    print()
+    if failed:
+        print("FAILED:\n  " + "\n  ".join(failed))
+        return 1
+    print("quickstart test: all passed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

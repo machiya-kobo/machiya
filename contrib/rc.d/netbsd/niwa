@@ -1,0 +1,49 @@
+#!/bin/sh
+#
+# PROVIDE: niwa
+# REQUIRE: DAEMON NETWORKING
+# KEYWORD: shutdown
+#
+# Niwa, the published garden (web, gemini, gopher), part of Machiya (docs/install/bsd.md). NetBSD: rc.subr + daemonize (pkgsrc sysutils/daemonize), output
+# to /var/log/niwa/niwa.log. There's no supervisor: see the restart cron in the doc.
+#
+#   niwa=YES in /etc/rc.conf
+#
+# Optional rc.conf settings (defaults in brackets):
+#   niwa_runas   [niwa]                    the unprivileged user it runs as
+#   niwa_config  [/etc/niwa.env]           its settings, KEY=VALUE lines (read by the app: NIWA_ENV_FILE)
+#   niwa_dir     [/var/db/niwa]            its data directory and HOME (owned by niwa_runas)
+#   niwa_code    [/usr/pkg/share/niwa]     the app directory (owned by root)
+#   niwa_python  [/usr/pkg/bin/python3.13]   (pkgsrc installs python3.13, no python3 link)
+
+$_rc_subr_loaded . /etc/rc.subr
+
+name="niwa"
+rcvar=$name
+load_rc_config $name
+
+: ${niwa_runas:=niwa}
+: ${niwa_config:=/etc/niwa.env}
+: ${niwa_dir:=/var/db/niwa}
+: ${niwa_code:=/usr/pkg/share/niwa}
+: ${niwa_python:=/usr/pkg/bin/python3.13}
+
+pidfile="/var/run/${name}/${name}.pid"
+logfile="/var/log/${name}/${name}.log"
+procname="${niwa_python}"
+command="/usr/pkg/sbin/daemonize"
+command_args="-p ${pidfile} -u ${niwa_runas} -c ${niwa_dir} -a -o ${logfile} -e ${logfile} \
+    /usr/bin/env HOME=${niwa_dir} ${niwa_python} -u ${niwa_code}/niwa.py --env-file ${niwa_config}"
+start_precmd="niwa_precmd"
+
+niwa_precmd()
+{
+    if [ ! -r "${niwa_config}" ]; then
+        echo "${niwa_config} is missing (see docs/install/bsd.md)"
+        return 1
+    fi
+    mkdir -p "/var/run/${name}" "/var/log/${name}"
+    chown "${niwa_runas}" "/var/run/${name}" "/var/log/${name}"
+}
+
+run_rc_command "$1"

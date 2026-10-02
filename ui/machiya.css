@@ -1,0 +1,260 @@
+/* machiya.css: the shared design language of Machiya's web rooms (docs/design.md).
+   Vendored into each app with vaultkit (app/vaultkit/ui/machiya.css; `python3 -m vaultkit.verify` fails on local edits).
+   Each app loads it first, then its own <app>.css for its room. Class names are the ones the apps already emit
+   (header.top, .topbar, .brand, .nav, .tools, .tabbar, .nbody, ...), plus the shared components below.
+
+   Rooms: <body class="theme-… room-kura|room-niwa|room-konbini" data-room="…">. The room sets --room / --room2.
+   Themes: theme-night · theme-day · theme-system (theme-auto is accepted as an alias of system).
+   Text size: data-text="xsmall|small|standard|large|xlarge" on <body> (Shiori's names). */
+
+/* ---- tokens ------------------------------------------------------------------------------------------------ */
+:root {
+  --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px); --sar: env(safe-area-inset-right, 0px);
+  --gutter: 20px;
+  /* scale: type 12/13/14/16/20/26, space 4/8/12/16/24/32, radii 6/10/16/999 */
+  --fs-xs: 12px; --fs-s: 13px; --fs-m: 14px; --fs-l: 16px; --fs-xl: 20px; --fs-xxl: 26px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+  --r-s: 6px; --r-m: 10px; --r-l: 16px; --r-pill: 999px;
+  --measure: 68ch;
+  --font: system-ui, -apple-system, "Segoe UI", "Inter", Roboto, sans-serif;
+  --font-seal: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", "Noto Serif CJK JP", serif;
+}
+/* Tokyo Night */
+body.theme-night, body.theme-system, body.theme-auto {
+  --bg: #1a1b26; --dark: #16161e; --hl: #292e42; --line: #232433; --line2: #33395a;
+  --fg: #c0caf5; --fg2: #a9b1d6; --comment: #565f89; --muted: #8890b5;
+  --blue: #7aa2f7; --orange: #ff9e64; --red: #f7768e; --yellow: #e0af68;
+  --green: #9ece6a; --teal: #73daca; --magenta: #bb9af7; --cyan: #7dcfff; --slate: #737aa2;
+  --shadow-1: 0 1px 2px rgba(0,0,0,.35); --shadow-2: 0 1px 2px rgba(0,0,0,.35), 0 6px 18px rgba(0,0,0,.25);
+}
+/* Tokyo Night Day, with Shiori's contrast-safe hues (each >= 4.5:1 on #e1e2e7) */
+body.theme-day {
+  --bg: #e1e2e7; --dark: #d0d5e3; --hl: #eef0f6; --line: #c4c8da; --line2: #aab1cb;
+  --fg: #3760bf; --fg2: #4c5a8f; --comment: #5a6391; --muted: #4c5a8f;
+  --blue: #155fc5; --orange: #9a5000; --red: #bd204c; --yellow: #7a5e36;
+  --green: #506b34; --teal: #0d6e5c; --magenta: #802cee; --cyan: #006b8f; --slate: #4c5a8f;
+  --shadow-1: 0 1px 2px rgba(55,96,191,.12); --shadow-2: 0 1px 2px rgba(55,96,191,.12), 0 6px 18px rgba(55,96,191,.12);
+}
+@media (prefers-color-scheme: light) {
+  body.theme-system, body.theme-auto {
+    --bg: #e1e2e7; --dark: #d0d5e3; --hl: #eef0f6; --line: #c4c8da; --line2: #aab1cb;
+    --fg: #3760bf; --fg2: #4c5a8f; --comment: #5a6391; --muted: #4c5a8f;
+    --blue: #155fc5; --orange: #9a5000; --red: #bd204c; --yellow: #7a5e36;
+    --green: #506b34; --teal: #0d6e5c; --magenta: #802cee; --cyan: #006b8f; --slate: #4c5a8f;
+    --shadow-1: 0 1px 2px rgba(55,96,191,.12); --shadow-2: 0 1px 2px rgba(55,96,191,.12), 0 6px 18px rgba(55,96,191,.12);
+  }
+}
+/* the rooms: blue is the house colour (links, focus, buttons); each room has its own accent */
+body { --house: var(--blue); --room: var(--blue); --room2: var(--yellow); --shadow: var(--shadow-2); }
+body.room-shiori  { --room: var(--blue);    --room2: var(--yellow); }
+body.room-konbini { --room: var(--magenta); --room2: var(--cyan); }
+body.room-niwa    { --room: var(--green);   --room2: var(--teal); }
+body.room-kura    { --room: var(--orange);  --room2: var(--slate); }
+/* things wear the colour of their room, wherever they appear */
+.is-note { --thing: var(--orange); } .is-card { --thing: var(--magenta); } .is-garden { --thing: var(--green); }
+/* text size (Shiori's names) */
+body[data-text="xsmall"] { font-size: 12px; } body[data-text="small"] { font-size: 13px; }
+body[data-text="large"] { font-size: 15px; } body[data-text="xlarge"] { font-size: 16px; }
+body[data-text="large"] .nbody { font-size: 17px; } body[data-text="xlarge"] .nbody { font-size: 18px; }
+body[data-text="small"] .nbody { font-size: 15px; } body[data-text="xsmall"] .nbody { font-size: 14px; }
+
+/* ---- base -------------------------------------------------------------------------------------------------- */
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; padding: 0 var(--gutter) var(--sp-6); min-height: 100vh;
+  background: var(--bg); color: var(--fg); font: var(--fs-m)/1.45 var(--font);
+  -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; -webkit-tap-highlight-color: transparent;
+  overflow-wrap: break-word;               /* a long URL or code span never widens the page */
+}
+a { color: var(--house); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--house); outline-offset: 2px; border-radius: 4px; }
+h1, h2, h3 { font-weight: 600; }
+code { background: var(--dark); padding: 1px 5px; border-radius: 5px; font-size: var(--fs-s); }
+.muted { color: var(--muted); }
+
+/* ---- header: seal, wordmark, nav, tools (switcher, gear) --------------------------------------------------- */
+header.top {
+  position: sticky; top: 0; z-index: 10; margin: 0 calc(-1 * var(--gutter)) var(--sp-3);
+  padding: var(--sat) var(--gutter) 0;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-bottom: 1px solid var(--line);
+}
+.topbar { display: flex; align-items: center; gap: var(--sp-4); min-height: 48px; }
+.brand { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: 18px; font-weight: 700;
+  color: var(--fg); letter-spacing: -.01em; white-space: nowrap; }
+.brand:hover { text-decoration: none; }
+.brand .word { color: var(--room); }
+.seal { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: var(--r-s);
+  background: var(--room); color: var(--bg); font: 600 16px/1 var(--font-seal); flex: none; }
+.seal.small { width: 20px; height: 20px; font-size: 12px; border-radius: 5px; }
+.subtitle { color: var(--muted); font-size: var(--fs-s); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.nav { display: flex; gap: 2px; }
+.nav a, .nav b { padding: var(--sp-1) 10px; border-radius: 8px; font-size: var(--fs-s); color: var(--muted); font-weight: 500; }
+.nav a:hover { background: var(--hl); color: var(--fg); text-decoration: none; }
+.nav b.here { background: var(--hl); color: var(--fg); font-weight: 600; box-shadow: inset 0 -2px 0 var(--room); }
+.tools { margin-left: auto; display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.iconbtn { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; color: var(--muted); }
+.iconbtn:hover { background: var(--hl); color: var(--fg); text-decoration: none; }
+.iconbtn svg, .rooms svg, .tabbar svg { width: 18px; height: 18px; }
+
+/* the Rooms switcher: <details class="rooms"> (works without JavaScript) */
+.rooms { position: relative; }
+.rooms > summary { list-style: none; cursor: pointer; display: inline-grid; place-items: center; width: 32px; height: 32px;
+  border-radius: 8px; color: var(--muted); }
+.rooms > summary::-webkit-details-marker { display: none; }
+.rooms > summary:hover, .rooms[open] > summary { background: var(--hl); color: var(--fg); }
+.rooms .menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 230px; padding: var(--sp-2);
+  background: var(--dark); border: 1px solid var(--line2); border-radius: var(--r-m); box-shadow: var(--shadow-2); z-index: 20; }
+.rooms .menu a, .rooms .menu b { display: flex; align-items: center; gap: 10px; padding: 7px var(--sp-2); border-radius: 8px;
+  color: var(--fg); font-size: var(--fs-s); font-weight: 500; }
+.rooms .menu a:hover { background: var(--hl); text-decoration: none; }
+.rooms .menu b { background: var(--hl); }
+.rooms .menu small { color: var(--muted); font-weight: 400; margin-left: auto; }
+.rooms .menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
+.rooms .menu .seal { width: 22px; height: 22px; font-size: 13px; }
+.rooms .menu .neighbour { display: inline-grid; place-items: center; width: 22px; height: 22px; color: var(--muted); }
+/* A room's own icon (its home-screen icon) instead of the kanji square: the header mark and the Rooms menu. */
+.seal.icon { background: center / cover no-repeat transparent; border-radius: 0; color: transparent; overflow: hidden; }
+.brand .seal.icon { width: 28px; height: 28px; }
+.rooms .menu .seal.icon { width: 24px; height: 24px; }
+.rooms .menu .seal.icon.neighbour-icon { background-size: 20px 20px; background-position: center; }   /* Hister's and SearXNG's own logos: no tile, a little smaller */
+/* ROOM ICONS (generated by icons/build-css.py from icons/*.svg; don't edit by hand) */
+.seal.icon[data-room="shiori"] { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiI+CjwhLS0gU2hpb3JpICjmoJ4pOiBhIGJvb2ttYXJrIHJpYmJvbiB1bmRlciBhIGxlbnMgdGhhdCBlbmxhcmdlcyBpdC4gLS0+CjxkZWZzPjxjbGlwUGF0aCBpZD0ibGVucyI+PGNpcmNsZSBjeD0iMjcxLjQiIGN5PSIyOTcuMCIgcj0iOTIuMiIvPjwvY2xpcFBhdGg+PC9kZWZzPgo8cmVjdCB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiIgcng9IjExMiIgZmlsbD0iIzFhMWIyNiIvPgo8cG9seWdvbiBwb2ludHM9IjExMi42LDAuMCAyNjYuMiwwLjAgMjY2LjIsMzY4LjYgMTg5LjQsMzAyLjEgMTEyLjYsMzY4LjYiIGZpbGw9IiM3YWEyZjciLz4KPGcgY2xpcC1wYXRoPSJ1cmwoI2xlbnMpIj4KPHJlY3QgeD0iMTc5LjIiIHk9IjIwNC44IiB3aWR0aD0iMTg0LjMiIGhlaWdodD0iMTg0LjMiIGZpbGw9IiMxYTFiMjYiLz4KPHBvbHlnb24gcG9pbnRzPSIxMTIuNiwwLjAgMjY2LjIsMC4wIDI2Ni4yLDM2OC42IDE4OS40LDMwMi4xIDExMi42LDM2OC42IiBmaWxsPSIjN2FhMmY3IiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyNzEuNCAyOTcuMCkgc2NhbGUoMS40KSB0cmFuc2xhdGUoLTI3MS40IC0yOTcuMCkiLz4KPGNpcmNsZSBjeD0iMjcxLjQiIGN5PSIyOTcuMCIgcj0iOTIuMiIgZmlsbD0iI2ZmZiIgZmlsbC1vcGFjaXR5PSIuMTEiLz4KPC9nPgo8bGluZSB4MT0iMzM2LjUiIHkxPSIzNjIuMSIgeDI9IjM5OC4xIiB5Mj0iNDIzLjciIHN0cm9rZT0iI2UwYWY2OCIgc3Ryb2tlLXdpZHRoPSIzOC40IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPGNpcmNsZSBjeD0iMjcxLjQiIGN5PSIyOTcuMCIgcj0iNzkuNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZTBhZjY4IiBzdHJva2Utd2lkdGg9IjI1LjYiLz4KPHBhdGggZD0iTTIxOC40IDI3Ny43IEE1Ni4zIDU2LjMgMCAwIDEgMjYxLjYgMjQxLjUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLW9wYWNpdHk9Ii41OSIgc3Ryb2tlLXdpZHRoPSIxMS4zIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPC9zdmc+Cg=="); }
+.seal.icon[data-room="konbini"] { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiI+CjxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiByeD0iMTEyIiBmaWxsPSIjMWExYjI2Ii8+CjxyZWN0IHg9Ijg4IiB5PSI4NCIgd2lkdGg9IjMzNiIgaGVpZ2h0PSI0NCIgcng9IjE0IiBmaWxsPSIjN2FhMmY3Ii8+CjxyZWN0IHg9IjIwMCIgeT0iODQiIHdpZHRoPSIxMTIiIGhlaWdodD0iNDQiIGZpbGw9IiNmZjllNjQiLz4KPHJlY3QgeD0iMzEyIiB5PSI4NCIgd2lkdGg9IjExMiIgaGVpZ2h0PSI0NCIgcng9IjE0IiBmaWxsPSIjOWVjZTZhIi8+CjxyZWN0IHg9IjMxMiIgeT0iODQiIHdpZHRoPSIyMCIgaGVpZ2h0PSI0NCIgZmlsbD0iIzllY2U2YSIvPgo8cmVjdCB4PSI4OCIgeT0iMTYwIiB3aWR0aD0iOTYiIGhlaWdodD0iMjU2IiByeD0iMjIiIGZpbGw9IiMyOTJlNDIiLz4KPHJlY3QgeD0iMjA4IiB5PSIxNjAiIHdpZHRoPSI5NiIgaGVpZ2h0PSIyNTYiIHJ4PSIyMiIgZmlsbD0iIzI5MmU0MiIvPgo8cmVjdCB4PSIzMjgiIHk9IjE2MCIgd2lkdGg9Ijk2IiBoZWlnaHQ9IjI1NiIgcng9IjIyIiBmaWxsPSIjMjkyZTQyIi8+CjxyZWN0IHg9IjEwNCIgeT0iMTgwIiB3aWR0aD0iNjQiIGhlaWdodD0iNDQiIHJ4PSIxMiIgZmlsbD0iIzdhYTJmNyIvPgo8cmVjdCB4PSIxMDQiIHk9IjIzOCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjQ0IiByeD0iMTIiIGZpbGw9IiM3YWEyZjciIG9wYWNpdHk9Ii41NSIvPgo8cmVjdCB4PSIyMjQiIHk9IjE4MCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjQ0IiByeD0iMTIiIGZpbGw9IiNmZjllNjQiLz4KPHJlY3QgeD0iMjI0IiB5PSIyMzgiIHdpZHRoPSI2NCIgaGVpZ2h0PSI0NCIgcng9IjEyIiBmaWxsPSIjZmY5ZTY0IiBvcGFjaXR5PSIuNTUiLz4KPHJlY3QgeD0iMjI0IiB5PSIyOTYiIHdpZHRoPSI2NCIgaGVpZ2h0PSI0NCIgcng9IjEyIiBmaWxsPSIjZmY5ZTY0IiBvcGFjaXR5PSIuMyIvPgo8cmVjdCB4PSIzNDQiIHk9IjE4MCIgd2lkdGg9IjY0IiBoZWlnaHQ9IjQ0IiByeD0iMTIiIGZpbGw9IiM5ZWNlNmEiLz4KPC9zdmc+Cg=="); }
+.seal.icon[data-room="niwa"] { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiI+CjxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiByeD0iMTEyIiBmaWxsPSIjMWExYjI2Ii8+CjxwYXRoIGQ9Ik0yNTYgNDIwIEwyNTYgMjUwIiBzdHJva2U9IiM5ZWNlNmEiIHN0cm9rZS13aWR0aD0iMjYiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgZmlsbD0ibm9uZSIvPgo8cGF0aCBkPSJNMjU2IDMwMCBDIDI1NiAyMjAsIDIwMCAxNzAsIDEyMCAxNzYgQyAxMTggMjYwLCAxNzYgMzA2LCAyNTYgMzAwIFoiIGZpbGw9IiM5ZWNlNmEiLz4KPHBhdGggZD0iTTI1NiAyNTAgQyAyNTYgMTcwLCAzMTIgMTIwLCAzOTIgMTI2IEMgMzk0IDIxMCwgMzM2IDI1NiwgMjU2IDI1MCBaIiBmaWxsPSIjNzNkYWNhIi8+CjxwYXRoIGQ9Ik0xNTAgNDIwIEwzNjIgNDIwIiBzdHJva2U9IiM1NjVmODkiIHN0cm9rZS13aWR0aD0iMjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K"); }
+.seal.icon[data-room="kura"] { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiB3aWR0aD0iNTEyIiBoZWlnaHQ9IjUxMiI+CjxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiByeD0iMTEyIiBmaWxsPSIjMWExYjI2Ii8+CjxyZWN0IHg9IjE0NCIgeT0iMTIwIiB3aWR0aD0iMjI0IiBoZWlnaHQ9IjMwMCIgcng9IjIyIiBmaWxsPSIjMjkyZTQyIi8+CjxyZWN0IHg9IjE0NCIgeT0iMjYyIiB3aWR0aD0iMjI0IiBoZWlnaHQ9IjE0IiBmaWxsPSIjMWExYjI2Ii8+CjxnPgo8cmVjdCB4PSIxNjQiIHk9IjE0NiIgd2lkdGg9IjM2IiBoZWlnaHQ9IjEwOCIgcng9IjEwIiBmaWxsPSIjN2FhMmY3Ii8+PHJlY3QgeD0iMjA4IiB5PSIxNjYiIHdpZHRoPSIzMiIgaGVpZ2h0PSI4OCIgcng9IjEwIiBmaWxsPSIjN2FhMmY3IiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSIyNDgiIHk9IjE0MCIgd2lkdGg9IjM4IiBoZWlnaHQ9IjExNCIgcng9IjEwIiBmaWxsPSIjZmY5ZTY0Ii8+PHJlY3QgeD0iMjk0IiB5PSIxNjAiIHdpZHRoPSIzNCIgaGVpZ2h0PSI5NCIgcng9IjEwIiBmaWxsPSIjOWVjZTZhIi8+CjxyZWN0IHg9IjE2NCIgeT0iMjk2IiB3aWR0aD0iMzQiIGhlaWdodD0iMTA4IiByeD0iMTAiIGZpbGw9IiM5ZWNlNmEiIG9wYWNpdHk9Ii41NSIvPjxyZWN0IHg9IjIwNiIgeT0iMjgwIiB3aWR0aD0iMzgiIGhlaWdodD0iMTI0IiByeD0iMTAiIGZpbGw9IiM3YWEyZjciLz48cmVjdCB4PSIyNTIiIHk9IjMwMCIgd2lkdGg9IjMyIiBoZWlnaHQ9IjEwNCIgcng9IjEwIiBmaWxsPSIjZmY5ZTY0IiBvcGFjaXR5PSIuNTUiLz48cmVjdCB4PSIyOTIiIHk9IjI4NiIgd2lkdGg9IjM2IiBoZWlnaHQ9IjExOCIgcng9IjEwIiBmaWxsPSIjOWVjZTZhIi8+CjwvZz4KPHBhdGggZD0iTTEzNiAxMjggTDkyIDExMCBRODQgMTA3IDg0IDExNiBMODQgNDEyIFE4NCA0MjEgOTIgNDE5IEwxMzYgNDA4IFoiIGZpbGw9IiM0MTQ4NjgiLz4KPHBhdGggZD0iTTM3NiAxMjggTDQyMCAxMTAgUTQyOCAxMDcgNDI4IDExNiBMNDI4IDQxMiBRNDI4IDQyMSA0MjAgNDE5IEwzNzYgNDA4IFoiIGZpbGw9IiM0MTQ4NjgiLz4KPHBhdGggZD0iTTEwNCA0MzYgTDQwOCA0MzYiIHN0cm9rZT0iIzU2NWY4OSIgc3Ryb2tlLXdpZHRoPSIyMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+Cjwvc3ZnPgo="); }
+.seal.icon[data-room="hister"] { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN2FhMmY3IiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSI1IiB5PSIzIiB3aWR0aD0iMTQiIGhlaWdodD0iMTgiIHJ4PSIyIi8+PHBhdGggZD0iTTggOGg4TTggMTJoOE04IDE2aDUiLz48L3N2Zz4K"); }
+.seal.icon[data-room="searxng"] { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN2FhMmY3IiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI5Ii8+PHBhdGggZD0iTTMgMTJoMThNMTIgM2MzIDMgMyAxNSAwIDE4TTEyIDNjLTMgMy0zIDE1IDAgMTgiLz48L3N2Zz4K"); }
+/* END ROOM ICONS */
+
+/* ---- tab bar (phones and the installed app) ---------------------------------------------------------------- */
+.tabbar { display: none; }
+@media (max-width: 760px) {
+  :root { --gutter: 14px; }
+  body { padding-bottom: calc(72px + var(--sab)); }
+  .nav, .tools .rooms, .tools .gear { display: none; }
+  .tabbar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
+    padding: 6px calc(8px + var(--sal)) calc(6px + var(--sab)) calc(8px + var(--sar));
+    background: color-mix(in srgb, var(--dark) 92%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border-top: 1px solid var(--line); }
+  .tabbar > a, .tabbar > details > summary { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 4px 0; color: var(--muted); font-size: 10.5px; font-weight: 500; list-style: none; cursor: pointer; }
+  .tabbar > details { flex: 1; position: relative; }
+  .tabbar > details > summary::-webkit-details-marker { display: none; }
+  /* the Rooms tab is also a .rooms: undo the header button's 32px box and hover fill */
+  .tabbar > details > summary { width: auto; height: auto; border-radius: 0; }
+  .tabbar > details > summary:hover, .tabbar > details[open] > summary { background: none; color: var(--fg); }
+  .tabbar > a.here, .tabbar > a[aria-current="page"] { color: var(--room); }
+  .tabbar > a:hover { text-decoration: none; }
+  .tabbar .rooms .menu { top: auto; bottom: calc(100% + 10px); right: 0; }
+}
+
+/* ---- chips and tags: filled for state, outlined for tags --------------------------------------------------- */
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: var(--r-pill);
+  font-size: var(--fs-xs); font-weight: 500; background: color-mix(in srgb, var(--chip, var(--muted)) 18%, transparent);
+  color: var(--chip, var(--muted)); white-space: nowrap; }
+.tag { display: inline-block; padding: 0 7px; border: 1px solid var(--line2); border-radius: var(--r-pill);
+  font-size: var(--fs-xs); color: var(--fg2); white-space: nowrap; }
+a.tag:hover { border-color: var(--room); color: var(--fg); text-decoration: none; }
+.thing { color: var(--thing, var(--house)); }
+
+/* ---- lists and cards ---------------------------------------------------------------------------------------- */
+.list { list-style: none; margin: 0; padding: 0; }
+.list > li { padding: 10px var(--sp-3); border-bottom: 1px solid var(--line); }
+.list > li:last-child { border-bottom: 0; }
+.card { background: var(--dark); border: 1px solid var(--line); border-radius: var(--r-m); padding: var(--sp-3); box-shadow: var(--shadow-1); }
+.sechead { margin: var(--sp-5) 0 var(--sp-2); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--fg2); }
+
+/* ---- empty states: a Title Case heading and one line (Shiori's wording) ------------------------------------ */
+.empty { max-width: 520px; margin: var(--sp-6) auto; text-align: center; color: var(--muted); }
+.empty h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-l); color: var(--fg2); }
+.empty p { margin: 0; font-size: var(--fs-s); }
+
+/* ---- reading: note bodies in the reading rooms --------------------------------------------------------------- */
+.nbody { font-size: var(--fs-l); line-height: 1.65; max-width: var(--measure); }
+.nbody pre { overflow-x: auto; background: var(--dark); padding: var(--sp-3); border-radius: var(--r-m); font-size: var(--fs-s); line-height: 1.5; }
+.nbody pre code { background: none; padding: 0; }
+.nbody table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 10px 0; font-size: var(--fs-m); }
+.nbody th, .nbody td { border: 1px solid var(--line2); padding: 4px 8px; vertical-align: top; }
+.nbody img { max-width: 100%; height: auto; border-radius: var(--r-s); }
+.nbody blockquote { margin: var(--sp-3) 0; padding: 2px var(--sp-3); border-left: 3px solid var(--room); color: var(--fg2); }
+.nbody a.wikilink { color: var(--thing, var(--orange)); }
+.nbody .seed { color: var(--muted); border-bottom: 1px dotted var(--line2); }
+
+/* ---- settings (Shiori's web layout: groups of rows, toggles and pickers, footnotes) -------------------------- */
+.settings { max-width: 640px; margin: 0 auto; }
+.settings h2 { margin: var(--sp-5) 6px var(--sp-2); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted); }
+.settings .group { background: var(--dark); border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; }
+.settings .item { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3);
+  padding: 11px 14px; border-bottom: 1px solid var(--line); font-size: var(--fs-m); }
+.settings .item:last-child { border-bottom: 0; }
+.settings .item .value { color: var(--muted); font-size: var(--fs-s); text-align: right; }
+.settings .offline-copies > span { display: grid; gap: 2px; }
+.settings .offline-copies small.value { text-align: left; font-size: var(--fs-xs); }
+.settings .item button { flex: none; font: 600 var(--fs-s) var(--font); border: 0; border-radius: 8px; padding: 6px 12px;
+  background: var(--hl); color: var(--fg2); cursor: pointer; }
+.settings .item button:disabled { opacity: .6; cursor: default; }
+.settings .footnote { margin: 6px 6px 0; font-size: var(--fs-xs); color: var(--comment); line-height: 1.5; }
+.settings select, .settings input[type="text"], .settings input[type="url"] {
+  font: inherit; font-size: var(--fs-s); color: var(--fg); background: var(--hl); border: 1px solid var(--line2);
+  border-radius: 8px; padding: 5px 8px; max-width: 60%; }
+.settings input[type="text"], .settings input[type="url"] { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.switch { appearance: none; -webkit-appearance: none; flex: none; width: 46px; height: 28px; margin: 0; border-radius: var(--r-pill);
+  background: var(--line2); position: relative; cursor: pointer; transition: background .15s; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--fg); transition: transform .15s; }
+.switch:checked { background: var(--room); }
+.switch:checked::after { transform: translateX(18px); background: var(--bg); }
+.switch:disabled { opacity: .45; cursor: default; }
+.settings .saved { color: var(--green); font-size: var(--fs-xs); margin-left: var(--sp-2); }
+
+/* ---- footer: links and the status line ------------------------------------------------------------------------ */
+.foot { margin-top: var(--sp-6); padding-top: var(--sp-3); border-top: 1px solid var(--line); color: var(--comment);
+  font-size: var(--fs-xs); display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); align-items: center; }
+.foot .status::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px;
+  background: var(--green); vertical-align: middle; }
+.foot .status.stale::before { background: var(--yellow); }
+.foot .status.down::before { background: var(--red); }
+.foot a { color: var(--comment); }
+.foot a:hover { color: var(--fg2); }
+
+/* ---- motion ---------------------------------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
+
+/* ---- room search (v0.6): the field, and the hand-off to Shiori at the end of a room's results ------------------- */
+form.search { display: flex; min-width: 0; }
+form.search input { width: 220px; max-width: 100%; padding: 6px 10px; border: 1px solid var(--line2); border-radius: 8px;
+  background: var(--dark); color: var(--fg); font: inherit; font-size: var(--fs-s); }
+form.search input:focus { outline: 2px solid var(--room); outline-offset: 1px; border-color: transparent; }
+main form.search input { width: 100%; font-size: var(--fs-l); padding: 9px 12px; }
+@media (max-width: 760px) { form.search input { font-size: 16px; } }   /* iOS zooms into fields under 16px */
+/* phones: the header's field is a magnifier-sized box until tapped, so the room's subtitle keeps its space */
+@media (max-width: 760px) {
+  .topbar form.search input { width: 36px; height: 34px; padding: 0 0 0 30px; background: var(--dark) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23737aa2' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-4-4'/%3E%3C/svg%3E") no-repeat 9px center / 16px;
+    transition: width .2s ease; }
+  .topbar form.search input:not(:focus)::placeholder { color: transparent; }
+  .topbar form.search input:focus { width: min(58vw, 240px); padding-right: 8px; }
+  .topbar form.search input::-webkit-search-cancel-button { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .topbar form.search input { transition: none; } }
+.handoff { display: flex; align-items: center; gap: 10px; margin: var(--sp-4) 0; padding: 10px var(--sp-3);
+  border: 1px solid var(--line2); border-radius: var(--r-m); color: var(--fg); font-weight: 500; }
+.handoff:hover { background: var(--hl); text-decoration: none; }
+.handoff .seal.icon { width: 22px; height: 22px; }
+.handoff .arrow { margin-left: auto; color: var(--muted); }
+
+/* ---- update toast (v0.6) ---------------------------------------------------------------------------------- */
+.update-toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--sp-4) + env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: var(--sp-3); padding: 8px 8px 8px 14px; border-radius: 999px; z-index: 50;
+  background: var(--dark); border: 1px solid var(--line2); box-shadow: var(--shadow-2); color: var(--fg); font-size: var(--fs-s); }
+.update-toast button { border: 0; border-radius: 999px; padding: 6px 12px; background: var(--house); color: var(--bg);
+  font: inherit; font-weight: 600; cursor: pointer; }
+@media (max-width: 760px) { .update-toast { bottom: calc(72px + env(safe-area-inset-bottom)); } }

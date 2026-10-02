@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<!-- Machiya (町家), the house: a machiya front, upper floor with mushiko lattice, a low tiled eave, koshi lattice below and a three-panel noren in the house blue -->
+<rect width="512" height="512" rx="112" fill="#1a1b26"/>
+<path d="M92 140 L420 140 L444 164 L68 164 Z" fill="#565f89"/>
+<rect x="116" y="164" width="280" height="64" fill="#292e42"/>
+<g fill="#414868"><rect x="132" y="170" width="6" height="52" rx="3"/><rect x="150" y="170" width="6" height="52" rx="3"/><rect x="168" y="170" width="6" height="52" rx="3"/><rect x="186" y="170" width="6" height="52" rx="3"/><rect x="204" y="170" width="6" height="52" rx="3"/><rect x="222" y="170" width="6" height="52" rx="3"/><rect x="240" y="170" width="6" height="52" rx="3"/><rect x="258" y="170" width="6" height="52" rx="3"/><rect x="276" y="170" width="6" height="52" rx="3"/><rect x="294" y="170" width="6" height="52" rx="3"/><rect x="312" y="170" width="6" height="52" rx="3"/><rect x="330" y="170" width="6" height="52" rx="3"/><rect x="348" y="170" width="6" height="52" rx="3"/><rect x="366" y="170" width="6" height="52" rx="3"/></g>
+<path d="M60 228 L452 228 L430 256 L82 256 Z" fill="#565f89"/>
+<rect x="104" y="256" width="304" height="160" fill="#292e42"/>
+<g fill="#7aa2f7" opacity=".85"><rect x="118" y="262" width="7" height="146" rx="3"/><rect x="134" y="262" width="7" height="146" rx="3"/><rect x="150" y="262" width="7" height="146" rx="3"/><rect x="166" y="262" width="7" height="146" rx="3"/><rect x="182" y="262" width="7" height="146" rx="3"/><rect x="198" y="262" width="7" height="146" rx="3"/><rect x="214" y="262" width="7" height="146" rx="3"/><rect x="230" y="262" width="7" height="146" rx="3"/></g>
+<rect x="252" y="256" width="146" height="160" fill="#1a1b26"/>
+<g><rect fill="#7aa2f7" x="256" y="256" width="44" height="78" rx="4"/><rect fill="#7aa2f7" x="303" y="256" width="44" height="78" rx="4"/><rect fill="#7aa2f7" x="350" y="256" width="44" height="78" rx="4"/></g>
+<rect x="84" y="416" width="344" height="18" rx="9" fill="#565f89"/>
+</svg>

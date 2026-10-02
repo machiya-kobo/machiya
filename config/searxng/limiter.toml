@@ -1,0 +1,11 @@
+# SearXNG bot limiter (settings.yml `limiter: true`, state in valkey). Only the keys that differ from the
+# built-in defaults. A tailnet-only instance can trust its clients; that also lets Shiori's combined
+# Hister + SearXNG search use the JSON API (format=json) without 429s.
+[botdetection]
+# Requests arrive through a Tailscale sidecar (docker network): take the client IP from its
+# X-Forwarded-For header instead of seeing every client as the sidecar.
+trusted_proxies = ['127.0.0.0/8', '::1', '172.16.0.0/12']
+
+[botdetection.ip_lists]
+# Tailscale CGNAT + ULA ranges: every client of a tailnet-only instance is on the tailnet.
+pass_ip = ['100.64.0.0/10', 'fd7a:115c:a1e0::/48']

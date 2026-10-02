@@ -1,0 +1,49 @@
+#!/bin/sh
+#
+# PROVIDE: kura
+# REQUIRE: DAEMON NETWORKING
+# KEYWORD: shutdown
+#
+# Kura, the vault's reader, part of Machiya (docs/install/bsd.md). NetBSD: rc.subr + daemonize (pkgsrc sysutils/daemonize), output
+# to /var/log/kura/kura.log. There's no supervisor: see the restart cron in the doc.
+#
+#   kura=YES in /etc/rc.conf
+#
+# Optional rc.conf settings (defaults in brackets):
+#   kura_runas   [kura]                    the unprivileged user it runs as
+#   kura_config  [/etc/kura.env]           its settings, KEY=VALUE lines (read by the app: KURA_ENV_FILE)
+#   kura_dir     [/var/db/kura]            its data directory and HOME (owned by kura_runas)
+#   kura_code    [/usr/pkg/share/kura]     the app directory (owned by root)
+#   kura_python  [/usr/pkg/bin/python3.13]   (pkgsrc installs python3.13, no python3 link)
+
+$_rc_subr_loaded . /etc/rc.subr
+
+name="kura"
+rcvar=$name
+load_rc_config $name
+
+: ${kura_runas:=kura}
+: ${kura_config:=/etc/kura.env}
+: ${kura_dir:=/var/db/kura}
+: ${kura_code:=/usr/pkg/share/kura}
+: ${kura_python:=/usr/pkg/bin/python3.13}
+
+pidfile="/var/run/${name}/${name}.pid"
+logfile="/var/log/${name}/${name}.log"
+procname="${kura_python}"
+command="/usr/pkg/sbin/daemonize"
+command_args="-p ${pidfile} -u ${kura_runas} -c ${kura_dir} -a -o ${logfile} -e ${logfile} \
+    /usr/bin/env HOME=${kura_dir} ${kura_python} -u ${kura_code}/kura.py --env-file ${kura_config}"
+start_precmd="kura_precmd"
+
+kura_precmd()
+{
+    if [ ! -r "${kura_config}" ]; then
+        echo "${kura_config} is missing (see docs/install/bsd.md)"
+        return 1
+    fi
+    mkdir -p "/var/run/${name}" "/var/log/${name}"
+    chown "${kura_runas}" "/var/run/${name}" "/var/log/${name}"
+}
+
+run_rc_command "$1"

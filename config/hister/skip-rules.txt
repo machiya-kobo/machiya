@@ -1,0 +1,103 @@
+# Hister SKIP rules: URLs matching any pattern are never indexed (Go regexp, full URL, one per line,
+# no spaces inside a pattern; '#' lines are comments). Loading a list replaces the server's skip list.
+# Rules only stop NEW captures: `hister reindex` removes already-indexed pages that now match. Hister
+# never indexes its own URLs.
+
+# Tailnet + LAN: internal UIs (password manager, Konbini, Niwa, SearXNG results) never go in from browsing.
+# Kura's vault push (Niwa/card URLs) gets in on purpose with metadata.ignore_skip_rules=true per document.
+^https?://([^/]*\.)?ts\.net([:/]|$)
+^https?://(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.)
+^https?://[^/.:]+(:[0-9]+)?(/|$)
+
+# Sign-in, account and OAuth pages
+^https?://(accounts|login|auth|sso|signin|id|myaccount|account)\.
+^https?://[^/]+/(login|log-in|signin|sign-in|signup|oauth2?|authorize|logout|auth)([/?#]|$)
+# Login/account/settings pages at ANY depth, whole path segments only
+# (/accounts/login/, /settings/billing, /projects/<id>/settings/ ... but not /blog/accounting-tips or /settings-for-beginners)
+^https?://[^/]+(/[^?#]*)?/(login|log-in|signin|sign-in|accounts?|settings)([/?#]|$)
+
+# Mail, messaging, AI chats, password managers
+^https?://(mail|webmail|inbox)\.
+^https://(outlook\.(live|office|office365)\.com|mail\.proton\.me|app\.slack\.com|discord\.com/channels|web\.whatsapp\.com|messages\.google\.com)
+^https://(claude\.ai|chatgpt\.com|chat\.openai\.com|gemini\.google\.com)/
+^https://(vault\.bitwarden\.com|my\.1password\.com)
+
+# Banking, payments, investing, taxes, government benefits (add your own banks here)
+^https?://([^/]*\.)?(paypal|venmo|stripe|chase|wellsfargo|bankofamerica|capitalone|americanexpress|citi|schwab|fidelity|vanguard|usbank|discover|ally|sofi|robinhood|coinbase|intuit|turbotax|creditkarma|experian|equifax|transunion)\.com([:/]|$)
+^https?://([^/]*\.)?(irs|ssa|healthcare|studentaid)\.gov([:/]|$)
+
+# Patient portals
+^https?://([^/]*\.)?(mychart\.[^/]+|patient\.[^/]+)([:/]|$)
+
+# Search engine result pages (the query is the private part; the result you open is indexed)
+^https?://(www\.)?google\.[a-z.]+/(search|url)
+^https?://(www\.|html\.)?duckduckgo\.com/(\?|html)
+^https?://(www\.)?bing\.com/search
+# The other engines' query pages
+^https?://search\.brave\.com/(search|images|news|videos)([/?#]|$)
+^https?://(www\.)?startpage\.com/(do|sp)/search
+^https?://(www\.)?ecosia\.org/(search|images|news|videos)([/?#]|$)
+^https?://([a-z]+\.)?search\.yahoo\.com/search
+^https?://(www\.)?yandex\.[a-z.]+/(search|images/search)([/?#]|$)
+^https?://(www\.)?baidu\.com/s([/?#]|$)
+
+# Work: add your employer's domains here
+^https?://([^/]*\.)?employer\.example(\.com|\.net|\.io)?([:/]|$)
+
+# Hacker News front page + its listing pages (/news, /news?p=N), and comment threads / reply forms (item?id=,
+# reply?id=). Profiles, favorites etc. are kept.
+^https?://news\.ycombinator\.com/(news)?(\?p=[0-9]+)?$
+^https?://news\.ycombinator\.com/(item|reply)\?
+
+# Generic store homepages (site root only; product/listing pages are kept).
+^https?://(www\.|smile\.)?(amazon|target|walmart|bestbuy|ebay|costco|etsy|homedepot|lowes|ikea|newegg|aliexpress|temu|wayfair|kohls|macys)\.com/?(\?[^/]*)?$
+
+# ---- Doom-scrolling / high-volume, low-value pages ----
+# Social timelines: never keep. Scrolling a timeline saves EVERY post seen (Hister's per-post extractors do this too).
+^https?://([^/]*\.)?bsky\.app([:/]|$)
+^https?://([^/]*\.)?(x|twitter)\.com([:/]|$)
+^https?://(social\.example\.com|mastodon\.social|mastodon\.online|mstdn\.social)([:/]|$)
+^https?://([^/]*\.)?(threads\.net|threads\.com|instagram\.com|facebook\.com|tiktok\.com)([:/]|$)
+^https?://([^/]*\.)?linkedin\.com/(feed|notifications|mynetwork|messaging|jobs)([/?#]|$)
+
+# Feed and listing pages (the threads/stories/videos they link to are kept)
+^https?://((www|old|new)\.)?reddit\.com/?(\?.*)?$
+^https?://((www|old|new)\.)?reddit\.com/r/[^/]+/?((hot|new|top|rising|best|controversial)/?)?(\?.*)?$
+^https?://(www\.|m\.)?youtube\.com/(\?.*)?$
+^https?://(www\.|m\.)?youtube\.com/(feed/|shorts/|results)
+^https?://news\.google\.com/
+
+# Web apps and consoles: private working surfaces, not reading material
+^https?://(docs|drive|sheets|slides|calendar|keep|photos|contacts|meet)\.google\.com/
+^https?://(www\.)?google\.[a-z.]+/maps
+^https?://maps\.(google|apple)\.com/
+^https?://([^/]*\.)?(console\.aws\.amazon\.com|console\.cloud\.google\.com|portal\.azure\.com)([:/]|$)
+^https://github\.com/?(\?.*)?$
+^https://github\.com/(notifications|pulls|issues|dashboard|settings|codespaces|sessions|new)([/?#]|$)
+
+# Streaming and music players
+^https?://([^/]*\.)?(netflix\.com|disneyplus\.com|hulu\.com|max\.com|primevideo\.com|tv\.apple\.com|music\.apple\.com|open\.spotify\.com|music\.youtube\.com|twitch\.tv)([:/]|$)
+
+# Store search results, cart, checkout and account pages (product pages are kept); IKEA's regional home page
+^https?://(www\.|smile\.)?(amazon|target|walmart|bestbuy|ebay|costco|etsy|homedepot|lowes|ikea|newegg|aliexpress|temu|wayfair|kohls|macys)\.com/(s|search|sch|site/searchpage\.jsp|cart|checkout|basket|gp/cart|gp/buy|gp/css|gp/your-account|your-account|account|orders|your-orders)([/?#]|$)
+^https?://www\.ikea\.com/[a-z]{2}/[a-z]{2}/?$
+
+# Package tracking: shipment pages carry tracking numbers, names and delivery addresses.
+# Carriers' tracking and delivery-manager pages, by path; their tracking hosts as a whole.
+(?i)^https?://([^/]*\.)?fedex\.com/([a-z]{2}-[a-z]{2}/)?(fedextrack|apps/fedextrack|tracking|track|delivery-manager|secure-login|apps/myprofile)([/?#.]|$)
+^https?://(tracking|track|wwwapps|mytrack)\.fedex\.com/
+(?i)^https?://([^/]*\.)?ups\.com/(.*/)?(track|tracking|webtracking|mychoice|myups|mc|track-ups)([/?#.]|$)
+^https?://([^/]*\.)?wwwapps\.ups\.com/
+(?i)^https?://(tools|reg|informeddelivery|gateway|faq|store)\.usps\.com/(.*/)?(go/TrackConfirmAction|TrackConfirmAction|track|tracking|mailer|dashboard|login)
+(?i)^https?://informeddelivery\.usps\.com/
+(?i)^https?://([^/]*\.)?usps\.com/.*[?&](tLabels|tRef|qtc_tLabels1)=
+(?i)^https?://([^/]*\.)?dhl\.com/(.*/)?(tracking|track)(\.html|[/?#]|$)
+^https?://(mydhl|track|trackcn|dhlparcel|my\.dhlparcel)\.[a-z.]*dhl[a-z.]*/
+(?i)^https?://([^/]*\.)?(ontrac|lasership|veho|uniuni|gls-us|pitneybowes|purolator|canadapost-postescanada|royalmail|parcelforce|evri|dpd\.co\.uk|dpd\.de|hermes-europe|postnl|deutschepost|laposte|colissimo)\.(com|ca|co\.uk|de|nl|fr)/(.*/)?(track|tracking|trace|parcel-tracking|track-your|track-reperage|suivi)
+# Amazon delivery tracking (order and account pages are skipped above)
+(?i)^https?://([^/]*\.)?amazon\.[a-z.]+/(.*/)?(progress-tracker|ship-track|shiptrack|track-package|trackpackages|gp/your-account/ship-track|gp/css/shiptrack)
+^https?://track\.amazon\.[a-z.]+/
+# Tracking aggregators and retailer tracking portals
+(?i)^https?://([^/]*\.)?(aftership\.com|17track\.net|parcelsapp\.com|pkge\.net|packagetrackr\.com|parcelmonitor\.com|track-trace\.com|trackingmore\.com|shiptrack\.[a-z]+|narvar\.com|route\.com|shop\.app/(track|orders)|getpackage\.com|ordertracker\.com|shipstation\.com/track|tracking\.[a-z0-9-]+\.[a-z]+)([:/]|$)
+# Any URL that carries a tracking number in its query
+(?i)^https?://[^?#]*[?&](trk?nbrs?|tracking_?(number|num|id|code)s?|tracknum(ber)?s?|trackingnum(ber)?s?|tracknumbers|trackids?|tlabels|shipmentid|parcelid)=

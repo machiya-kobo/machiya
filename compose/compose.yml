@@ -1,0 +1,173 @@
+# Machiya reference compose: the engines (Hister, SearXNG) and the rooms Kura, Niwa and Konbini on one machine, in any
+# combination, with no Tailscale. Shiori is a client and is not in it (see its README).
+#
+#   ./demo-init                       # the sample vault + a .env for this machine (or: cp .env.example .env and edit it)
+#   docker compose up -d --build --wait
+#
+# `docker compose` works the same as `podman compose`. Profiles choose what runs (COMPOSE_PROFILES in .env, or
+# --profile on the command line): engines (hister, searxng + valkey), kura, niwa, konbini, and proxy (an optional SOCKS5
+# egress proxy for SearXNG, off by default; see the `proxy` service below and config/searxng/settings.yml).
+# Ports: every published port is a variable (HISTER_PORT, SEARXNG_PORT, KURA_PORT, NIWA_PORT, NIWA_GEMINI_PORT, NIWA_GOPHER_PORT,
+# KONBINI_PORT) for when one is taken; change the matching *_PUBLIC_URL and MACHIYA_ROOMS with it.
+# Services find each other by URL settings only (docs/principles.md): leave one out and the feature that needs it
+# switches off. The rooms build from their own repositories, checked out next to this one (../../kura etc.).
+#
+# Who may use the apps: AUTH defaults to `open` (no identity check), which is only safe because every published port
+# binds 127.0.0.1. To let other people in, put a proxy in front that sets a Tailscale-User-Login header (a Tailscale
+# sidecar does, and terminates TLS too), set KURA_AUTH/NIWA_AUTH/KONBINI_AUTH=tailscale and list the logins in
+# KURA_USERS/NIWA_USERS/KONBINI_USERS. One vault copy for the whole stack: add mirror.yml (see it).
+name: machiya
+
+x-room: &room
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  pids_limit: 1024
+  init: true                                         # the rooms run git
+  user: "${MACHIYA_UID:-1000}:${MACHIYA_GID:-1000}"  # your own ids (demo-init writes them), so the mounted folders stay yours
+  userns_mode: ${MACHIYA_USERNS:-}                   # rootless podman only: keep-id (demo-init sets it); empty for Docker
+
+services:
+  # -- engines -----------------------------------------------------------------------------------
+  hister:
+    profiles: [engines]
+    image: ghcr.io/asciimoo/hister:v0.20.0          # pinned: pre-1.0, breaking releases
+    user: "${MACHIYA_UID:-1000}:${MACHIYA_GID:-1000}"   # so ./data/hister stays yours (the image's own user is 65532)
+    userns_mode: ${MACHIYA_USERNS:-}
+    environment:
+      - HISTER__SERVER__BASE_URL=${HISTER_PUBLIC_URL:-http://localhost:4433}
+      - HISTER__APP__SEARCH_URL=${SEARXNG_PUBLIC_URL:-http://localhost:8888}/search?q={query}
+    volumes:
+      - ../config/hister/config.yml:/hister/config.yml:ro
+      - ${HISTER_DATA:-./data/hister}:/hister/data
+    ports: ["127.0.0.1:${HISTER_PORT:-4433}:4433"]
+    restart: unless-stopped
+
+  searxng:
+    profiles: [engines]
+    image: searxng/searxng:2026.9.25-12f8b6515      # pinned; check the JSON image-proxy plugin after a bump
+    environment:
+      - SEARXNG_SECRET=${SEARXNG_SECRET:?set SEARXNG_SECRET in .env}
+      - SEARXNG_BASE_URL=${SEARXNG_PUBLIC_URL:-http://localhost:8888}/
+    volumes:
+      - ../config/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ../config/searxng/limiter.toml:/etc/searxng/limiter.toml:ro
+      - ../config/searxng/plugins/image_proxy_json.py:/usr/local/searxng/searx/plugins/image_proxy_json.py:ro
+    ports: ["127.0.0.1:${SEARXNG_PORT:-8888}:8080"]
+    depends_on: [valkey]
+    restart: unless-stopped
+
+  valkey:                                           # SearXNG's limiter store
+    profiles: [engines]
+    image: docker.io/valkey/valkey:8-alpine
+    restart: unless-stopped
+
+  proxy:                                            # OPTIONAL SOCKS5 egress for SearXNG; not started unless you add --profile proxy
+    profiles: [proxy]
+    # One example of a SOCKS5 proxy (it tunnels through a hosted VPN-style account). Any SOCKS5 proxy listening on :1080 on this
+    # network works instead. To use one: uncomment `outgoing.proxies` in config/searxng/settings.yml and start with
+    #   docker compose --profile engines --profile proxy up -d
+    image: caomingjun/warp
+    cap_add: [NET_ADMIN]
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv4.conf.all.src_valid_mark=1
+    volumes:
+      - ${PROXY_DATA:-./data/proxy}:/var/lib/cloudflare-warp
+    restart: unless-stopped
+
+  # -- Machiya -----------------------------------------------------------------------------------
+  # The vault: VAULT_REPO_URL (https, ssh or file://). With a file:// URL the repository's folder is mounted into the
+  # containers at the same absolute path (VAULT_GIT; the demo's bare repository), so `git` inside finds it.
+  kura:
+    profiles: [kura]
+    <<: *room
+    build: ${KURA_SRC:-../../kura}/app
+    environment:
+      - KURA_AUTH=${KURA_AUTH:-open}
+      - KURA_USERS=${KURA_USERS:-}
+      - KURA_REPO_URL=${VAULT_REPO_URL:-}
+      - KURA_REPO_SUBDIR=${VAULT_SUBDIR:-}
+      - KURA_REPO_USER=${VAULT_REPO_USER:-}
+      - KURA_REPO_TOKEN_FILE=${VAULT_TOKEN_FILE:+/secrets/vault-token}
+      - KURA_PUBLIC_URL=${KURA_PUBLIC_URL:-http://localhost:8083}
+      - KURA_NIWA_URL=${NIWA_PUBLIC_URL:-}
+      - KURA_KONBINI_URL=${KONBINI_PUBLIC_URL:-}
+      - KURA_HISTER_URL=${KURA_HISTER_URL:-}         # e.g. http://hister:4433 to push the notes into Hister
+      - MACHIYA_ROOMS=${MACHIYA_ROOMS:-}
+      - MACHIYA_SOURCE_URL=${MACHIYA_SOURCE_URL:-}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${KURA_DATA:-./data/kura}:/data
+      - ${VAULT_TOKEN_FILE:-/dev/null}:/secrets/vault-token:ro
+      - ${VAULT_GIT:-/dev/null}:${VAULT_GIT:-/vault-git-unused}:ro
+    depends_on:
+      hister: {condition: service_started, required: false}      # push the notes only once Hister is up (if it is in the stack)
+    ports: ["127.0.0.1:${KURA_PORT:-8083}:8080"]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8080/api/status', timeout=4)\""]
+      interval: 15s
+      timeout: 6s
+      retries: 6
+      start_period: 60s
+      disable: ${MACHIYA_NO_HEALTHCHECK:-false}      # podman: its healthchecks can't run in rootless containers (demo-init sets it)
+    restart: unless-stopped
+
+  niwa:
+    profiles: [niwa]
+    <<: *room
+    build: ${NIWA_SRC:-../../niwa}/app
+    environment:
+      - NIWA_AUTH=${NIWA_AUTH:-open}
+      - NIWA_USERS=${NIWA_USERS:-}
+      - NIWA_HOST=${NIWA_HOST:-localhost}            # the name in the gemini certificate and the gopher menus
+      - NIWA_REPO_URL=${VAULT_REPO_URL:-}            # it pushes the garden's fields here: needs write access
+      - NIWA_REPO_SUBDIR=${VAULT_SUBDIR:-}
+      - NIWA_KURA_URL=${KURA_PUBLIC_URL:-http://localhost:8083}
+      - NIWA_KONBINI_URL=${KONBINI_PUBLIC_URL:-http://localhost:8081}   # the address of browser links
+      - NIWA_KONBINI_API_URL=${KONBINI_INTERNAL_URL:-http://konbini:8081}   # the address Niwa itself calls Konbini on
+      - NIWA_GOPHER_PUBLIC_PORT=${NIWA_GOPHER_PORT:-7070}                 # the port gopher menus advertise
+      - MACHIYA_ROOMS=${MACHIYA_ROOMS:-}
+      - MACHIYA_SOURCE_URL=${MACHIYA_SOURCE_URL:-}
+      - NIWA_ARCHIVE=${NIWA_ARCHIVE:-none}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${NIWA_DATA:-./data/niwa}:/data
+      - ${VAULT_GIT:-/dev/null}:${VAULT_GIT:-/vault-git-unused}
+    ports:
+      - "127.0.0.1:${NIWA_PORT:-8082}:8080"                       # the web garden
+      - "127.0.0.1:${NIWA_GEMINI_PORT:-1965}:1965"                       # gemini
+      - "127.0.0.1:${NIWA_GOPHER_PORT:-7070}:7070"                       # gopher
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8080/api/status', timeout=4)\""]
+      interval: 15s
+      timeout: 6s
+      retries: 6
+      start_period: 90s
+      disable: ${MACHIYA_NO_HEALTHCHECK:-false}
+    restart: unless-stopped
+
+  konbini:
+    profiles: [konbini]
+    <<: *room
+    build: ${KONBINI_SRC:-../../konbini}/app
+    environment:
+      - KANBAN_AUTH=${KONBINI_AUTH:-open}
+      - KANBAN_TAILNET_USERS=${KONBINI_USERS:-}
+      - KANBAN_REPO=/repo                            # its own read-write clone of the vault (demo-init makes it)
+      - KANBAN_DB=/data/kanban.sqlite3
+      - KANBAN_REPO_SUBDIR=${VAULT_SUBDIR:-}
+      - KANBAN_BOARD_URL=${KONBINI_PUBLIC_URL:-http://localhost:8081}
+      - KANBAN_KURA_URL=${KURA_PUBLIC_URL:-}
+      - KANBAN_NIWA_URL=${NIWA_PUBLIC_URL:-}
+      - KANBAN_HISTER_URL=${KONBINI_HISTER_URL:-}
+      - KANBAN_ARCHIVE=${KONBINI_ARCHIVE:-none}
+      - MACHIYA_ROOMS=${MACHIYA_ROOMS:-}
+      - MACHIYA_SOURCE_URL=${MACHIYA_SOURCE_URL:-}
+      - HOME=/data
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${KONBINI_DATA:-./data/konbini}:/data
+      - ${KONBINI_REPO:-./data/konbini-repo}:/repo
+      - ${VAULT_GIT:-/dev/null}:${VAULT_GIT:-/vault-git-unused}      # the clone's origin, so the board can push
+    ports: ["127.0.0.1:${KONBINI_PORT:-8081}:8081"]
+    restart: unless-stopped

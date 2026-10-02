@@ -1,0 +1,129 @@
+# SearXNG settings (only what differs from the built-in defaults; use_default_settings merges the rest).
+
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "SearXNG"
+  enable_metrics: false
+
+search:
+  safe_search: 0            # off; the per-browser preference still works
+  autocomplete: 'duckduckgo'
+  formats:
+    - html
+    - json   # read by Shiori's combined Hister + SearXNG search
+
+server:
+  # secret_key comes from ${SEARXNG_SECRET} (from your secret store, rendered into the container's environment);
+  # it is deliberately NOT set here.
+  limiter: true             # trusted client ranges are pass-listed in limiter.toml
+  image_proxy: true
+  # public URL of the instance. Is overwritten by ${SEARXNG_BASE_URL}.
+  base_url: http://localhost:8888/   # image_proxy links use this name
+  port: 8080
+  bind_address: "[::]"
+  public_instance: false
+
+valkey:
+  # The limiter's store: valkey runs as its own container on the stack network. Is overwritten by ${SEARXNG_VALKEY_URL}.
+  url: valkey://valkey:6379/0
+
+ui:
+  static_path: ""
+  static_use_hash: false
+  templates_path: ""
+  query_in_title: false     # page titles would leak queries into browser history
+  infinite_scroll: false
+  default_theme: simple
+  center_alignment: false
+  default_locale: ""
+  theme_args:
+    simple_style: auto
+
+# Communication with search engines. By default SearXNG connects directly. To send EVERY engine request through a
+# SOCKS5 proxy instead (socks5h: DNS is resolved at the proxy too, so if the proxy is down searches fail instead of
+# leaking out of the server's own IP), uncomment `proxies:` below AND start the compose `proxy` profile
+# (`docker compose --profile engines --profile proxy up -d`), or point the URL at a SOCKS5 proxy you already run.
+# Some engines (DuckDuckGo, Qwant) may CAPTCHA proxied traffic: if one fails behind your proxy, disable it under `engines`.
+outgoing:
+  request_timeout: 4.0      # a proxy adds a hop; 3.0 cut off slow engines
+  useragent_suffix: ""
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true
+  # proxies:
+  #   all://:
+  #     - socks5h://proxy:1080
+
+# Plugin syntax of current SearXNG (the old `enabled_plugins` list is ignored). Only deviations from the
+# defaults; tracker remover, calculator, hash, self-info, unit converter and hostnames are on by default.
+plugins:
+  searx.plugins.hostnames.SXNGPlugin:
+    active: true
+  # Local plugin (searxng/plugins/image_proxy_json.py): signed /image_proxy links in format=json results,
+  # so Shiori's thumbnails are fetched by SearXNG (through its outgoing proxy, if one is set).
+  searx.plugins.image_proxy_json.SXNGPlugin:
+    active: true
+
+# Hostnames plugin. high_priority lifts reference docs to the top of web results (a ranking Hister's own
+# priority rules cannot do: their boost dilutes); low_priority sinks content farms. Edit both lists to taste.
+# Each entry is a regexp over the result's hostname.
+hostnames:
+  high_priority:
+    - '(.*\.)?developer\.mozilla\.org$'
+    - '(.*\.)?docs\.python\.org$'
+    - '(.*\.)?en\.wikipedia\.org$'
+  low_priority:
+    - '(.*\.)?geeksforgeeks\.org$'
+    - '(.*\.)?w3schools\.com$'
+    - '(.*\.)?tutorialspoint\.com$'
+    - '(.*\.)?javatpoint\.com$'
+    - '(.*\.)?pinterest\.[a-z.]+$'
+
+# Engine line-up. Not enabled: mojeek (denies some proxy ranges), startpage (proof-of-work captcha), marginalia (needs a
+# personal API key; the shared one is rate-limited).
+# Re-test an engine with /search?q=...&format=json&engines=<name> and read unresponsive_engines.
+engines:
+  - name: google
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: yep
+    disabled: false
+  - name: wiby               # small web: personal sites
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: duckduckgo images
+    disabled: false
+  - name: duckduckgo videos
+    disabled: false
+  - name: duckduckgo news
+    disabled: false
+  - name: qwant
+    disabled: false
+  - name: qwant news
+    disabled: false
+  - name: qwant images
+    disabled: false
+  - name: qwant videos
+    disabled: false
+  - name: ahmia              # Tor-only engines: fail to load without Tor and log errors on every start
+    inactive: true
+  - name: torch
+    inactive: true
+
+categories_as_tabs:
+  general:
+  images:
+  videos:
+  news:
+  map:
+  music:
+  it:
+  science:
+  files:
+  social media:

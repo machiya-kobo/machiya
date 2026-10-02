@@ -1,0 +1,49 @@
+#!/bin/sh
+#
+# PROVIDE: konbini
+# REQUIRE: DAEMON NETWORKING
+# KEYWORD: shutdown
+#
+# Konbini, the project board, part of Machiya (docs/install/bsd.md). NetBSD: rc.subr + daemonize (pkgsrc sysutils/daemonize), output
+# to /var/log/konbini/konbini.log. There's no supervisor: see the restart cron in the doc.
+#
+#   konbini=YES in /etc/rc.conf
+#
+# Optional rc.conf settings (defaults in brackets):
+#   konbini_runas   [konbini]                    the unprivileged user it runs as
+#   konbini_config  [/etc/konbini.env]           its settings, KEY=VALUE lines (read by the app: KANBAN_ENV_FILE)
+#   konbini_dir     [/var/db/konbini]            its data directory and HOME (owned by konbini_runas)
+#   konbini_code    [/usr/pkg/share/konbini]     the app directory (owned by root)
+#   konbini_python  [/usr/pkg/bin/python3.13]   (pkgsrc installs python3.13, no python3 link)
+
+$_rc_subr_loaded . /etc/rc.subr
+
+name="konbini"
+rcvar=$name
+load_rc_config $name
+
+: ${konbini_runas:=konbini}
+: ${konbini_config:=/etc/konbini.env}
+: ${konbini_dir:=/var/db/konbini}
+: ${konbini_code:=/usr/pkg/share/konbini}
+: ${konbini_python:=/usr/pkg/bin/python3.13}
+
+pidfile="/var/run/${name}/${name}.pid"
+logfile="/var/log/${name}/${name}.log"
+procname="${konbini_python}"
+command="/usr/pkg/sbin/daemonize"
+command_args="-p ${pidfile} -u ${konbini_runas} -c ${konbini_dir} -a -o ${logfile} -e ${logfile} \
+    /usr/bin/env HOME=${konbini_dir} ${konbini_python} -u ${konbini_code}/app.py --env-file ${konbini_config}"
+start_precmd="konbini_precmd"
+
+konbini_precmd()
+{
+    if [ ! -r "${konbini_config}" ]; then
+        echo "${konbini_config} is missing (see docs/install/bsd.md)"
+        return 1
+    fi
+    mkdir -p "/var/run/${name}" "/var/log/${name}"
+    chown "${konbini_runas}" "/var/run/${name}" "/var/log/${name}"
+}
+
+run_rc_command "$1"

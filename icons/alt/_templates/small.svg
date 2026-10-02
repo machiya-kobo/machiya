@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<!-- Machiya icon for favicon sizes (16-48 px): the same house with the lattice dropped and the parts made bold, so two eaves and the three-panel noren survive at 16 px -->
+<rect width="512" height="512" rx="112" fill="#1a1b26"/>
+<path d="M76 118 L436 118 L466 158 L46 158 Z" fill="#8791c2"/>
+<rect x="104" y="158" width="304" height="62" fill="#414868"/>
+<path d="M50 220 L462 220 L432 268 L80 268 Z" fill="#8791c2"/>
+<rect x="92" y="268" width="328" height="144" fill="#414868"/>
+<rect x="116" y="268" width="104" height="144" fill="#7aa2f7" opacity=".6"/>
+<rect x="240" y="268" width="56" height="100" rx="8" fill="#7aa2f7"/>
+<rect x="308" y="268" width="56" height="100" rx="8" fill="#7aa2f7"/>
+<rect x="376" y="268" width="36" height="100" rx="8" fill="#7aa2f7"/>
+<rect x="70" y="412" width="372" height="30" rx="15" fill="#8791c2"/>
+</svg>

@@ -1,0 +1,61 @@
+# The shared vault copy (see docs/principles.md): add this file to run the services as ONE stack that keeps a
+# single copy of the vault, instead of each app cloning its own.
+#
+#   docker compose -f compose.yml -f mirror.yml up -d --build --wait      (or COMPOSE_FILE=compose.yml:mirror.yml in .env)
+#
+# vault-mirror clones VAULT_REPO_URL into ${MIRROR_DATA}/vault and fetches every 30 s; Kura reads it read-only (no clone
+# of its own). Niwa and Konbini borrow its objects for their small read-write clones (vaultkit.borrow) and check out only
+# the notes folder and their own bookkeeping, so the folder is mounted at the SAME absolute path in each container:
+# MIRROR_DATA must be an absolute path (demo-init writes one). The apps wait for the mirror's health (MIRROR_WAIT=service_started
+# under podman, whose image builds drop the HEALTHCHECK; demo-init sets it). Without this file every app owns its copy, as in compose.yml.
+services:
+  vault-mirror:
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    pids_limit: 256
+    init: true
+    build:
+      context: ..
+      dockerfile: stack/vault-mirror/Dockerfile
+    user: "${MACHIYA_UID:-1000}:${MACHIYA_GID:-1000}"
+    userns_mode: ${MACHIYA_USERNS:-}
+    environment:
+      - MIRROR_URL=${VAULT_REPO_URL:?set VAULT_REPO_URL in .env}
+      - MIRROR_USER=${VAULT_REPO_USER:-}
+      - MIRROR_TOKEN_FILE=${VAULT_TOKEN_FILE:+/secrets/vault-token}
+      - MIRROR_DIR=/data/vault
+    volumes:
+      - ${MIRROR_DATA:?set MIRROR_DATA (an absolute path) in .env}:/data
+      - ${VAULT_TOKEN_FILE:-/dev/null}:/secrets/vault-token:ro
+      - ${VAULT_GIT:-/dev/null}:${VAULT_GIT:-/vault-git-unused}:ro
+    restart: unless-stopped
+
+  kura:
+    environment:
+      - KURA_REPO_URL=                               # no clone: read the mirror
+      - KURA_REPO_DIR=/vault
+    volumes:
+      - ${MIRROR_DATA}/vault:/vault:ro
+    depends_on:
+      vault-mirror:
+        condition: ${MIRROR_WAIT:-service_healthy}
+
+  niwa:
+    environment:
+      - NIWA_REPO_REFERENCE=${MIRROR_DATA}/vault
+      - NIWA_REPO_SPARSE=${VAULT_SUBDIR:-.},.garden,.board
+    volumes:
+      - ${MIRROR_DATA}/vault:${MIRROR_DATA}/vault:ro
+    depends_on:
+      vault-mirror:
+        condition: ${MIRROR_WAIT:-service_healthy}
+
+  konbini:
+    environment:
+      - KANBAN_REPO_REFERENCE=${MIRROR_DATA}/vault
+      - KANBAN_REPO_SPARSE=${VAULT_SUBDIR:-.},.board
+    volumes:
+      - ${MIRROR_DATA}/vault:${MIRROR_DATA}/vault:ro
+    depends_on:
+      vault-mirror:
+        condition: ${MIRROR_WAIT:-service_healthy}

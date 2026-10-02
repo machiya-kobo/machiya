@@ -1,0 +1,9 @@
+# gitleaks config: the only things it finds in this repository are deliberate test fixtures, listed here.
+title = "machiya"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "deliberately fake secrets that the notes tool must refuse (stack/mcp/tests/test_notes.py)"
+paths = ['''stack/mcp/tests/test_notes\.py''']

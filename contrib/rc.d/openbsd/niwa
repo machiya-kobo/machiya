@@ -1,0 +1,27 @@
+#!/bin/ksh
+#
+# Niwa, the published garden (web, gemini, gopher), part of Machiya (docs/install/bsd.md). OpenBSD: rc.d(8) + rc.subr(8); output to syslog
+# (daemon.info, /var/log/daemon). There's no supervisor: see the restart cron in the doc.
+#
+#   rcctl enable niwa && rcctl start niwa
+#
+# rc.d can't give a daemon environment variables, so the settings live in /etc/niwa.env (KEY=VALUE lines) and the
+# app reads them itself (--env-file, or NIWA_ENV_FILE). Change the flags with `rcctl set niwa flags ...`.
+# The user _niwa has HOME=/var/db/niwa (useradd -d), which is also its data directory.
+
+daemon="/usr/local/bin/python3"
+daemon_flags="-u /usr/local/share/niwa/niwa.py --env-file /etc/niwa.env"
+daemon_user="_niwa"
+daemon_logger="daemon.info"
+daemon_execdir="/var/db/niwa"
+
+. /etc/rc.d/rc.subr
+
+rc_bg=YES
+rc_reload=NO
+
+rc_pre() {
+    [ -r /etc/niwa.env ] || { echo "/etc/niwa.env is missing (see docs/install/bsd.md)"; return 1; }
+}
+
+rc_cmd $1

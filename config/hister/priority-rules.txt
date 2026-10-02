@@ -1,0 +1,19 @@
+# Hister PRIORITY rules: URLs matching a pattern get a score boost in every search.
+#
+# FORMAT DIFFERS FROM skip-rules.txt - priority rules are search-index regexps (Bleve):
+#  - they match the WHOLE URL, no ^ or $ (a pattern with $ made EVERY search return 0 results);
+#    end each pattern with .*  (a leading ^ or any $ breaks the search)
+#  - the boost is DILUTED: each pattern is one optional clause (boost 100), and Bleve scales it by the share
+#    of clauses and of expanded URL terms that match. So every extra pattern, and every extra URL a pattern
+#    matches, weakens all of them. In testing, one pattern per group and few groups worked; eight sources
+#    (or one big alternation over ~200 URLs) gave no visible boost. Keep this list SHORT.
+#
+# Reference sites (documentation, wikis) are left out on purpose: in any combination they barely moved and
+# diluted the groups below. Use `domain:developer.mozilla.org` etc. in the query instead.
+
+# Example (off): boost your own garden's pages, if you publish one and visit it in the browser. Notes pushed by Kura
+# (label vault) are not matched by URL here: use label:vault or the Notes filter in the query.
+# https://niwa\.example\.ts\.net/.*
+
+# Your own sites: your website (www, social) and your GitHub
+https?://((www\.|social\.)?example\.com|github\.com/example)/.*

@@ -1,0 +1,50 @@
+#!/bin/sh
+#
+# PROVIDE: konbini
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+#
+# Konbini, the project board, part of Machiya (docs/install/bsd.md). FreeBSD: rc.subr + daemon(8), which restarts it if it dies and
+# sends its output to syslog (tag konbini).
+#
+#   sysrc konbini_enable=YES
+#
+# Optional rc.conf settings (defaults in brackets):
+#   konbini_runas   [konbini]                        the unprivileged user it runs as
+#   konbini_config  [/usr/local/etc/konbini.env]     its settings, KEY=VALUE lines (read by the app: KANBAN_ENV_FILE)
+#   konbini_dir     [/var/db/konbini]                its data directory and HOME (owned by konbini_runas)
+#   konbini_code    [/usr/local/share/konbini]       the app directory (owned by root)
+#   konbini_python  [/usr/local/bin/python3.12]
+#
+# Not konbini_user or konbini_env_file: rc.subr would su on top of daemon -u, and would source the settings file as
+# shell (expanding $ and breaking on values with spaces). The app reads the file itself, literally.
+
+. /etc/rc.subr
+
+name=konbini
+rcvar=konbini_enable
+load_rc_config $name
+
+: ${konbini_enable:=NO}
+: ${konbini_runas:=konbini}
+: ${konbini_config:=/usr/local/etc/konbini.env}
+: ${konbini_dir:=/var/db/konbini}
+: ${konbini_code:=/usr/local/share/konbini}
+: ${konbini_python:=/usr/local/bin/python3.12}
+
+pidfile=/var/run/${name}.pid
+procname=/usr/sbin/daemon
+command=/usr/sbin/daemon
+command_args="-r -R 5 -S -T ${name} -P ${pidfile} -u ${konbini_runas} \
+    /usr/bin/env HOME=${konbini_dir} ${konbini_python} -u ${konbini_code}/app.py --env-file ${konbini_config}"
+start_precmd="konbini_precmd"
+
+konbini_precmd()
+{
+    if [ ! -r "${konbini_config}" ]; then
+        err 1 "${konbini_config} is missing (see docs/install/bsd.md)"
+    fi
+    cd "${konbini_dir}" || err 1 "${konbini_dir} is missing"
+}
+
+run_rc_command "$1"

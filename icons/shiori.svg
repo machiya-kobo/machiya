@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<!-- Shiori (栞): a bookmark ribbon under a lens that enlarges it. -->
+<defs><clipPath id="lens"><circle cx="271.4" cy="297.0" r="92.2"/></clipPath></defs>
+<rect width="512" height="512" rx="112" fill="#1a1b26"/>
+<polygon points="112.6,0.0 266.2,0.0 266.2,368.6 189.4,302.1 112.6,368.6" fill="#7aa2f7"/>
+<g clip-path="url(#lens)">
+<rect x="179.2" y="204.8" width="184.3" height="184.3" fill="#1a1b26"/>
+<polygon points="112.6,0.0 266.2,0.0 266.2,368.6 189.4,302.1 112.6,368.6" fill="#7aa2f7" transform="translate(271.4 297.0) scale(1.4) translate(-271.4 -297.0)"/>
+<circle cx="271.4" cy="297.0" r="92.2" fill="#fff" fill-opacity=".11"/>
+</g>
+<line x1="336.5" y1="362.1" x2="398.1" y2="423.7" stroke="#e0af68" stroke-width="38.4" stroke-linecap="round"/>
+<circle cx="271.4" cy="297.0" r="79.4" fill="none" stroke="#e0af68" stroke-width="25.6"/>
+<path d="M218.4 277.7 A56.3 56.3 0 0 1 261.6 241.5" fill="none" stroke="#fff" stroke-opacity=".59" stroke-width="11.3" stroke-linecap="round"/>
+</svg>

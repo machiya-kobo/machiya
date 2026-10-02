@@ -1,0 +1,12 @@
+{
+  "name": "machiya",
+  "description": "Claude Code plugins for Machiya, the self-hosted stack of Kura, Shiori, Niwa and Konbini.",
+  "owner": { "name": "Machiya" },
+  "plugins": [
+    {
+      "name": "machiya",
+      "source": "./plugins/machiya",
+      "description": "Machiya for Claude Code: the MCP server connection and the cross-room skills (backlog-add, weekly-review, recall, garden-suggest, tidy-collections)."
+    }
+  ]
+}

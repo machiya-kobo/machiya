@@ -1,0 +1,55 @@
+#!/bin/sh
+# Set the demo up: the sample vault as a bare git repository, Konbini's own clone of it, the data folders, and a .env
+# for this machine (your user and group ids, a fresh SearXNG secret, open access on localhost, every service on).
+#
+#   ./demo-init              each app keeps its own copy of the vault (compose.yml)
+#   ./demo-init --mirror     one shared copy through vault-mirror (compose.yml + mirror.yml)
+#
+# Run it from this folder (compose/) with the Machiya, Kura, Niwa and Konbini repositories side by side. It refuses to
+# overwrite a .env; to start over, `docker compose down` and remove .env and data/. ENGINE=podman picks podman.
+set -eu
+cd "$(dirname "$0")"
+mirror=no
+[ "${1:-}" = "--mirror" ] && mirror=yes
+[ -e .env ] && { echo "demo-init: .env exists; remove .env and data/ to start over" >&2; exit 1; }
+for repo in kura niwa konbini; do
+    [ -d "../../$repo/app" ] || { echo "demo-init: ../../$repo/app not found: clone $repo next to this repository" >&2; exit 1; }
+done
+
+here=$(pwd)
+data=$here/data
+mkdir -p "$data"
+../tools/demo-vault "$data/vault" --bare >/dev/null
+rm -rf "$data/vault"                                    # keep the bare repository; the rooms make their own clones
+git clone -q "$data/vault.git" "$data/konbini-repo"      # Konbini needs its clone to exist (its origin is the bare repository)
+mkdir -p "$data/kura" "$data/niwa" "$data/konbini" "$data/hister" "$data/mirror"
+
+engine=${ENGINE:-docker}
+"$engine" version >/dev/null 2>&1 || { command -v podman >/dev/null 2>&1 && engine=podman; }   # no usable docker: podman
+userns=; nohealth=false; wait=service_healthy
+if "$engine" version 2>/dev/null | grep -qi podman; then            # rootless podman: keep your own user id inside, and its
+    userns=keep-id; nohealth=true; wait=service_started                # healthchecks can't run there and its builds drop the image's
+fi
+secret=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
+
+cat > .env <<ENV
+# Written by demo-init. The demo: the sample vault, no login (every port is bound to 127.0.0.1), everything on.
+COMPOSE_PROFILES=engines,kura,niwa,konbini
+MACHIYA_UID=$(id -u)
+MACHIYA_GID=$(id -g)
+MACHIYA_USERNS=$userns
+MACHIYA_NO_HEALTHCHECK=$nohealth
+MIRROR_WAIT=$wait
+VAULT_REPO_URL=file://$data/vault.git
+VAULT_GIT=$data/vault.git
+VAULT_SUBDIR=personal
+KONBINI_REPO=$data/konbini-repo
+SEARXNG_SECRET=$secret
+KURA_HISTER_URL=http://hister:4433
+MACHIYA_ROOMS=konbini=http://localhost:8081,niwa=http://localhost:8082,kura=http://localhost:8083,hister=http://localhost:4433,searxng=http://localhost:8888
+ENV
+if [ "$mirror" = yes ]; then
+    printf 'COMPOSE_FILE=compose.yml:mirror.yml\nMIRROR_DATA=%s\n' "$data/mirror" >> .env
+fi
+echo "demo ready: $here/.env and $data"
+if [ "$nohealth" = true ]; then echo "next: $engine compose up -d --build"; else echo "next: $engine compose up -d --build --wait"; fi

@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# tools/build-multiarch [--push] [--latest] [--also-tag T]... [--label K=V]... [--platforms a,b] [--file Dockerfile] <context dir> <image name> <tag>
+#
+# Builds a multi-arch (linux/amd64 + linux/arm64 by default) image with podman, as one manifest list:
+#   tools/build-multiarch ../kura/app kura v0.3.0
+#   tools/build-multiarch --push ../kura/app kura v0.3.0        # also pushes <registry>/kura:v0.3.0
+#   add --latest to move :latest too (a release: :latest follows the newest release; a main build uses tag main-<short sha> and no --latest)
+# Without --push nothing leaves the machine; the manifest is left as localhost/<image>-manifest:<tag> for a smoke test.
+# Images are built in Docker format so the HEALTHCHECK in the Dockerfile survives (OCI format drops it).
+# The non-native architecture runs under qemu-user-static (apt install qemu-user-static), so it is slow and only fit for
+# images that are plain apt and pip installs, like these.
+# Registry: MACHIYA_REGISTRY (default registry.example/machiya). Log in once per machine with a token that has package write
+# (podman login "$registry" -u <user> --password-stdin): never on the command line, never in a log.
+set -euo pipefail
+
+push=0; latest=0; platforms="linux/amd64,linux/arm64"; file=""; also=(); labels=()
+while [[ ${1:-} == --* ]]; do
+    case $1 in
+        --push) push=1; shift ;;
+        --latest) latest=1; shift ;;
+        --platforms) platforms=$2; shift 2 ;;
+        --file) file=$2; shift 2 ;;
+        --also-tag) also+=("$2"); shift 2 ;;      # more tags for the same manifest list (e.g. vX.Y.Z and main-<sha>)
+        --label) labels+=(--label "$2"); shift 2 ;;   # image labels, e.g. org.opencontainers.image.version=0.4.0
+        *) echo "unknown option $1" >&2; exit 2 ;;
+    esac
+done
+[[ $# -eq 3 ]] || { sed -n 2,13p "$0"; exit 2; }
+ctx=$1; image=$2; tag=$3
+registry=${MACHIYA_REGISTRY:-registry.example/machiya}
+[[ -d $ctx ]] || { echo "build-multiarch: $ctx is not a directory" >&2; exit 1; }
+[[ -z $file ]] && file="$ctx/Dockerfile"
+[[ -f $file ]] || { echo "build-multiarch: no $file" >&2; exit 1; }
+for arch in ${platforms//,/ }; do
+    [[ $arch == "linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" ]] && continue
+    [[ -e /proc/sys/fs/binfmt_misc/qemu-${arch#linux/} || -e /proc/sys/fs/binfmt_misc/qemu-$(echo "${arch#linux/}" | sed 's/arm64/aarch64/') ]] ||
+        { echo "build-multiarch: no qemu binfmt handler for $arch (apt install qemu-user-static)" >&2; exit 1; }
+done
+
+native="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+
+# podman keeps ONE image per tag, so building another architecture leaves the local base tags (python:3.13-slim ...)
+# pointing at the other architecture's image, and a later plain `podman build` anywhere on this machine silently gets
+# that base and runs under emulation. However this script ends, put the native base images back.
+restore_native_bases() {
+    python3 - "$file" "$native" <<'PY'
+import re, subprocess, sys
+dockerfile, native = sys.argv[1:3]
+text = open(dockerfile).read().replace("\\\n", " ")
+args = dict(re.findall(r"^\s*ARG\s+(\w+)=(\S+)", text, re.M))
+stages, refs = set(), []
+for m in re.finditer(r"^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?", text, re.M | re.I):
+    ref = re.sub(r"\$\{?(\w+)\}?", lambda v: args.get(v.group(1), v.group(0)), m.group(1))
+    if ref not in stages and ref != "scratch" and ref not in refs and "$" not in ref:
+        refs.append(ref)
+    if m.group(2):
+        stages.add(m.group(2))
+for ref in refs:
+    r = subprocess.run(["podman", "pull", "-q", "--platform", native, ref], capture_output=True, text=True)
+    print("restored %s to %s%s" % (ref, native, "" if r.returncode == 0 else " FAILED: " + r.stderr.strip()[:120]))
+PY
+}
+trap restore_native_bases EXIT
+
+name="localhost/$image-manifest:$tag"      # its own name: never collide with (or remove) a single-arch image of the same name
+podman manifest rm "$name" >/dev/null 2>&1 || true
+# --format docker: OCI images have no HEALTHCHECK; the rooms' Dockerfiles define one
+podman build --format docker --platform "$platforms" --manifest "$name" "${labels[@]}" -f "$file" "$ctx"
+echo "built $name for $platforms:"
+podman manifest inspect "$name" | python3 -c "
+import sys, json
+for m in json.load(sys.stdin)['manifests']:
+    print('  ', m['platform']['os'] + '/' + m['platform']['architecture'], m['digest'][:19])"
+if (( push )); then
+    podman manifest push --all "$name" "docker://$registry/$image:$tag"
+    echo "pushed $registry/$image:$tag"
+    for extra in "${also[@]}"; do
+        podman manifest push --all "$name" "docker://$registry/$image:$extra"
+        echo "pushed $registry/$image:$extra"
+    done
+    if (( latest )); then
+        podman manifest push --all "$name" "docker://$registry/$image:latest"
+        echo "pushed $registry/$image:latest"
+    fi
+fi

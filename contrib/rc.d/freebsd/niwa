@@ -1,0 +1,50 @@
+#!/bin/sh
+#
+# PROVIDE: niwa
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+#
+# Niwa, the published garden (web, gemini, gopher), part of Machiya (docs/install/bsd.md). FreeBSD: rc.subr + daemon(8), which restarts it if it dies and
+# sends its output to syslog (tag niwa).
+#
+#   sysrc niwa_enable=YES
+#
+# Optional rc.conf settings (defaults in brackets):
+#   niwa_runas   [niwa]                        the unprivileged user it runs as
+#   niwa_config  [/usr/local/etc/niwa.env]     its settings, KEY=VALUE lines (read by the app: NIWA_ENV_FILE)
+#   niwa_dir     [/var/db/niwa]                its data directory and HOME (owned by niwa_runas)
+#   niwa_code    [/usr/local/share/niwa]       the app directory (owned by root)
+#   niwa_python  [/usr/local/bin/python3.12]
+#
+# Not niwa_user or niwa_env_file: rc.subr would su on top of daemon -u, and would source the settings file as
+# shell (expanding $ and breaking on values with spaces). The app reads the file itself, literally.
+
+. /etc/rc.subr
+
+name=niwa
+rcvar=niwa_enable
+load_rc_config $name
+
+: ${niwa_enable:=NO}
+: ${niwa_runas:=niwa}
+: ${niwa_config:=/usr/local/etc/niwa.env}
+: ${niwa_dir:=/var/db/niwa}
+: ${niwa_code:=/usr/local/share/niwa}
+: ${niwa_python:=/usr/local/bin/python3.12}
+
+pidfile=/var/run/${name}.pid
+procname=/usr/sbin/daemon
+command=/usr/sbin/daemon
+command_args="-r -R 5 -S -T ${name} -P ${pidfile} -u ${niwa_runas} \
+    /usr/bin/env HOME=${niwa_dir} ${niwa_python} -u ${niwa_code}/niwa.py --env-file ${niwa_config}"
+start_precmd="niwa_precmd"
+
+niwa_precmd()
+{
+    if [ ! -r "${niwa_config}" ]; then
+        err 1 "${niwa_config} is missing (see docs/install/bsd.md)"
+    fi
+    cd "${niwa_dir}" || err 1 "${niwa_dir} is missing"
+}
+
+run_rc_command "$1"

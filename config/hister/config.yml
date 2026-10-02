@@ -1,0 +1,38 @@
+# Hister server config (reference). No secrets here: set the access token with the
+# HISTER__APP__ACCESS_TOKEN environment variable. Env vars HISTER__<SECTION>__<KEY>
+# override any key below. Reference: https://hister.org/docs/configuration
+app:
+  title: Hister
+  # Web search for anything Hister doesn't know: SearXNG. One direction only:
+  # SearXNG must NOT query Hister (other people may use SearXNG; this index is private).
+  search_url: http://localhost:8888/search?q={query}
+  redirect_on_no_results: false
+  user_handling: false          # single user; restrict access at the network or proxy level
+  public: false
+  open_results_on_new_tab: false
+  log_level: info
+server:
+  address: 0.0.0.0:4433
+  # Must equal the URL browsers use: cookies get Secure and the CSRF check compares Origin with it.
+  base_url: http://localhost:4433
+  database: db.sqlite3
+  max_batch_body_size: 40       # MiB
+  metrics: false
+indexer:
+  detect_languages: true
+  directories: []               # the vault is pushed by Kura, not mounted
+crawler:
+  backend: http
+  timeout: 15
+  delay: 1
+extractors:
+  # Per-post social extractors split a feed into one document per post scrolled past, and on a re-add they
+  # REPLACE a document's text and metadata. X, Mastodon and Bluesky are skip-listed anyway, so the
+  # extractors would only do damage.
+  twitter:
+    enable: false
+  mastodon:
+    enable: false
+  bluesky:
+    enable: false
+  # ytdlp stays at its default (off): browsing YouTube must never make the server contact YouTube.
