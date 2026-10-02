@@ -287,6 +287,13 @@ class PrefsTest(Base):
         self.assertEqual(self.call(None, "GET")[0], 401)
         self.assertEqual(self.call(token, "DELETE")[0], 405)
 
+    def test_a_reused_name_starts_with_no_prefs(self):
+        old = idn.Principal("guest", "person", via="token:aaaa11", uid="guestold00000001")
+        self.assertEqual(self.call(old, data={"prefs": {"theme": "day"}})[0], 200)
+        new = idn.Principal("guest", "person", via="token:bbbb22", uid="guestnew00000002")
+        self.assertEqual(self.call(new, "GET"), (200, {"prefs": {}}))                # keyed by id, not by name
+        self.assertEqual(self.call(old, "GET"), (200, {"prefs": {"theme": "day"}}))
+
     def test_api_bad_bodies(self):
         token = idn.Principal("vm", "agent", via="token:abcd12")
         self.assertEqual(self.call(token, data={"theme": "night"})[0], 400)           # not wrapped in "prefs"

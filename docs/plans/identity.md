@@ -161,7 +161,7 @@ is today's advice made a check.
 
 ## Built-in sign-in (no Tailscale, no proxy)
 
-Enabled with `*_SIGNIN=1` (or always when `*_AUTH=signin`). Kept small:
+Enabled with `*_SIGNIN=1`, alongside any `*_AUTH` mode. Kept small:
 
 - `GET /signin` shows a form (vaultkit's shared UI); `POST /signin` takes principal name and password. scrypt
   (`hashlib.scrypt`, N=2^14, r=8, p=1, 16-byte salt), compared in constant time. A wrong name and a wrong password
@@ -222,7 +222,7 @@ DB, for the CLI's `list` to show stale ones (optional).
 
 ## Per-user preferences
 
-Each room keeps its users' preferences in its own SQLite DB: `prefs(principal, key, value, updated)`, read and written
+Each room keeps its users' preferences in its own SQLite DB: `prefs(principal, key, value, updated)` keyed by the principal's id, read and written
 through `GET/PUT /api/prefs` (same-origin or token). Shared ones (theme, text size) keep syncing across rooms through
 the `machiya_*` cookies on `MACHIYA_COOKIE_DOMAIN`, as today; the server copy makes them follow the person to a new
 device. A room stays standalone: no shared writable store.

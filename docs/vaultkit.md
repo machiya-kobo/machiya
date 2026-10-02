@@ -86,7 +86,7 @@ the client address, and returns `(status, [(header, value), ...], body bytes)`:
   characters, never `/signin` or `/signout`; anything else is `/`. Non-ASCII is percent-encoded.
 - **Bodies:** `read_body(headers, rfile, limit)` reads at most `limit` bytes (`MAX_FORM`, `MAX_PAIR`, `MAX_PREFS`) and
   answers None for a larger, chunked or short body: answer 413 and close the connection.
-- **Preferences** (`Prefs(path)`): table `prefs(principal, key, value, updated)` in the room's own SQLite file (its
+- **Preferences** (`Prefs(path)`): table `prefs(principal, key, value, updated)` keyed by the principal's id in the room's own SQLite file (its
   `*_DB` is fine). Keys `[a-z0-9_.-]{1,64}`, values strings of at most 4 KB, at most 100 keys per principal;
   `get_all(principal)`, `put(principal, changes)` (raises `PrefsError`). Shared ones (theme, text size) keep syncing
   through the `machiya_*` cookies as before; the server copy follows the person to a new device.

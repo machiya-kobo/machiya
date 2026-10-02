@@ -205,8 +205,9 @@ def check_bind(auth, bind, behind_proxy=False):
 class Principal:
     """Who is calling: a name, a kind, and what they may do. `via` says how it was proven (for logs only)."""
 
-    def __init__(self, name, kind, owner=False, grants=None, limits=None, via=""):
+    def __init__(self, name, kind, owner=False, grants=None, limits=None, via="", uid=""):
         self.name, self.kind, self.owner = name, kind, owner
+        self.uid = uid or name          # the file's id (a person's is random): what rooms key stored data on
         self.grants = grants or {}      # {room: {"actions": set, "vaults": tuple|None}}
         self.limits = dict(limits or {})
         self.via = via
@@ -227,7 +228,7 @@ class Principal:
         return grant["vaults"] if grant["vaults"] is not None else DEFAULT_VAULTS
 
     def with_via(self, via):
-        return Principal(self.name, self.kind, self.owner, self.grants, self.limits, via)
+        return Principal(self.name, self.kind, self.owner, self.grants, self.limits, via, self.uid)
 
     def __repr__(self):
         return "Principal(%s, %s%s)" % (self.name, self.kind, ", owner" if self.owner else "")
@@ -377,7 +378,7 @@ class Config:
         revoked = p.get("revoked_devices", [])
         if not isinstance(revoked, list) or not all(isinstance(d, str) for d in revoked):
             raise IdentityError("%s: revoked_devices must be a list of device ids" % where)
-        self.principals[name] = Principal(name, kind, owner, grants, limits)
+        self.principals[name] = Principal(name, kind, owner, grants, limits, uid=uid)
         self.raw[name] = {"password": p.get("password"), "epoch": epoch, "revoked": frozenset(revoked), "uid": uid}
 
     def pair_entry(self, i, e):

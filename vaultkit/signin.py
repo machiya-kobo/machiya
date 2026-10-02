@@ -241,7 +241,8 @@ class PrefsError(ValueError):
 
 
 class Prefs:
-    """A principal's preferences in the room's own SQLite file: table prefs(principal, key, value, updated). Keys match
+    """A principal's preferences in the room's own SQLite file: table prefs(principal, key, value, updated), keyed by
+    the principal's id (Principal.uid), so a name deleted and added again starts empty. Keys match
     KEY_RE, values are strings of at most MAX_VALUE bytes, at most MAX_KEYS keys per principal. Nothing here decides who
     the principal is: the room passes the name `resolve` gave it."""
 
@@ -321,7 +322,7 @@ def handle_prefs(prefs, principal, method, headers, body=b"", secure=True):
     if principal is None:
         return _json(401, {"error": "sign in first"})
     if method == "GET":
-        return _json(200, {"prefs": prefs.get_all(principal.name)})
+        return _json(200, {"prefs": prefs.get_all(principal.uid)})      # by id: a reused name starts empty
     if method != "PUT":
         return _json(405, {"error": "GET or PUT"}, [("Allow", "GET, PUT")])
     if not bearer(principal) and not same_origin(headers, secure):
@@ -337,6 +338,6 @@ def handle_prefs(prefs, principal, method, headers, body=b"", secure=True):
     if not isinstance(data, dict) or set(data) != {"prefs"}:
         return _json(400, {"error": "send {\"prefs\": {key: value}}"})
     try:
-        return _json(200, {"prefs": prefs.put(principal.name, data["prefs"])})
+        return _json(200, {"prefs": prefs.put(principal.uid, data["prefs"])})
     except PrefsError as e:
         return _json(400, {"error": str(e)})
