@@ -23,6 +23,7 @@ session_key_file = "session.key"
 session_days = 30
 
 [principals.owner]
+id = "ownerid00000000a"
 kind = "person"
 owner = true
 tailscale = ["Owner@Example.com"]
@@ -30,12 +31,14 @@ proxy = ["owner"]
 password = "%(pw)s"
 
 [principals.partner]
+id = "partnerid0000000"
 kind = "person"
 tailscale = ["partner@example.com"]
 password = "%(pw2)s"
 grants = { niwa = ["read"], kura = { read = true, vaults = ["default"] } }
 
 [principals.newbie]
+id = "newbieid00000000"
 kind = "person"
 proxy = ["newbie"]
 
@@ -314,7 +317,8 @@ class SessionTest(Base):
         self.assertEqual(renewed["auth"], t0 - 2 * 86400)                            # the sign-in time is kept
         self.assertGreaterEqual(renewed["exp"], t0 + 30 * 86400 - 5)
         first = t0 - 179 * 86400                                                     # signed in 179 days ago
-        late = idn.sign(KEY, "session", {"p": "owner", "u": "owner", "e": 1, "iat": t0 - 2 * 86400, "auth": first,
+        late = idn.sign(KEY, "session", {"p": "owner", "u": "ownerid00000000a", "e": 1, "iat": t0 - 2 * 86400,
+                                         "auth": first,
                                          "exp": t0 + 86400})
         capped = json.loads(idn.b64d(self.cookie_of(i.resolve(headers(Cookie="machiya_session=" + late)).cookies[0])
                                      .split(".")[0]))
@@ -469,7 +473,7 @@ class ReviewTest(Base):
         value = i.sign_in("partner", "partner pass 1").cookies[0].split(";")[0].split("=", 1)[1]
         with open(self.path) as f:
             text = f.read()
-        self.write(text.replace("[principals.partner]", '[principals.partner]\nid = "a1b2c3d4e5f6a7b8"'))
+        self.write(text.replace('id = "partnerid0000000"', 'id = "a1b2c3d4e5f6a7b8"'))
         i.checked = 0
         self.assertIsNone(i.resolve(headers(Cookie="machiya_session=" + value)).principal)
 
@@ -513,6 +517,42 @@ class ReviewTest(Base):
         self.assertEqual(self.ident().resolve(m).status, 401)
         i = self.ident(auth="header", header="Remote-User")
         self.assertEqual(i.resolve(headers(Remote_User="Owner")).status, 403)        # proxies compare exactly
+
+    def test_n1_a_write_during_a_reload_is_not_lost(self):
+        i = self.ident()
+        with open(self.path) as f:
+            text = f.read()
+        real = idn.read_file
+
+        def racing(path):
+            got = real(path)                                                         # read the old file, then...
+            self.write(text.replace("partner@example.com", "partner3@example.com"))   # ...the CLI writes
+            st = os.stat(self.path)
+            os.utime(self.path, ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))
+            return got
+        self.write(text + "\n")
+        i.checked = 0
+        with mock.patch.object(idn, "read_file", racing):
+            i.current()
+        i.checked = 0
+        self.assertEqual(i.resolve(headers(Tailscale_User_Login="partner3@example.com")).principal.name, "partner")
+
+    def test_n2_junk_names_cant_free_a_locked_name(self):
+        t = idn.Throttle(5, 900)
+        for _ in range(5):
+            t.take("owner")
+        self.assertFalse(t.take("owner"))
+        for n in range(t.MAX_KEYS + 300):
+            t.take("junk%d" % n)
+        self.assertFalse(t.take("owner"))                                           # still locked
+        self.assertLessEqual(len(t.hits), t.MAX_KEYS)
+
+    def test_m4_a_person_needs_an_id(self):
+        with open(self.path) as f:
+            text = f.read()
+        self.write(text.replace('id = "newbieid00000000"\n', ""))
+        with self.assertRaises(idn.IdentityError):
+            idn.read_file(self.path)
 
     def test_l5_the_throttle_stays_small(self):
         t = idn.Throttle(5, 900)

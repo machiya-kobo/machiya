@@ -326,9 +326,13 @@ class Config:
             raise IdentityError("%s: only a person signs in with a password" % where)
         if "password" in p and not valid_hash(p["password"]):
             raise IdentityError("%s: password must be the CLI's scrypt hash (use passwd)" % where)
-        uid = p.get("id", name)             # signed proofs carry it: a deleted name added again starts afresh
-        if not isinstance(uid, str) or not (uid == name or UID_RE.match(uid)):
-            raise IdentityError("%s: id is 8-32 lowercase letters and digits (the CLI's add sets it)" % where)
+        # Sessions and device tokens carry the id, so a person deleted and added again under the same name starts
+        # afresh. Only people get those, so a person needs one; agents and services (stored tokens, tagged nodes) may
+        # leave it out.
+        uid = p.get("id", None if kind == "person" else name)
+        if not isinstance(uid, str) or not (uid == name and kind != "person" or UID_RE.match(uid)):
+            raise IdentityError("%s: id is 8-32 lowercase letters and digits, required for a person (the CLI's add "
+                                "sets it)" % where)
         epoch = p.get("session_epoch", 1)
         if not isinstance(epoch, int) or epoch < 1:
             raise IdentityError("%s: session_epoch must be a whole number from 1" % where)
@@ -440,8 +444,12 @@ class Throttle:
                 return False
             hits.append(t)
             self.hits[key] = hits                  # re-inserted: the dict's order is least recently used first
-            while len(self.hits) > self.MAX_KEYS:
-                del self.hits[next(iter(self.hits))]
+            if len(self.hits) > self.MAX_KEYS:
+                # forget the least recently used keys that aren't locked: a flood of junk names can't free a locked one
+                for k in [k for k, v in self.hits.items() if len(v) < self.limit][:len(self.hits) - self.MAX_KEYS]:
+                    del self.hits[k]
+                while len(self.hits) > self.MAX_KEYS:   # all locked: drop the oldest (5 failures each, many addresses)
+                    del self.hits[next(iter(self.hits))]
             return True
 
     def forgive(self, key):
@@ -520,11 +528,14 @@ class Identity:
         with self.lock:
             if time.monotonic() - self.checked >= 1:
                 self.checked = time.monotonic()
+                # the stamp is taken before reading, so a write that lands during the read is seen next time
                 stamp = self._stamp(self.config)
                 if stamp != self.stamp:
                     try:
                         config, key = read_file(self.path)
-                        self.config, self.key, self.stamp = config, key, self._stamp(config)
+                        if config.key_file != self.config.key_file:
+                            stamp = self._stamp(config)
+                        self.config, self.key, self.stamp = config, key, stamp
                     except (OSError, IdentityError) as e:
                         if stamp[1] != self.stamp[1]:
                             self.key = None
@@ -699,6 +710,8 @@ class Identity:
         if not self.signin_names.take(name):
             return Result(None, 429, "too many tries; wait a few minutes")
         if not key:
+            self.signin_names.forgive(name)
+            self.signin_addrs.forgive(client)
             return Result(None, 503, "sign-in is unavailable (no session key)")
         if not HASHING.acquire(blocking=False):
             self.signin_names.forgive(name)
@@ -713,6 +726,7 @@ class Identity:
         if not ok:
             return Result(None, 401, "wrong name or password")
         self.signin_names.forgive(name)
+        self.signin_addrs.forgive(client)
         return Result(p.with_via("session"), 200, "", [self.issue(config, key, name)])
 
     def sign_out(self):
@@ -726,6 +740,7 @@ class Identity:
         if not self.pair_addrs.take(client):
             return Result(None, 429, "too many tries; wait a few minutes"), ""
         if not key:
+            self.pair_addrs.forgive(client)
             return Result(None, 503, "pairing is unavailable (no session key)"), ""
         code = re.sub(r"[\s-]", "", code).upper()
         t = datetime.datetime.now(datetime.timezone.utc)
@@ -839,7 +854,8 @@ def write_file(path, data):
             try:
                 os.fchown(fd, old.st_uid, old.st_gid)      # run as root over a room-readable file: keep it readable
             except PermissionError:
-                pass
+                print("identity: warning: can't keep %s owned by uid %d gid %d; check the rooms can still read it"
+                      % (path, old.st_uid, old.st_gid), file=sys.stderr, flush=True)
         with os.fdopen(fd, "w") as f:
             f.write(text)
             f.flush()

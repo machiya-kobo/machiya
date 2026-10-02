@@ -94,6 +94,7 @@ session_days = 30                          # renewed on use: expires 30 days aft
 tailscale_capability = "github.com/machiya-kobo/cap/identity"
 
 [principals.owner]
+id = "k3m9q2x7p4w8r6t1"                      # random, set by the CLI's add; required for a person
 kind = "person"
 owner = true
 tailscale = ["owner@example.com"]           # Tailscale-User-Login values
@@ -102,6 +103,7 @@ password = "scrypt$16384$8$1$<salt-b64>$<hash-b64>"
 session_epoch = 1                           # bump to sign out every session of this principal
 
 [principals.household]
+id = "h5n2c8v4b7z3j9d6"
 kind = "person"
 tailscale = ["partner@example.com"]
 grants = { niwa = ["read"], kura = { read = true, vaults = ["default"] } }
