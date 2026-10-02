@@ -11,4 +11,4 @@ Start with the [README](../README.md) for what Machiya is, then:
 | reuse the vault code | [vaultkit.md](vaultkit.md) |
 | connect Claude Code | [services/mcp.md](services/mcp.md) and the plugin in [../plugins/machiya/](../plugins/machiya/) |
 
-**Words used throughout.** A **room** is one of Machiya's web apps (Kura, Niwa, Konbini); the **owner** is the single user a deployment is for (the identity the Tailscale header names); the **vault** is the Markdown notes in a git repository; a **card** is a note the board shows as a project; **work vault** means any other vault that must never reach a search index, a model or a feed.
+**Words used throughout.** A **room** is one of Machiya's web apps (Kura, Niwa, Konbini); the **owner** is the single user a deployment is for (the identity the Tailscale header names); the **vault** is the Markdown notes in a git repository; a **card** is a note the board shows as a project; a **work vault** (or **private vault**) is any other vault that must never reach a search index, a model or a feed; a **shared vault** is one the owner marked `+shared` in Kura's config, treated like the default vault at its `/v/<name>/` address.
