@@ -152,6 +152,7 @@ services:
     build: ${KONBINI_SRC:-../../konbini}/app
     environment:
       - KANBAN_AUTH=${KONBINI_AUTH:-open}
+      - KANBAN_ALLOWED_HOSTS=konbini                 # open mode answers only known names: Niwa calls http://konbini:8081
       - KANBAN_TAILNET_USERS=${KONBINI_USERS:-}
       - KANBAN_REPO=/repo                            # its own read-write clone of the vault (demo-init makes it)
       - KANBAN_DB=/data/kanban.sqlite3
