@@ -11,12 +11,13 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mcp                                  # noqa: E402  (puts the vendored vaultkit on the path)
-from test_mcp import make_server, rooms     # noqa: E402
+from backend import HISTER_ORIGIN, Backend, BackendError   # noqa: E402
+from test_mcp import Fake, call, make_server, rooms        # noqa: E402
 from vaultkit import identity               # noqa: E402
 
 PING = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
@@ -159,6 +160,16 @@ class Inbound(WithFile):
         agents = [r["headers"]["x-agent"] for r in self.fakes["konbini"].seen]
         self.assertEqual(agents, ["mcp:claude-vm/session-1", "mcp:claude-vm/owner", "mcp:partner"])
 
+    def test_the_rooms_get_the_mcp_token_never_the_callers(self):
+        token_file = os.path.join(self.folder, "mcp.token")
+        with open(token_file, "w") as f:
+            f.write(self.tokens["mcp"] + "\n")
+        _, base = self.serve(MCP_TOKEN_FILE=token_file)
+        self.post(base, tool("board_review"), dict(self.bearer("claude-vm"), **{"X-Agent": "session-1"}))
+        req = self.fakes["konbini"].seen[-1]
+        self.assertEqual(req["headers"]["authorization"], "Bearer " + self.tokens["mcp"])
+        self.assertEqual(req["headers"]["x-agent"], "mcp:claude-vm/session-1")
+
     def test_header_mode_with_a_proxy(self):
         _, base = self.serve(MCP_AUTH="header", MCP_AUTH_HEADER="Remote-User")
         self.assertEqual(self.post(base, PING, {"Remote-User": "partner"})[0], 200)
@@ -201,6 +212,95 @@ class Startup(WithFile):
     def test_no_sign_in_here(self):
         c = self.config(MCP_BIND="127.0.0.1", MCP_SIGNIN="1")
         self.assertFalse(c.identity.signin)
+
+
+class Outbound(unittest.TestCase):
+    """MCP_TOKEN_FILE: the `mcp` principal's token goes to Kura, Konbini and Niwa as Authorization, never to Hister,
+    never through a redirect, never into a log; X-Agent stays the label and no Origin or Referer reaches the rooms."""
+
+    TOKEN = "mch_abcd_" + "s" * 43
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.folder, True)
+        self.file = os.path.join(self.folder, "mcp.token")
+        with open(self.file, "w") as f:
+            f.write(self.TOKEN + "\n")
+        self.fakes = rooms()
+        self.addCleanup(lambda: [f.close() for f in self.fakes.values()])
+
+    def test_the_token_reaches_the_rooms_and_never_hister(self):
+        server = make_server(self.fakes, MCP_TOKEN_FILE=self.file)
+        self.addCleanup(os.unlink, server.log_path)
+        for name, args in (("machiya_status", {}), ("machiya_search", {"q": "x"}), ("notes_read", {"path": "Projects/Alpha.md"}),
+                           ("board_set_next", {"slug": "alpha", "next": "n"}), ("garden_suggest", {"note": "Projects/Alpha.md", "reason": "A finished write-up."}),
+                           ("pages_search", {"q": "x"}), ("pages_set_label", {"url": "https://example.com/a", "label": "python"})):
+            self.assertFalse(call(server, name, args).get("isError"), name)
+        for room in ("kura", "konbini", "niwa"):
+            seen = self.fakes[room].seen
+            self.assertTrue(seen, room)
+            for req in seen:
+                self.assertEqual(req["headers"].get("authorization"), "Bearer " + self.TOKEN, room)
+                self.assertEqual(req["headers"]["x-agent"], "mcp:t")
+                self.assertFalse({"origin", "referer"} & set(req["headers"]), room)
+        self.assertTrue(self.fakes["niwa"].writes() and self.fakes["konbini"].writes())
+        self.assertTrue(self.fakes["hister"].seen)
+        for req in self.fakes["hister"].seen:
+            self.assertNotIn("authorization", req["headers"])
+            self.assertEqual(req["headers"]["origin"], HISTER_ORIGIN)
+        with open(server.log_path) as f:
+            self.assertNotIn(self.TOKEN[9:], f.read())
+        self.assertNotIn(self.TOKEN[9:], repr(server.backends) + repr(vars(server.backends["kura"]).get("base")))
+
+    def test_without_the_file_no_token_is_sent(self):
+        server = make_server(self.fakes)
+        self.addCleanup(os.unlink, server.log_path)
+        call(server, "machiya_status")
+        for f in self.fakes.values():
+            self.assertTrue(all("authorization" not in r["headers"] for r in f.seen))
+
+    def test_a_set_file_that_is_empty_or_missing_refuses_to_start(self):
+        empty = os.path.join(self.folder, "empty")
+        open(empty, "w").close()
+        for path in (empty, os.path.join(self.folder, "missing"), self.folder):
+            with self.assertRaises(SystemExit, msg=path) as cm:
+                mcp.Config({"MCP_AUTH": "open", "MCP_TOKEN_FILE": path})
+            self.assertNotIn(self.TOKEN, str(cm.exception))
+        with open(empty, "w") as f:
+            f.write("mch_abcd_with a space\n")
+        with self.assertRaises(SystemExit):
+            mcp.Config({"MCP_AUTH": "open", "MCP_TOKEN_FILE": empty})
+        self.assertEqual(mcp.Config({"MCP_AUTH": "open", "MCP_TOKEN_FILE": ""}).token, "")
+
+    def test_a_redirect_is_not_followed_with_the_token(self):
+        elsewhere = Fake({"/api/status": {"ok": True}})
+        self.addCleanup(elsewhere.close)
+
+        class Redirect(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", elsewhere.url + "/api/status")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+        threading.Thread(target=httpd.serve_forever, args=(0.02,), daemon=True).start()
+        self.addCleanup(lambda: (httpd.shutdown(), httpd.server_close()))
+        url = "http://127.0.0.1:%d" % httpd.server_address[1]
+        with self.assertRaises(BackendError) as cm:
+            Backend("kura", url, token=self.TOKEN).get("/api/status")
+        self.assertEqual(cm.exception.status, 302)
+        self.assertNotIn(self.TOKEN, cm.exception.message)
+        self.assertEqual(elsewhere.seen, [])
+        self.assertEqual(Backend("kura", url).get("/api/status"), {"ok": True})    # without a token, as before
+        self.assertEqual(len(elsewhere.seen), 1)
+
+    def test_hister_can_never_carry_the_token(self):
+        with self.assertRaises(ValueError):
+            Backend("hister", "http://127.0.0.1:1", origin=HISTER_ORIGIN, token=self.TOKEN)
 
 
 class NoFile(unittest.TestCase):

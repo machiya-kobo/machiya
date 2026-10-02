@@ -3,7 +3,9 @@
 Invariants (tests guard them): no Origin or Referer ever goes to Konbini, Kura or Niwa (a same-origin header is
 what makes Konbini and Niwa treat a caller as "web", the owner's powers); Hister calls always carry
 `Origin: hister://`; every call names the caller with X-Agent; there's no way to reach a URL the operator didn't
-configure (callers pass a path, never a URL)."""
+configure (callers pass a path, never a URL). With a token (MCP_TOKEN_FILE, the `mcp` principal's, for Kura, Konbini
+and Niwa only) every call sends `Authorization: Bearer`, and a redirect is an error, never followed: urllib would
+carry the header to wherever it points."""
 import json
 import urllib.error
 import urllib.parse
@@ -11,6 +13,11 @@ import urllib.request
 
 HISTER_ORIGIN = "hister://"
 FORBIDDEN_HEADERS = {"origin", "referer"}
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
 
 
 class BackendError(Exception):
@@ -22,14 +29,22 @@ class BackendError(Exception):
 
 
 class Backend:
-    def __init__(self, room, base, origin=None, timeout=15, opener=None):
+    def __init__(self, room, base, origin=None, timeout=15, opener=None, token=""):
+        if token and origin:
+            raise ValueError("the rooms' token never goes to %s" % room)
         self.room, self.base, self.origin, self.timeout = room, base.rstrip("/"), origin, timeout
-        self.opener = opener or urllib.request.build_opener()
+        self.token = token
+        self.opener = opener or (urllib.request.build_opener(NoRedirect) if token else urllib.request.build_opener())
+
+    def __repr__(self):                 # never the token
+        return "Backend(%s, %s%s)" % (self.room, self.base, ", token" if self.token else "")
 
     def headers(self, agent):
         h = {"Accept": "application/json", "X-Agent": agent}
         if self.origin:
             h["Origin"] = self.origin
+        if self.token:
+            h["Authorization"] = "Bearer " + self.token
         assert self.origin or not (FORBIDDEN_HEADERS & {k.lower() for k in h}), "no Origin/Referer to %s" % self.room
         return h
 
@@ -55,6 +70,8 @@ class Backend:
                 raw = r.read().decode("utf-8", "replace")
                 return json.loads(raw) if raw.strip() else {}
         except urllib.error.HTTPError as e:
+            if self.token and 300 <= e.code < 400:
+                raise BackendError(e.code, "%s answered a redirect (%s); not followed" % (self.room, e.code), self.room)
             body = e.read().decode("utf-8", "replace")[:300]
             try:
                 body = json.loads(body).get("error", body)

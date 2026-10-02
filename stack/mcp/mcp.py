@@ -11,8 +11,8 @@ work vaults never pass (rooms/kura.py).
 
 With Machiya's identity file (MACHIYA_IDENTITY_FILE, vaultkit.identity) each request names a principal instead (a
 token, a Tailscale login or tagged node, or with MCP_AUTH=header a trusted proxy's header); it needs the `mcp` `use`
-grant, and its `limits` replace the buckets' defaults. The rooms see only this server, with the caller's name in
-X-Agent as a label, never on anyone's behalf."""
+grant, and its `limits` replace the buckets' defaults. The rooms see only this server: it calls them as the principal
+`mcp` with its own token (MCP_TOKEN_FILE), the caller's name in X-Agent as a label, never on anyone's behalf."""
 import json
 import os
 import re
@@ -57,6 +57,21 @@ def load_identity(env, bind):
         return identity.load_for("mcp", {k: v for k, v in env.items() if k != "MCP_SIGNIN"}, bind=bind)
     except identity.IdentityError as e:
         raise SystemExit("machiya-mcp: identity: %s" % e)
+
+
+def room_token(path):
+    """MCP_TOKEN_FILE: the `mcp` principal's own token, sent to Kura, Konbini and Niwa as Authorization (never to
+    Hister). Unset: no token, as before. Set but missing, empty or not a token: refuse to start. Never logged."""
+    path = (path or "").strip()
+    if not path:
+        return ""
+    from vaultkit import read_secret
+    token = read_secret(path)
+    if not token:
+        raise SystemExit("machiya-mcp: MCP_TOKEN_FILE: no token in %s" % path)
+    if not re.fullmatch(r"[\x21-\x7e]{1,4096}", token):
+        raise SystemExit("machiya-mcp: MCP_TOKEN_FILE: %s doesn't hold a token on its first line" % path)
+    return token
 
 
 # What a principal's `limits` in the identity file may set: the setting's name without MCP_, in lower case -> the bucket.
@@ -110,6 +125,7 @@ class Config:
         self.auth = auth_mode(env.get("MCP_AUTH"), (env.get("MACHIYA_IDENTITY_FILE") or "").strip())
         self.bind = env.get("MCP_BIND", "0.0.0.0").strip() or "0.0.0.0"
         self.identity = load_identity(env, self.bind)        # None: the MCP_USERS gate, as before
+        self.token = room_token(env.get("MCP_TOKEN_FILE"))   # the `mcp` principal's token for the rooms; "" without one
         self.port = int(env.get("MCP_PORT", "8080"))
         self.users = csv(env.get("MCP_USERS"))
         self.log = env.get("MCP_LOG", "/data/mcp.log")
@@ -193,8 +209,10 @@ class Server:
 
     def __init__(self, config, backends=None, clock=time.time):
         self.config, self.clock = config, clock
+        # Kura, Konbini and Niwa get the `mcp` principal's token (MCP_TOKEN_FILE); Hister never does.
         self.backends = backends if backends is not None else {
-            r: Backend(r, u, origin=HISTER_ORIGIN if r == "hister" else None) for r, u in config.urls.items() if u}
+            r: Backend(r, u, origin=HISTER_ORIGIN if r == "hister" else None, token="" if r == "hister" else config.token)
+            for r, u in config.urls.items() if u}
         self.limits = {"read": Limiter(config.reads_per_min), "board_write": Limiter(config.writes_per_min),
                        "board_write_day": Limiter(config.writes_per_day, per=86400.0),
                        "garden_day": Limiter(config.suggests_per_day, per=86400.0),
@@ -600,6 +618,8 @@ def main():
         sys.stderr.write("machiya-mcp: MCP_AUTH=open, no identity check: use it on localhost or a trusted LAN only\n")
     elif not config.users:
         sys.stderr.write("machiya-mcp: MCP_USERS is empty, so every request will be refused\n")
+    if config.token:
+        sys.stderr.write("machiya-mcp: calling Kura, Konbini and Niwa with MCP_TOKEN_FILE's token\n")
     server = Server(config)
     sys.stderr.write("machiya-mcp %s on %s:%d, rooms: %s\n" % (VERSION, config.bind, config.port, ", ".join(sorted(server.backends)) or "none"))
     ThreadingHTTPServer((config.bind, config.port), make_handler(server)).serve_forever()
