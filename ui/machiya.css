@@ -213,6 +213,20 @@ a.tag:hover { border-color: var(--room); color: var(--fg); text-decoration: none
 .switch:disabled { opacity: .45; cursor: default; }
 .settings .saved { color: var(--green); font-size: var(--fs-xs); margin-left: var(--sp-2); }
 
+/* ---- sign-in (vaultkit/signin.py): one card, a field per row, the room's colour on the button ------------------ */
+.signin { max-width: 420px; margin: var(--sp-6) auto 0; }
+.signin h1 { margin: 0 6px var(--sp-3); font-size: var(--fs-xl); }
+.signin .group { background: var(--dark); border: 1px solid var(--line); border-radius: var(--r-m); overflow: hidden; }
+.signin .item { display: grid; gap: 6px; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+.signin .item > span { font-size: var(--fs-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.signin input { width: 100%; font: inherit; font-size: 16px; color: var(--fg); background: var(--hl);   /* 16px: iOS doesn't zoom */
+  border: 1px solid var(--line2); border-radius: 8px; padding: 8px 10px; }
+.signin button { display: block; width: calc(100% - 28px); margin: 14px; padding: 10px; border: 0; border-radius: 8px;
+  font: 600 var(--fs-m) var(--font); background: var(--room); color: var(--bg); cursor: pointer; }
+.signin-error { margin: 0 0 var(--sp-3); padding: 8px 12px; border-radius: 8px; font-size: var(--fs-s); color: var(--red);
+  background: color-mix(in srgb, var(--red) 14%, transparent); }
+.signin .footnote { margin: 6px 6px 0; font-size: var(--fs-xs); color: var(--comment); line-height: 1.5; }
+
 /* ---- footer: links and the status line ------------------------------------------------------------------------ */
 .foot { margin-top: var(--sp-6); padding-top: var(--sp-3); border-top: 1px solid var(--line); color: var(--comment);
   font-size: var(--fs-xs); display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); align-items: center; }
