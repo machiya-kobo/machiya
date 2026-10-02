@@ -316,7 +316,8 @@ def bearer(principal):
 def handle_prefs(prefs, principal, method, headers, body=b"", secure=True):
     """GET /api/prefs -> {"prefs": {key: value}}; PUT /api/prefs with JSON {"prefs": {key: value or null}} merges
     (null removes) and answers the same shape. `principal` is what the room's resolve gave (None: 401). A PUT not made
-    with a token must be same-origin (403); `secure` is the room's (identity.secure)."""
+    with a token must be same-origin (403); `secure` is the room's (identity.secure). The room calls this only after
+    its own gate (the principal's read grant in the room): a principal with no grants here stores nothing."""
     if principal is None:
         return _json(401, {"error": "sign in first"})
     if method == "GET":

@@ -280,7 +280,9 @@ as defence in depth.
 4. **Konbini and Niwa** (grants for owner powers; GET write removed; service token for Niwa → Konbini).
 5. **machiya-mcp** (callers by principal, its own token, no delegation). In review: `stack/mcp` (vaultkit v0.10.0,
    `MCP_TOKEN_FILE`, limits from the file; docs/services/mcp.md).
-6. **Built-in sign-in pages and per-user prefs** in all three rooms.
+6. **Built-in sign-in pages and per-user prefs** in all three rooms. vaultkit part in review: `vaultkit/signin.py`
+   (`/signin`, `/signout`, `/api/pair`, `Prefs` and `/api/prefs`), `tests/test_signin.py`, vaultkit v0.11.0; then each
+   room wires it (Niwa also needs `NIWA_PUBLIC_URL` or `NIWA_SECURE_COOKIES` to know when to pass `secure=False`).
 7. **Shiori** (app, extension, hosted pages, Linux).
 8. **Docs:** principles (owner gate → identity), contracts (401/403 shapes, `Authorization`, `/api/prefs`), install
    guides, SECURITY.md files. Remove this plan.
