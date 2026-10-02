@@ -7,7 +7,12 @@ It is a client of the rooms' HTTP APIs and changes none of them; a room's tools 
 Owner-only, in Machiya's auth shape: MCP_AUTH=tailscale (default: Tailscale-User-Login must be in MCP_USERS, an
 empty list admits nobody) | open (no check, a startup warning; localhost or a trusted LAN only), MCP_BIND.
 Every call reaches the rooms as the owner's machine, so this gate is the fence: no tool takes a URL, and notes from
-work vaults never pass (rooms/kura.py)."""
+work vaults never pass (rooms/kura.py).
+
+With Machiya's identity file (MACHIYA_IDENTITY_FILE, vaultkit.identity) each request names a principal instead (a
+token, a Tailscale login or tagged node, or with MCP_AUTH=header a trusted proxy's header); it needs the `mcp` `use`
+grant, and its `limits` replace the buckets' defaults. The rooms see only this server, with the caller's name in
+X-Agent as a label, never on anyone's behalf."""
 import json
 import os
 import re
@@ -30,11 +35,46 @@ BIG = {"anthropic/maxResultSizeChars": 100000}
 SAFE_VALUES = {"slug", "board", "area", "period", "label", "collection", "sort", "folder", "tag", "topic", "column", "priority", "path", "mode", "name"}
 
 
-def auth_mode(value):
+def auth_mode(value, identity_file=""):
+    """MCP_AUTH: tailscale (the default) | open; with an identity file also header (a trusted proxy's login header,
+    MCP_AUTH_HEADER), which only the file can turn into a principal."""
     value = (value or "tailscale").strip().lower()
-    if value not in ("tailscale", "open"):
-        raise SystemExit("machiya-mcp: MCP_AUTH must be tailscale or open, not %r" % value)
+    allowed = ("tailscale", "open", "header") if identity_file else ("tailscale", "open")
+    if value not in allowed:
+        raise SystemExit("machiya-mcp: MCP_AUTH must be %s, not %r%s" % (
+            " or ".join(allowed), value, "" if identity_file or value != "header" else " (header needs MACHIYA_IDENTITY_FILE)"))
     return value
+
+
+def load_identity(env, bind):
+    """Machiya's identity file as vaultkit.identity sees it for the room `mcp`, or None without MACHIYA_IDENTITY_FILE
+    (the MCP_USERS gate, as before). A bad file or setup refuses to start. There are no sign-in pages here, so
+    MCP_SIGNIN is ignored: callers bring a token, a Tailscale identity or a proxy's header."""
+    if not (env.get("MACHIYA_IDENTITY_FILE") or "").strip():
+        return None
+    from vaultkit import identity     # vendored beside this file; only needed with the identity file
+    try:
+        return identity.load_for("mcp", {k: v for k, v in env.items() if k != "MCP_SIGNIN"}, bind=bind)
+    except identity.IdentityError as e:
+        raise SystemExit("machiya-mcp: identity: %s" % e)
+
+
+# What a principal's `limits` in the identity file may set: the setting's name without MCP_, in lower case -> the bucket.
+# Other names are ignored (the file is shared by every room).
+LIMIT_KEYS = {"reads_per_min": "read", "writes_per_min": "board_write", "writes_per_day": "board_write_day",
+              "suggests_per_day": "garden_day", "notes_per_min": "notes_write", "notes_per_day": "notes_write_day",
+              "hister_writes_per_min": "hister_write", "bulk_per_hour": "bulk_hour"}
+BUCKET_LIMIT = {bucket: key for key, bucket in LIMIT_KEYS.items()}
+
+
+class Caller(str):
+    """The key for a caller's buckets and apply tokens (the login, or with the identity file the principal's name),
+    carrying how it was proven (`via`, for the audit log) and the principal's `limits`. A plain str works as before."""
+
+    def __new__(cls, name, via="", limits=None):
+        self = super().__new__(cls, name)
+        self.via, self.limits = via, dict(limits or {})
+        return self
 
 
 def csv(value):
@@ -67,8 +107,9 @@ def backup_window(value):
 
 class Config:
     def __init__(self, env):
-        self.auth = auth_mode(env.get("MCP_AUTH"))
+        self.auth = auth_mode(env.get("MCP_AUTH"), (env.get("MACHIYA_IDENTITY_FILE") or "").strip())
         self.bind = env.get("MCP_BIND", "0.0.0.0").strip() or "0.0.0.0"
+        self.identity = load_identity(env, self.bind)        # None: the MCP_USERS gate, as before
         self.port = int(env.get("MCP_PORT", "8080"))
         self.users = csv(env.get("MCP_USERS"))
         self.log = env.get("MCP_LOG", "/data/mcp.log")
@@ -122,22 +163,24 @@ class Limiter:
     def __init__(self, rate, per=60.0, clock=time.monotonic):
         self.rate, self.per, self.clock, self.buckets, self.lock = rate, per, clock, {}, threading.Lock()
 
-    def _tokens(self, key, now):
-        tokens, stamp = self.buckets.get(key, (float(self.rate), now))
-        return min(float(self.rate), tokens + (now - stamp) * self.rate / self.per), now
+    def _tokens(self, key, now, rate=None):
+        rate = float(self.rate if rate is None else rate)
+        tokens, stamp = self.buckets.get(key, (rate, now))
+        return min(rate, tokens + (now - stamp) * rate / self.per), now
 
-    def has(self, key):
+    def has(self, key, rate=None):
+        """`rate` overrides the default for this key (a principal's limits)."""
         with self.lock:
-            return self._tokens(key, self.clock())[0] >= 1
+            return self._tokens(key, self.clock(), rate)[0] >= 1
 
-    def give(self, key):
+    def give(self, key, rate=None):
         with self.lock:
-            tokens, now = self._tokens(key, self.clock())
-            self.buckets[key] = (min(float(self.rate), tokens + 1), now)
+            tokens, now = self._tokens(key, self.clock(), rate)
+            self.buckets[key] = (min(float(self.rate if rate is None else rate), tokens + 1), now)
 
-    def take(self, key):
+    def take(self, key, rate=None):
         with self.lock:
-            tokens, now = self._tokens(key, self.clock())
+            tokens, now = self._tokens(key, self.clock(), rate)
             if tokens < 1:
                 self.buckets[key] = (tokens, now)
                 return False
@@ -157,7 +200,7 @@ class Server:
                        "garden_day": Limiter(config.suggests_per_day, per=86400.0),
                        "notes_write": Limiter(config.notes_per_min), "notes_write_day": Limiter(config.notes_per_day, per=86400.0),
                        "hister_write": Limiter(config.hister_writes_per_min), "bulk_hour": Limiter(config.bulk_per_hour, per=3600.0)}
-        self.tokens = {}          # apply tokens: token -> (kind, login, payload, expires); one use, ten minutes
+        self.tokens = {}          # apply tokens: token -> (kind, caller, payload, expires); one use, ten minutes
         self.census = (0.0, None)   # (when, label counts) for pages_labels and the audits
         self.notes, self.features = None, set()
         if config.notes_dir:
@@ -192,13 +235,18 @@ class Server:
         who = (headers.get("Tailscale-User-Login") or "").strip()
         return who if who and who in self.config.users else None
 
+    @staticmethod
+    def rate(bucket, login):
+        """The caller's own rate for a bucket (a principal's `limits`), or None for the default."""
+        return (getattr(login, "limits", None) or {}).get(BUCKET_LIMIT.get(bucket))
+
     def allow(self, names, login):
         """Take one token from each named bucket, or none of them: a refused call costs nothing."""
         with self.rate_lock:
-            if not all(self.limits[n].has(login) for n in names):
+            if not all(self.limits[n].has(login, self.rate(n, login)) for n in names):
                 return False
             for n in names:
-                self.limits[n].take(login)
+                self.limits[n].take(login, self.rate(n, login))
             return True
 
     def mint(self, kind, login, payload, ttl=600):
@@ -305,7 +353,7 @@ class Server:
                 status = "refused"
                 for bucket in tool.get("limits", ()):
                     if bucket.endswith(("_day", "_hour")):    # a refused call changed nothing: it doesn't use up the day's allowance
-                        self.limits[bucket].give(login)
+                        self.limits[bucket].give(login, self.rate(bucket, login))
                 result = envelope.error(e.message, **e.extra)
             except Exception as e:     # a bug must not leak a traceback to the client
                 status = "failed"
@@ -316,7 +364,9 @@ class Server:
             out = result.get("structuredContent", {}).get("untrusted_content")
             if isinstance(out, dict):
                 done = {k: out[k] for k in ("path", "commit") if isinstance(out.get(k), str)}
-        self.audit(login=login, agent=agent, tool=name, status=status, ms=int((time.time() - t0) * 1000),
+        # with the identity file: the principal and how it was proven (a token's id, never the token); else the login
+        who = {"principal": str(login), "via": login.via} if getattr(login, "via", "") else {"login": login}
+        self.audit(**who, agent=agent, tool=name, status=status, ms=int((time.time() - t0) * 1000),
                    args={k: (v if k in SAFE_VALUES and isinstance(v, str) else "…") for k, v in args.items()}, **done)
         return result
 
@@ -363,7 +413,9 @@ class Server:
                  "note": ("notes_read", {"path": rest})}
         if kind not in table or table[kind][0] not in self.tools:
             raise ToolError("unknown resource: %s" % uri)
-        res = self.tools_call({"name": table[kind][0], "arguments": table[kind][1]}, "resource", agent)
+        # a principal's reads count against its own buckets; without the identity file, the shared "resource" key
+        res = self.tools_call({"name": table[kind][0], "arguments": table[kind][1]},
+                              login if isinstance(login, Caller) else "resource", agent)
         if res.get("isError"):
             raise ToolError(res["structuredContent"]["error"])
         return {"contents": [{"uri": uri, "mimeType": "application/json", "text": res["content"][0]["text"]}]}
@@ -498,9 +550,20 @@ def make_handler(server):
             # A browser page can't call this: MCP clients send no Origin, so any Origin is refused (DNS rebinding).
             if self.headers.get("Origin"):
                 return self.json(403, {"error": "browser origins are not allowed"})
-            login = server.login(self.headers)
-            if login is None:
-                return self.json(403, {"error": "not an allowed user"})
+            principal = None
+            if server.config.identity is not None:
+                # 401: no proof or a bad one (never passed over for another); 403: a principal without `mcp` `use`
+                who = server.config.identity.resolve(self.headers, self.client_address[0] if self.client_address else "")
+                if not who:
+                    return self.json(who.status, {"error": who.error or "no identity"})
+                principal = who.principal
+                if not principal.can("mcp", "use"):
+                    return self.json(403, {"error": "not allowed to use machiya-mcp"})
+                login = Caller(principal.name, principal.via, principal.limits)
+            else:
+                login = server.login(self.headers)
+                if login is None:
+                    return self.json(403, {"error": "not an allowed user"})
             try:
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
@@ -514,6 +577,11 @@ def make_handler(server):
                 return self.json(400, rpc_error(None, -32700, "Parse error"))
             agent = (self.headers.get("X-Agent") or "client").strip()[:76] or "client"
             agent = "".join(c for c in agent if c.isprintable())
+            if principal is not None:
+                # the rooms get the proven name first (X-Agent: mcp:<principal>[/<client's label>]); a label only
+                label = (self.headers.get("X-Agent") or "").strip()
+                label = "".join(c for c in label if c.isprintable())
+                agent = (principal.name + ("/" + label if label and label != principal.name else ""))[:76]
             batch = isinstance(msg, list)
             replies = [r for r in (server.handle(m, login, agent) for m in (msg if batch else [msg])) if r is not None]
             if not replies:
@@ -525,7 +593,10 @@ def make_handler(server):
 
 def main():
     config = Config(os.environ)
-    if config.auth == "open":
+    if config.identity is not None:
+        sys.stderr.write("machiya-mcp: identity file %s, MCP_AUTH=%s: callers need the mcp use grant%s\n" % (
+            config.identity.path, config.auth, "; open mode admits anyone without a token as the owner" if config.auth == "open" else ""))
+    elif config.auth == "open":
         sys.stderr.write("machiya-mcp: MCP_AUTH=open, no identity check: use it on localhost or a trusted LAN only\n")
     elif not config.users:
         sys.stderr.write("machiya-mcp: MCP_USERS is empty, so every request will be refused\n")
