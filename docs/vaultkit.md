@@ -40,6 +40,25 @@ v.index()
 html = v.render(v.get("Projects/Kura"), "", mode="all")
 ```
 
+**A note is data, never code** (v0.13). `render()` returns clean HTML (`vaultkit.sanitize.clean`): raw HTML in a note
+keeps only known tags and attributes; scripts, styles, frames, forms and event handlers are dropped, and a link or
+image keeps only an `http(s)`, `mailto`, `obsidian`, `gemini` or `gopher` URL (or a relative one). `- [ ]` / `- [x]`
+items become disabled checkboxes (`li.task`), bare URLs in the text become links (never inside `<a>`, `<code>` or
+`<pre>`), and table alignment is an `align` attribute, not a style. An API answer read outside the room uses
+`clean(html, base=URL, schemes=API_SCHEMES)` (relative URLs made absolute, gemini/gopher dropped).
+
+Behind the sanitizer, every HTML page a room serves carries `shell.security_headers()`: a Content-Security-Policy
+(`script-src 'self'`: no inline script and no `on…=` attributes anywhere in a room's own markup either; images from
+anywhere; forms and frames only to and by the room), `X-Content-Type-Options: nosniff` and `Referrer-Policy:
+same-origin`.
+
+Shared page pieces (v0.13): `shell.title(room, what)` ("Lantern - Kura"), `shell.message(heading, text, actions)`,
+`shell.not_found(room, what)`, `shell.offline(room)` (the precached `/offline`: no status line, no network named),
+`signin.needed(room, next, ctx, signin=True)` (the 401 page: the plain header, no Rooms switcher), and `who=` on
+`header()` / `page()` (the signed-in name: a person button to `/settings#account`, and a row in the phone's Rooms
+sheet). `settings_page` gives each section an id (`#account`); `appearance_section(ctx, synced=True)` says the theme
+follows the person when the page has a `prefs_url`.
+
 Turning identity on for the first time is one command:
 
 ```sh
@@ -54,9 +73,11 @@ TTY with none of these flags (and no `--yes`) it asks for a Tailscale login and 
 overwrites: on an existing file it validates it, refuses when another principal is the owner, and only adds the
 requested logins to the owner (a login another principal holds, or replacing a password, is refused). It also refuses
 to leave the owner with no way to sign in. Then it prints, per room in `--rooms`, the lines to paste
-(`MACHIYA_IDENTITY_FILE=<absolute path>`, `<PREFIX>_SIGNIN=1` when the owner has a password,
-`<PREFIX>_BIND_BEHIND_PROXY=1`; prefixes `KURA`, `NIWA`, `KANBAN`, `MCP`) and the next steps: mount the directory
-read-only, set `KURA_PUBLIC_URL` / `NIWA_PUBLIC_URL` / `KANBAN_BOARD_URL`, then `add`, `grant`, `token mint` and `pair`.
+(`MACHIYA_IDENTITY_FILE=<absolute path>`; with a password, `<PREFIX>_SIGNIN=1` and the room's public-URL setting
+(`KURA_PUBLIC_URL` / `NIWA_PUBLIC_URL` / `KANBAN_BOARD_URL`) to fill in; with a Tailscale or proxy login,
+`<PREFIX>_BIND_BEHIND_PROXY=1` for a Docker or sidecar setup; prefixes `KURA`, `NIWA`, `KANBAN`, `MCP`) and the next
+steps for the rooms asked for: mount the directory read-only, then (with `mcp`) `add`, `grant` and `token mint`, and
+(with `kura`) `pair` for Shiori.
 It never prints a password, hash or key. Exit codes: 0 done, 2 usage, 1 refused (nothing written).
 
 A room's owner gate, once it reads an identity file (`MACHIYA_IDENTITY_FILE`):
@@ -92,7 +113,7 @@ the client address, and returns `(status, [(header, value), ...], body bytes)`:
 |---|---|---|
 | `GET /signin` | `handle_get(ident, headers, query)` | the form (name, password, a hidden `next`) in the shared shell; 404 when sign-in is off |
 | `POST /signin` | `handle_post(ident, headers, body, client, origins)` | same-origin only (403); urlencoded, at most `MAX_FORM` (4 KB); 303 to the safe `next` with the session cookie; the page again with 401 (one message for a wrong name or password) or 429 (throttled) |
-| `POST /signout` | `handle_signout(ident, headers)` | same-origin only (403); clears the cookie, 303 to `/` |
+| `POST /signout` | `handle_signout(ident, headers)` | same-origin only (403); clears the cookie and (v0.13) the browser's HTTP cache (`Clear-Site-Data`), 303 to `/`; machiya.js empties the offline copies before posting |
 | `POST /api/pair` | `handle_pair(ident, headers, body, client)` | `{"code", "device"}` (JSON, at most 1 KB) → `{"token": "mcd_…", "principal"}` or `{"error"}` with 401/429; no cookie, so no same-origin rule |
 | `GET/PUT /api/prefs` | `handle_prefs(prefs, principal, method, headers, body, secure, origins)` | `{"prefs": {key: value}}`; a PUT merges (`null` removes), all or nothing |
 

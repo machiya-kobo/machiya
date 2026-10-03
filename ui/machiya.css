@@ -173,6 +173,15 @@ a.tag:hover { border-color: var(--room); color: var(--fg); text-decoration: none
 .empty { max-width: 520px; margin: var(--sp-6) auto; text-align: center; color: var(--muted); }
 .empty h2 { margin: 0 0 var(--sp-2); font-size: var(--fs-l); color: var(--fg2); }
 .empty p { margin: 0; font-size: var(--fs-s); }
+main.msg { margin-inline: auto; padding: 0 var(--gutter); }                      /* v0.13: shell.message() */
+.empty .actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: center; margin-top: var(--sp-4); }
+a.button { display: inline-block; padding: 8px 16px; border-radius: 8px; font: 600 var(--fs-s) var(--font);
+  text-decoration: none; color: var(--fg); background: var(--hl); }
+a.button.primary { color: var(--bg); background: var(--room, var(--blue)); }
+a.button:hover { filter: brightness(1.08); }
+/* task lists (vaultkit.vault render, v0.13): "- [ ]" items as disabled checkboxes, no bullet */
+li.task { list-style: none; }
+li.task > input[type=checkbox], li.task > p > input[type=checkbox] { margin: 0 .45em 0 -1.3em; vertical-align: -1px; }
 
 /* ---- reading: note bodies in the reading rooms --------------------------------------------------------------- */
 .nbody { font-size: var(--fs-l); line-height: 1.65; max-width: var(--measure); }

@@ -121,6 +121,97 @@ class VaultTest(unittest.TestCase):
         self.assertIn("New.md", self.v.notes)
 
 
+class SanitizeTest(unittest.TestCase):
+    """vaultkit.sanitize (v0.13): a note's HTML never runs, in a page or an API answer."""
+
+    def clean(self, markup, **kw):
+        from vaultkit.sanitize import clean
+        return clean(markup, **kw)
+
+    def test_scripts_handlers_and_frames_go(self):
+        for bad in ('<script>alert(1)</script>', '<img src=x onerror=alert(1)>', '<svg onload=alert(1)>',
+                    '<iframe src="https://e.example"></iframe>', '<style>*{}</style>', '<object data=x></object>',
+                    '<form action=/signout method=post><button>go</button></form>', '<script/>alert(1)',
+                    '<a href="javascript:alert(1)">x</a>', '<a href=" java\tscript:alert(1)">x</a>',
+                    '<a href="JAVASCRIPT:alert(1)">x</a>', '<a href="data:text/html,<script>1</script>">x</a>',
+                    '<img src="vbscript:x">', '<a href="//evil.example/">x</a>', '<div style="x" onclick="y">d</div>',
+                    '<input type="text" value="x" onfocus=alert(1) autofocus>', '<body onload=alert(1)>'):
+            out = self.clean(bad)
+            for word in ("script", "onerror", "onload", "onclick", "onfocus", "iframe", "javascript", "data:",
+                         "vbscript", "style", "evil", "<form", "<button", 'type="text"'):
+                self.assertNotIn(word, out.lower(), (bad, out))
+
+    def test_what_a_note_needs_stays(self):
+        keep = ('<p><a class="wikilink" href="/n/A%20B">A</a> <a href="https://x.example/?a=1&amp;b=2">x</a> '
+                '<a href="gemini://g.example/">g</a> <a href="obsidian://open?vault=v">o</a> <a href="#h">h</a></p>'
+                '<img src="/a/i.png" alt="i" width="200"><pre><code class="language-mermaid">a --&gt; b</code></pre>'
+                '<table border="1"><tr><td align="right">1</td></tr></table>')
+        self.assertEqual(self.clean(keep), keep)
+        api = self.clean(keep, base="https://kura.example", schemes=("http", "https", "mailto", "obsidian"))
+        self.assertIn('href="https://kura.example/n/A%20B"', api)
+        self.assertNotIn("gemini:", api)
+
+    def test_task_boxes_are_disabled_checkboxes_only(self):
+        self.assertEqual(self.clean('<input type="checkbox" checked>'), '<input type="checkbox" checked disabled>')
+        self.assertEqual(self.clean('<input type="checkbox" name="n" onclick="x">'), '<input type="checkbox" disabled>')
+        self.assertEqual(self.clean('<input type="image" src="x">'), "")
+
+    def test_output_is_balanced(self):
+        self.assertEqual(self.clean("<p><b>x</p>y"), "<p><b>x</b></p>y")
+        self.assertEqual(self.clean("<div><em>x"), "<div><em>x</em></div>")
+        self.assertEqual(self.clean("</div>x"), "x")
+
+    def test_autolink(self):
+        out = self.clean("<p>see https://e.example/a_(b)). or gopher://g.example:70/1x, "
+                         "<code>http://no.example</code> <a href=\"https://a.example\">https://a.example</a></p>",
+                         autolink=True)
+        self.assertIn('<a href="https://e.example/a_(b)">https://e.example/a_(b)</a>).', out)
+        self.assertIn('<a href="gopher://g.example:70/1x">', out)
+        self.assertIn("<code>http://no.example</code>", out)
+        self.assertEqual(out.count("a.example"), 2)                      # an existing link isn't linked again
+        self.assertNotIn("<a", self.clean("<p>https://e.example</p>"))   # off unless asked
+
+
+class RenderSafetyTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.v = vaultkit.Vault(self.tmp, git=lambda *a: "")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def render(self, text, **kw):
+        return self.v.render(vaultkit.Note("N.md", {}, text), "", **kw)
+
+    def test_raw_html_in_a_note_never_runs(self):
+        out = self.render('hi <script>window.x=1</script><img src=x onerror="alert(1)">\n\n<div onclick="y">d</div>')
+        self.assertNotIn("script", out)
+        self.assertNotIn("onerror", out)
+        self.assertNotIn("onclick", out)
+        self.assertIn("<div>d</div>", out)
+
+    def test_task_lists_and_autolinks(self):
+        out = self.render("- [ ] todo\n- [x] done\n- plain\n\nread https://e.example/x.")
+        self.assertIn('<li class="task"><input type="checkbox" disabled> todo</li>', out)
+        self.assertIn('<li class="task"><input type="checkbox" checked disabled> done</li>', out)
+        self.assertIn("<li>plain</li>", out)
+        self.assertIn('<a href="https://e.example/x">https://e.example/x</a>.', out)
+
+    def test_smallweb_autolinks(self):
+        out = self.render("<gemini://g.example/a> and `<gopher://code.example>`\n\n```\n<gemini://fence.example>\n```")
+        self.assertIn('<a href="gemini://g.example/a">gemini://g.example/a</a>', out)
+        self.assertIn("<code>&lt;gopher://code.example&gt;</code>", out)
+        self.assertIn("&lt;gemini://fence.example&gt;", out)
+
+    def test_table_alignment_survives(self):
+        out = self.render("| a | b |\n|:-|-:|\n| 1 | 2 |")
+        self.assertIn('<td align="right">2</td>', out)
+        self.assertNotIn("style", out)
+
+    def test_retro_tables_keep_their_border(self):
+        self.assertIn('<table border="1" cellpadding="4" cellspacing="0">', self.render("| a |\n|-|\n| 1 |", retro=True))
+
+
 class TagsTest(unittest.TestCase):
     def test_scalar_tags(self):
         from vaultkit.front import tags_of
@@ -379,7 +470,59 @@ class ShellTest(unittest.TestCase):
         self.assertIn('data-set="previewPane" data-cookie checked', page)
         self.assertIn('data-set="show_hister">', page)                                         # off
         self.assertNotIn('show_kura', page)                                                     # not itself
-        self.assertIn("<h2>About</h2>", page)
+        self.assertIn('<h2 id="about">About</h2>', page)
+
+class ShellPagesTest(unittest.TestCase):
+    """v0.13: titles, security headers, message pages, the signed-in person, the status bar, the prefs footnote."""
+
+    def setUp(self):
+        from vaultkit import shell
+        self.shell = shell
+
+    def test_titles(self):
+        self.assertEqual(self.shell.title("kura", "Lantern"), "Lantern - Kura")
+        self.assertEqual(self.shell.title("konbini"), "Konbini")
+
+    def test_security_headers(self):
+        h = dict(self.shell.security_headers())
+        csp = h["Content-Security-Policy"]
+        self.assertIn("script-src 'self';", csp)
+        self.assertNotIn("unsafe-eval", csp)
+        self.assertNotIn("'unsafe-inline'", csp.split("script-src")[1].split(";")[0])
+        for part in ("object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'self'"):
+            self.assertIn(part, csp)
+        self.assertEqual((h["X-Content-Type-Options"], h["Referrer-Policy"]), ("nosniff", "same-origin"))
+
+    def test_messages(self):
+        nf = self.shell.not_found("niwa", "/n/<x>")
+        self.assertIn("<h2>Not Found</h2>", nf)
+        self.assertIn("/n/&lt;x&gt;", nf)
+        self.assertIn('<a class="button primary" href="/">Go to Niwa</a>', nf)
+        off = self.shell.offline("konbini")
+        self.assertNotIn("Tailscale", off)
+        self.assertIn("Konbini can&#x27;t be reached", off)
+
+    def test_who_is_signed_in(self):
+        links = {"kura": "https://k", "niwa": "https://n"}
+        head = self.shell.header("kura", [], "", links, who="me<")
+        self.assertIn('href="/settings#account" title="Signed in as me&lt;"', head)
+        self.assertNotIn("Signed in", self.shell.header("kura", [], "", links))
+        self.assertNotIn("Signed in", self.shell.header("kura", [], "", links, settings=False, who="me"))
+        page = self.shell.page(self.shell.Prefs(), "kura", "t", "", tabs=[("/", "home", "Home")], links=links, who="me")
+        self.assertIn('<a href="/settings#account" class="who">', page)
+        self.assertIn("<small>signed in</small>", page)
+
+    def test_status_bar_follows_the_theme(self):
+        day = self.shell.page(self.shell.Prefs("day"), "kura", "t", "")
+        self.assertIn('status-bar-style" content="default"', day)
+        for theme in ("night", "system"):
+            self.assertIn('status-bar-style" content="black-translucent"', self.shell.page(self.shell.Prefs(theme), "kura", "t", ""))
+
+    def test_appearance_footnote(self):
+        ctx = self.shell.Prefs()
+        self.assertEqual(self.shell.appearance_section(ctx)[2], "Kept in this browser only.")
+        self.assertIn("your other devices", self.shell.appearance_section(ctx, synced=True)[2])
+
 
 class SourceLinkTest(unittest.TestCase):
     """MACHIYA_SOURCE_URL: the AGPL section 13 offer of the source, in the footer and in About, only when set."""

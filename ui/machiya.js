@@ -1,5 +1,5 @@
 // machiya.js: shared behaviour for Machiya's web rooms (docs/ui.md). Loaded as a module on every page, before the
-// app's own script. It does five things:
+// app's own script. It does these things:
 //  1. settings: every [data-set] control on /settings saves to localStorage under "<room>Settings" (per device, like
 //     Shiori); controls marked data-cookie also set a cookie of the same name, which the server reads for the first
 //     render (theme, textSize, …). Theme and text size apply at once.
@@ -15,6 +15,8 @@
 //     theme and text size follow the person. On load the server's `theme` / `text_size` replace the cookies when they
 //     differ (applied without a reload); a change on /settings is also PUT there. Cookies stay the fast path for the
 //     first paint and offline; any failure (offline, 401, 404) is silent. Only known values are ever applied.
+//  7. sign-out (v0.13): a form posting to /signout first empties the service worker's offline copies (CLEAR_OFFLINE),
+//     so whoever uses this device next can't read what was kept; the server's answer also clears the HTTP cache.
 // Apps can listen for `machiya:setting` events ({detail: {key, value}}) to react to their own settings.
 
 const room = document.body.dataset.room || "app";
@@ -146,6 +148,15 @@ function askWorker(msg) {
     ch.port1.onmessage = (ev) => resolve(ev.data);
     w.postMessage(msg, [ch.port2]);
     setTimeout(() => resolve(null), 5000);
+  });
+}
+// sign-out (7.): the offline copies go first; at most a second's wait, then the form goes anyway
+for (const form of document.querySelectorAll('form[action="/signout"]')) {
+  form.addEventListener("submit", (ev) => {
+    if (form.dataset.cleared) return;
+    ev.preventDefault();
+    const go = () => { form.dataset.cleared = "1"; form.submit(); };
+    Promise.race([askWorker({ type: "CLEAR_OFFLINE" }), new Promise((r) => setTimeout(r, 1000))]).then(go, go);
   });
 }
 const offlineRow = document.querySelector(".offline-copies");

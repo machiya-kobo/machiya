@@ -1099,17 +1099,19 @@ def setup(path, args, interactive=None):
         except IdentityError as e:
             return refuse("not written: %s" % e)
 
-    signin = bool(p.get("password"))
+    signin, behind_proxy = bool(p.get("password")), bool(p.get("tailscale") or p.get("proxy"))
     print("\n# Paste into each room's settings (.env or the container's environment):")
     for room in rooms:
-        prefix = SETUP_ROOMS[room][0]
+        prefix, url = SETUP_ROOMS[room]
         print("\n# %s" % room.capitalize())
         print("MACHIYA_IDENTITY_FILE=%s" % path)
         if signin:
             print("%s_SIGNIN=1" % prefix)
-        print("# (Docker or a sidecar: the proxy is the only way in)")
-        print("%s_BIND_BEHIND_PROXY=1" % prefix)
-    urls = [SETUP_ROOMS[r][1] for r in rooms if SETUP_ROOMS[r][1]]
+            if url:
+                print("%s=http://localhost:PORT    # the address people open; sign-in checks it" % url)
+        if behind_proxy:
+            print("%s_BIND_BEHIND_PROXY=1    # Docker or a sidecar: Tailscale or the proxy is the only way in" % prefix)
+    urls = [SETUP_ROOMS[r][1] for r in rooms if SETUP_ROOMS[r][1]] if signin else []
     cli = "python3 -m vaultkit.identity --file %s" % path
     print("\nNotes:")
     print("- Mount the directory, not the file, read-only into each room at the same path:")
@@ -1117,12 +1119,19 @@ def setup(path, args, interactive=None):
     print("  (the CLI replaces the file atomically; a file mount would keep the old one). The directory is 0700 and")
     print("  the files 0600: the rooms' user must be able to read them (chown -R, or chgrp -R and g+rX).")
     if urls:
-        print("- Set each room's public URL (%s), so sign-in works over plain http." % ", ".join(urls))
-    print("- Next steps:")
-    print("    %s add mcp --kind agent" % cli)
-    print("    %s grant mcp konbini read write" % cli)
-    print("    %s token mint mcp --label mcp" % cli)
-    print("    %s pair %s --label phone     # a one-time code for Shiori" % (cli, owner))
+        print("- Replace PORT in %s with each room's real address (same-origin checks compare it)." % ", ".join(urls))
+    steps = []
+    if "mcp" in rooms:
+        steps.append("%s add mcp --kind agent" % cli)
+        if "konbini" in rooms:
+            steps.append("%s grant mcp konbini read write" % cli)
+        steps.append("%s token mint mcp --label mcp" % cli)
+    if "kura" in rooms:
+        steps.append("%s pair %s --label phone     # a one-time code for Shiori" % (cli, owner))
+    if steps:
+        print("- Next steps:")
+        for line in steps:
+            print("    " + line)
     return 0
 
 

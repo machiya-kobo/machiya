@@ -163,7 +163,7 @@ def page(room, next="/", error="", name="", ctx=None, action="/signin"):
     e = shell.e
     alert = '<p class="signin-error" role="alert">%s</p>' % e(error) if error else ""
     body = (
-        '%s<main class="signin"><h1>Sign in</h1>%s'
+        '%s<main class="signin"><h1>Sign In</h1>%s'
         '<form class="group" method="post" action="%s">'
         '<input type="hidden" name="next" value="%s">'
         '<label class="item"><span>Name</span><input name="name" value="%s" required maxlength="64" '
@@ -173,9 +173,25 @@ def page(room, next="/", error="", name="", ctx=None, action="/signin"):
         '<button type="submit">Sign In</button></form>'
         '<p class="footnote">You stay signed in on this browser until you sign out or stop visiting for a while.</p>'
         '</main>'
-    ) % (shell.header(room, [], "", shell.rooms(), settings=False), alert, e(action), e(safe_next(next)), e(name),
+    ) % (shell.header(room, [], "", {}, settings=False), alert, e(action), e(safe_next(next)), e(name),
          "" if name else " autofocus", " autofocus" if name else "")
-    return shell.page(ctx, room, "Sign In", body, manifest=False)
+    return shell.page(ctx, room, shell.title(room, "Sign In"), body, links={}, manifest=False)
+
+
+def needed(room, next="/", ctx=None, signin=True):
+    """The 401 page (v0.13) for a browser nobody is signed in on: the room's plain header (no nav, no Rooms switcher:
+    nothing about the house before anyone is known) and the way in. signin=False (Tailscale or a proxy only): no
+    form to offer, so it says how this room knows people instead. Serve with PAGE_HEADERS."""
+    ctx = ctx or shell.Prefs()
+    _, name, _, _ = shell.room_info(room)
+    if signin:
+        body = shell.message("Sign In", "%s is private. Sign in to continue." % name,
+                             [("/signin?next=" + quote(safe_next(next), safe=""), "Sign In")])
+    else:
+        body = shell.message("Who Are You?", "%s is private and doesn't know who you are. Open it through Tailscale "
+                                             "or the sign-in proxy it trusts." % name)
+    return shell.page(ctx, room, shell.title(room, "Sign In"), shell.header(room, [], "", {}, settings=False) + body,
+                      links={}, manifest=False)
 
 
 def _page(identity, headers, status, next="/", error="", name=""):
@@ -231,12 +247,15 @@ def handle_post(identity, headers, body, client="", origins=()):
 
 
 def handle_signout(identity, headers, origins=()):
-    """POST /signout: same-origin only (403); clears the session cookie and goes to /."""
+    """POST /signout: same-origin only (403); clears the session cookie and goes to /. v0.13: also asks the browser to
+    drop its HTTP cache (Clear-Site-Data, honoured on https and localhost); machiya.js empties the service worker's
+    offline copies before it posts the form, so the next person on this device can't read them."""
     if identity is None:
         return _text(404, "not found")
     if not same_origin(headers, identity.secure, origins):
         return _text(403, "cross-site sign-out refused")
-    return _redirect("/", identity.sign_out())
+    status, headers_out, body = _redirect("/", identity.sign_out())
+    return status, headers_out + [("Clear-Site-Data", '"cache"')], body
 
 
 def handle_pair(identity, headers, body, client=""):

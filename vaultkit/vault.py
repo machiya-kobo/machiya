@@ -22,11 +22,14 @@ import markdown
 
 from .git import Git
 from .notes import FRONT_RE, LINK_RE, Note, e, read_notes
+from .sanitize import clean
 
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
 EMBED_RE = re.compile(r"!\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]")
 MDIMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 CALLOUT_RE = re.compile(r"^> \[!(\w+)\][+-]?[ \t]*(.*)$", re.M)
+TASK_RE = re.compile(r"<li>(<p>)?\[([ xX])\] ")
+SMALLWEB_AUTOLINK_RE = re.compile(r"<((?:gemini|gopher)://[^\s<>\"']+)>", re.I)   # Markdown autolinks only http(s)
 HIDDEN = ("Templates/",)
 IGNORED = ("CLAUDE.md",)            # agent instructions, not notes
 
@@ -112,7 +115,9 @@ class Vault:
     # -- rendering -----------------------------------------------------
 
     def render(self, note, base, retro=False, mode="garden", prefix=""):
-        """prefix (v0.8): a path put before /n/ and /a/ (Kura's other vaults: "/v/work"); "" = unchanged output."""
+        """prefix (v0.8): a path put before /n/ and /a/ (Kura's other vaults: "/v/work"); "" = unchanged output.
+        The result is clean (v0.13, vaultkit.sanitize): raw HTML in a note never runs; "- [ ]" / "- [x]" items are
+        checkboxes (class "task"), and bare URLs in the text are links."""
         self.index()
         body = FRONT_RE.sub("", note.text, count=1)
 
@@ -151,7 +156,11 @@ class Vault:
         body = LINK_RE.sub(link, body)
         body = CALLOUT_RE.sub(callout, body)
         out = markdown.markdown(body, extensions=["tables", "fenced_code", "sane_lists", "nl2br"],
-                                output_format="html")
+                                extension_configs={"tables": {"use_align_attribute": True}}, output_format="html")
+        out = TASK_RE.sub(lambda m: '<li class="task">%s<input type="checkbox"%s disabled> '
+                          % (m.group(1) or "", " checked" if m.group(2) != " " else ""), out)
+        out = SMALLWEB_AUTOLINK_RE.sub(lambda m: '<a href="%s">%s</a>' % (m.group(1), m.group(1)), out)
+        out = clean(out, autolink=True)
         if retro:
             out = out.replace("<table>", '<table border="1" cellpadding="4" cellspacing="0">')
         return out

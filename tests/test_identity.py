@@ -739,9 +739,11 @@ class CliTest(unittest.TestCase):
         for prefix in ("KURA", "NIWA", "KANBAN", "MCP"):
             self.assertIn("%s_BIND_BEHIND_PROXY=1" % prefix, out)
             self.assertNotIn("%s_SIGNIN" % prefix, out)                              # no password, no sign-in
-        self.assertIn("(Docker or a sidecar: the proxy is the only way in)", out)
-        for setting in ("KURA_PUBLIC_URL", "NIWA_PUBLIC_URL", "KANBAN_BOARD_URL", "token mint", "grant", "pair"):
+        self.assertIn("Docker or a sidecar: Tailscale or the proxy is the only way in", out)
+        for setting in ("token mint", "grant mcp konbini", "pair"):
             self.assertIn(setting, out)
+        for setting in ("KURA_PUBLIC_URL", "NIWA_PUBLIC_URL", "KANBAN_BOARD_URL"):     # only sign-in needs them
+            self.assertNotIn(setting, out)
         with open(key) as f:
             self.assertNotIn(f.read().strip(), out + err)                           # no secret printed
         self.assertNotIn("scrypt", out + err)
@@ -752,6 +754,10 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         for prefix in ("KURA", "NIWA", "KANBAN", "MCP"):
             self.assertIn("%s_SIGNIN=1" % prefix, out)
+            self.assertNotIn("%s_BIND_BEHIND_PROXY" % prefix, out)                  # a password alone: no proxy
+        for setting in ("KURA_PUBLIC_URL=", "NIWA_PUBLIC_URL=", "KANBAN_BOARD_URL="):
+            self.assertIn(setting, out)
+        self.assertNotIn("MCP_PUBLIC", out)
         self.assertNotIn(pw, out + err)
         self.assertNotIn("scrypt", out + err)
         r = idn.Identity(self.path, "kura", signin=True).sign_in("me", pw, "10.0.0.1")
@@ -821,8 +827,8 @@ class CliTest(unittest.TestCase):
         code, out, err = self.setup_cli("--tailscale", "me@example.com", "--rooms", "kura")
         self.assertEqual(code, 0, err)
         self.assertIn("KURA_BIND_BEHIND_PROXY=1", out)
-        self.assertIn("KURA_PUBLIC_URL", out)
-        for other in ("NIWA", "KANBAN", "MCP_"):
+        self.assertIn("pair owner", out)
+        for other in ("NIWA", "KANBAN", "MCP_", "konbini", "add mcp"):          # nothing about rooms not asked for
             self.assertNotIn(other, out)
         for bad in (("--rooms", "kura,hister"), ("--tailscale",), ("--owner", "Not_A_Name"), ("--frobnicate",)):
             self.assertEqual(self.setup_cli(*bad)[0], 2, bad)

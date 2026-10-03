@@ -93,6 +93,11 @@ machiyaSW({"version": "<room build>-<core hash>", "precache": [...], "notes": {"
 
 **Settings:** `shell.offline_row()` in the room's section: "Offline Copies", with the counts from the worker ("200 notes (1 pinned), 3 pages") and a **Clear Offline Copies** button. `machiya.js` sends `OFFLINE_STATS` / `CLEAR_OFFLINE` over a `MessageChannel`. Name it in the section's footnote.
 
+**Signing out** (v0.13): machiya.js catches every `form[action="/signout"]`, sends the worker `CLEAR_OFFLINE` (waiting
+at most a second) and then posts the form, so the next person on the device can't read what was kept; the server's
+answer also carries `Clear-Site-Data: "cache"`. A room's network-only list should also cover pages that show
+unpublished or owner-only things (Niwa's `/queue` and `/stream`).
+
 **Messages:** `SKIP_WAITING`, `CLEAR_OFFLINE` → `{cleared}`, `OFFLINE_STATS` → `{notes, pinned, pages, assets}`, `SYNC_PINS` → `{synced}` (forces a pins fetch).
 
 **Expected behaviour** (what to check in a browser with a test vault):

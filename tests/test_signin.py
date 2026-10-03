@@ -276,6 +276,30 @@ class SignInTest(Base):
         self.assertEqual((status, self.cookies(hdrs)), (403, []))
         self.assertEqual(signin.handle_signout(self.ident, headers(Host=HOST))[0], 403)
 
+    def test_signout_clears_the_http_cache(self):
+        _, hdrs, _ = signin.handle_signout(self.ident, headers(Host=HOST, Origin="https://" + HOST))
+        self.assertEqual(dict(hdrs)["Clear-Site-Data"], '"cache"')
+        _, hdrs, _ = signin.handle_signout(self.ident, headers(Host=HOST, Origin="https://evil.example"))
+        self.assertNotIn("Clear-Site-Data", dict(hdrs))
+
+    def test_needed_page_says_nothing_about_the_house(self):
+        os.environ["MACHIYA_ROOMS"] = "kura=https://k.example,niwa=https://secret-garden.example"
+        try:
+            page = signin.needed("niwa", "/n/a%20b?x=1")
+            form = signin.page("niwa")
+        finally:
+            del os.environ["MACHIYA_ROOMS"]
+        for html in (page, form):
+            self.assertNotIn("k.example", html)
+            self.assertNotIn("secret-garden", html)
+            self.assertNotIn('class="rooms"', html)
+            self.assertIn("<title>Sign In - Niwa</title>", html)
+        self.assertIn('href="/signin?next=%2Fn%2Fa%2520b%3Fx%3D1"', page)
+        self.assertIn("<h1>Sign In</h1>", form)
+        other = signin.needed("kura", signin=False)
+        self.assertNotIn("/signin", other)
+        self.assertIn("Tailscale", other)
+
 
 class PairTest(Base):
     def pair(self, body, client="10.0.3.1", ctype="application/json"):

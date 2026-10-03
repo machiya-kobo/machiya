@@ -34,6 +34,7 @@ GLYPH = {   # one glyph per room everywhere (Shiori uses SF Symbols for the same
     "kura": _SVG % '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M8 7h7"/>',     # book
     "hister": _SVG % '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',                         # history
     "searxng": _SVG % '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',  # web
+    "person": _SVG % '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',               # who's signed in
     "rooms": _SVG % '<path d="M3 11 12 4l9 7v9H3z"/><path d="M9 20v-5h6v5"/>',                           # the house
     "gear": _SVG % '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1'
                    'a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0'
@@ -123,6 +124,52 @@ def handoff(q, links=None):
             'Search everything in Shiori<span class="arrow" aria-hidden="true">›</span></a>' % (e(links["shiori"]), quote(q, safe="")))
 
 
+# -- titles, headers, messages (v0.13) ---------------------------------------------------------------------------------
+
+def title(room, what=""):
+    """Every page's <title>: "What - Room" ("Lantern - Kura", "Not Found - Konbini"), the room alone for its home."""
+    _, name, _, _ = room_info(room)
+    return "%s - %s" % (what, name) if what else name
+
+
+# Every HTML page a room serves: what a note's body may do is decided by the sanitizer (vaultkit.sanitize) and, behind
+# it, by this policy. Scripts only from the room itself (no inline script, no handler attributes); images from anywhere
+# a note links to; nothing framed except by the room itself; forms post only to the room.
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; "
+       "media-src 'self' https: http:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; "
+       "form-action 'self'; frame-src 'self'; frame-ancestors 'self'")
+
+
+def security_headers(csp=CSP):
+    """[(header, value)] for every HTML page (v0.13): the CSP above, no MIME sniffing, the path never leaves the
+    room in a Referer. A room adds these to its own (Content-Type, Cache-Control)."""
+    return [("Content-Security-Policy", csp), ("X-Content-Type-Options", "nosniff"),
+            ("Referrer-Policy", "same-origin")]
+
+
+def message(heading, text="", actions=()):
+    """A short page body (not found, offline, sign in first): a heading, a sentence and a row of buttons
+    [(href, label)], centred (machiya.css main.msg, .empty). The first action is the main one."""
+    buttons = "".join('<a class="button%s" href="%s">%s</a>' % ("" if i else " primary", e(h), e(l))
+                      for i, (h, l) in enumerate(actions))
+    return ('<main class="msg"><div class="empty"><h2>%s</h2>%s%s</div></main>'
+            % (e(heading), ('<p>%s</p>' % e(text)) if text else "", ('<p class="actions">%s</p>' % buttons) if buttons else ""))
+
+
+def not_found(room, what=""):
+    """The body of a 404: what wasn't found, and the way home."""
+    _, name, _, _ = room_info(room)
+    return message("Not Found", ("There's nothing at %s." % what) if what else "There's nothing here.",
+                   [("/", "Go to %s" % name)])
+
+
+def offline(room):
+    """The body of the precached /offline page: no status line, no claims about the network the person uses."""
+    _, name, _, _ = room_info(room)
+    return message("Offline", "%s can't be reached right now. Pages you've opened before are still here; "
+                              "this one isn't yet." % name, [("/", "Try Again")])
+
+
 # -- header, tabs, footer ----------------------------------------------------------------------------------------
 
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui")   # vendored: app/vaultkit/ui
@@ -181,9 +228,10 @@ def mark(room):
     return '<span class="seal icon" data-room="%s" title="%s (%s)" aria-hidden="true">%s</span>' % (room, e(name), seal, seal)
 
 
-def switcher(room, links, cls="rooms", settings=False):
+def switcher(room, links, cls="rooms", settings=False, who=""):
     """The Rooms menu: the rooms front to back, then the neighbours; the current room is plain text. With settings,
-    a Settings row closes the menu (phones, where the header's gear is hidden)."""
+    a Settings row closes the menu (phones, where the header's gear is hidden), and `who` (the signed-in name) a row
+    for the account above it."""
     rows = []
     for key, name, seal, what in ROOMS:
         if key == room:
@@ -194,31 +242,38 @@ def switcher(room, links, cls="rooms", settings=False):
     nb = ['<a href="%s/" data-room="%s"><span class="seal icon neighbour-icon" data-room="%s" aria-hidden="true"></span>%s<small>%s</small></a>'
           % (e(links[k]), k, k, e(n), e(w)) for k, n, w in NEIGHBOURS if k in links]      # their own logos (machiya.css)
     gear = ('<hr><a href="/settings"><span class="neighbour">%s</span>Settings</a>' % GLYPH["gear"]) if settings else ""
+    if settings and who:
+        gear = ('<hr><a href="/settings#account" class="who"><span class="neighbour">%s</span>%s<small>signed in</small></a>'
+                % (GLYPH["person"], e(who))) + gear[4:]
     if len(rows) <= 1 and not nb and not settings:
         return ""
     return ('<details class="%s"><summary title="Rooms" aria-label="Rooms">%s</summary><nav class="menu" aria-label="Rooms">%s%s%s%s</nav></details>'
             % (cls, GLYPH["rooms"], "".join(rows), "<hr>" if nb else "", "".join(nb), gear))
 
 
-def header(room, nav, current, links, subtitle="", tools="", settings=True):
-    """nav = [(href, key, label)]; tools = extra HTML before the switcher (e.g. a search box)."""
+def header(room, nav, current, links, subtitle="", tools="", settings=True, who=""):
+    """nav = [(href, key, label)]; tools = extra HTML before the switcher (e.g. a search box); who = the signed-in
+    name (v0.13): a person button before the gear, to the Account settings."""
     _, name, seal, _ = room_info(room)
     items = "".join(('<b class="here">%s</b>' % e(label)) if key == current else '<a href="%s">%s</a>' % (e(href), e(label))
                     for href, key, label in nav)
     gear = ('<a class="iconbtn gear" href="/settings" title="Settings" aria-label="Settings">%s</a>' % GLYPH["gear"]) if settings else ""
+    if who and settings:
+        gear = ('<a class="iconbtn who" href="/settings#account" title="Signed in as %s" aria-label="Signed in as %s">%s</a>'
+                % (e(who), e(who), GLYPH["person"])) + gear
     return ('<header class="top"><div class="topbar"><a class="brand" href="/">%s'
             '<span class="word">%s</span></a>%s<nav class="nav">%s</nav><div class="tools">%s%s%s</div></div></header>\n'
             % (mark(room), e(name), ('<span class="subtitle">%s</span>' % e(subtitle)) if subtitle else "", items, tools,
                switcher(room, links), gear))
 
 
-def tabbar(tabs, current, room, links, icons=None):
+def tabbar(tabs, current, room, links, icons=None, who=""):
     """Phones: the room's own tabs (at most four: [(href, key, label)]) plus a Rooms tab when there are rooms."""
     icons = icons or {}
     out = ['<a href="%s"%s>%s<span>%s</span></a>' % (e(href), ' class="here" aria-current="page"' if key == current else "",
                                                      icons.get(key, GLYPH.get(key, "")), e(label))
            for href, key, label in tabs[:4]]
-    menu = switcher(room, links, cls="rooms", settings=True)
+    menu = switcher(room, links, cls="rooms", settings=True, who=who)
     if menu:
         out.append(menu.replace('<summary title="Rooms" aria-label="Rooms">%s</summary>' % GLYPH["rooms"],
                                 '<summary title="Rooms" aria-label="Rooms">%s<span>Rooms</span></summary>' % GLYPH["rooms"], 1))
@@ -250,10 +305,11 @@ def prefs_meta(url):
 
 
 def page(ctx, room, title, body, tabs=(), current="", links=None, head="", stylesheets=(), scripts=(), manifest=True,
-         icons=None, prefs_url=""):
+         icons=None, prefs_url="", who=""):
     """The HTML5 document. stylesheets/scripts: the app's own (machiya.css and machiya.js come first); icons: the SVG
     for each tab key (the room's own glyphs; GLYPH covers the rooms, rooms, gear). prefs_url: the room's /api/prefs
-    when this request has a principal with preferences (prefs_meta); machiya.js then syncs theme and text size."""
+    when this request has a principal with preferences (prefs_meta); machiya.js then syncs theme and text size.
+    who (v0.13): the signed-in name, for the phone's Rooms sheet (pass the same to header())."""
     links = links if links is not None else rooms()
     theme = getattr(ctx, "theme", "system")
     theme = "system" if theme == "auto" else theme
@@ -276,25 +332,26 @@ def page(ctx, room, title, body, tabs=(), current="", links=None, head="", style
         '<link rel="icon" href="/static/icons/%s.svg" type="image/svg+xml">\n'
         '<link rel="apple-touch-icon" href="/static/icons/%s-apple-180.png">\n'
         '<meta name="apple-mobile-web-app-capable" content="yes">\n<meta name="mobile-web-app-capable" content="yes">\n'
-        '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">\n'
+        '<meta name="apple-mobile-web-app-status-bar-style" content="%s">\n'
         '<meta name="apple-mobile-web-app-title" content="%s">\n%s%s%s%s'
         '</head>\n<body class="theme-%s room-%s" data-room="%s" data-text="%s"%s>\n%s\n%s\n</body>\n</html>\n'
     ) % (e(title), scheme, colors,
          '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">\n' if manifest else "",
-         room, room, e(name), prefs_meta(prefs_url) if prefs_url else "", css, js, head, theme, room, room, e(text),
+         room, room, "default" if theme == "day" else "black-translucent", e(name), prefs_meta(prefs_url) if prefs_url else "", css, js, head, theme, room, room, e(text),
          (' data-cookie-domain="%s"' % e(COOKIE_DOMAIN)) if COOKIE_DOMAIN else "", body,
-         tabbar(tabs, current, room, links, icons) if tabs else "")
+         tabbar(tabs, current, room, links, icons, who) if tabs else "")
 
 
 # -- /settings ----------------------------------------------------------------------------------------------------
 
-def appearance_section(ctx):
+def appearance_section(ctx, synced=False):
+    """synced (v0.13): the page has a prefs_url, so theme and text size also follow the person to other devices."""
     theme = getattr(ctx, "theme", "system")
     text = getattr(ctx, "text", "standard")
     return ("Appearance", [
         select("Theme", "theme", THEMES, theme, cookie=True),
         select("Text Size", "textSize", TEXT_SIZES, text, cookie=True),
-    ], "Kept in this browser only.")
+    ], "Saved to your account, so your other devices follow." if synced else "Kept in this browser only.")
 
 
 def toggle(label, key, on, cookie=False, disabled=False):
@@ -347,7 +404,7 @@ def settings_page(sections, room):
         if not sec:
             continue
         title, items, note = sec
-        out.append('<h2>%s</h2><div class="group">%s</div>%s' % (e(title), "".join(items),
+        out.append('<h2 id="%s">%s</h2><div class="group">%s</div>%s' % (e(title.lower().replace(" ", "-")), e(title), "".join(items),
                                                                 ('<p class="footnote">%s</p>' % e(note)) if note else ""))
     out.append("</main>")
     return "".join(out)
