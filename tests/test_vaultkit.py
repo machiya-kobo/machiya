@@ -493,6 +493,17 @@ class ShellPagesTest(unittest.TestCase):
             self.assertIn(part, csp)
         self.assertEqual((h["X-Content-Type-Options"], h["Referrer-Policy"]), ("nosniff", "same-origin"))
 
+    def test_manifest_colors_follow_the_device(self):
+        mc, night, day = self.shell.manifest_colors, self.shell.NIGHT, self.shell.DAY
+        self.assertEqual(mc("night", {"Sec-CH-Prefers-Color-Scheme": "light"}), night)     # a choice wins
+        self.assertEqual(mc("day", {}), day)
+        light = mc("system", {"Sec-CH-Prefers-Color-Scheme": '"light"'})
+        self.assertEqual((light["background_color"], light["theme_color"]), (day["background_color"], day["theme_color"]))
+        self.assertEqual(light["user_preferences"], {"color_scheme_dark": night})
+        for headers in ({}, None, {"Sec-CH-Prefers-Color-Scheme": "dark"}, {"Sec-CH-Prefers-Color-Scheme": "weird"}):
+            self.assertEqual(mc("system", headers)["background_color"], night["background_color"], headers)
+        self.assertIn(("Accept-CH", "Sec-CH-Prefers-Color-Scheme"), self.shell.security_headers())
+
     def test_messages(self):
         nf = self.shell.not_found("niwa", "/n/<x>")
         self.assertIn("<h2>Not Found</h2>", nf)

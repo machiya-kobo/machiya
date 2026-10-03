@@ -142,9 +142,35 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 
 def security_headers(csp=CSP):
     """[(header, value)] for every HTML page (v0.13): the CSP above, no MIME sniffing, the path never leaves the
-    room in a Referer. A room adds these to its own (Content-Type, Cache-Control)."""
+    room in a Referer. A room adds these to its own (Content-Type, Cache-Control). v0.14: also Accept-CH for the
+    device's colour scheme, so the browser sends Sec-CH-Prefers-Color-Scheme with later requests (the manifest's)."""
     return [("Content-Security-Policy", csp), ("X-Content-Type-Options", "nosniff"),
-            ("Referrer-Policy", "same-origin")]
+            ("Referrer-Policy", "same-origin"), ("Accept-CH", COLOR_HINT)]
+
+
+# -- the manifest's colours (v0.14) -------------------------------------------------------------------------------------
+
+COLOR_HINT = "Sec-CH-Prefers-Color-Scheme"
+NIGHT = {"background_color": "#1a1b26", "theme_color": "#16161e"}
+DAY = {"background_color": "#e1e2e7", "theme_color": "#d0d5e3"}
+MANIFEST_VARY = "Cookie, " + COLOR_HINT      # the manifest's Vary header: the theme cookie and the hint choose it
+
+
+def manifest_colors(theme, headers=None):
+    """The manifest's background_color and theme_color: what an installed app's splash screen and title bar use.
+    Night or Day as chosen in Settings; with System, the device's own scheme when the browser says it
+    (Sec-CH-Prefers-Color-Scheme, which security_headers' Accept-CH asks for), else Night. With System the answer also
+    carries user_preferences.color_scheme_dark (the manifest's per-scheme colours, where a browser supports them), so
+    a light install still opens dark when the device is dark. Serve the manifest with Vary: MANIFEST_VARY."""
+    theme = "system" if theme == "auto" else theme
+    if theme == "night":
+        return dict(NIGHT)
+    if theme == "day":
+        return dict(DAY)
+    hint = ((headers.get(COLOR_HINT) if headers is not None else "") or "").strip().strip('"').lower()
+    out = dict(DAY if hint == "light" else NIGHT)
+    out["user_preferences"] = {"color_scheme_dark": dict(NIGHT)}
+    return out
 
 
 def message(heading, text="", actions=()):

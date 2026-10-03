@@ -52,6 +52,13 @@ Behind the sanitizer, every HTML page a room serves carries `shell.security_head
 anywhere; forms and frames only to and by the room), `X-Content-Type-Options: nosniff` and `Referrer-Policy:
 same-origin`.
 
+**The installed app's colours** (v0.14): `shell.manifest_colors(theme, headers)` gives the manifest's
+`background_color` and `theme_color` (the splash screen and title bar): Night or Day as chosen, and with System the
+device's own scheme when the browser sends `Sec-CH-Prefers-Color-Scheme` (`security_headers()` now includes the
+`Accept-CH` that asks for it), else Night, plus `user_preferences.color_scheme_dark` for browsers that read per-scheme
+manifest colours. Serve the manifest with `Vary: ` + `shell.MANIFEST_VARY` and `Cache-Control: no-cache`. An Android
+install keeps the colours it saw when installed; iOS draws its own launch screen.
+
 Shared page pieces (v0.13): `shell.title(room, what)` ("Lantern - Kura"), `shell.message(heading, text, actions)`,
 `shell.not_found(room, what)`, `shell.offline(room)` (the precached `/offline`: no status line, no network named),
 `signin.needed(room, next, ctx, signin=True)` (the 401 page: the plain header, no Rooms switcher), and `who=` on
