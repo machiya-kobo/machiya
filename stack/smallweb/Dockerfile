@@ -3,7 +3,7 @@
 FROM public.ecr.aws/docker/library/python:3.13-alpine
 RUN adduser -D -u 1000 -h /data -s /sbin/nologin smallweb
 WORKDIR /app
-COPY smallweb.py smolnet.py engines.py render.py store.py selftest.py smallweb.css /app/
+COPY smallweb.py smolnet.py web.py engines.py render.py store.py selftest.py smallweb.css /app/
 ENV SMALLWEB_DATA=/data PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER 1000:1000
 EXPOSE 8080

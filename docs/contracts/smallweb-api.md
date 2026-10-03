@@ -1,6 +1,6 @@
 # smallweb API
 
-The small-web gateway (`stack/smallweb/`): Gemini and Gopher search for Shiori, and the pages behind the results. Contract changes are proposed to the maintainers first, like every contract here.
+The small-web gateway (`stack/smallweb/`): Gemini and Gopher search for Shiori, the pages behind the results, and saving pages (including http(s) ones) to Hister. Contract changes are proposed to the maintainers first, like every contract here.
 
 Served on its own name, `https://smallweb.example.ts.net` (its own Tailscale Service, owner-only), never same-origin with Hister or Shiori.
 
@@ -77,20 +77,76 @@ A page read through `/page` is saved (in the background) with `POST http://histe
 - Find them in Hister with `metadata.source:smallweb`. `gemini://` and `gopher://` URLs are accepted by Hister (`201`), and `%23` in a selector is kept.
 - The skip rule for your own `*.ts.net` pages (`^https?://([^/]*\.)?example\.ts\.net…`, see `config/hister/skip-rules.txt`) keeps the extension from saving the proxy URLs.
 
-## `POST /api/save {"url": "gemini://…|gopher://…"}`
+## `POST /api/save {"url": "…", "title": "…"}`
 
-For Shiori's "In a Gemini App" setting: a page opened directly in a Gemini client never passes through `/page`, so Shiori asks smallweb to save it.
+Two callers:
+- Shiori's "In a Gemini App" setting: a page opened directly in a Gemini client never passes through `/page`, so Shiori asks smallweb to save it (`gemini://`, `gopher://`).
+- Shiori's Add Page action and share target: an `http://` or `https://` page. A browser page can't download other sites (CORS), and Hister's `POST /api/add` with only a URL doesn't fetch the page, so smallweb fetches it and sends Hister the page.
 
+The request:
 - Owner-only. The request's `Origin` must be one of: smallweb's own; `hister://` (the native apps); or one listed in `SMALLWEB_ORIGINS` (Shiori's hosted pages, which reach smallweb through a `/smallweb/` route on the web server that hosts them, e.g. `https://shiori.example.ts.net`). With no `Origin`, the request is refused.
-- The body is JSON (`Content-Type: application/json`) or a form.
-- Answers `202 {"queued": true, "url": "<canonical>"}` at once. Then, in the background, smallweb fetches the page through the configured SOCKS proxy and saves it exactly as a `/page` read would: the same `metadata`, no label, the same never-save rules, the unchanged-body dedupe, and the same per-host politeness.
-- `400` for a URL that isn't `gemini://` or `gopher://`. `403` for not the owner or a refused origin. `429` when 20 saves are already waiting.
+- The body is JSON (`Content-Type: application/json`, an object) or a form. `url` is required. `title` is optional and used for http(s) only, when the page has no title of its own.
+- Answers `202 {"queued": true, "url": "<canonical>"}` at once; the fetch and the save happen in the background. The canonical URL:
+  - gemini and gopher: as in `/api/search`;
+  - http(s): lowercase scheme and host (an international name in its `xn--` form), no default port (`80`, `443`), no fragment, non-ASCII in the path and query percent-encoded.
+- `400 {"error": "…"}`:
+  - a URL that isn't `gemini://`, `gopher://`, `http://` or `https://`;
+  - http(s): a user name or password in the URL (`user@`), more than 2048 characters, spaces or control characters, no host, an IP literal in a private range (below, unless `SMALLWEB_FETCH_ALLOW` lists it), or a path that is a private Kura vault's address (below);
+  - a body that isn't a JSON object or a form.
+- `403` for not the owner or a refused origin. `429` when 20 saves are already waiting.
+
+### gemini:// and gopher://
+
+- smallweb fetches the page through the configured SOCKS proxy and saves it exactly as a `/page` read would: the same `metadata`, no label, the same never-save rules, the unchanged-body dedupe, and the same per-host politeness.
 - A Gemini URL with a query is saved only if its path without the query doesn't answer `10`/`11` (checked once a day per path). Otherwise the query is the answer to a prompt, and it's never saved. This applies to `/page` too.
+
+### http:// and https://
+
+This is save-only: `/page` stays gemini and gopher, and smallweb is not a web proxy.
+
+**Private addresses are never fetched.** In the background, smallweb resolves the host itself and refuses the save if ANY of its addresses is:
+- loopback, private (RFC 1918), link-local, multicast, reserved or unspecified;
+- in `0.0.0.0/8`, CGNAT `100.64.0.0/10` (Tailscale) or the broadcast address;
+- IPv6 unique local `fc00::/7`;
+- an IPv6 form (IPv4-mapped, 6to4, NAT64) of any of those.
+
+The one exception is `SMALLWEB_FETCH_ALLOW`: a comma list of host names (exact, lowercase) and CIDRs. A listed host name may resolve to anything; otherwise each private address must be in a listed CIDR. Unset (the default) allows nothing private.
+
+The rest of the fetch:
+- **The vetted address is the one connected to,** so a second DNS answer can't swap it. With `SMALLWEB_SOCKS` set, the proxy is asked for that IP address, never the name. The request carries the real `Host` header; https sends the name as SNI and checks the certificate against it (the system's trust store).
+- **Redirects:** at most 5, each one checked again in full (the URL rules, the resolution, the address rules). A redirect to anything but `http(s)` is refused.
+- **Never a private Kura vault:** even for an allowed host, a URL whose path, percent-decoded and with a leading `//` folded, starts with `/v/<name>/` (or is `/v/<name>`) is never fetched or saved. That is a private vault's address in Machiya. It's a `400` when asked for, and a refused save when a redirect leads there.
+- **Limits:** 10 s to connect and per read, 30 s for one response, 5 MB (smallweb stops reading and refuses past it).
+- **Types:** only a `200` with `text/html`, `application/xhtml+xml` or `text/plain` is saved. Any other type or status is refused and not saved.
+- **Charset:** the `Content-Type` header's charset, else the page's `<meta charset>`, else UTF-8 with bad bytes replaced.
+- **User-Agent:** `smallweb/<version> (Machiya; saves a page its owner asked for)`.
+- **Politeness:** one connection at a time per host, at least 1.5 s apart.
+- **No `robots.txt`:** each save is one page its owner asked for, like a browser visit, not a crawl. smallweb never follows the page's links.
+
+What is saved: the same `POST <SMALLWEB_HISTER_URL>/api/add` with `Origin: hister://`, under the final URL (after redirects, canonical), with no `label`:
+
+```json
+{"url": "https://example.com/notes/page", "title": "A Page",
+ "text": "<visible text>", "html": "<the page, cleaned>",
+ "metadata": {"source": "smallweb", "smallweb_scheme": "https", "smallweb_mime": "text/html",
+              "smallweb_fetched": 1767225600}}
+```
+
+- `title`: the page's `<title>`, else its `og:title`, else its first `<h1>`, else the request's `title`, else the URL. Whitespace is collapsed.
+- `text`: the visible text, without `script`, `style`, `noscript`, `template` and `svg`, whitespace collapsed, one line per block.
+- `html`: the page with `script`, `style`, `iframe`, `object` and `embed` removed (with their content), every `on…=` attribute and `javascript:` URL removed, and comments dropped. A `text/plain` page is saved as `<pre>`.
+- The unchanged-body dedupe holds: a body unchanged since its last save isn't sent again.
+
+Errors, per save:
+- They go in `/api/status`'s `hister.last_error` (`<time>: save <url>: <why>`) and the log, like a gemini save's.
+- A refused private address is `blocked: private address` (a private vault's: `blocked: private vault address`). It is never a failure, so it doesn't turn `/api/status`'s `error` on.
+- Neither does a page that couldn't be fetched or isn't saved (a timeout, `HTTP 404`, `not saved: image/png`, `more than 5 redirects`, `the page is larger than 5 MB`).
+- Hister's `406`/`422` (its skip rules or sensitive-content check refuse the page) count as not saved, not as an error: `hister.saved` doesn't grow and `error` stays `null`.
 
 ## `GET /api/status` (open, for the probe)
 
 ```json
-{"ok": true, "ready": true, "error": null, "version": "0.1.0", "auth": "tailscale", "socks": true,
+{"ok": true, "ready": true, "error": null, "version": "0.2.0", "auth": "tailscale", "socks": true,
  "sources": {"tlgs": {"last_ok": 1767225600, "last_error": null}, "kennedy": {…}, "veronica": {…}},
  "hister": {"enabled": true, "saved": 12, "queued": 0, "last_error": null}, "known_hosts": 7}
 ```
@@ -104,5 +160,5 @@ For Shiori's "In a Gemini App" setting: a page opened directly in a Gemini clien
 - Searches are cached for 1 h and pages for 10 min.
 - `44 SLOW DOWN` is honoured (doubling on repeats). At most 5 redirects; 10 s timeouts; 5 MB cap.
 - smallweb never follows links on its own.
-- `/page` honours Gemini `robots.txt` for `webproxy` and `*`, and gopher `robots.txt` for `*`.
-- Egress goes through `SMALLWEB_SOCKS` (an optional SOCKS proxy), never your own IP when it is set. Some hosts refuse VPN ranges; their pages say so and offer the native link.
+- `/page` honours Gemini `robots.txt` for `webproxy` and `*`, and gopher `robots.txt` for `*`. An http(s) save reads no `robots.txt` (see `POST /api/save`).
+- Egress goes through `SMALLWEB_SOCKS` (an optional SOCKS proxy), never your own IP when it is set. Some hosts refuse VPN ranges; their pages say so and offer the native link. Gemini and gopher names are resolved by the proxy; an http(s) save resolves the name itself (to check the addresses) and asks the proxy for the vetted address.

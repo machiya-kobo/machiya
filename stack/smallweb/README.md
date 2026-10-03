@@ -1,6 +1,6 @@
 # smallweb
 
-Machiya's gateway to the small web: Gemini and Gopher search for Shiori, and the pages behind the results, saved to Hister as they're read. Stdlib Python, nonroot, one sqlite file. Contract: [docs/contracts/smallweb-api.md](../../docs/contracts/smallweb-api.md).
+Machiya's gateway to the small web: Gemini and Gopher search for Shiori, and the pages behind the results, saved to Hister as they're read. It also saves http(s) pages Shiori asks for (`POST /api/save`), which a browser page can't fetch itself; it never becomes a web proxy. Stdlib Python, nonroot, one sqlite file. Contract: [docs/contracts/smallweb-api.md](../../docs/contracts/smallweb-api.md).
 
 ## Settings
 
@@ -9,8 +9,9 @@ Machiya's gateway to the small web: Gemini and Gopher search for Shiori, and the
 | `SMALLWEB_AUTH` | `tailscale` | `tailscale`: every page and API call needs a `Tailscale-User-Login` in `SMALLWEB_USERS`. `open`: no identity check (a startup warning), for localhost or a trusted LAN only. Anything else refuses to start |
 | `SMALLWEB_USERS` | — | allowed logins; `*` = anyone the tailnet lets through; unset = nobody (`/api/status` is open) |
 | `SMALLWEB_BIND`, `SMALLWEB_PORT` | `0.0.0.0`, `8080` | the listener. A native install behind `tailscale serve` binds `127.0.0.1` |
-| `SMALLWEB_SOCKS` | — | `socks5h://proxy:1080`: every gemini/gopher connection goes through it, names resolved by the proxy. Unset = direct from the host (the startup line says so) |
+| `SMALLWEB_SOCKS` | — | `socks5h://proxy:1080`: every connection goes through it. Gemini/gopher names are resolved by the proxy; an http(s) save resolves the name itself, checks the addresses and asks the proxy for the checked address. Unset = direct from the host (the startup line says so) |
 | `SMALLWEB_HISTER_URL` | — | `http://hister:4433`: pages read are saved there. Unset = no saves |
+| `SMALLWEB_FETCH_ALLOW` | — | host names (exact, lowercase) and CIDRs an http(s) save may reach although they are private: `wiki.internal,10.1.0.0/16`. Unset = nothing private: loopback, RFC 1918, link-local, CGNAT `100.64.0.0/10` (Tailscale), `fc00::/7` and the like are refused. A private Kura vault's address (`/v/<name>/…`) is never saved, listed or not |
 | `SMALLWEB_ORIGINS` | — | origins besides smallweb's own and `hister://` that may `POST /api/save`: `https://shiori.example.ts.net` (Shiori's hosted pages, if they call smallweb from their own origin) |
 | `SMALLWEB_PUBLIC_URL` | the request's host | `https://smallweb.example.ts.net`: the base of `proxy_url` in `/api/search`. Set it, since Shiori calls the API from its own origin |
 | `SMALLWEB_DATA` | `/data` | `smallweb.sqlite3`: TOFU known hosts, caches, the hourly counts, the save log. All of it can be deleted |
@@ -36,6 +37,7 @@ docker run --rm -v "$PWD/stack/smallweb":/s -w /s --entrypoint python3 smallweb-
 They cover:
 - the parsers, on the engines' real formats;
 - the renderers;
-- the gateway against local fake Gemini (TLS) and Gopher servers, a SOCKS5 proxy (which checks names go to the proxy) and a fake Hister.
+- the gateway against local fake Gemini (TLS) and Gopher servers, a SOCKS5 proxy (which checks names go to the proxy) and a fake Hister;
+- http(s) saves against a local fake web server (http and https): the URL rules, private addresses (by IP, by DNS through a patched resolver, after a redirect), the redirect, size and type limits, charsets, reading the page, the dedupe and Hister's 406. The fake is on `127.0.0.1`, so the tests set `SMALLWEB_FETCH_ALLOW=127.0.0.1/32`.
 
 The tests make throwaway self-signed certificates for those fakes with `openssl` when they start and delete them afterwards (nothing secret is committed; `openssl` must be installed).

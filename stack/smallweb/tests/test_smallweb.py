@@ -1,6 +1,8 @@
 """smallweb's tests: the parsers on the engines' response formats (with invented content), the renderers, and the
-whole gateway against local fakes: two Gemini engines and a capsule (TLS), a Gopher engine and hole, a SOCKS5 proxy
-(which records the names it resolves: socks5h) and Hister (which records /api/add).
+whole gateway against local fakes: two Gemini engines and a capsule (TLS), a Gopher engine and hole, a web server (http
+and https) for http(s) saves, a SOCKS5 proxy (which records the names or addresses it is asked for) and Hister (which
+records /api/add). The web server is on 127.0.0.1, which smallweb never fetches unless SMALLWEB_FETCH_ALLOW says so:
+the tests allow 127.0.0.1/32 and map invented names to addresses with a patched resolver.
 
 The test certificates are throwaway self-signed ones for 127.0.0.1 fakes, made with `openssl` when the tests start and
 deleted afterwards (nothing secret is committed; `old` is valid for one day, so it is always about to expire).
@@ -34,6 +36,10 @@ for _name, _cn, _days in (("a", "capsule.test", 36500), ("b", "capsule.test", 36
     subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
                     "-keyout", os.path.join(CERTS, "test-%s.key" % _name), "-out", os.path.join(CERTS, "test-%s.crt" % _name),
                     "-subj", "/CN=" + _cn, "-days", str(_days)], check=True, capture_output=True)
+subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
+                "-keyout", os.path.join(CERTS, "test-web.key"), "-out", os.path.join(CERTS, "test-web.crt"),
+                "-subj", "/CN=web.test", "-addext", "subjectAltName=DNS:web.test", "-days", "36500"],
+               check=True, capture_output=True)
 
 TLGS_PAGE = """# TLGS
 => / 🏠 Home
@@ -140,8 +146,12 @@ class Fakes:
                 c.recv(3)
                 c.sendall(b"\x05\x00")
                 head = c.recv(4)
-                n = c.recv(1)[0]
-                name = c.recv(n).decode()
+                if head[3] == 1:
+                    name = socket.inet_ntop(socket.AF_INET, c.recv(4))
+                elif head[3] == 4:
+                    name = socket.inet_ntop(socket.AF_INET6, c.recv(16))
+                else:
+                    name = c.recv(c.recv(1)[0]).decode()
                 port = struct.unpack(">H", c.recv(2))[0]
                 Fakes.resolved.append("%s:%d" % (name, port))
                 try:
@@ -176,6 +186,86 @@ class Fakes:
         return s.server_address[1]
 
 
+WEB_REQUESTS = []                                 # (path, Host, User-Agent) for every request the web fake answers
+BIG = b"<html><body>" + b"x" * (6 << 20) + b"</body></html>"
+WEB_PAGES = {
+    "/ok": (200, {"Content-Type": "text/html; charset=utf-8"},
+            b"<!DOCTYPE html><html><head><title>A  Web Page</title><script>alert(1)</script><style>p{}</style></head>"
+            b"<body onload=\"x()\"><h1>Heading</h1><p>Hello <b>web</b> &amp; friends.</p><noscript>no js</noscript>"
+            b"<iframe src=\"https://ads.example/\">frame</iframe><object data=\"x.swf\">obj</object><embed src=\"e\">"
+            b"<a href=\"javascript:alert(1)\" onclick=\"y()\">link</a><svg><text>drawn</text></svg>"
+            b"<template><p>later</p></template><!-- [if IE]><script>z()</script><![endif] --></body></html>"),
+    "/og": (200, {"Content-Type": "text/html"}, b'<meta property="og:title" content="From OG"><p>body</p>'),
+    "/h1": (200, {"Content-Type": "application/xhtml+xml"}, b"<html><body><h1>Body  Title</h1><p>x</p></body></html>"),
+    "/untitled": (200, {"Content-Type": "text/html"}, b"<p>no title anywhere</p>"),
+    "/plain": (200, {"Content-Type": "text/plain"}, b"Just   text.\n\nTwo lines <b>."),
+    "/latin1": (200, {"Content-Type": "text/html; charset=iso-8859-1"}, "<title>Caf\u00e9</title>".encode("latin-1")),
+    "/meta-charset": (200, {"Content-Type": "text/html"},
+                      '<meta charset="windows-1252"><title>\u201cQuoted\u201d</title>'.encode("cp1252")),
+    "/bad-utf8": (200, {"Content-Type": "text/html"}, b"<title>ok \xff</title>"),
+    "/image": (200, {"Content-Type": "image/png"}, b"\x89PNG...."),
+    "/notype": (200, {}, b"<p>?</p>"),
+    "/big": (200, {"Content-Type": "text/html"}, BIG),
+    "/big-nolength": (200, {"Content-Type": "text/html", "Content-Length": None}, BIG),
+    "/missing": (404, {"Content-Type": "text/html"}, b"gone"),
+    "/to-ok": (301, {"Location": "/ok"}, b""),
+    "/to-inside": (302, {"Location": "http://inside.test/secret"}, b""),
+    "/to-private-ip": (302, {"Location": "http://10.1.2.3/"}, b""),
+    "/to-vault": (302, {"Location": "/%76/work/n/x"}, b""),
+    "/to-file": (302, {"Location": "file:///etc/passwd"}, b""),
+    "/loop": (302, {"Location": "/loop"}, b""),
+    "/v/work/n/x": (200, {"Content-Type": "text/html"}, b"<title>private</title>"),
+    "/skipme": (200, {"Content-Type": "text/html"}, b"<title>Skip me</title><p>Hister refuses this one.</p>"),
+}
+
+
+class WebFake(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        WEB_REQUESTS.append((self.path, self.headers.get("Host"), self.headers.get("User-Agent")))
+        status, headers, body = WEB_PAGES.get(self.path.split("?", 1)[0], (404, {}, b""))
+        self.send_response(status)
+        headers = dict({"Content-Length": str(len(body))}, **headers)
+        for k, v in headers.items():
+            if v is not None:
+                self.send_header(k, v)
+        self.end_headers()
+        try:
+            for i in range(0, len(body), 1 << 16):
+                self.wfile.write(body[i:i + (1 << 16)])
+        except OSError:
+            pass                                                     # the client stopped reading: the cap
+
+
+def web_server(tls=False):
+    s = ThreadingHTTPServer(("127.0.0.1", 0), WebFake)
+    s.daemon_threads = True
+    if tls:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(os.path.join(CERTS, "test-web.crt"), os.path.join(CERTS, "test-web.key"))
+        s.socket = ctx.wrap_socket(s.socket, server_side=True)
+    threading.Thread(target=s.serve_forever, daemon=True).start()
+    return s.server_address[1]
+
+
+# invented names -> addresses (the fake resolver smallweb is given)
+NAMES = {"web.test": ["127.0.0.1"], "other.test": ["127.0.0.1"], "inside.test": ["10.0.0.5"],
+         "mixed.test": ["93.184.216.34", "192.168.1.1"], "mapped.test": ["::ffff:127.0.0.1"]}
+RESOLVED = []
+
+
+def fake_resolve(host, port, type=0, **kw):
+    RESOLVED.append(host)
+    if host in NAMES:
+        return [(socket.AF_INET6 if ":" in ip else socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port))
+                for ip in NAMES[host]]
+    if host.replace(".", "").isdigit():
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (host, port))]
+    raise socket.gaierror("no such name: %s" % host)
+
+
 HISTER_DOCS = []
 
 
@@ -186,7 +276,7 @@ class HisterFake(BaseHTTPRequestHandler):
     def do_POST(self):
         doc = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         HISTER_DOCS.append((self.headers.get("Origin"), doc))
-        self.send_response(201)
+        self.send_response(406 if "/skipme" in doc["url"] else 201)          # 406: one of Hister's skip rules
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -201,7 +291,8 @@ threading.Thread(target=hister.serve_forever, daemon=True).start()
 DATA = tempfile.mkdtemp()
 os.environ.update(SMALLWEB_DATA=DATA, SMALLWEB_USERS="user@test", SMALLWEB_SOCKS="socks5h://127.0.0.1:%d" % SOCKS_PORT,
                   SMALLWEB_HISTER_URL="http://127.0.0.1:%d" % hister.server_address[1], SMALLWEB_PER_HOUR="100",
-                  SMALLWEB_PUBLIC_URL="https://smallweb.test", SMALLWEB_ORIGINS="https://shiori.test/")
+                  SMALLWEB_PUBLIC_URL="https://smallweb.test", SMALLWEB_ORIGINS="https://shiori.test/",
+                  SMALLWEB_FETCH_ALLOW="127.0.0.1/32")
 os.environ.pop("SMALLWEB_AUTH", None)
 
 import engines   # noqa: E402
@@ -220,6 +311,14 @@ for k, v in list(HOLE.items()):                                       # the hole
 CAPSULE["/"] = CAPSULE["/"].replace("hole.test:7070", "hole.test:%d" % GOPHER_PORT)
 GEM_PAGES.update({"/search?example%20query": "20 text/gemini\r\n" + TLGS_PAGE, "/search?slow": "44 30\r\n", **CAPSULE})
 GOPHER_PAGES.update({**HOLE, "/v2/vs\texample query": VERONICA_PAGE})
+
+import web       # noqa: E402
+
+WEB_PORT, WEBS_PORT = web_server(), web_server(tls=True)
+web.resolve = fake_resolve
+web.CAFILE = os.path.join(CERTS, "test-web.crt")
+smallweb.web_polite.default = 0.05
+WEB = "http://web.test:%d" % WEB_PORT
 
 SERVER = ThreadingHTTPServer(("127.0.0.1", 0), smallweb.Handler)
 threading.Thread(target=SERVER.serve_forever, daemon=True).start()
@@ -330,6 +429,134 @@ class Renderers(unittest.TestCase):
         self.assertEqual(title, "Welcome to the hole")
         self.assertIn('name="q"', html)                                      # a type-7 item is a search form
         self.assertIn('href="https://example.com/"', html)                   # an h URL: item goes direct
+
+
+class Web(unittest.TestCase):
+    """http(s) fetching for saves: the URL rules, the address checks, the fetch limits and reading the page."""
+    ALLOW = web.parse_allow("127.0.0.1/32")
+    UA = "smallweb/test"
+
+    def fetch(self, url, allow=None, proxy=""):
+        return web.fetch(web.check(url, allow or self.ALLOW), allow or self.ALLOW, proxy, smolnet.Polite(), self.UA)
+
+    def test_canonical(self):
+        self.assertEqual(web.canonical("HTTPS://Example.COM:443/a%20b?q=é#frag"), "https://example.com/a%20b?q=%C3%A9")
+        self.assertEqual(web.canonical("http://example.com:80"), "http://example.com/")
+        self.assertEqual(web.canonical("http://example.com:8080/x"), "http://example.com:8080/x")
+        self.assertEqual(web.canonical("http://[::1]:80/"), "http://[::1]/")
+        self.assertEqual(web.canonical("https://bücher.example/"), "https://xn--bcher-kva.example/")
+        for bad in ("ftp://example.com/", "gemini://example.com/", "http://user@example.com/",
+                    "http://user:pw@example.com/", "http:///x", "https://example.com/" + "a" * 2048, "javascript:alert(1)",
+                    "http://exa mple.com/", "http://example.com:99999/"):
+            with self.assertRaises(web.Refused, msg=bad):
+                web.canonical(bad)
+
+    def test_private_ranges(self):
+        for ip in ("127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "224.0.0.1", "240.0.0.1",
+                   "0.0.0.0", "0.1.2.3", "255.255.255.255", "100.64.0.1", "100.127.255.254", "::1", "::", "fe80::1",
+                   "fc00::1", "fd12:3456::1", "ff02::1", "::ffff:127.0.0.1", "::ffff:10.0.0.1", "64:ff9b::a00:1",
+                   "2002:7f00:1::"):
+            self.assertTrue(web.private(ip), ip)
+        for ip in ("93.184.216.34", "1.1.1.1", "100.128.0.1", "2606:4700:4700::1111", "2001:4860:4860::8888"):
+            self.assertFalse(web.private(ip), ip)
+
+    def test_allow_setting(self):
+        names, nets = web.parse_allow(" Intranet.Example , 10.0.0.0/8,127.0.0.1, fd00::/8 ")
+        self.assertEqual(names, {"intranet.example"})
+        self.assertEqual([str(n) for n in nets], ["10.0.0.0/8", "127.0.0.1/32", "fd00::/8"])
+        self.assertEqual(web.parse_allow(""), (set(), []))
+        for bad in ("10.0.0.0/33", "http://x", "a b"):
+            with self.assertRaises(SystemExit, msg=bad):
+                web.parse_allow(bad)
+
+    def test_vault_paths(self):
+        for path in ("/v/work/n/x", "/v/work/", "/v/work", "//v/work/n/x", "/%76/work/n/x", "/%2576/work/", "/V/work/x"):
+            self.assertTrue(web.vault_path(path), path)
+        for path in ("/", "/n/x", "/vault/x", "/v", "/a/v/work/"):
+            self.assertFalse(web.vault_path(path), path)
+
+    def test_checks_before_fetching(self):
+        n = len(WEB_REQUESTS)
+        with self.assertRaises(web.PrivateAddress):                     # an IP literal in a private range: never fetched
+            web.check("http://127.0.0.1:%d/ok" % WEB_PORT, web.parse_allow(""))
+        with self.assertRaises(web.PrivateAddress):
+            web.check("http://[::ffff:7f00:1]/", web.parse_allow(""))
+        with self.assertRaises(web.Blocked):                            # a private vault's address, even when allowed
+            web.check(WEB + "/v/work/n/x", self.ALLOW)
+        self.assertEqual(len(WEB_REQUESTS), n)
+        self.assertEqual(web.check("http://127.0.0.1:%d/ok" % WEB_PORT, self.ALLOW), "http://127.0.0.1:%d/ok" % WEB_PORT)
+
+    def test_names_resolving_to_private_addresses(self):
+        n = len(WEB_REQUESTS)
+        for host in ("inside.test", "mixed.test", "mapped.test"):          # ANY private address refuses the save
+            with self.assertRaises(web.Blocked, msg=host):
+                self.fetch("http://%s:%d/ok" % (host, WEB_PORT))
+        with self.assertRaises(web.Blocked):                              # unset: nothing private
+            self.fetch(WEB + "/ok", allow=web.parse_allow(""))
+        self.assertEqual(len(WEB_REQUESTS), n)
+        r = self.fetch(WEB + "/ok", allow=web.parse_allow("web.test"))    # a host name in the setting
+        self.assertEqual(r.status, 200)
+
+    def test_fetch_sends_the_real_host_to_the_vetted_address(self):
+        Fakes.resolved.clear()
+        WEB_REQUESTS.clear()
+        r = self.fetch(WEB + "/ok", proxy="127.0.0.1:%d" % SOCKS_PORT)
+        self.assertEqual((r.status, r.mime, r.charset), (200, "text/html", "utf-8"))
+        self.assertEqual(WEB_REQUESTS, [("/ok", "web.test:%d" % WEB_PORT, self.UA)])
+        self.assertEqual(Fakes.resolved, ["127.0.0.1:%d" % WEB_PORT])     # the proxy got the vetted IP, not the name
+
+    def test_https_checks_the_certificate_against_the_name(self):
+        r = self.fetch("https://web.test:%d/ok" % WEBS_PORT)
+        self.assertEqual((r.status, r.url), (200, "https://web.test:%d/ok" % WEBS_PORT))
+        with self.assertRaisesRegex(web.WebError, "TLS"):
+            self.fetch("https://other.test:%d/ok" % WEBS_PORT)
+
+    def test_redirects_are_checked_again(self):
+        self.assertEqual(self.fetch(WEB + "/to-ok").url, WEB + "/ok")
+        for path, err in (("/to-inside", web.Blocked), ("/to-private-ip", web.Blocked), ("/to-vault", web.Blocked),
+                          ("/to-file", web.WebError)):
+            with self.assertRaises(err, msg=path):
+                self.fetch(WEB + path)
+        WEB_REQUESTS.clear()
+        with self.assertRaisesRegex(web.WebError, "redirects"):
+            self.fetch(WEB + "/loop")
+        self.assertEqual(len(WEB_REQUESTS), web.MAX_REDIRECTS + 1)
+
+    def test_limits(self):
+        for path in ("/big", "/big-nolength"):
+            with self.assertRaisesRegex(web.WebError, "larger than 5 MB", msg=path):
+                self.fetch(WEB + path)
+        for path in ("/image", "/notype"):
+            with self.assertRaisesRegex(web.WebError, "not saved", msg=path):
+                self.fetch(WEB + path)
+        with self.assertRaisesRegex(web.WebError, "HTTP 404"):
+            self.fetch(WEB + "/missing")
+
+    def test_reading_a_page(self):
+        r = self.fetch(WEB + "/ok")
+        title, text, doc = web.read_page(r.body, r.mime, r.charset, r.url, "Asked Title")
+        self.assertEqual(title, "A Web Page")
+        self.assertEqual(text, "Heading\nHello web & friends.\nlink")
+        for gone in ("<script", "alert", "<style", "<iframe", "<object", "<embed", "onload", "onclick", "javascript:",
+                     "z()"):
+            self.assertNotIn(gone, doc)
+        self.assertIn("<p>Hello <b>web</b> &amp; friends.</p>", doc)
+        self.assertIn("<svg><text>drawn</text></svg>", doc)
+
+        def title_of(path, asked=""):
+            r = self.fetch(WEB + path)
+            return web.read_page(r.body, r.mime, r.charset, r.url, asked)[0]
+        self.assertEqual(title_of("/og"), "From OG")
+        self.assertEqual(title_of("/h1"), "Body Title")
+        self.assertEqual(title_of("/untitled", "Asked"), "Asked")
+        self.assertEqual(title_of("/untitled"), WEB + "/untitled")
+        self.assertEqual(title_of("/latin1"), "Café")                                  # the header's charset
+        self.assertEqual(title_of("/meta-charset"), "\u201cQuoted\u201d")             # <meta charset>
+        self.assertEqual(title_of("/bad-utf8"), "ok \ufffd")                          # else UTF-8, replaced
+        r = self.fetch(WEB + "/plain")
+        title, text, doc = web.read_page(r.body, r.mime, r.charset, r.url, "")
+        self.assertEqual((title, text), (WEB + "/plain", "Just text.\nTwo lines <b>."))
+        self.assertIn("<pre>Just   text.\n\nTwo lines &lt;b&gt;.</pre>", doc)
 
 
 class Gateway(unittest.TestCase):
@@ -463,12 +690,118 @@ class Gateway(unittest.TestCase):
         self.assertTrue(wait_for(lambda: any(d["url"].endswith("/saveme") for _, d in HISTER_DOCS)))
         code, _, out = get("/api/save", data=json.dumps({"url": CAP + "/two"}).encode(), headers=dict(js, Origin="hister://"))
         self.assertEqual((code, json.loads(out)["url"]), (202, "gemini://capsule.test:%d/two" % GEM_PORT))
-        self.assertEqual(get("/api/save", data=b'{"url": "https://example.com/"}', headers=dict(js, Origin="hister://"))[0], 400)
+        self.assertEqual(get("/api/save", data=b'{"url": "ftp://example.com/"}', headers=dict(js, Origin="hister://"))[0], 400)
         self.assertEqual(get("/api/save", data=body, user="other@test", headers=dict(js, Origin="hister://"))[0], 403)
         n = len(HISTER_DOCS)
         get("/api/save", data=json.dumps({"url": CAP + "/ask?Ann%20B"}).encode(), headers=dict(js, Origin="hister://"))
         time.sleep(0.5)
         self.assertEqual(len([d for _, d in HISTER_DOCS if "/ask?" in d["url"]]), 0)   # the never-save rules hold
+
+    # -- http(s) saves ---------------------------------------------------------------------------------------------
+
+    def save(self, url, origin="hister://", wait=True, **extra):
+        code, _, out = get("/api/save", data=json.dumps(dict(extra, url=url)).encode(),
+                           headers={"Content-Type": "application/json", "Origin": origin})
+        if wait:
+            self.assertTrue(wait_for(lambda: smallweb.save_state["pending"] == 0, 15))
+        return code, json.loads(out)
+
+    def docs_for(self, fragment):
+        return [d for _, d in HISTER_DOCS if fragment in d["url"]]
+
+    def assert_not_saved(self, url, why):
+        smallweb.hister_state["last_error"] = None
+        n, saved = len(HISTER_DOCS), smallweb.store.save_count()
+        code, out = self.save(url)
+        self.assertEqual(code, 202, url)
+        self.assertIn(why, smallweb.hister_state["last_error"] or "", url)
+        self.assertEqual((len(HISTER_DOCS), smallweb.store.save_count()), (n, saved), url)
+        status = json.loads(get("/api/status", user=None)[2])
+        self.assertEqual((status["error"], status["hister"]["queued"]), (None, 0))   # not a failure
+
+    def test_api_save_http_page(self):
+        HISTER_DOCS.clear()
+        WEB_REQUESTS.clear()
+        saved = smallweb.store.save_count()
+        code, out = self.save("HTTP://Web.Test:%d/ok?t=1#top" % WEB_PORT, origin="https://shiori.test")
+        self.assertEqual((code, out), (202, {"queued": True, "url": WEB + "/ok?t=1"}))
+        origin, doc = HISTER_DOCS[0]
+        self.assertEqual(origin, "hister://")
+        self.assertEqual((doc["url"], doc["title"]), (WEB + "/ok?t=1", "A Web Page"))
+        self.assertNotIn("label", doc)
+        self.assertEqual(doc["text"], "Heading\nHello web & friends.\nlink")
+        self.assertNotIn("<script", doc["html"])
+        self.assertNotIn("onclick", doc["html"])
+        self.assertIn("<p>Hello <b>web</b> &amp; friends.</p>", doc["html"])
+        meta = doc["metadata"]
+        self.assertEqual({k: meta[k] for k in ("source", "smallweb_scheme", "smallweb_mime")},
+                         {"source": "smallweb", "smallweb_scheme": "http", "smallweb_mime": "text/html"})
+        self.assertLess(abs(meta["smallweb_fetched"] - time.time()), 60)
+        self.assertNotIn("smallweb_cert_sha256", meta)
+        self.assertEqual(WEB_REQUESTS, [("/ok?t=1", "web.test:%d" % WEB_PORT,
+                                         "smallweb/%s (Machiya; saves a page its owner asked for)" % smallweb.VERSION)])
+        self.assertEqual(smallweb.store.save_count(), saved + 1)
+        # the dedupe: the same body again isn't sent again
+        self.assertEqual(self.save(WEB + "/ok?t=1")[0], 202)
+        self.assertEqual(len(self.docs_for("/ok?t=1")), 1)
+        # https, a form body, and the asked title used only when the page has none; saved under the final URL
+        code, _, out = get("/api/save", data=urllib.parse.urlencode({"url": "https://web.test:%d/untitled" % WEBS_PORT,
+                                                                      "title": "Asked  Title"}).encode(),
+                           headers={"Origin": "hister://"})
+        self.assertEqual(code, 202)
+        self.assertTrue(wait_for(lambda: self.docs_for("/untitled")))
+        doc = self.docs_for("/untitled")[0]
+        self.assertEqual((doc["title"], doc["metadata"]["smallweb_scheme"]), ("Asked Title", "https"))
+        self.assertEqual(self.save(WEB + "/to-ok", title="Ignored")[0], 202)
+        self.assertEqual(self.docs_for(WEB + "/ok")[-1]["title"], "A Web Page")
+        self.assertFalse(self.docs_for("/to-ok"))
+        self.assertEqual(self.save(WEB + "/latin1")[0], 202)                           # charset decoding
+        self.assertEqual(self.docs_for("/latin1")[0]["title"], "Café")
+
+    def test_api_save_http_refusals(self):
+        WEB_REQUESTS.clear()
+        for url in ("http://user@web.test/ok", "http://user:pw@web.test/ok", "https://web.test/" + "a" * 2048,
+                    "data:text/html,x", "http:///ok", "http://[::1/", "http://10.0.0.1/", "http://[::1]/", "http://169.254.169.254/x",
+                    WEB + "/v/work/n/x", WEB + "/%76/work/n/x", WEB + "//v/work/n/x"):
+            code, out = self.save(url, wait=False)
+            self.assertEqual(code, 400, url)
+            self.assertIn("error", out)
+        old = smallweb.FETCH_ALLOW
+        smallweb.FETCH_ALLOW = web.parse_allow("")                                       # the default: nothing private
+        try:
+            self.assertEqual(self.save("http://127.0.0.1:%d/ok" % WEB_PORT, wait=False)[0], 400)
+            self.assert_not_saved(WEB + "/ok?t=allow", "blocked: private address")
+        finally:
+            smallweb.FETCH_ALLOW = old
+        self.assertEqual(WEB_REQUESTS, [])                                               # nothing was fetched
+        # the Origin rule is unchanged
+        self.assertEqual(self.save(WEB + "/ok", origin="https://evil.test", wait=False)[0], 403)
+        code, _, _ = get("/api/save", data=json.dumps({"url": WEB + "/ok"}).encode(),
+                         headers={"Content-Type": "application/json"})
+        self.assertEqual(code, 403)
+        self.assertEqual(self.save(WEB + "/ok", origin="https://shiori.test.evil.test", wait=False)[0], 403)
+
+    def test_api_save_http_blocked_and_failed(self):
+        WEB_REQUESTS.clear()
+        self.assert_not_saved("http://inside.test:%d/ok" % WEB_PORT, "blocked: private address")   # DNS -> private
+        self.assertEqual(WEB_REQUESTS, [])
+        self.assert_not_saved(WEB + "/to-inside", "blocked: private address")      # an allowed host redirects inward
+        self.assert_not_saved(WEB + "/to-private-ip", "blocked: private address")
+        self.assert_not_saved(WEB + "/to-vault", "blocked: private vault address")
+        self.assertNotIn("/secret", [p for p, _, _ in WEB_REQUESTS])
+        self.assert_not_saved(WEB + "/to-file", "non-http(s)")
+        self.assert_not_saved(WEB + "/loop", "more than 5 redirects")
+        self.assert_not_saved(WEB + "/big-nolength", "larger than 5 MB")
+        self.assert_not_saved(WEB + "/image", "not saved: image/png")
+        self.assert_not_saved(WEB + "/missing", "HTTP 404")
+
+    def test_api_save_http_skipped_by_hister(self):
+        smallweb.hister_state["fails"] = 0
+        saved = smallweb.store.save_count()
+        self.assertEqual(self.save(WEB + "/skipme")[0], 202)
+        self.assertEqual(len(self.docs_for("/skipme")), 1)                              # sent, and Hister said 406
+        status = json.loads(get("/api/status", user=None)[2])
+        self.assertEqual((status["hister"]["saved"], status["error"], smallweb.hister_state["fails"]), (saved, None, 0))
 
     def test_gopher(self):
         code, _, body = page(HOLE_URL)

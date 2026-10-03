@@ -7,6 +7,8 @@
 - GET /page?url=gemini://…|gopher://…  the page as HTML (no script; links go back through /page). A page read here
   is saved to Hister under its canonical gemini:// or gopher:// URL (not the proxy URL), without a label.
 - GET /  a plain search page over the same data. GET /api/status  for the probe (open).
+- POST /api/save {"url"}  a page Shiori asks to have saved: gemini/gopher as a /page read would, or an http(s) page
+  fetched once (web.py: private addresses refused unless SMALLWEB_FETCH_ALLOW names them). Never a web proxy.
 
 Egress goes through SMALLWEB_SOCKS (e.g. socks5h://proxy:1080) when set, so capsule hosts never see the server's own IP.
 Gemini certificates are trusted on first use (known hosts in the sqlite file under SMALLWEB_DATA). Private, in
@@ -29,9 +31,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import engines   # noqa: E402
 import render    # noqa: E402
 import smolnet   # noqa: E402
+import web       # noqa: E402
 from store import Store   # noqa: E402
 
-VERSION = "0.1.2"
+VERSION = "0.2.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -64,6 +67,10 @@ HISTER = os.environ.get("SMALLWEB_HISTER_URL", "").rstrip("/")
 # hosted pages reach smallweb through a reverse proxy, so their browser Origin is that site's (list it in SMALLWEB_ORIGINS).
 ORIGINS = {o.strip().rstrip("/") for o in ["hister://"] + os.environ.get("SMALLWEB_ORIGINS", "").split(",") if o.strip()}
 DATA = os.environ.get("SMALLWEB_DATA", "/data")
+# http(s) saves never reach a private address (loopback, RFC 1918, CGNAT/Tailscale, link-local, …) unless it is listed
+# here: host names (exact) and CIDRs. Unset = nothing private.
+FETCH_ALLOW = web.parse_allow(os.environ.get("SMALLWEB_FETCH_ALLOW"))
+USER_AGENT = "smallweb/%s (Machiya; saves a page its owner asked for)" % VERSION
 
 SEARCH_TTL, PAGE_TTL, ROBOTS_TTL = 3600, 600, 86400
 PER_HOUR = int(os.environ.get("SMALLWEB_PER_HOUR", "30"))     # searches per engine per hour
@@ -73,6 +80,7 @@ MAX_REDIRECTS = 5
 
 store = Store(os.path.join(DATA, "smallweb.sqlite3"))
 polite = smolnet.Polite({e["host"]: ENGINE_GAP for e in engines.ENGINES.values()})
+web_polite = smolnet.Polite(default=web.GAP)          # http(s) saves: one connection per host, 1.5 s apart
 health = {k: {"last_ok": None, "last_error": None} for k in engines.ORDER}
 hister_state = {"last_error": None, "fails": 0}      # fails: consecutive saves that didn't reach Hister
 pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
@@ -396,8 +404,8 @@ def save_to_hister(s):
     if s["cert"]:
         meta["smallweb_cert_sha256"] = s["cert"]
     doc = {"url": s["url"], "title": s["title"], "text": s["text"],
-           "html": "<!DOCTYPE html><html><head><title>%s</title></head><body><article>%s</article></body></html>"
-                   % (render.e(s["title"]), s["body"]),
+           "html": s.get("html") or "<!DOCTYPE html><html><head><title>%s</title></head><body><article>%s</article>"
+                                    "</body></html>" % (render.e(s["title"]), s["body"]),
            "metadata": meta}
     req = urllib.request.Request(HISTER + "/api/add", data=json.dumps(doc).encode(), method="POST",
                                  headers={"Content-Type": "application/json", "Origin": "hister://"})
@@ -417,13 +425,52 @@ def save_to_hister(s):
         hister_state["last_error"] = "%s: %s -> %d" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), s["url"], status)
 
 
-def queue_save(url):
-    """POST /api/save: fetch a page Shiori opened directly (in a Gemini app, so it never passed through /page) and
-    save it exactly as a /page read would. -> (status, body)."""
+def note_save(url, what):
+    """A save that didn't happen, in /api/status's hister.last_error and the log. Never counted as a Hister failure."""
+    hister_state["last_error"] = "%s: save %s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), url, what)
+    sys.stderr.write("smallweb save %s: %s\n" % (url, what))
+
+
+def save_web(url, title=""):
+    """An http(s) page Shiori asked to have saved: fetched once (checked, web.fetch), read, and sent to Hister under
+    its final URL. A private address is `blocked: private address`, not a failure."""
+    if not HISTER:
+        return
     try:
-        url = smolnet.canonical(url)
-    except ValueError:
-        return 400, {"error": "url must be a gemini:// or gopher:// URL"}
+        r = web.fetch(url, FETCH_ALLOW, SOCKS, web_polite, USER_AGENT)
+    except web.Blocked as ex:
+        return note_save(url, "blocked: %s" % ex)
+    except web.WebError as ex:
+        return note_save(url, str(ex))
+    page_title, text, html = web.read_page(r.body, r.mime, r.charset, r.url, title)
+    save_to_hister({"url": r.url, "title": page_title, "text": text, "html": html, "scheme": urlsplit(r.url).scheme,
+                    "mime": r.mime, "cert": None, "sha": hashlib.sha256(r.body).hexdigest()})
+
+
+def queue_save(url, title=""):
+    """POST /api/save: fetch a page Shiori opened directly (in a Gemini app, so it never passed through /page) and
+    save it exactly as a /page read would; or an http(s) page (Shiori's Add Page), which a browser page can't fetch
+    itself. -> (status, body)."""
+    url = (url or "").strip()
+    if url.split(":", 1)[0].lower() in web.DEFAULT_PORT:
+        try:
+            url = web.check(url, FETCH_ALLOW)
+        except web.Refused as ex:
+            return 400, {"error": str(ex)}
+        except web.Blocked:
+            return 400, {"error": "a private vault's address is never saved"}
+        title = " ".join(str(title or "").split())[:500]
+        work = lambda: save_web(url, title)         # noqa: E731
+    else:
+        try:
+            url = smolnet.canonical(url)
+        except ValueError:
+            return 400, {"error": "url must be a gemini://, gopher://, http:// or https:// URL"}
+
+        def work():
+            p = open_page(url)
+            if p.save:
+                save_to_hister(p.save)
     with save_state["lock"]:
         if save_state["pending"] >= MAX_PENDING:
             return 429, {"error": "too many saves waiting; try again later"}
@@ -431,11 +478,9 @@ def queue_save(url):
 
     def job():
         try:
-            p = open_page(url)
-            if p.save:
-                save_to_hister(p.save)
+            work()
         except Exception as ex:                       # a background job must never die silently
-            hister_state["last_error"] = "%s: save %s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), url, ex)
+            note_save(url, ex)
         finally:
             with save_state["lock"]:
                 save_state["pending"] -= 1
@@ -592,7 +637,9 @@ class Handler(BaseHTTPRequestHandler):
                     {k: v[-1] for k, v in parse_qs(raw).items()}
             except ValueError:
                 return self.send_json(400, {"error": "invalid JSON"})
-            code, body = queue_save(str(data.get("url") or ""))
+            if not isinstance(data, dict):
+                return self.send_json(400, {"error": "the body must be a JSON object or a form"})
+            code, body = queue_save(str(data.get("url") or ""), data.get("title") or "")
             return self.send_json(code, body)
         if not own:
             return self.send(403, "cross-site form post refused\n", "text/plain")
@@ -615,6 +662,9 @@ def main():
     print("smallweb %s: auth %s%s, listening on %s:%d; egress %s; Hister %s" % (
         VERSION, AUTH, "" if AUTH == "open" else " (%s)" % (",".join(sorted(USERS)) or "NOBODY: set SMALLWEB_USERS"),
         BIND, PORT, ("SOCKS " + SOCKS) if SOCKS else "DIRECT (set SMALLWEB_SOCKS)", HISTER or "off"), flush=True)
+    print("smallweb: http(s) saves never fetch a private address%s" % (
+        "" if not (FETCH_ALLOW[0] or FETCH_ALLOW[1]) else " except %s" % ", ".join(
+            sorted(FETCH_ALLOW[0]) + [str(n) for n in FETCH_ALLOW[1]])), flush=True)
     if AUTH == "open":
         print("smallweb: WARNING: SMALLWEB_AUTH=open: no identity check. Anyone who can reach %s:%d can search and "
               "read through smallweb and add pages to Hister. Use it only on localhost or a trusted LAN." % (BIND, PORT),

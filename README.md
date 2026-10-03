@@ -243,7 +243,7 @@ Shiori is a client, not a service: the search front door for iPhone, iPad, Mac, 
   - install guides ([docs/install/](docs/install/)) and the contracts between the services ([docs/contracts/](docs/contracts/))
 - **[vaultkit/](vaultkit/)** — the shared vault core (frontmatter, notes, wikilink resolution, the Markdown renderer, a git mirror). Services vendor it at a tag; see [docs/vaultkit.md](docs/vaultkit.md).
 - **[ui/](ui/)** — the shared stylesheet and script of the web rooms (themes, tab bar, rooms switcher, offline shell), vendored with vaultkit; see [docs/ui.md](docs/ui.md).
-- **[stack/](stack/)** — small services that run beside the rooms: `mcp/` (machiya-mcp, one MCP endpoint for the whole stack, [docs/services/mcp.md](docs/services/mcp.md)), `smallweb/` (Gemini and Gopher search for Shiori) and `vault-mirror/` (one shared clone of the vault for the readers).
+- **[stack/](stack/)** — small services that run beside the rooms: `mcp/` (machiya-mcp, one MCP endpoint for the whole stack, [docs/services/mcp.md](docs/services/mcp.md)), `smallweb/` (Gemini and Gopher search for Shiori, and saving the pages Shiori asks for, http(s) ones too, to Hister) and `vault-mirror/` (one shared clone of the vault for the readers).
 - **[plugins/machiya/](plugins/machiya/)** — a Claude Code plugin: the MCP connection and cross-room skills (backlog, weekly review, recall, garden suggestions, tidying saved-page labels).
 - **[compose/](compose/)** — a reference compose file for the engines, Kura, Niwa and Konbini (Shiori is a client and not in it).
 - **[config/](config/)** — reference configuration for Hister and SearXNG, as they run in this stack.

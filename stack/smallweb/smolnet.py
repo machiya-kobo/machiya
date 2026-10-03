@@ -6,6 +6,7 @@ Specs: gemini://geminiprotocol.net/docs/protocol-specification.gmi, RFC 1436 (go
 """
 import datetime
 import hashlib
+import ipaddress
 import socket
 import ssl
 import struct
@@ -81,11 +82,11 @@ def gopher_url(host, port, itype, selector, query=""):
 # -- politeness ------------------------------------------------------------------------------------------------------
 
 class Polite:
-    """One request at a time per host, at least `gap` seconds apart for hosts in `gaps`, and none while a host has
-    asked us to slow down (Gemini 44)."""
+    """One request at a time per host, at least `gap` seconds apart for hosts in `gaps` (`default` for the others),
+    and none while a host has asked us to slow down (Gemini 44)."""
 
-    def __init__(self, gaps=None):
-        self.gaps = dict(gaps or {})
+    def __init__(self, gaps=None, default=0):
+        self.gaps, self.default = dict(gaps or {}), default
         self.locks, self.last, self.until = {}, {}, {}
         self.guard = threading.Lock()
 
@@ -104,7 +105,7 @@ class Polite:
 
     def run(self, host, fn):
         with self.lock(host):
-            gap = self.gaps.get(host, 0)
+            gap = self.gaps.get(host, self.default)
             wait = self.last.get(host, 0) + gap - time.time()
             if wait > 0:
                 time.sleep(wait)
@@ -117,7 +118,8 @@ class Polite:
 # -- connections -----------------------------------------------------------------------------------------------------
 
 def socks5h(proxy, host, port, timeout=TIMEOUT):
-    """A TCP connection to host:port through a SOCKS5 proxy "host:port", the name resolved by the proxy."""
+    """A TCP connection to host:port through a SOCKS5 proxy "host:port", the name resolved by the proxy. An IP literal
+    goes as an address (an http(s) save connects to the address it vetted, never a name the proxy would resolve)."""
     phost, _, pport = proxy.rpartition(":")
     try:
         s = socket.create_connection((phost, int(pport)), timeout=timeout)
@@ -130,8 +132,13 @@ def socks5h(proxy, host, port, timeout=TIMEOUT):
         s.sendall(b"\x05\x01\x00")                                   # v5, one method: no auth
         if _recv(s, 2) != b"\x05\x00":
             raise FetchError("proxy", "SOCKS proxy refused the no-auth method")
-        name = host.encode("idna")
-        s.sendall(b"\x05\x01\x00\x03" + bytes([len(name)]) + name + struct.pack(">H", port))
+        try:
+            ip = ipaddress.ip_address(host)
+            dest = (b"\x01" if ip.version == 4 else b"\x04") + ip.packed
+        except ValueError:
+            name = host.encode("idna")
+            dest = b"\x03" + bytes([len(name)]) + name
+        s.sendall(b"\x05\x01\x00" + dest + struct.pack(">H", port))
         head = _recv(s, 4)
         if head[1] != 0:
             kind = {3: "unreachable", 4: "unreachable", 5: "refused", 6: "timeout"}.get(head[1], "proxy")
