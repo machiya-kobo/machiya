@@ -3,6 +3,7 @@
 ## 0.4.1
 
 - **A chunked body is refused** (the 2026-10 sweep, LEAD-2): `PUT /api/prefs` and `POST /signout` read their body with vaultkit's `signin.read_body`, so a `Transfer-Encoding: chunked` body, a duplicate or odd `Content-Length`, an oversized or a short one answers 413 and closes the connection. Before, a chunked body was read as empty and its bytes were parsed as the next request on a kept-alive connection (behind a proxy other than Tailscale Serve).
+- **Today's Saved & Read links only http(s), gemini and gopher addresses** (LEAD-5): a page Hister stored under `javascript:`, `data:`, `file:` or any other scheme is left out, as Niwa's garden links already were. The page's CSP blocked them; this is defence in depth.
 
 ## 0.4.0
 

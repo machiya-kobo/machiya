@@ -389,14 +389,20 @@ def hister_version(base, now, timeout, headers):
     return version
 
 
+LINK_SCHEMES = ("http", "https", "gemini", "gopher")
+
+
 def page_entry(doc):
-    """One Hister document for Today's Saved & Read: plain values only."""
+    """One Hister document for Today's Saved & Read: plain values only; None when its address isn't an http(s), gemini
+    or gopher link."""
     meta = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
     source = text(meta.get("via") or meta.get("source"), 40).lower()
     reader = READERS_NAMES.get(source, "")
     stream = text(meta.get(source + "_stream"), 20).lower() if reader else ""
     starred = reader and (stream == "starred" or bool(meta.get(source + "_starred")))
     url = text(doc.get("url"), 2000)
+    if url.split(":", 1)[0].lower() not in LINK_SCHEMES or ":" not in url:
+        return None                     # 0.4.1 (sweep LEAD-5): javascript:, data:, file: … never become a link
     return {"title": text(doc.get("title"), 200) or text(doc.get("domain"), 100) or url, "url": url,
             "domain": text(doc.get("domain"), 100), "at": num(doc.get("updated")) or num(doc.get("added")),   # Hister's order
             "reader": reader, "starred": bool(starred), "label": text(doc.get("label"), 40)}
@@ -423,7 +429,7 @@ def hister(base, now, timeout, headers, token=None):
         found = [d for d in (s.get("documents") or []) if isinstance(d, dict)]
         if found:
             newest = num(found[0].get("updated")) or num(found[0].get("added"))
-        pages = [page_entry(d) for d in found[:8]]
+        pages = [p for p in (page_entry(d) for d in found) if p][:8]
     except FetchError as e:
         if str(e) in ("HTTP 401", "HTTP 403"):          # users on: the count needs the owner's token
             note = "page count: the token was refused" if value else "page count needs LANDING_HISTER_TOKEN_FILE"

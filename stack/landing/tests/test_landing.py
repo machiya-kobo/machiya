@@ -994,6 +994,19 @@ class Launcher(Stack):
         self.assertEqual([(p["title"], p["reader"], p["starred"]) for p in t["pages"]],
                          [("A Read Story", "NewsBlur", False), ("A Starred One", "NewsBlur", True), ("example.org", "", False)])
 
+    def test_today_pages_keep_only_link_schemes(self):
+        """0.4.1 (sweep LEAD-5): a stored address that isn't http(s), gemini or gopher never becomes a link."""
+        docs = [{"url": u, "title": "T " + u[:12], "domain": "x", "updated": NOW - 60, "metadata": {}}
+                for u in ("javascript:alert(1)", " JavaScript:alert(2)", "data:text/html,x", "vbscript:x", "file:///etc/passwd",
+                          "gemini://capsule.example/", "gopher://hole.example/1", "HTTPS://example.com/a")]
+        self.fakes["hister"].routes["/search"] = {"total": len(docs), "documents": docs}
+        l, _, t = self.today()
+        self.assertEqual([p["url"] for p in t["pages"]],
+                         ["gemini://capsule.example/", "gopher://hole.example/1", "HTTPS://example.com/a"])
+        html = render.home_html(l.current(), l.config.links, l.config.targets, "", NOW)
+        self.assertNotIn("javascript:", html.lower())
+        self.assertNotIn("data:text", html)
+
     def test_sections_degrade_quietly(self):
         self.fakes["konbini"].routes["/api/cards"] = (403, "forbidden", "text/plain")
         self.fakes["niwa"].routes["/feed.xml"] = (200, "<html>not a feed", "text/html")
