@@ -28,7 +28,9 @@ import base64
 import hashlib
 import json
 import os
+import socket
 import threading
+import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
@@ -51,6 +53,19 @@ class FakeForgejo:
         self.seed, self.token, self.root = seed, token, root_url.rstrip("/")
         self.requests = []              # (method, path, query, authorization header)
         self.lock = threading.Lock()
+        self.faults = []                # [path substring, action, times or None (always)]: tests' failures
+        self.sleep = 1.0
+
+    def fault(self, path):
+        """The injected failure for this request, if any: "sleep" (answer after self.sleep s: a read timeout),
+        "reset" (close the connection unanswered), "503", "429" (Retry-After: 0)."""
+        with self.lock:
+            for f in self.faults:
+                if f[0] in path and (f[2] is None or f[2] > 0):
+                    if f[2] is not None:
+                        f[2] -= 1
+                    return f[1]
+        return None
 
     # -- the seed as Forgejo shows it ----------------------------------------------------------------------------------
 
@@ -188,6 +203,20 @@ class FakeForgejo:
 
             def any(self, method):
                 u = urlsplit(self.path)
+                action = fake.fault(u.path)
+                if action == "sleep":
+                    time.sleep(fake.sleep)
+                elif action == "reset":
+                    self.close_connection = True
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                    return
+                elif action in ("503", "429"):
+                    self.send_response(int(action))
+                    if action == "429":
+                        self.send_header("Retry-After", "0")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 status, body, extra = fake.answer(method, u.path, parse_qs(u.query), self.headers.get("Authorization"))
                 data = json.dumps(body).encode() if body is not None else b""
                 self.send_response(status)
@@ -196,7 +225,16 @@ class FakeForgejo:
                 for k, v in extra.items():
                     self.send_header(k, v)
                 self.end_headers()
-                self.wfile.write(data)
+                try:
+                    self.wfile.write(data)
+                except OSError:                     # the client gave up (a "sleep" fault's timeout)
+                    pass
+
+            def finish(self):
+                try:
+                    super().finish()
+                except OSError:                     # a "reset" fault closed the connection
+                    pass
 
             def do_GET(self):
                 self.any("GET")

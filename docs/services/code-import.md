@@ -2,7 +2,7 @@
 
 code-import copies the owner's repos on **Forgejo** and **GitHub** into [Hister](hister.md), where Shiori searches them as its **Code** area. A result opens the forge's own page. Code: [stack/code-import/](../../stack/code-import/) (settings, the metadata table and the tests are in its README).
 
-**Status: phase 1 built (0.1.0), not deployed.** The Hister contract's [code documents](../contracts/hister.md#code-documents-metadatasourcecode) section is approved (the lead, 2026-10-04).
+**Status: phase 1. 0.1.0 is in production; 0.1.1 (retries, sources on their own) is built.** The Hister contract's [code documents](../contracts/hister.md#code-documents-metadatasourcecode) section is approved (the lead, 2026-10-04).
 
 ## What it imports (owner, 2026-10-05)
 
@@ -38,7 +38,9 @@ flowchart LR
 - **Secrets.** Every document is sent **with `html`**, because Hister's 422 check reads only `html`. Before that, code-import's own, wider scan redacts likely secrets (or refuses the document, with `CODE_IMPORT_SECRETS=refuse`). Files named like secrets are never read, and `skip_sensitive_check` is never sent.
 - **Browsed pages win.** A URL Hister already holds as somebody else's page (a GitHub issue the owner opened in the browser) is left alone. code-import replaces and deletes only documents whose `metadata.source` is `code`.
 - **Withdrawals.** A deleted, renamed, transferred, archived or newly excluded repo has its documents withdrawn. So does a deleted doc or release, and (on a full run) a deleted issue.
-- **Fail closed.** A forge that can't be listed, or suddenly lists nothing, stops the run before anything is withdrawn. So does Hister being down.
+- **Retries:** a transient failure (a timeout, a reset, a 5xx, a 429) is tried again after 2, 8 and 30 s; 401, 403 and 404 never are.
+- **Sources on their own, failing closed:** each owner on each forge is a source. One that still fails is named in `status.json` (`sources`), withdraws nothing, and doesn't stop the others. A source that suddenly lists nothing fails too. Hister being down stops the whole run.
+- **Caps:** a repo with more markdown docs than `CODE_IMPORT_MAX_DOCS` is named in `status.json` (`caps`).
 - **Logs** carry counts and URLs of refusals, never titles or text. `status.json` feeds the healthcheck.
 
 ## The Code area in Shiori (for the shiori agent)

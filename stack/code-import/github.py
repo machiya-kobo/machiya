@@ -24,7 +24,7 @@ HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "202
 class GitHub(Forge):
     name = "github"
 
-    def __init__(self, api, owner_tokens, gap=0.25, cache=None):
+    def __init__(self, api, owner_tokens, gap=0.25, cache=None, **client):
         """owner_tokens: [(owner, token)], one token per owner."""
         if not owner_tokens:
             raise SystemExit("code-import: CODE_IMPORT_GITHUB_TOKEN_FILES names no owner")
@@ -34,11 +34,18 @@ class GitHub(Forge):
             if owner.lower() in self.clients:
                 raise SystemExit("code-import: GitHub owner %r is named twice" % owner)
             self.clients[owner.lower()] = (owner, Client(self.api, token, "Bearer", HEADERS, gap=gap,
-                                                         name="github(%s)" % owner, cache=cache))
+                                                         name="github(%s)" % owner, cache=cache, **client))
 
     @property
     def calls(self):
         return sum(c.calls for _, c in self.clients.values())
+
+    @property
+    def retries(self):
+        return sum(c.retries for _, c in self.clients.values())
+
+    def owner_names(self):
+        return [owner for owner, _ in self.clients.values()]
 
     def client(self, repo):
         return self.clients[repo.owner.lower()][1]
@@ -53,20 +60,19 @@ class GitHub(Forge):
                     stamp=r.get("pushed_at") or r.get("updated_at") or "", created=unix(r.get("created_at")),
                     updated=unix(r.get("pushed_at") or r.get("updated_at")))
 
-    def repos(self):
-        out = []
-        for key, (owner, c) in self.clients.items():
-            me, _ = c.get("/user", conditional=True)
-            if not isinstance(me, dict) or not me.get("login"):
-                raise ForgeError("github GET /user: no login (token for %s)" % owner)
-            if me["login"].lower() == key:
-                found = c.pages("/user/repos", [("affiliation", "owner"), ("visibility", "all"), ("sort", "full_name")],
-                                size=100, size_param="per_page", conditional=True)
-            else:
-                found = c.pages("/orgs/%s/repos" % owner, [("type", "all"), ("sort", "full_name")], size=100,
-                                size_param="per_page", conditional=True)
-            out += [self.repo(r) for r in found if (r.get("owner") or {}).get("login", "").lower() == key]
-        return out
+    def repos(self, owner):
+        key = owner.lower()
+        owner, c = self.clients[key]
+        me, _ = c.get("/user", conditional=True)
+        if not isinstance(me, dict) or not me.get("login"):
+            raise ForgeError("github GET /user: no login (token for %s)" % owner)
+        if me["login"].lower() == key:
+            found = c.pages("/user/repos", [("affiliation", "owner"), ("visibility", "all"), ("sort", "full_name")],
+                            size=100, size_param="per_page", conditional=True)
+        else:
+            found = c.pages("/orgs/%s/repos" % owner, [("type", "all"), ("sort", "full_name")], size=100,
+                            size_param="per_page", conditional=True)
+        return [self.repo(r) for r in found if (r.get("owner") or {}).get("login", "").lower() == key]
 
     def tree(self, repo):
         if not repo.branch:

@@ -20,12 +20,14 @@ from forges import Client, Forge, ForgeError, Item, Repo, quote_path, unix
 class Forgejo(Forge):
     name = "forgejo"
 
-    def __init__(self, url, token, owners, gap=0.5, cache=None):
+    def __init__(self, url, token, owners, gap=0.5, cache=None, **client):
         if not owners:
             raise SystemExit("code-import: CODE_IMPORT_FORGEJO_OWNERS names no owner")
+        if len({o.lower() for o in owners}) != len(owners):
+            raise SystemExit("code-import: a Forgejo owner is named twice")
         self.web = url.rstrip("/")
         self.owners = owners
-        self.c = Client(self.web + "/api/v1", token, "token", gap=gap, name="forgejo", cache=cache)
+        self.c = Client(self.web + "/api/v1", token, "token", gap=gap, name="forgejo", cache=cache, **client)
         self._login = None
 
     def login(self):
@@ -47,21 +49,21 @@ class Forgejo(Forge):
                     empty=bool(r.get("empty")), stamp=r.get("updated_at") or "", created=unix(r.get("created_at")),
                     updated=unix(r.get("updated_at")))
 
-    def repos(self):
-        out, login = [], self.login()
-        for owner in self.owners:
-            if owner.lower() == login.lower():
-                found = self.c.pages("/user/repos")
-            else:
-                probe, _ = self.c.get("/orgs/%s" % owner, missing=(404,))
-                path = ("/orgs/%s/repos" if probe is not None else "/users/%s/repos") % owner
-                if probe is None:
-                    user, _ = self.c.get("/users/%s" % owner, missing=(404,))
-                    if user is None:
-                        raise ForgeError("forgejo: owner %r not found (or the token can't see it)" % owner)
-                found = self.c.pages(path)
-            out += [self.repo(r) for r in found if (r.get("owner") or {}).get("login", "").lower() == owner.lower()]
-        return out
+    def owner_names(self):
+        return list(self.owners)
+
+    def repos(self, owner):
+        if owner.lower() == self.login().lower():
+            found = self.c.pages("/user/repos")
+        else:
+            probe, _ = self.c.get("/orgs/%s" % owner, missing=(404,))
+            path = ("/orgs/%s/repos" if probe is not None else "/users/%s/repos") % owner
+            if probe is None:
+                user, _ = self.c.get("/users/%s" % owner, missing=(404,))
+                if user is None:
+                    raise ForgeError("forgejo: owner %r not found (or the token can't see it)" % owner)
+            found = self.c.pages(path)
+        return [self.repo(r) for r in found if (r.get("owner") or {}).get("login", "").lower() == owner.lower()]
 
     def tree(self, repo):
         if repo.empty or not repo.branch:
@@ -126,3 +128,7 @@ class Forgejo(Forge):
     @property
     def calls(self):
         return self.c.calls
+
+    @property
+    def retries(self):
+        return self.c.retries

@@ -42,11 +42,11 @@ import render                                                  # noqa: E402
 import secretscan                                              # noqa: E402
 import tokens                                                  # noqa: E402
 from forgejo import Forgejo                                    # noqa: E402
-from forges import ForgeError, iso                             # noqa: E402
+from forges import RETRY_DELAYS, ForgeError, Repo, iso          # noqa: E402
 from github import GitHub                                      # noqa: E402
 from store import Store                                        # noqa: E402
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 DOC_V = 1               # the documents' shape: part of every fingerprint, so a bump re-sends everything once
 FINAL = ("added", "known", "refused", "rejected", "skipped")
 DOC_EXTS = (".md", ".markdown", ".mdown", ".mkd")
@@ -146,6 +146,11 @@ class Rules:
         return out
 
 
+def source_winners(rules, host, owner):
+    """The sources whose repos win over this source's same-named ones (its twins' sources)."""
+    return ["%s:%s" % w for w, (lh, lo) in rules.twins if (lh, lo) == (host, owner.lower())]
+
+
 class Ctx:
     """A repo as its documents need it."""
 
@@ -167,7 +172,8 @@ class Importer:
         self.doc_skip = tuple(DEFAULT_DOC_SKIP) + tuple(doc_skip)
         self.limit, self.only_repo = limit, (only_repo or "").lower() or None
         self.out, self.clock = out, clock
-        self.stats, self.fresh, self.ctx = {}, set(), {}
+        self.stats, self.fresh, self.ctx, self.sources = {}, set(), {}, {}
+        self.later, self.touched = None, set()
 
     def log(self, msg):
         self.out("%s %s" % (time.strftime("%Y-%m-%dT%H:%M:%S"), msg))
@@ -181,8 +187,21 @@ class Importer:
 
     # -- withdrawing -----------------------------------------------------------------------------------------------------
 
+    def defer(self, fn):
+        """Within a source's pass, writes that withdraw or move on wait until the whole source has completed: a
+        source that fails part way withdraws nothing (fail closed per source)."""
+        if self.later is None:
+            fn()
+        else:
+            self.later.append(fn)
+
     def withdraw(self, row):
-        """A document whose source is gone: deleted from Hister only if it is ours there; the row is forgotten."""
+        """A document whose source is gone: deleted from Hister only if it is ours there; the row is forgotten.
+        Deferred to the end of the source's pass; a URL that was written again meanwhile (touched) is left alone."""
+        row = dict(row)
+        self.defer(lambda: None if row["url"] in self.touched else self.withdraw_now(row))
+
+    def withdraw_now(self, row):
         url = row["url"]
         if row["status"] == "added":
             if self.dry_run:
@@ -197,14 +216,13 @@ class Importer:
                 self.note(row["host"], "deleted")
             elif doc is not None:
                 self.note(row["host"], "left alone (a page now)")
-        if not self.dry_run:
-            self.store.drop_doc(url)
+        current = self.store.doc(url)
+        if not self.dry_run and current and (current["status"], current["src"]) == (row["status"], row["src"]):
+            self.store.drop_doc(url)                    # (a row rewritten since, e.g. now refused, stays)
 
     def withdraw_repo(self, host, repo_id, kinds=None):
         for row in self.store.docs(host, repo_id, kinds):
             self.withdraw(row)
-        if kinds is None and not self.dry_run:
-            self.store.drop_meta("issues:%s:repo:%s" % (host, repo_id))
 
     # -- one document ----------------------------------------------------------------------------------------------------
 
@@ -212,6 +230,7 @@ class Importer:
         """build() -> (title, line, body markdown, extra metadata); called only when the source changed."""
         host, repo = ctx.forge.name, ctx.repo
         url = histermod.norm(url)
+        self.touched.add(url)
         row = self.store.doc(url)
         if row and row["src"] == src and row["status"] in FINAL:
             self.note(host, "unchanged")
@@ -314,9 +333,17 @@ class Importer:
         f, r = ctx.forge, ctx.repo
         seen = set()
         cands = self.doc_candidates(f.tree(r))
+        cap = "cap:%s:%s" % (f.name, r.id)
         if len(cands) > self.max_docs:
             self.note(f.name, "docs over CODE_IMPORT_MAX_DOCS", len(cands) - self.max_docs)
+            self.log("  %s:%s has %d markdown docs, over CODE_IMPORT_MAX_DOCS=%d: the first %d are imported"
+                     % (f.name, r.full_name, len(cands), self.max_docs, self.max_docs))
+            if not self.dry_run:
+                self.store.meta(cap, json.dumps({"repo": "%s:%s" % (f.name, r.full_name), "docs": len(cands),
+                                                 "max": self.max_docs}))
             cands = cands[:self.max_docs]
+        elif not self.dry_run:
+            self.store.drop_meta(cap)
         for kind, path, sha, size in cands:
             url = histermod.norm(f.doc_url(r, path))
             seen.add(url)
@@ -328,8 +355,9 @@ class Importer:
                     if row and row["status"] == "added":
                         self.withdraw(row)
                     if not self.dry_run:
-                        self.store.put_doc(url, host=f.name, repo_id=r.id, kind=kind, key="doc:" + path, src=src,
-                                           status="refused" if "secret" in why else "skipped", error=why)
+                        self.defer(lambda url=url, kind=kind, path=path, src=src, why=why: self.store.put_doc(
+                            url, host=f.name, repo_id=r.id, kind=kind, key="doc:" + path, src=src,
+                            status="refused" if "secret" in why else "skipped", error=why))
                     self.note(f.name, "refused (secret name)" if "secret" in why else "skipped (too big)")
                 continue
 
@@ -379,8 +407,9 @@ class Importer:
             self.docs(ctx)
             self.releases(ctx)
             self.note(f.name, "repos read")
-        self.store.put_repo(f.name, r.id, full_name=r.full_name, url=r.url, branch=r.branch, included=1, reason="",
-                            stamp=r.stamp if changed else prev["stamp"])
+        stamp = r.stamp if changed else prev["stamp"]
+        self.defer(lambda: self.store.put_repo(f.name, r.id, full_name=r.full_name, url=r.url, branch=r.branch,
+                                               included=1, reason="", stamp=stamp))
 
     def issue_pass(self, f, repos, full):
         for scope, srepos in f.issue_scopes(repos):
@@ -415,50 +444,115 @@ class Importer:
 
     # -- a run -----------------------------------------------------------------------------------------------------------
 
+    def stored(self, host, owner):
+        """The state's repos of one source (an owner on a host)."""
+        return [row for row in self.store.repos(host) if (row["full_name"] or "").split("/")[0].lower() == owner.lower()]
+
     def run(self, full=False):
-        """One pass over every forge. Raises ForgeError or HisterDown (the state is written per document and per repo,
-        so a run that stops is resumed by the next)."""
-        self.stats, self.fresh, self.ctx = {}, set(), {}
+        """One pass over every source (an owner on a forge), each on its own: a source that fails (after each call's
+        retries) is recorded in self.sources and withdraws nothing, and the others go on. Raises HisterDown (Hister
+        is every source's: the run stops; the state is written per document, so the next run resumes)."""
+        self.stats, self.fresh, self.ctx, self.sources = {}, set(), {}, {}
         now = self.clock()
-        last_full = self.store.meta("last_full")
-        full = full or last_full is None or now - float(last_full) >= self.full_interval
+        srcs = [(f, owner, "%s:%s" % (f.name, owner.lower())) for f in self.forges for owner in f.owner_names()]
         listing = {}
-        for f in self.forges:
-            listing[f.name] = f.repos()
-            known = [row for row in self.store.repos(f.name)]
-            if known and not listing[f.name]:
-                raise ForgeError("%s listed no repos, though %d were seen before: nothing is withdrawn (a token that "
-                                 "lost its access?)" % (f.name, len(known)))
-        decisions = self.rules.decide([r for rs in listing.values() for r in rs])
-        for f in self.forges:
-            current = {r.id: r for r in listing[f.name]}
-            for row in self.store.repos(f.name):
-                if row["id"] not in current:
-                    self.withdraw_repo(f.name, row["id"])
-                    if not self.dry_run:
-                        self.store.drop_repo(f.name, row["id"])
-                    self.note(f.name, "repo gone")
-            included = []
-            for r in listing[f.name]:
-                if self.only_repo and r.full_name.lower() != self.only_repo:
-                    continue
-                ok, reason, twin = decisions[(f.name, r.id)]
-                if not ok:
-                    self.note(f.name, "repo left out: " + reason)
-                    prev = self.store.repo(f.name, r.id)
-                    if prev and prev["included"]:
-                        self.withdraw_repo(f.name, r.id)
-                    self.store.put_repo(f.name, r.id, full_name=r.full_name, url=r.url, branch=r.branch, included=0,
-                                        reason=reason, stamp="")
-                    continue
-                included.append(r)
-                self.note(f.name, "repos")
-                self.repo_pass(f, r, twin, full)
-            self.issue_pass(f, included, full)
-        if full and not self.dry_run and self.limit is None and not self.only_repo:
-            self.store.meta("last_full", int(now))
+        for f, owner, key in srcs:
+            try:
+                repos = f.repos(owner)
+                known = self.stored(f.name, owner)
+                if known and not repos:
+                    raise ForgeError("%s listed no repos, though %d were seen before: nothing is withdrawn (a token "
+                                     "that lost its access?)" % (key, len(known)))
+                listing[key] = repos
+            except ForgeError as e:
+                self.fail(key, e)
+        # a failed source's repos as the state last saw them, so its twins are still recognised as twins
+        phantoms = [Repo(host=f.name, id=row["id"], owner=row["full_name"].split("/")[0],
+                         name=row["full_name"].split("/", 1)[1], url=row["url"])
+                    for f, owner, key in srcs if key not in listing for row in self.stored(f.name, owner)]
+        decisions = self.rules.decide(phantoms + [r for rs in listing.values() for r in rs])
+        for f, owner, key in srcs:
+            if key not in listing:
+                continue
+            blind = [w for w in source_winners(self.rules, f.name, owner)
+                     if w in self.sources and not self.sources[w]["ok"]
+                     and not self.stored(w.split(":", 1)[0], w.split(":", 1)[1])]
+            if blind:                       # its twins' source failed and was never seen: can't tell twins apart
+                self.sources[key] = {"ok": False, "error": "waiting for %s (its twins' source)" % ", ".join(blind)}
+                self.log("source %s: skipped, %s" % (key, self.sources[key]["error"]))
+                continue
+            self.later, self.touched = [], set()
+            try:
+                n = self.source_pass(f, owner, key, listing[key], decisions, full, now)
+            except ForgeError as e:
+                held, self.later = len(self.later), None
+                self.fail(key, e, held)
+                continue
+            later, self.later = self.later, None
+            for fn in later:
+                fn()
+            self.sources[key] = {"ok": True, "repos": n}
+            if not self.dry_run:
+                self.store.meta("last_ok:" + key, int(now))
+        if not self.dry_run:
             self.store.http_prune(now - 7 * 86400)
         return self.stats
+
+    def fail(self, key, error, held=0):
+        self.sources[key] = {"ok": False, "error": str(error)[:500]}
+        self.note(key.split(":", 1)[0], "sources failed")
+        self.log("source %s failed: %s%s" % (key, error, "; %d withdrawal(s) held back" % held if held else ""))
+
+    def source_pass(self, f, owner, key, repos, decisions, full, now):
+        last_full = self.store.meta("last_full:" + key)
+        full = full or last_full is None or now - float(last_full) >= self.full_interval
+        current = {r.id for r in repos}
+        for row in self.stored(f.name, owner):
+            if row["id"] not in current:
+                self.withdraw_repo(f.name, row["id"])
+                if not self.dry_run:
+                    self.defer(lambda rid=row["id"]: (self.store.drop_repo(f.name, rid),
+                                                      self.store.drop_meta("issues:%s:repo:%s" % (f.name, rid)),
+                                                      self.store.drop_meta("cap:%s:%s" % (f.name, rid))))
+                self.note(f.name, "repo gone")
+        included = []
+        for r in repos:
+            if self.only_repo and r.full_name.lower() != self.only_repo:
+                continue
+            ok, reason, twin = decisions[(f.name, r.id)]
+            if not ok:
+                self.note(f.name, "repo left out: " + reason)
+                prev = self.store.repo(f.name, r.id)
+                if prev and prev["included"]:
+                    self.withdraw_repo(f.name, r.id)
+                self.defer(lambda r=r, reason=reason: self.store.put_repo(
+                    f.name, r.id, full_name=r.full_name, url=r.url, branch=r.branch, included=0, reason=reason,
+                    stamp=""))
+                continue
+            included.append(r)
+            self.note(f.name, "repos")
+            self.repo_pass(f, r, twin, full)
+        self.issue_pass(f, included, full)
+        if full and not self.dry_run and self.limit is None and not self.only_repo:
+            self.defer(lambda: self.store.meta("last_full:" + key, int(now)))
+        return len(included)
+
+    def caps(self):
+        """The repos over CODE_IMPORT_MAX_DOCS, as the last walk of each saw them (for the owner to decide)."""
+        out = []
+        for key, value in self.store.meta_prefix("cap:"):
+            try:
+                out.append(json.loads(value))
+            except ValueError:
+                pass
+        return sorted(out, key=lambda c: c.get("repo", ""))
+
+    def source_status(self):
+        out = {}
+        for key, st in self.sources.items():
+            out[key] = dict(st, last_success=int(self.store.meta("last_ok:" + key) or 0) or None,
+                            last_full=int(self.store.meta("last_full:" + key) or 0) or None)
+        return out
 
 
 # -- the service ------------------------------------------------------------------------------------------------------
@@ -471,12 +565,18 @@ def build(env, dry_run=False, limit=None, only_repo=None):
     data = env.get("CODE_IMPORT_DATA", "/data")
     store = Store(":memory:" if dry_run else os.path.join(data, "code-import.sqlite3"))
     gap = env.get("CODE_IMPORT_GAP")
+    try:
+        delays = tuple(float(x) for x in owner_list(env.get("CODE_IMPORT_RETRY_DELAYS", ",".join(map(str, RETRY_DELAYS)))))
+        client = {"retry_delays": delays, "timeout": float(env.get("CODE_IMPORT_TIMEOUT", "60"))}
+    except ValueError:
+        raise SystemExit("code-import: CODE_IMPORT_RETRY_DELAYS is seconds, comma-separated (2,8,30); "
+                         "CODE_IMPORT_TIMEOUT is seconds")
     forges = []
     if env.get("CODE_IMPORT_FORGEJO_URL"):
         token = tokens.token_file(env.get("CODE_IMPORT_FORGEJO_TOKEN_FILE"), "CODE_IMPORT_FORGEJO_TOKEN_FILE",
                                   required=True)
         forges.append(Forgejo(env["CODE_IMPORT_FORGEJO_URL"], token, owner_list(env.get("CODE_IMPORT_FORGEJO_OWNERS")),
-                              gap=float(gap) if gap else 0.5, cache=store))
+                              gap=float(gap) if gap else 0.5, cache=store, **client))
     if env.get("CODE_IMPORT_GITHUB_TOKEN_FILES"):
         pairs = []
         for item in owner_list(env["CODE_IMPORT_GITHUB_TOKEN_FILES"]):
@@ -486,7 +586,7 @@ def build(env, dry_run=False, limit=None, only_repo=None):
             pairs.append((owner.strip(), tokens.token_file(path, "CODE_IMPORT_GITHUB_TOKEN_FILES (%s)" % owner.strip(),
                                                            required=True)))
         forges.append(GitHub(env.get("CODE_IMPORT_GITHUB_API", "https://api.github.com"), pairs,
-                             gap=float(gap) if gap else 0.25, cache=store))
+                             gap=float(gap) if gap else 0.25, cache=store, **client))
     if not forges:
         raise SystemExit("code-import: no forge: set CODE_IMPORT_FORGEJO_URL and/or CODE_IMPORT_GITHUB_TOKEN_FILES")
     hister_url = env.get("CODE_IMPORT_HISTER_URL", "")
@@ -524,7 +624,8 @@ def serve(env, once=False, full=False):
     last_ok, fails, stats = None, 0, {}
 
     def healthy():
-        """ok=false only when broken: after a failed run once no run has succeeded for three intervals."""
+        """ok=false only when broken: after a failed run (Hister down, or any source failed) once no fully good run
+        has happened for three intervals. A source that keeps failing turns it false; the others still import."""
         if last_ok is None:
             return fails == 0
         return fails == 0 or time.time() - last_ok < 3 * interval + 300
@@ -533,25 +634,33 @@ def serve(env, once=False, full=False):
         started = int(time.time())
         error = None
         common = dict(version=VERSION, started=started, last_success=last_ok, failures_in_a_row=fails,
-                      last_full=imp.store.meta("last_full"), counts=imp.store.counts())
+                      counts=imp.store.counts(), sources=imp.source_status(), caps=imp.caps())
         write_status(data, ok=healthy(), running=True, error=None, last_run=stats, **common)
         if in_window(window, tz):
             imp.log("in the pause window: no run")
         else:
-            calls = {f.name: f.calls for f in imp.forges}
+            calls = {f.name: (f.calls, f.retries) for f in imp.forges}
             try:
                 stats = imp.run(full=full)
                 full = False
-                last_ok, fails = int(time.time()), 0
                 for f in imp.forges:
-                    imp.note(f.name, "forge calls", f.calls - calls[f.name])
+                    imp.note(f.name, "forge calls", f.calls - calls[f.name][0])
+                    if f.retries > calls[f.name][1]:
+                        imp.note(f.name, "forge retries", f.retries - calls[f.name][1])
                 imp.log("run: %s" % json.dumps(stats, sort_keys=True))
-            except (histermod.HisterDown, ForgeError) as e:
+                bad = {k: v["error"] for k, v in imp.sources.items() if not v["ok"]}
+                if bad:
+                    fails += 1
+                    error = "; ".join("%s: %s" % kv for kv in sorted(bad.items()))
+                    imp.log("run partly failed (%d in a row): %d source(s) of %d" % (fails, len(bad), len(imp.sources)))
+                else:
+                    last_ok, fails = int(time.time()), 0
+            except histermod.HisterDown as e:
                 fails += 1
                 error = str(e)
                 imp.log("run failed (%d in a row): %s" % (fails, e))
-        common.update(last_success=last_ok, failures_in_a_row=fails, last_full=imp.store.meta("last_full"),
-                      counts=imp.store.counts())
+        common.update(last_success=last_ok, failures_in_a_row=fails, counts=imp.store.counts(),
+                      sources=imp.source_status(), caps=imp.caps())
         write_status(data, ok=healthy(), running=False, error=error, last_run=stats, **common)
         if once:
             return 0 if error is None else 1
@@ -571,11 +680,14 @@ def main(argv=None):
         imp, _ = build(env, dry_run=True, limit=args.limit if args.limit is not None else 5, only_repo=args.repo)
         try:
             stats = imp.run(full=True)
-        except (histermod.HisterDown, ForgeError) as e:
+        except histermod.HisterDown as e:
             print("dry run failed: %s" % e, file=sys.stderr)
             return 1
         print("dry run: %s (nothing was written)" % json.dumps(stats, sort_keys=True))
-        return 0
+        bad = {k: v["error"] for k, v in imp.sources.items() if not v["ok"]}
+        for k, e in sorted(bad.items()):
+            print("dry run failed for %s: %s" % (k, e), file=sys.stderr)
+        return 1 if bad else 0
     return serve(env, once=args.once, full=args.full)
 
 

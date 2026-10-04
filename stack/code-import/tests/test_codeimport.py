@@ -153,10 +153,12 @@ class Base(unittest.TestCase):
         self.lines = []
         self.now = 1791200000
 
-    def importer(self, dry_run=False, hister=True, store=None, **kw):
+    def importer(self, dry_run=False, hister=True, store=None, timeout=5, **kw):
         store = store or self.store
-        forges = [Forgejo(self.fj_api, FJ_TOKEN, ["lantern", "workshop"], gap=0, cache=store),
-                  GitHub(self.gh_api, [("lantern", GH_LANTERN), ("workshop-kobo", GH_WORKSHOP)], gap=0, cache=store)]
+        client = {"retry_delays": (0.01, 0.01, 0.01), "timeout": timeout}
+        forges = [Forgejo(self.fj_api, FJ_TOKEN, ["lantern", "workshop"], gap=0, cache=store, **client),
+                  GitHub(self.gh_api, [("lantern", GH_LANTERN), ("workshop-kobo", GH_WORKSHOP)], gap=0, cache=store,
+                         **client)]
         h = histermod.Hister(H_URL, HISTER_TOKEN) if hister else None
         return codeimport.Importer(forges, store, h, rules=codeimport.Rules(twins=codeimport.parse_twins(TWINS)),
                                    dry_run=dry_run, out=self.lines.append, clock=lambda: self.now, **kw)
@@ -552,23 +554,146 @@ class Failures(Base):
         self.importer().run()
         self.assertEqual({d["url"] for d in adds()}, EXPECTED)
 
-    def test_a_refused_forge_token_stops_the_run(self):
+    def test_a_refused_forge_token_fails_its_sources_only(self):
         self.importer().run()
         H.calls = []
         self.fj.token = "rotated-elsewhere"
-        with self.assertRaises(ForgeError) as e:
-            self.importer().run()
-        self.assertIn("401", str(e.exception))
+        self.gh_repo("pixel-font")["description"] = "A 5x7 pixel font, now with katakana"
+        imp = self.importer()
+        imp.run()
+        self.assertFalse(imp.sources["forgejo:lantern"]["ok"])
+        self.assertIn("401", imp.sources["forgejo:lantern"]["error"])
+        self.assertFalse(imp.sources["forgejo:workshop"]["ok"])
+        self.assertTrue(imp.sources["github:lantern"]["ok"])                       # the others go on
+        self.assertTrue(imp.sources["github:workshop-kobo"]["ok"])
+        self.assertEqual([d["url"] for d in adds()], [gh_url("/lantern/pixel-font")])
         self.assertEqual(deletes(), [])
+        auth = [r for r in self.fj.requests if r[1] == "/api/v1/user"]
+        self.assertEqual(len(auth), 3)              # the first run's, then once per Forgejo source: 401 isn't retried
 
     def test_an_empty_listing_withdraws_nothing(self):
         self.importer().run()
         H.calls = []
         self.gh.seed["repos"] = []
-        with self.assertRaises(ForgeError) as e:
-            self.importer().run()
-        self.assertIn("listed no repos", str(e.exception))
+        imp = self.importer()
+        imp.run()
+        self.assertIn("listed no repos", imp.sources["github:lantern"]["error"])
+        self.assertIn("listed no repos", imp.sources["github:workshop-kobo"]["error"])
+        self.assertTrue(imp.sources["forgejo:lantern"]["ok"])
         self.assertEqual(deletes(), [])
+
+
+class Retries(Base):
+    def test_a_timeout_once_then_success(self):
+        self.gh.faults = [["/repos/lantern/pixel-font/releases", "sleep", 1]]
+        self.gh.sleep = 1.0
+        imp = self.importer(timeout=0.4)
+        imp.run()
+        self.assertTrue(all(s["ok"] for s in imp.sources.values()), imp.sources)
+        self.assertEqual({d["url"] for d in adds()}, EXPECTED)
+        self.assertEqual(sum(f.retries for f in imp.forges), 1)
+
+    def test_resets_5xx_and_429_are_tried_again_404_is_not(self):
+        self.fj.faults = [["/api/v1/repos/issues/search", "reset", 1], ["/releases", "503", 2]]
+        self.gh.faults = [["/orgs/workshop-kobo/repos", "429", 1]]
+        imp = self.importer()
+        imp.run()
+        self.assertTrue(all(s["ok"] for s in imp.sources.values()), imp.sources)
+        self.assertEqual({d["url"] for d in adds()}, EXPECTED)
+        self.assertEqual(sum(f.retries for f in imp.forges), 4)
+        c = Client(self.gh_api, GH_LANTERN, "Bearer", gap=0, retry_delays=(0.01,) * 3)
+        with self.assertRaises(ForgeError):
+            c.get("/repos/nobody/nothing")
+        self.assertEqual(c.retries, 0)
+        self.assertEqual(len([r for r in self.gh.requests if r[1] == "/repos/nobody/nothing"]), 1)
+
+    def test_a_long_retry_after_fails_the_call(self):
+        c = Client(self.gh_api, GH_LANTERN, "Bearer", gap=0, retry_delays=(0.01,) * 3, max_wait=10)
+        self.gh.faults = [["/user", "429", None]]
+        orig = self.gh.fault
+        self.gh.fault = lambda path: orig(path)
+        with self.assertRaises(ForgeError) as e:
+            c.get("/user")
+        self.assertIn("4 tries", str(e.exception))                                # Retry-After 0: tried 4 times
+
+    def test_gives_up_after_the_last_try(self):
+        self.gh.faults = [["/repos/workshop-kobo/lamp/issues", "503", None]]
+        imp = self.importer()
+        imp.run()
+        self.assertFalse(imp.sources["github:workshop-kobo"]["ok"])
+        self.assertIn("HTTP 503 (4 tries)", imp.sources["github:workshop-kobo"]["error"])
+
+
+class Sources(Base):
+    def test_a_source_failing_part_way_withdraws_nothing(self):
+        self.importer().run()
+        H.calls = []
+        self.now += 900
+        lamp = self.gh_repo("lamp")
+        del lamp["files"]["docs/api.md"]                                          # gone: would be withdrawn
+        lamp["releases"] = lamp["releases"][1:]
+        lamp["pushed_at"] = "2026-10-04T09:00:00Z"
+        self.gh.faults = [["/repos/workshop-kobo/lamp/issues", "503", None]]      # fails after the docs pass
+        self.gh_repo("pixel-font")["description"] = "changed"
+        self.fj_repo("garden-notes")["issues"][0].update(state="open", updated_at="2026-10-04T09:00:00Z")
+        imp = self.importer()
+        imp.run()
+        self.assertFalse(imp.sources["github:workshop-kobo"]["ok"])
+        self.assertTrue(imp.sources["github:lantern"]["ok"] and imp.sources["forgejo:lantern"]["ok"])
+        self.assertEqual(deletes(), [])                                           # held back
+        self.assertIn(gh_url("/workshop-kobo/lamp/blob/main/docs/api.md"), H.docs)
+        self.assertIsNotNone(self.store.doc(gh_url("/workshop-kobo/lamp/blob/main/docs/api.md")))
+        self.assertEqual({d["url"] for d in adds()}, {gh_url("/lantern/pixel-font"),          # the good sources land
+                                                      fj_url("/lantern/garden-notes/issues/1")})
+        self.assertIn("held back", "\n".join(self.lines))
+        # the forge recovers: the next run withdraws what the failed one held back
+        self.gh.faults = []
+        H.calls = []
+        self.now += 900
+        imp = self.importer()
+        imp.run()
+        self.assertTrue(all(s["ok"] for s in imp.sources.values()), imp.sources)
+        self.assertEqual(set(deletes()), {gh_url("/workshop-kobo/lamp/blob/main/docs/api.md"),
+                                          gh_url("/workshop-kobo/lamp/releases/tag/v0.1.0")})
+
+    def test_a_source_gone_quiet_keeps_its_documents(self):
+        self.importer().run()
+        H.calls = []
+        self.gh.faults = [["/user/repos", "503", None]]                           # github:lantern can't be listed
+        self.gh.seed["repos"].remove(self.gh_repo("pixel-font"))
+        imp = self.importer()
+        imp.run()
+        self.assertFalse(imp.sources["github:lantern"]["ok"])
+        self.assertEqual(deletes(), [])
+        self.assertIn(gh_url("/lantern/pixel-font"), H.docs)
+
+    def test_twins_wait_for_a_winner_never_seen(self):
+        self.gh.faults = [["/orgs/workshop-kobo/repos", "503", None]]
+        imp = self.importer()
+        imp.run()
+        self.assertIn("waiting for github:workshop-kobo", imp.sources["forgejo:workshop"]["error"])
+        self.assertFalse([d for d in adds() if "/workshop/" in d["url"]])         # Forgejo's lamp is a twin
+        self.assertTrue(imp.sources["forgejo:lantern"]["ok"] and imp.sources["github:lantern"]["ok"])
+        self.gh.faults = []
+        self.importer().run()                                                     # seen once...
+        H.calls = []
+        self.gh.faults = [["/orgs/workshop-kobo/repos", "503", None]]
+        imp = self.importer()
+        imp.run()                                                                 # ...its last listing still counts
+        self.assertTrue(imp.sources["forgejo:workshop"]["ok"])
+        self.assertFalse([d for d in adds() if "/workshop/" in d["url"]])
+        self.assertEqual(deletes(), [])
+
+    def test_caps_are_named(self):
+        imp = self.importer(max_docs=1)
+        imp.run()
+        caps = {c["repo"]: c for c in imp.caps()}
+        self.assertEqual(caps["forgejo:lantern/dotfiles"], {"repo": "forgejo:lantern/dotfiles", "docs": 2, "max": 1})
+        self.assertIn("github:workshop-kobo/lamp", caps)
+        imp = self.importer(max_docs=200)
+        self.now += 21600
+        imp.run(full=True)
+        self.assertEqual(imp.caps(), [])
 
 
 class DryRun(Base):
@@ -598,6 +723,7 @@ class CommandLine(Base):
                "CODE_IMPORT_FORGEJO_OWNERS": "lantern,workshop", "CODE_IMPORT_GITHUB_API": self.gh_api,
                "CODE_IMPORT_GITHUB_TOKEN_FILES": "lantern=%s,workshop-kobo=%s" % (files["ghl"], files["ghw"]),
                "CODE_IMPORT_TWINS": TWINS, "CODE_IMPORT_GAP": "0", "CODE_IMPORT_HISTER_URL": H_URL,
+               "CODE_IMPORT_RETRY_DELAYS": "0.01,0.01,0.01",
                "CODE_IMPORT_HISTER_TOKEN_FILE": files["hister"]}
         env.update(kw)
         return {k: v for k, v in env.items() if v is not None}
@@ -619,6 +745,27 @@ class CommandLine(Base):
             self.assertNotIn(token, p.stdout + p.stderr)
         self.assertNotIn("Moss", p.stdout + p.stderr)                             # logs carry counts, not text
 
+    def test_once_with_a_failing_source(self):
+        self.gh.faults = [["/orgs/workshop-kobo/repos", "503", None]]
+        p = self.run_cli(["--once"], self.env(CODE_IMPORT_MAX_DOCS="1"))
+        self.assertEqual(p.returncode, 1, p.stderr + p.stdout)
+        status = load(os.path.join(self.tmp, "data", "status.json"))
+        self.assertFalse(status["ok"])
+        self.assertIn("github:workshop-kobo", status["error"])
+        self.assertIn("HTTP 503 (4 tries)", status["sources"]["github:workshop-kobo"]["error"])
+        self.assertIn("waiting for github:workshop-kobo", status["sources"]["forgejo:workshop"]["error"])
+        self.assertTrue(status["sources"]["forgejo:lantern"]["ok"] and status["sources"]["github:lantern"]["ok"])
+        self.assertTrue(status["sources"]["github:lantern"]["last_success"])
+        self.assertIsNone(status["last_success"])                                 # not every source succeeded
+        self.assertIn({"repo": "forgejo:lantern/dotfiles", "docs": 2, "max": 1}, status["caps"])
+        self.assertIn(fj_url("/lantern/dotfiles"), {d["url"] for d in adds()})   # the good sources landed
+        self.assertFalse([d for d in adds() if "workshop" in d["url"]])
+        self.gh.faults = []
+        p = self.run_cli(["--once"], self.env())
+        self.assertEqual(p.returncode, 0, p.stderr + p.stdout)
+        status = load(os.path.join(self.tmp, "data", "status.json"))
+        self.assertTrue(status["ok"] and all(s["ok"] for s in status["sources"].values()))
+
     def test_once_fails_when_hister_is_down(self):
         H.down = True
         p = self.run_cli(["--once"], self.env())
@@ -639,6 +786,13 @@ class CommandLine(Base):
         self.assertEqual(p.returncode, 0, p.stderr)
         urls = {json.loads(x)["would_add"]["url"] for x in p.stdout.splitlines() if x.startswith('{"would_add"')}
         self.assertEqual(urls, {u for u in EXPECTED if "/workshop-kobo/lamp" in u})
+
+    def test_dry_run_with_one_failing_source(self):
+        self.gh.faults = [["/user/repos", "503", None]]
+        p = self.run_cli(["--dry-run", "--limit", "50"], self.env())
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("dry run failed for github:lantern", p.stderr)
+        self.assertIn(fj_url("/lantern/dotfiles"), p.stdout)                      # the others are still shown
 
     def test_dry_run_fails_on_a_forge_error(self):
         env = self.env()
@@ -662,6 +816,7 @@ class CommandLine(Base):
             ({"CODE_IMPORT_SECRETS": "ignore"}, "redact or refuse"),
             ({"CODE_IMPORT_TWINS": "github:a"}, "host:owner=host:owner"),
             ({"CODE_IMPORT_FORGEJO_OWNERS": None}, "names no owner"),
+            ({"CODE_IMPORT_RETRY_DELAYS": "2,soon"}, "CODE_IMPORT_RETRY_DELAYS"),
         ]
         for overrides, message in cases:
             p = self.run_cli(["--once"], self.env(**overrides))

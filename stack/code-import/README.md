@@ -4,7 +4,7 @@ Puts the owner's repos on **Forgejo** and **GitHub** into [Hister](../../docs/se
 
 It is stdlib Python with one sqlite file, it listens on nothing, and it only ever reads from the forges (GET). The design is the vault's research note "Code search in Shiori (Forgejo + GitHub)" (architecture (b), the start of (d)); the service page is [docs/services/code-import.md](../../docs/services/code-import.md).
 
-**Status: phase 1 (0.1.0, unreleased).** No code bodies yet: those are phase 2.
+**Status: phase 1 (0.1.1; 0.1.0 is in production).** No code bodies yet: those are phase 2.
 
 ## What a run does
 
@@ -37,10 +37,15 @@ Runs happen every `CODE_IMPORT_INTERVAL` seconds (15 minutes by default).
 
 **A full run** happens first, then every `CODE_IMPORT_FULL_INTERVAL` (6 hours). It reads every repo and every issue list completely. Only a source that changed is rebuilt: a fingerprint of what each document was built from is kept, so an unchanged one costs no call and no write.
 
-**Fail closed:**
-- A forge that can't be listed (down, token refused, rate-limited) stops the run before anything is withdrawn.
-- A forge that suddenly lists **no** repos, after listing some before, stops the run too: a token that lost its access must not wipe the index.
-- Hister down (5xx, unreachable, 403) stops the run. The state is written per document, so the next run resumes.
+**Retries.** Every forge call that fails transiently is tried again after 2, 8 and 30 s (`CODE_IMPORT_RETRY_DELAYS`). That covers a TLS, connect or read timeout, a reset connection, a 5xx, a 429 and a secondary rate limit. A `Retry-After` longer than the delay is honoured, up to 120 s; a longer one fails the call. 401, 403 and 404 are never tried again.
+
+**Sources, each on its own.** A source is an owner on a forge: `forgejo:owner`, `forgejo:machiya`, `github:owner`, `github:machiya-kobo`. A source that still fails after the retries is recorded in `status.json`, and the run goes on with the others, whose documents land.
+
+**Fail closed, per source:**
+- A source that fails withdraws nothing. Its withdrawals, repo stamps and full-run mark wait until the whole source has completed; a source that fails part way drops them, and the next good run finds the same work again.
+- A source that suddenly lists **no** repos, after listing some before, fails: a token that lost its access must not wipe the index.
+- Twins: a source whose twins' source failed uses that source's last listing from the state. A twins' source that has never been listed makes it wait.
+- Hister down (5xx, unreachable, 403) stops the whole run. The state is written per document, so the next run resumes.
 
 ### What Hister gets
 
@@ -113,6 +118,8 @@ Also verified on that Hister:
 | `CODE_IMPORT_MAX_DOC_BYTES` | `262144` | a bigger doc is skipped |
 | `CODE_IMPORT_DOC_SKIP` | — | more path globs to skip, comma-separated (`drafts/*`), on top of the defaults above |
 | `CODE_IMPORT_GAP` | `0.5` Forgejo, `0.25` GitHub | seconds between two calls to a forge (Forgejo runs on a small Pi VM) |
+| `CODE_IMPORT_RETRY_DELAYS` | `2,8,30` | seconds before each new try of a call that failed transiently (so 4 tries) |
+| `CODE_IMPORT_TIMEOUT` | `60` | seconds per forge call |
 | `CODE_IMPORT_DATA` | `/data` | `code-import.sqlite3` (the state, cursors and ETags) and `status.json` |
 
 **Tokens.** Every token comes from a file (its first line), never from the environment, argv, a URL or a log.
@@ -121,11 +128,13 @@ Also verified on that Hister:
 - While a token is set, **a redirect is never followed**: the run stops instead. The token goes only to the configured API base; pages are built from that base, never taken from a `Link` header.
 
 **`status.json`** holds:
-- `ok`, `running`, `last_success`, `last_full`, `failures_in_a_row` and `error`;
-- `last_run`: the run's counts, and its calls per forge;
+- `ok`, `running`, `last_success` (the last run where every source succeeded), `failures_in_a_row` and `error` (the failed sources and why);
+- `sources`: per source, `ok`, `error`, `repos`, `last_success` and `last_full`;
+- `caps`: every repo over `CODE_IMPORT_MAX_DOCS`, named (`{"repo": "github:owner/foo", "docs": 3052, "max": 200}`), so the owner can decide;
+- `last_run`: the run's counts, and its calls and retries per forge;
 - `counts`: documents per host, kind and status.
 
-`ok` turns false after a failed run once no run has succeeded for three intervals. The image's healthcheck reads it. Alert on `ok` only: the counts are information.
+`ok` turns false after a failed run (Hister down, or any source failed) once no run has had every source succeed for three intervals. So one source that keeps failing turns it false, while the others go on importing. The image's healthcheck reads it. Alert on `ok` only: the counts are information.
 
 ## Running
 

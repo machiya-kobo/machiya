@@ -91,6 +91,10 @@ class Store:
             return row[0] if row else None
         self.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, str(value)))
 
+    def meta_prefix(self, prefix):
+        return [(r[0], r[1]) for r in self.db.execute("SELECT key, value FROM meta WHERE key LIKE ? ORDER BY key",
+                                                       (prefix.replace("%", "") + "%",))]
+
     def drop_meta(self, key):
         self.db.execute("DELETE FROM meta WHERE key=?", (key,))
 

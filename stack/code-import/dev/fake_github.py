@@ -22,7 +22,9 @@ import base64
 import hashlib
 import json
 import os
+import socket
 import threading
+import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlsplit
@@ -46,6 +48,19 @@ class FakeGitHub:
         self.requests = []              # (method, path, query, authorization header, status)
         self.not_modified = 0
         self.lock = threading.Lock()
+        self.faults = []                # [path substring, action, times or None (always)]: tests' failures
+        self.sleep = 1.0
+
+    def fault(self, path):
+        """The injected failure for this request, if any: "sleep" (answer after self.sleep s: a read timeout),
+        "reset" (close the connection unanswered), "503", "429" (Retry-After: 0)."""
+        with self.lock:
+            for f in self.faults:
+                if f[0] in path and (f[2] is None or f[2] > 0):
+                    if f[2] is not None:
+                        f[2] -= 1
+                    return f[1]
+        return None
 
     def repos(self):
         return self.seed.get("repos", [])
@@ -164,6 +179,20 @@ class FakeGitHub:
 
             def any(self, method):
                 u = urlsplit(self.path)
+                action = fake.fault(u.path)
+                if action == "sleep":
+                    time.sleep(fake.sleep)
+                elif action == "reset":
+                    self.close_connection = True
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                    return
+                elif action in ("503", "429"):
+                    self.send_response(int(action))
+                    if action == "429":
+                        self.send_header("Retry-After", "0")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 auth = self.headers.get("Authorization")
                 status, body = fake.answer(method, u.path, parse_qs(u.query), auth)
                 data = json.dumps(body).encode()
@@ -181,7 +210,16 @@ class FakeGitHub:
                 if status in (200, 304):
                     self.send_header("ETag", etag)
                 self.end_headers()
-                self.wfile.write(data)
+                try:
+                    self.wfile.write(data)
+                except OSError:                     # the client gave up (a "sleep" fault's timeout)
+                    pass
+
+            def finish(self):
+                try:
+                    super().finish()
+                except OSError:                     # a "reset" fault closed the connection
+                    pass
 
             def do_GET(self):
                 self.any("GET")
