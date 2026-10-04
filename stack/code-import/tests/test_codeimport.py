@@ -1,7 +1,7 @@
 """code-import's tests: no network. Three local fakes on 127.0.0.1:
 - Forgejo and GitHub: dev/fake_forgejo.py and dev/fake_github.py (the dev stack's fakes), on copies of their seeds:
-  a fork, an archived repo, an excluded name, a private repo, an empty repo, twins on both hosts, a README with an
-  invented token, a file named like a secret, hidden and vendored markdown, issues, PRs (one merged), releases (one a
+  a fork, an archived repo, a mirror on each host, an excluded name, a private repo, an empty repo, twins on both hosts, a README with an
+  invented token, a file named like a secret, hidden, vendored, test, example and sample-vault markdown, issues, PRs (one merged), releases (one a
   draft, one a prerelease). They record every request: the importer may only GET.
 - Hister (/api/document, /api/add, /api/delete), which refuses calls without `Origin: hister://`, answers 422 when
   the html matches Hister's default sensitive patterns, and records everything.
@@ -325,6 +325,8 @@ class Pipeline(Base):
         self.assertEqual(set(sent), EXPECTED)
         self.assertEqual(stats["forgejo"]["repo left out: fork"], 1)
         self.assertEqual(stats["forgejo"]["repo left out: archived"], 1)
+        self.assertEqual(stats["forgejo"]["repo left out: mirror"], 1)
+        self.assertEqual(stats["github"]["repo left out: mirror"], 1)
         self.assertEqual(stats["forgejo"]["repo left out: excluded"], 1)          # obsidian
         self.assertEqual(stats["forgejo"]["repo left out: twin"], 1)              # workshop/lamp: GitHub's wins
         self.assertEqual(stats["github"]["repo left out: twin"], 1)               # lantern/dotfiles: Forgejo's wins
@@ -362,6 +364,7 @@ class Pipeline(Base):
         self.assertEqual(readme["metadata"]["code_redacted"], "true")
         self.assertIn("Moss beds", readme["text"])
         self.assertNotIn("print(", json.dumps(adds()))                            # no code bodies (phase 2)
+        self.assertNotIn("never imported", json.dumps(adds()))                    # tests/, examples/, sample-vault/, …
 
         auths = {a for m, p, q, a, s in self.gh.requests if p.startswith("/repos/workshop-kobo/")}
         self.assertEqual(auths, {"Bearer " + GH_WORKSHOP})                        # each owner's own token

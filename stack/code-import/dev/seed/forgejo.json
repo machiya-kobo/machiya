@@ -27,7 +27,9 @@
     "docs/setup.md": "# Setting up a new laptop\n\nInstall the paper-lantern theme first, then the dotfiles.\n",
     "install.sh": "#!/bin/sh\nln -s \"$PWD/zshrc\" ~/.zshrc\n",
     ".github/ISSUE_TEMPLATE/bug.md": "A hidden folder: never imported.\n",
-    "node_modules/left-pad/README.md": "Vendored: never imported.\n"
+    "node_modules/left-pad/README.md": "Vendored: never imported.\n",
+    "tests/fixtures.md": "Test data: never imported.\n",
+    "examples/zshrc.md": "An example: never imported.\n"
    },
    "issues": [
     {
@@ -137,6 +139,17 @@
    "name": "empty-repo",
    "description": "Created, never pushed",
    "updated_at": "2026-09-30T00:00:00Z"
+  },
+  {
+   "id": 17,
+   "owner": "lantern",
+   "name": "upstream-editor",
+   "description": "A pull mirror",
+   "mirror": true,
+   "updated_at": "2026-09-29T00:00:00Z",
+   "files": {
+    "README.md": "never imported: a mirror"
+   }
   },
   {
    "id": 21,

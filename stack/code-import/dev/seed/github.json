@@ -23,7 +23,9 @@
    "files": {
     "README.md": "# lamp\n\nDims the stone lanterns at dusk.\n\n```sh\npython3 lamp.py --dusk\n```\n",
     "docs/api.md": "# The lamp API\n\n`GET /api/brightness` answers the current level.\n",
-    "lamp.py": "print('code bodies are phase 2')\n"
+    "lamp.py": "print('code bodies are phase 2')\n",
+    "sample-vault/Notes/Example.md": "A sample note: never imported.\n",
+    "src/test/plan.md": "A test plan: never imported.\n"
    },
    "issues": [
     {
@@ -127,6 +129,17 @@
    "pushed_at": "2026-09-01T00:00:00Z",
    "files": {
     "README.md": "never imported"
+   }
+  },
+  {
+   "id": 604,
+   "owner": "lantern",
+   "name": "font-mirror",
+   "description": "A mirror",
+   "mirror": true,
+   "pushed_at": "2026-09-01T00:00:00Z",
+   "files": {
+    "README.md": "never imported: a mirror"
    }
   }
  ]

@@ -1,7 +1,7 @@
 """code-import: the owner's repos on Forgejo and GitHub, searchable in Hister (Machiya, stack/code-import).
 
 Every CODE_IMPORT_INTERVAL seconds:
-  1. every forge lists every repo of its owners; forks, archived repos, CODE_IMPORT_EXCLUDE (obsidian, pass-store,
+  1. every forge lists every repo of its owners; forks, archived repos, mirrors, CODE_IMPORT_EXCLUDE (obsidian, pass-store,
      backup) and the losing half of a twin (a repo on both forges, CODE_IMPORT_TWINS) are left out, and a repo that
      was imported before and is now left out, gone, renamed or moved has its documents withdrawn;
   2. per repo: a card (name, description, topics); when the repo changed (its push stamp), on its first run and on a
@@ -52,7 +52,9 @@ FINAL = ("added", "known", "refused", "rejected", "skipped")
 DOC_EXTS = (".md", ".markdown", ".mdown", ".mkd")
 README_RE = re.compile(r"^readme(\.(md|markdown|mdown|mkd|txt|rst|org))?$", re.I)
 DEFAULT_EXCLUDE = "obsidian,pass-store,backup"
-DEFAULT_DOC_SKIP = ("node_modules/*", "*/node_modules/*", "vendor/*", "*/vendor/*", "third_party/*", "*/third_party/*")
+# Vendored, sample and test trees (owner, 2026-10-05): READMEs, docs/ and the other markdown stay. Any depth.
+DEFAULT_DOC_SKIP = tuple(p for d in ("node_modules", "vendor", "third_party", "sample-vault", "tests", "test", "fixtures",
+                                     "examples") for p in (d + "/*", "*/" + d + "/*"))
 HOSTS = {"forgejo": "Forgejo", "github": "GitHub"}
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 WINDOW_RE = re.compile(r"^(%s)[a-z]*\s+([01]?\d|2[0-3]):([0-5]\d)\s*-\s*([01]?\d|2[0-3]):([0-5]\d)$" % "|".join(DAYS), re.I)
@@ -113,7 +115,7 @@ def parse_twins(value):
 
 
 class Rules:
-    """Forks, archived repos, excluded names (`name` or `owner/name`, any case) and twins are left out."""
+    """Forks, archived repos, mirrors, excluded names (`name` or `owner/name`, any case) and twins are left out."""
 
     def __init__(self, exclude=DEFAULT_EXCLUDE, twins=()):
         self.exclude = {x.strip().lower() for x in (exclude or "").split(",") if x.strip()}
@@ -129,6 +131,8 @@ class Rules:
                 reason = "fork"
             elif r.archived:
                 reason = "archived"
+            elif r.mirror:                              # a pull mirror (owner, 2026-10-05): the original is elsewhere
+                reason = "mirror"
             elif r.name.lower() in self.exclude or r.full_name.lower() in self.exclude:
                 reason = "excluded"
             else:

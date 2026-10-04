@@ -9,8 +9,8 @@ code-import copies the owner's repos on **Forgejo** and **GitHub** into [Hister]
 | | |
 |---|---|
 | **Hosts** | the self-hosted Forgejo and GitHub (Gitea works too: same API) |
-| **Repos** | every repo the owner owns, except forks, archived repos and `obsidian`, `pass-store`, `backup`. A repo on both forges is indexed once: GitHub for `machiya-kobo`, Forgejo for `owner` (`CODE_IMPORT_TWINS`) |
-| **Content** | repo cards (name, description, topics); READMEs and markdown docs on the default branch; issues and PRs (title, body, state; no comments); releases |
+| **Repos** | every repo the owner owns, except forks, archived repos, mirrors and `obsidian`, `pass-store`, `backup`. A repo on both forges is indexed once: GitHub for `machiya-kobo`, Forgejo for `owner` (`CODE_IMPORT_TWINS`) |
+| **Content** | repo cards (name, description, topics); READMEs and markdown docs on the default branch (not in vendored, sample or test trees: `sample-vault/`, `tests/`, `test/`, `fixtures/`, `examples/`, …); issues and PRs (title, body, state; no comments); releases |
 | **Not** | code bodies (phase 2, later, for repos the owner allow-lists), comments, wikis, commits |
 | **AI** | on-device only, as for notes (below) |
 

@@ -11,13 +11,13 @@ It is stdlib Python with one sqlite file, it listens on nothing, and it only eve
 Runs happen every `CODE_IMPORT_INTERVAL` seconds (15 minutes by default).
 
 1. **Every forge lists every repo of its owners.** These are left out:
-   - forks and archived repos;
+   - forks, archived repos and mirrors (Forgejo's `mirror`, GitHub's `mirror_url`);
    - the names in `CODE_IMPORT_EXCLUDE` (`obsidian`, `pass-store`, `backup` by default; `name` or `owner/name`);
    - **twins**: a repo that is on both forges is indexed once (`CODE_IMPORT_TWINS`). For the owner that is GitHub for `machiya-kobo` (GitHub's `main` is the source of truth) and Forgejo for `owner`. The indexed one carries the other's link (`code_twin_url`).
 2. **Per repo:**
    - a **card**: name, description, topics, language, homepage;
    - when the repo has changed (its push stamp), on its first run, and on every full run: the **README** and the **markdown docs** of the default branch, and the **releases** (drafts skipped).
-   - Docs in hidden folders (`.github/…`), `node_modules/`, `vendor/` and `third_party/` are skipped, as are files over `CODE_IMPORT_MAX_DOC_BYTES`. A repo has at most `CODE_IMPORT_MAX_DOCS` docs (README first).
+   - Markdown in hidden folders (`.github/…`) and in `node_modules/`, `vendor/`, `third_party/`, `sample-vault/`, `tests/`, `test/`, `fixtures/` and `examples/` (at any depth) is skipped, as are files over `CODE_IMPORT_MAX_DOC_BYTES`: the README, `docs/` and the other markdown stay. A repo has at most `CODE_IMPORT_MAX_DOCS` docs (README first).
    - **Files named like secrets** (`.env*`, `*.pem`, `*.key`, `id_*`, `*.gpg`, `*.age`, `secrets*`, `*.p12`, `*.pfx`, `*.kdbx`) are never read.
 3. **Issues and pull requests** changed since the cursor: title, body and state (open, closed, merged); no comments.
    - On Forgejo, one search per owner (`/repos/issues/search?owner=…&since=…`), not one call per repo.
@@ -111,7 +111,7 @@ Also verified on that Hister:
 | `CODE_IMPORT_PAUSE` | — | `Sun 02:20-02:50`: no runs in that weekly slot (Hister's backup), in `CODE_IMPORT_TZ` (default `UTC`) |
 | `CODE_IMPORT_MAX_DOCS` | `200` | markdown docs per repo |
 | `CODE_IMPORT_MAX_DOC_BYTES` | `262144` | a bigger doc is skipped |
-| `CODE_IMPORT_DOC_SKIP` | — | more path globs to skip, comma-separated (`sample-vault/*`) |
+| `CODE_IMPORT_DOC_SKIP` | — | more path globs to skip, comma-separated (`drafts/*`), on top of the defaults above |
 | `CODE_IMPORT_GAP` | `0.5` Forgejo, `0.25` GitHub | seconds between two calls to a forge (Forgejo runs on a small Pi VM) |
 | `CODE_IMPORT_DATA` | `/data` | `code-import.sqlite3` (the state, cursors and ETags) and `status.json` |
 
@@ -151,8 +151,8 @@ cd stack/code-import && python3 -m unittest discover -s tests
 The tests need no network. They run against the fake Forgejo and fake GitHub below, and a fake Hister. The fakes record every request, and a test fails if the importer sends a forge anything but GET.
 
 The synthetic forges hold:
-- a fork, an archived repo, an excluded name, a private repo, an empty repo, and twins on both hosts;
-- a README with an invented token, a file named like a secret, and hidden and vendored markdown;
+- a fork, an archived repo, a mirror on each host, an excluded name, a private repo, an empty repo, and twins on both hosts;
+- a README with an invented token, a file named like a secret, and hidden, vendored, test, example and sample-vault markdown;
 - issues, PRs (one merged, one open), and releases (one a draft, one a prerelease).
 
 The command-line tests run `codeimport.py` as the image does and check its exit codes, `status.json`, and that no token or text reaches its output.
