@@ -46,7 +46,7 @@ from forges import RETRY_DELAYS, ForgeError, Repo, iso          # noqa: E402
 from github import GitHub                                      # noqa: E402
 from store import Store                                        # noqa: E402
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 DOC_V = 1               # the documents' shape: part of every fingerprint, so a bump re-sends everything once
 FINAL = ("added", "known", "refused", "rejected", "skipped")
 DOC_EXTS = (".md", ".markdown", ".mdown", ".mkd")
@@ -146,6 +146,19 @@ class Rules:
         return out
 
 
+def parse_readme_only(value):
+    """CODE_IMPORT_README_ONLY: `github:owner/big-fork,…`: repos imported as their card and README only
+    (no other docs, issues, PRs or releases). -> {(host, "owner/repo")}, lowercase."""
+    out = set()
+    for item in [x.strip() for x in (value or "").split(",") if x.strip()]:
+        host, _, name = item.partition(":")
+        if host not in HOSTS or name.count("/") != 1 or not all(name.split("/")):
+            raise SystemExit("code-import: CODE_IMPORT_README_ONLY takes host:owner/repo items (github:owner/repo), "
+                             "not %r" % item)
+        out.add((host, name.lower()))
+    return out
+
+
 def source_winners(rules, host, owner):
     """The sources whose repos win over this source's same-named ones (its twins' sources)."""
     return ["%s:%s" % w for w, (lh, lo) in rules.twins if (lh, lo) == (host, owner.lower())]
@@ -158,6 +171,7 @@ class Ctx:
         self.forge, self.repo, self.twin = forge, repo, twin
         self.fp = fingerprint(repo.full_name, repo.url, repo.private, repo.branch, twin, secrets)
         self.shown = 0
+        self.readme_only = False
 
 
 # -- the importer -------------------------------------------------------------------------------------------------------
@@ -165,12 +179,13 @@ class Ctx:
 class Importer:
     def __init__(self, forges, store, hister=None, *, rules=None, dry_run=False, secrets="redact",
                  full_interval=21600, max_docs=200, max_doc_bytes=262144, max_text=100000, doc_skip=(), limit=None,
-                 only_repo=None, out=print, clock=time.time):
+                 only_repo=None, readme_only=(), out=print, clock=time.time):
         self.forges, self.store, self.hister, self.rules = forges, store, hister, rules or Rules()
         self.dry_run, self.secrets, self.full_interval = dry_run, secrets, full_interval
         self.max_docs, self.max_doc_bytes, self.max_text = max_docs, max_doc_bytes, max_text
         self.doc_skip = tuple(DEFAULT_DOC_SKIP) + tuple(doc_skip)
         self.limit, self.only_repo = limit, (only_repo or "").lower() or None
+        self.readme_only = set(readme_only)
         self.out, self.clock = out, clock
         self.stats, self.fresh, self.ctx, self.sources = {}, set(), {}, {}
         self.later, self.touched = None, set()
@@ -334,6 +349,8 @@ class Importer:
         seen = set()
         cands = self.doc_candidates(f.tree(r))
         cap = "cap:%s:%s" % (f.name, r.id)
+        if ctx.readme_only:                                 # CODE_IMPORT_README_ONLY: the README, never capped
+            cands = [c for c in cands if c[0] == "readme"]
         if len(cands) > self.max_docs:
             self.note(f.name, "docs over CODE_IMPORT_MAX_DOCS", len(cands) - self.max_docs)
             self.log("  %s:%s has %d markdown docs, over CODE_IMPORT_MAX_DOCS=%d: the first %d are imported"
@@ -401,15 +418,25 @@ class Importer:
         if new:
             self.fresh.add((f.name, r.id))
         ctx = self.ctx[(f.name, r.id)] = Ctx(f, r, twin, self.secrets)
+        ctx.readme_only = (f.name, r.full_name.lower()) in self.readme_only
+        mode = "readme-only" if ctx.readme_only else ""
+        if not new and (prev["reason"] or "") != mode:      # CODE_IMPORT_README_ONLY changed for it: read it all again
+            new = True
+            self.fresh.add((f.name, r.id))
+            self.note(f.name, "repo mode changed")
         self.card(ctx)
         changed = new or full or prev["stamp"] != r.stamp
         if changed:
             self.docs(ctx)
-            self.releases(ctx)
+            if ctx.readme_only:                             # no releases, issues or PRs: withdraw any imported
+                for row in self.store.docs(f.name, r.id, ("release", "issue", "pr")):
+                    self.withdraw(row)
+            else:
+                self.releases(ctx)
             self.note(f.name, "repos read")
         stamp = r.stamp if changed else prev["stamp"]
         self.defer(lambda: self.store.put_repo(f.name, r.id, full_name=r.full_name, url=r.url, branch=r.branch,
-                                               included=1, reason="", stamp=stamp))
+                                               included=1, reason=mode, stamp=stamp))
 
     def issue_pass(self, f, repos, full):
         for scope, srepos in f.issue_scopes(repos):
@@ -532,7 +559,7 @@ class Importer:
             included.append(r)
             self.note(f.name, "repos")
             self.repo_pass(f, r, twin, full)
-        self.issue_pass(f, included, full)
+        self.issue_pass(f, [r for r in included if not self.ctx[(f.name, r.id)].readme_only], full)
         if full and not self.dry_run and self.limit is None and not self.only_repo:
             self.defer(lambda: self.store.meta("last_full:" + key, int(now)))
         return len(included)
@@ -602,7 +629,8 @@ def build(env, dry_run=False, limit=None, only_repo=None):
                    full_interval=max(3600, int(env.get("CODE_IMPORT_FULL_INTERVAL", "21600"))),
                    max_docs=int(env.get("CODE_IMPORT_MAX_DOCS", "200")),
                    max_doc_bytes=int(env.get("CODE_IMPORT_MAX_DOC_BYTES", "262144")),
-                   doc_skip=owner_list(env.get("CODE_IMPORT_DOC_SKIP")), limit=limit, only_repo=only_repo)
+                   doc_skip=owner_list(env.get("CODE_IMPORT_DOC_SKIP")), limit=limit, only_repo=only_repo,
+                   readme_only=parse_readme_only(env.get("CODE_IMPORT_README_ONLY")))
     return imp, data
 
 

@@ -583,6 +583,57 @@ class Failures(Base):
         self.assertEqual(deletes(), [])
 
 
+LAMP_ALL = {u for u in EXPECTED if "/workshop-kobo/lamp" in u}
+LAMP_KEPT = {gh_url("/workshop-kobo/lamp"), gh_url("/workshop-kobo/lamp/blob/main/README.md")}
+
+
+class ReadmeOnly(Base):
+    def test_setting(self):
+        self.assertEqual(codeimport.parse_readme_only(" github:owner/big-fork, forgejo:a/b "),
+                         {("github", "owner/big-fork"), ("forgejo", "a/b")})
+        for bad in ("owner/qmk", "gitlab:a/b", "github:a", "github:a/b/c", "github:/b"):
+            with self.assertRaises(SystemExit):
+                codeimport.parse_readme_only(bad)
+
+    def test_card_and_readme_only_and_never_capped(self):
+        imp = self.importer(readme_only={("github", "workshop-kobo/lamp")}, max_docs=1)
+        imp.run()
+        sent = {d["url"] for d in adds()}
+        self.assertEqual(sent & LAMP_ALL, LAMP_KEPT)
+        self.assertIn(gh_url("/lantern/pixel-font/issues/4"), sent)                # the other repos as before
+        self.assertNotIn("github:workshop-kobo/lamp", {c["repo"] for c in imp.caps()})
+        self.assertIn("forgejo:lantern/dotfiles", {c["repo"] for c in imp.caps()})   # others still capped
+        self.assertFalse([r for r in self.gh.requests if r[1].startswith("/repos/workshop-kobo/lamp/")
+                          and r[1].endswith(("/issues", "/releases"))])
+
+    def test_listing_a_repo_withdraws_its_other_documents_and_unlisting_brings_them_back(self):
+        self.importer().run()
+        H.calls = []
+        self.now += 900                                     # an incremental run: the mode change forces the walk
+        imp = self.importer(readme_only={("github", "workshop-kobo/lamp")})
+        imp.run()
+        self.assertEqual(set(deletes()), LAMP_ALL - LAMP_KEPT)
+        self.assertEqual(adds(), [])
+        for url in LAMP_KEPT:
+            self.assertIn(url, H.docs)
+        H.calls = []
+        self.now += 900
+        self.importer(readme_only={("github", "workshop-kobo/lamp")}).run()
+        self.assertEqual((adds(), deletes()), ([], []))     # settled
+        self.now += 900
+        self.importer().run()
+        self.assertEqual({d["url"] for d in adds()}, LAMP_ALL - LAMP_KEPT)
+
+    def test_a_failed_source_withdraws_nothing_yet(self):
+        self.importer().run()
+        H.calls = []
+        self.gh.faults = [["/repos/workshop-kobo/lamp/git/trees", "503", None]]
+        imp = self.importer(readme_only={("github", "workshop-kobo/lamp")})
+        imp.run()
+        self.assertFalse(imp.sources["github:workshop-kobo"]["ok"])
+        self.assertEqual(deletes(), [])
+
+
 class Retries(Base):
     def test_a_timeout_once_then_success(self):
         self.gh.faults = [["/repos/lantern/pixel-font/releases", "sleep", 1]]
@@ -765,6 +816,10 @@ class CommandLine(Base):
         self.assertEqual(p.returncode, 0, p.stderr + p.stdout)
         status = load(os.path.join(self.tmp, "data", "status.json"))
         self.assertTrue(status["ok"] and all(s["ok"] for s in status["sources"].values()))
+        H.calls = []
+        p = self.run_cli(["--once"], self.env(CODE_IMPORT_README_ONLY="github:workshop-kobo/lamp"))
+        self.assertEqual(p.returncode, 0, p.stderr + p.stdout)
+        self.assertEqual(set(deletes()), LAMP_ALL - LAMP_KEPT)
 
     def test_once_fails_when_hister_is_down(self):
         H.down = True
@@ -817,6 +872,7 @@ class CommandLine(Base):
             ({"CODE_IMPORT_TWINS": "github:a"}, "host:owner=host:owner"),
             ({"CODE_IMPORT_FORGEJO_OWNERS": None}, "names no owner"),
             ({"CODE_IMPORT_RETRY_DELAYS": "2,soon"}, "CODE_IMPORT_RETRY_DELAYS"),
+            ({"CODE_IMPORT_README_ONLY": "workshop-kobo/lamp"}, "host:owner/repo"),
         ]
         for overrides, message in cases:
             p = self.run_cli(["--once"], self.env(**overrides))

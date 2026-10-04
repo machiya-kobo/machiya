@@ -1,5 +1,12 @@
 # Changelog: code-import
 
+## 0.1.2
+
+- **`CODE_IMPORT_README_ONLY`**: a comma list of `host:owner/repo` imported as their **repo card and README only**: no other docs, issues, PRs or releases, and never named in `caps`. This is the owner's answer for `github:owner/big-fork` (3,252 markdown docs), 2026-10-05.
+  - Listing a repo there withdraws its other documents on the next completed run of its source; the mode change forces that repo to be read again, even in an incremental run. A source that fails withdraws nothing, as before.
+  - Taking a repo off the list imports its docs, releases, issues and PRs again on the next run.
+  - A bad item (not `forgejo:` or `github:` plus `owner/repo`) refuses to start.
+
 ## 0.1.1
 
 The first production run stopped at one TLS handshake timeout (`github(owner) GET /repos/owner/repo/releases`), before GitHub's machiya-kobo was reached. Now:
