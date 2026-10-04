@@ -74,7 +74,7 @@ step "§8 step 5: the stack, with user handling on and the OIDC config"
 HISTER_USER_HANDLING=true compose up -d >/dev/null
 for _ in $(seq 30); do
     curl -sf --cacert "$DEV_DATA/certs/ca.crt" --resolve hister.machiya.test:19043:127.0.0.1 \
-        https://hister.machiya.test:19043/machiya/healthz >/dev/null && break
+        https://hister.machiya.test:19043/machiya/healthz 2>/dev/null | grep -q '"hister": "ok"' && break
     sleep 2
 done
 

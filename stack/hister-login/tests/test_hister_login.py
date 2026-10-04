@@ -220,9 +220,19 @@ class HelperTest(unittest.TestCase):
         self.login.hister.health_at = 0
         self.assertEqual(self.check(sid), (503, {"reason": "user-handling-off"}))
         self.assertEqual(self.check(token="tok-owner"), (503, {"reason": "user-handling-off"}))
-        status, _, body = self.public("GET", "/machiya/healthz")
-        self.assertEqual((status, json.loads(body)["hister"]), (503, "user-handling-off"))
+        status, _, body = self.public("GET", "/machiya/healthz")             # the probe's: the helper works
+        self.assertEqual((status, json.loads(body)["ok"], json.loads(body)["hister"]), (200, True, "user-handling-off"))
         self.assertIn("HISTER USER HANDLING IS OFF", self.err.getvalue())
+
+    def test_public_healthz_is_the_helpers_own(self):
+        self.fake.fail = True                                                # Hister down: still 200, degraded
+        status, _, body = self.public("GET", "/machiya/healthz")
+        self.assertEqual((status, json.loads(body)["ok"], json.loads(body)["hister"]), (200, True, "down"))
+        status, _, _ = self.internal("GET", "/healthz")                      # the rooms' flag: 503
+        self.assertEqual(status, 503)
+        self.login.store.db.close()                                          # the helper's own state fails: 503
+        status, _, body = self.public("GET", "/machiya/healthz")
+        self.assertEqual((status, json.loads(body)), (503, {"ok": False, "state": "error", "version": hl.VERSION}))
 
     def test_healthz_ok(self):
         status, _, body = self.internal("GET", "/healthz")

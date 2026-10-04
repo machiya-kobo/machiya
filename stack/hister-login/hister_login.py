@@ -8,10 +8,12 @@ Hister session and every id on it. Hister itself is not patched.
 
 Two ports:
   public   (HISTER_LOGIN_PORT, 8080): GET /machiya/signin, GET /api/oauth/callback (a pass-through shim),
-           POST /machiya/signout, GET/POST /machiya/sessions, POST /machiya/api/app-session, GET /machiya/healthz,
+           POST /machiya/signout, GET/POST /machiya/sessions, POST /machiya/api/app-session, GET /machiya/healthz
+           (the probe's: 200 while the helper and its state work, with Hister's state as "hister"; 503 only when the
+           helper's own state fails),
            /machiya/static/…
   internal (HISTER_LOGIN_INTERNAL_PORT, 8081; never routed by Serve): GET /v1/check, POST /v1/signout,
-           GET /v1/nginx (nginx auth_request), GET /healthz
+           GET /v1/nginx (nginx auth_request), GET /healthz (the rooms': 503 unless the helper AND Hister are fine)
 
 State: one SQLite file (HISTER_LOGIN_DB). An id is stored only as its SHA-256; the Hister session it maps to is
 stored raw (the helper must present it to Hister). Standard library only, plus the vendored vaultkit.
@@ -645,10 +647,14 @@ class Public(Handler):
         path = urlsplit(self.path).path
         if path in ("/machiya", "/machiya/"):
             return self.redirect("/machiya/sessions")
-        if path == "/machiya/healthz":
-            state = lg.hister.health()
-            return self.json(200 if state == "ok" else 503, {"ok": state == "ok", "hister": state,
-                                                             "version": VERSION})
+        if path == "/machiya/healthz":         # the probe's: the helper's own health; Hister's is its own probe's
+            try:
+                sessions = lg.store.count()
+            except (sqlite3.Error, OSError) as ex:
+                LOG("hister-login: the state file failed: %s" % type(ex).__name__)
+                return self.json(503, {"ok": False, "state": "error", "version": VERSION})
+            return self.json(200, {"ok": True, "hister": lg.hister.health(), "sessions": sessions,
+                                   "version": VERSION})
         if path.startswith("/machiya/static/"):
             return self.static(path[len("/machiya/static/"):])
         if path == "/machiya/signin":

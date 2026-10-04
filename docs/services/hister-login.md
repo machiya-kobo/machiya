@@ -35,7 +35,7 @@ flowchart LR
 | signed out (the helper or Hister said so) | sent to sign in; an API call gets 401 `{"error", "signin"}`; **never** the fallback | the same |
 | the helper or Hister unreachable, a 5xx, or Hister's user handling off | the owner's Tailscale login (in `<ROOM>_USERS`) is admitted with a banner, "Signed in through the tailnet: sign-in is unavailable"; nothing cached; counted as `fallback_total` | **503** on pages and API; there is no grace period |
 
-The helper's internal `/healthz` reports the helper **and** Hister (503 unless both are fine): a room uses it to know, before anyone has signed in, that sign-in is unavailable.
+The helper's internal `/healthz` reports the helper **and** Hister (503 unless both are fine): a room uses it to know, before anyone has signed in, that sign-in is unavailable. The public `/machiya/healthz` is for probes: 200 while the helper itself works (Hister's state is in `"hister"`), 503 only when its own state fails, so a Hister outage alerts once, from Hister's `/health` probe.
 
 ## Run it
 

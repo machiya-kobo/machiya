@@ -45,10 +45,13 @@ def compose(*args, **env):
 
 
 def wait_http(url, want=200, timeout=40, ctx=None):
+    """Until `url` answers `want` (and, for the helper's /machiya/healthz, reports Hister "ok" too: that probe stays
+    200 while Hister is down)."""
     t = time.time()
     while time.time() - t < timeout:
         try:
-            if ctx.get(url).status == want:
+            r = ctx.get(url)
+            if r.status == want and (not url.endswith("/machiya/healthz") or r.json().get("hister") == "ok"):
                 return True
         except Exception:
             pass
@@ -402,11 +405,11 @@ def c8_user_handling_off(browser, engine):
     pg = fresh.new_page()
     r = pg.goto(HISTER + "/machiya/signin?return=" + quote(KURA + "/", safe=""))
     signin_text = pg.inner_text("main")[:90]
-    health = api(fresh, HISTER + "/machiya/healthz")
+    health = api(fresh, HISTER + "/machiya/healthz")             # the probe's: 200, Hister's state inside
     with_ts = api(context(browser, extra_http_headers=TS), NIWA + "/api/whoami")
     compose("up", "-d", "hister", HISTER_USER_HANDLING="true")
     wait_http(HISTER + "/machiya/healthz", 200, 60, fresh.request)
-    ok = all(v == (503, 503) for v in res.values()) and r.status == 503 and health[0] == 503 \
+    ok = all(v == (503, 503) for v in res.values()) and r.status == 503 and health[0] == 200 \
         and health[1].get("hister") == "user-handling-off" and with_ts[0] == 200 and with_ts[1].get("banner")
     record("[%s] with user_handling off nobody is admitted through Hister" % engine, ok,
            "rooms (session, owner token) without a Tailscale identity: %s\nhelper sign-in page: %s %r\n"

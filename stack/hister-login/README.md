@@ -30,6 +30,11 @@ dev/gate0.sh                               # the phase-0 proof: a dev stack, Pla
 | 200 with no JSON user (`user_handling` is off) | `503 {"reason": "user-handling-off"}`, logged loudly |
 | timeout, connection error, 5xx | `503 {"reason": "hister-unavailable"}` |
 
+Two health answers: the internal `GET /healthz` is the rooms' (503 unless the helper **and** Hister are fine; a room uses it
+to know sign-in is unavailable before anyone signs in); the public `GET /machiya/healthz` is the probe's (200 while the
+helper and its state work, with Hister's state as `"hister": "ok"|"down"|"user-handling-off"`; 503 only when the
+helper's own state fails), so a Hister outage alerts once, from Hister's own `/health` probe.
+
 `GET /v1/nginx` (for `auth_request`, with `X-Machiya-Session: $cookie_machiya_sso`) answers 200 with
 `X-Hister-Cookie: hister=<session>` for nginx's hop to Hister, 401, or 503. Hister re-sends its cookie on every signed-in
 answer, so that nginx location must also have `proxy_hide_header Set-Cookie;`, or the raw Hister session reaches the
