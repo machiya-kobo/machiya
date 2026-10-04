@@ -63,6 +63,20 @@ A request proves *who* it is; the file alone says *what* it may do. The first pr
 
 Each room's Serve forwards it (`tailscale serve --accept-app-caps=github.com/machiya-kobo/cap/identity`, or `AcceptAppCaps` in `serve.json`), and the room opts in with `*_ACCEPT_APP_CAPS=1`. Leave it off with an older Serve: that passes a client's own copy of the header through. Then `python3 -m vaultkit.identity tag mcp mcp` ties the capability's `principal` value to the principal.
 
+**Verified** (Tailscale 1.102.5, a throwaway tagged node and a Tailscale Service, 2026-10-04):
+
+- In `serve.json`, `"AcceptAppCaps": ["github.com/machiya-kobo/cap/identity"]` goes in the HTTP handler next to `"Proxy"`
+  (`"Handlers": {"/": {"Proxy": "…", "AcceptAppCaps": […]}}`). It works for the node's own name and for a Service; for a
+  Service the `Web` key is the Service's DNS name (`<service>.<tailnet>.ts.net:443`). The CLI flag wasn't tried.
+- The grant needs network access too: give the tag `"ip": ["tcp:443"]` on the room (in the same grant or another), and use
+  `"dst": ["svc:<name>"]` when the room is a Tailscale Service.
+- From a tagged node the room gets **no** `Tailscale-User-Login` and `Tailscale-App-Capabilities:
+  {"github.com/machiya-kobo/cap/identity":[{"principal":"mcp"}]}`, as plain JSON (not RFC 2047 encoded). From a user's own
+  device it gets `Tailscale-User-Login` (and `-Name`) **and** the same capability header.
+- A client's own `Tailscale-User-Login` or `Tailscale-App-Capabilities` never reaches the room: Serve drops or replaces
+  both, on the node name and through the Service alike.
+- The capability header is present only when a grant gives that source the capability on that destination.
+
 ## Grants
 
 A principal is a `person`, an `agent` or a `service`. `owner = true` (a person) may do everything everywhere. Everyone else gets nothing until granted: every room answers **403**.
