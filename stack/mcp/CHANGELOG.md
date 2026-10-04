@@ -1,5 +1,9 @@
 # Changelog: machiya-mcp
 
+## 0.8.0
+
+- **Code and notes stay out of AI, enforced** (the owner, 2026-10-05; sweep MACH-M-4, MACH-F-10). `pages_search` and `pages_read` are back, and the machiya plugin stops connecting Hister's own MCP (whose `search` and `get_preview` hand vault notes and code documents to any client). Every page query still ends with the notes, code and cards exclusion, and now every document Hister returns is checked again before any of it reaches the model: a note, a card, a code document, a room's host, a non-page URL, or a document of a shape this server doesn't know (no `metadata` field) is withheld, and `pages_read` refuses anything but a page whose stored URL is the one asked for.
+
 ## 0.7.4
 
 - **Code documents stay out** (docs/contracts/hister.md, the code documents section: code-import's repos, docs, issues, PRs and releases, `metadata.source:code`). Every Hister query this server sends now ends ` -label:vault -metadata.source:vault -metadata.source:code -label:konbini`, so the label census, relabel plans and collection audits count pages only. `pages_set_label` refuses a code document. `@code` joins `@notes` and `@pages` as Hister's own aliases: never listed by `collections_list` (nor any alias naming `metadata.source:code`), never created, changed or removed. The server's instructions say `@pages` leaves the code out, and that it stays out of AI context.

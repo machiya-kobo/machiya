@@ -1,4 +1,4 @@
-"""Cross-room tools: one search over notes and cards, and which rooms are on. Pages are searched with Hister's own MCP."""
+"""Cross-room tools: one search over notes and cards, and which rooms are on. Pages are searched with pages_search."""
 import concurrent.futures
 import time
 
@@ -43,7 +43,7 @@ def machiya_status(ctx, args):
 
 TOOLS = [
     tool("machiya_search", "Search notes and board cards at once, grouped. Use notes_search or board_list_cards for more of "
-         "one kind, and Hister's own search (query starting @pages) for saved pages.", {"q": s("Query"), "limit": n("Results per kind (default 8)")}, ["q"],
+         "one kind, and pages_search for saved pages.", {"q": s("Query"), "limit": n("Results per kind (default 8)")}, ["q"],
          handler=machiya_search),
     tool("machiya_status", "Which Machiya rooms this server can reach right now, with their latest commit.",
          handler=machiya_status),
