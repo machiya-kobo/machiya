@@ -165,17 +165,8 @@ def main():
         work = tempfile.mkdtemp(prefix=name + "-", dir=base)
         try:
             print("\n== scenario %s (%s, %s)" % (name, work, compose))
-            fresh_copy(ROOT, os.path.join(work, "machiya"), a.worktree)
-            for repo in ("kura", "niwa", "konbini"):
-                fresh_copy(os.path.join(a.siblings, repo), os.path.join(work, repo), False)
-            steps = [s for s in SCENARIOS[name] if s != "clone"]
-            script = ["cd machiya/compose"] if name != "stack" else []     # the stack's init block does its own cd
-            for s in steps:
-                code = blocks[s]["code"].replace("docker compose", compose)
-                script.append('echo "@@begin %s"\n%s\necho "@@end %s"' % (s, code, s))
             env = dict(os.environ)
-            cmd = ["sh", "-ec", "\n".join(script)]
-            if a.with_packages and not packages_done:
+            if a.with_packages and not packages_done:         # first: a clean machine has no git for the copies below
                 print("-- packages-debian", flush=True)
                 pk = subprocess.run(["sh", "-ec", blocks["packages-debian"]["code"]], cwd=work, env=env, capture_output=True,
                                     text=True, timeout=1800)
@@ -184,6 +175,15 @@ def main():
                     failed.append("%s/packages-debian: exit %d" % (name, pk.returncode))
                     continue
                 packages_done = True
+            fresh_copy(ROOT, os.path.join(work, "machiya"), a.worktree)
+            for repo in ("kura", "niwa", "konbini"):
+                fresh_copy(os.path.join(a.siblings, repo), os.path.join(work, repo), False)
+            steps = [s for s in SCENARIOS[name] if s != "clone"]
+            script = ["cd machiya/compose"] if name != "stack" else []     # the stack's init block does its own cd
+            for s in steps:
+                code = blocks[s]["code"].replace("docker compose", compose)
+                script.append('echo "@@begin %s"\n%s\necho "@@end %s"' % (s, code, s))
+            cmd = ["sh", "-ec", "\n".join(script)]
             if a.with_packages and shutil.which("sg"):            # the docker group the block just added applies to new shells
                 cmd = ["sg", "docker", "-c", "sh -ec " + shlex.quote("\n".join(script))]
             proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=2400)
