@@ -9,9 +9,9 @@ It is optional. Without it a room keeps its Tailscale gate or the identity file,
 ```mermaid
 flowchart LR
   B[Browser / Shiori] -->|"machiya_sso=mhs_… (opaque)"| R[Kura · Niwa · Konbini]
-  B -->|"hister.*: /machiya/, /api/oauth/callback"| L[hister-login<br/>SQLite: id → Hister session]
+  B -->|"hister.*: /machiya/, /api/oauth/callback"| L[hister-login<br/>SQLite: id → Hister session;<br/>prefs.sqlite3: each user's settings]
   B -->|"hister.*: everything else"| H[(Hister)]
-  R -->|"GET /v1/check (internal :8081), cached 30 s"| L
+  R -->|"GET /v1/check (internal :8081), cached 30 s; GET/PUT /v1/prefs"| L
   L -->|"GET /api/profile, POST /api/logout"| H
   P[hosted pages' nginx] -->|"auth_request /v1/nginx"| L
   P -->|"Cookie: hister=… (internal hop only)"| H
@@ -27,6 +27,16 @@ flowchart LR
 - **Sessions page:** `/machiya/sessions` lists every browser and app signed in through the helper, with "Sign Out" for one and "Sign Out Everywhere". Hister tokens (extensions, scripts) are separate.
 - **Apps:** Shiori's apps sign in to Hister themselves and trade their own Hister session for an id (`POST /machiya/api/app-session`), or open `/machiya/signin?app=1&return=shiori://…` in an ephemeral web session and get `#sid=…&hister=…` back. They send `Authorization: Bearer mhs_…` to the rooms.
 - **Hosted pages** behind nginx use `auth_request` to `GET /v1/nginx`, which answers `X-Hister-Cookie: hister=<session>` for nginx's own hop to Hister. That location must replace the browser's `Cookie` header **and** have `proxy_hide_header Set-Cookie;`: Hister re-sends its session cookie on every signed-in answer, and without it the raw Hister session would reach the browser on the pages' host.
+- **Automatic sign-in** (0.2.0, the owner's call of 2026-10-05). A room or landing with `MACHIYA_SIGNIN_PROVIDER=oidc` sends a page with no sign-in to `/machiya/signin?return=…&provider=oidc&auto=1`, and the helper goes straight to Hister's `/api/oauth?provider=oidc`. tsidp knows the device, so there is no page and no tap: each installed web app, with its own cookie jar, signs itself in.
+  - The page shows instead when the browser holds `<sign-in cookie>_out` (`machiya_sso_out`). A deliberate sign-out sets it on the shared domain for 30 days: a room's `/signout`, `/machiya/signout`, or the sessions page signing this browser out.
+  - The page also shows when the last round trip failed. A callback that doesn't finish a sign-in this helper started lands on the page with "Sign in with Tailscale didn't work. Try again, or sign in with your password." and sets the marker for 10 minutes, so it never loops.
+  - The next successful sign-in clears the marker. `provider=` without `auto=1` (a tap on Shiori's "Sign In with Tailscale") always goes through.
+- **The settings that follow a person** (0.2.0, [contracts/prefs.md](../contracts/prefs.md)) are kept in the helper, in their own file `prefs.sqlite3` beside the sessions file (`HISTER_LOGIN_PREFS_DB`). Each Hister user's settings are keyed by `hi:<sha256(username)[:32]>`, derived only from the credential the helper resolved itself.
+  - **The rooms and landing** keep their same-origin `/api/prefs` and forward it to the internal `GET`/`PUT /v1/prefs` with the caller's own credential (`X-Machiya-Session` or `X-Access-Token`, exactly one, as for `/v1/check`).
+  - **Shiori's apps, extensions and scripts** call the public `GET`/`PUT /machiya/api/prefs` with `Authorization: Bearer mhs_…` or a Hister token.
+  - **The hosted pages** reach that same path through their own nginx with the sign-in cookie. A `PUT` then needs an `Origin` among the return hosts. There is no CORS.
+  - **First render:** `/v1/check` carries the Shared values as `prefs`, so a room draws a fresh browser's first page in the person's theme.
+  - **Values are never logged.**
 
 ## When something is down
 
@@ -45,6 +55,17 @@ HISTER_LOGIN_PUBLIC_URL=https://hister.example.ts.net HISTER_LOGIN_HISTER_URL=ht
   MACHIYA_COOKIE_DOMAIN=example.ts.net python3 stack/hister-login/hister_login.py
 ```
 
-The image (`stack/hister-login/Dockerfile`) runs as uid 1000 with its state in `/data` (`hister-login.sqlite3`, 0600, WAL: an id stored only as its SHA-256, the Hister session it maps to, the user, the times). Back the file up with Hister's own database. `stack/hister-login/dev/gate0.sh` brings up a throwaway stack (Hister with users and OIDC, the helper, three stand-in rooms, a stub OIDC provider, a TLS front for `*.machiya.test`), runs the Playwright checks in Chromium and WebKit, and removes it again.
+The image (`stack/hister-login/Dockerfile`) runs as uid 1000 with its state in `/data`:
+- `hister-login.sqlite3` (0600, WAL): an id stored only as its SHA-256, the Hister session it maps to, the user, the times;
+- `prefs.sqlite3` (0600): each user's settings.
+
+Back both up together, with Hister's own database.
+
+**Preferences on the command line** (run where the helper runs, e.g. `docker exec hister-login python3 /app/hister_login.py prefs …`):
+- `prefs import --user NAME [--tailscale LOGIN] [--principal KEY] [--dry-run] FILE…` seeds an account from the rooms' old `prefs.sqlite3` files, which it opens read-only. For each key the newest `updated` across the files wins, and only when it is newer than the account's own, so a second run changes nothing.
+- `prefs show --user NAME` lists what the account holds.
+- `prefs delete --user NAME` forgets it (an account removed).
+
+`stack/hister-login/dev/gate0.sh` brings up a throwaway stack (Hister with users and OIDC, the helper, three stand-in rooms, a stub OIDC provider, a TLS front for `*.machiya.test`), runs the Playwright checks in Chromium and WebKit, and removes it again.
 
 Hister's side: `app.user_handling: true`, `app.public: false`, `server.base_url` = the public address, the OIDC provider under `server.oauth.oidc` with its client secret only in the environment (`HISTER__SERVER__OAUTH__OIDC__CLIENT_SECRET`), and `HISTER_CONFIG` set so Hister reads the file at all. Every one-off Hister CLI container needs that secret too once OIDC is configured. Bind the owner's OIDC identity (`users.o_auth_id = 'oidc-<email>'`) **before** the first OIDC sign-in: Hister has no account linking, and an unknown OIDC identity becomes a new, empty, non-admin account.

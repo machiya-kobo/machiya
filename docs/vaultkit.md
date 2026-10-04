@@ -12,7 +12,8 @@ The shared core of Machiya's vault services, in `vaultkit/` of this repo. Each s
 | `git.py` | `Git` (a runner) and `Mirror` (a read-only clone of an https/ssh/file remote kept up to date; a token travels as a header in git's environment, never in argv or `.git/config`) |
 | `identity.py` | who is calling and what they may do ([identity.md](identity.md)): the read-only TOML identity file, `Identity.resolve` (bearer tokens, Tailscale logins and tagged nodes, a trusted proxy header, the built-in sign-in's session cookie), grants, sign-in and device pairing with throttling, and the CLI `python3 -m vaultkit.identity` |
 | `signin.py` | the built-in sign-in page and its POST, sign-out, Shiori's device pairing (`POST /api/pair`) and per-user preferences (`Prefs`, `GET/PUT /api/prefs`) over `identity.py`, as plain functions a room wires in a few lines |
-| `histerauth.py` | `*_AUTH=hister` ([identity.md](identity.md#hister-sign-in-authhister), [hister-login](services/hister-login.md)): `load_for` with the start-up refusals, `HisterAuth.resolve` (the token, the `machiya_sso` id (renamed by `MACHIYA_SSO_COOKIE`, `sso_cookie_name`), the check against the helper with its cache and health flag, the Tailscale fallback or 503, the loop guard), `signout`, `safe_return`, `hister_headers(token_file)` (`Origin: hister://` and the owner's token, re-read on change), default refusal pages; standard library only, tested in `tests/test_histerauth.py` |
+| `histerauth.py` | `*_AUTH=hister` ([identity.md](identity.md#hister-sign-in-authhister), [hister-login](services/hister-login.md)): `load_for` with the start-up refusals, `HisterAuth.resolve` (the token, the `machiya_sso` id (renamed by `MACHIYA_SSO_COOKIE`, `sso_cookie_name`), the check against the helper with its cache and health flag, the Tailscale fallback or 503, the loop guard; v0.21: the automatic sign-in through `MACHIYA_SIGNIN_PROVIDER` and the account's shared preferences on `Result.prefs`), `signout` (with the signed-out marker), `forward_prefs` and `prefs_state` (a room's `/api/prefs` is the account's, [contracts/prefs.md](contracts/prefs.md)), `safe_return`, `hister_headers(token_file)` (`Origin: hister://` and the owner's token, re-read on change), default refusal pages; standard library only, tested in `tests/test_histerauth.py` |
+| `prefs.py` | v0.21, [contracts/prefs.md](contracts/prefs.md): the schema of the settings that follow a person (`SHARED`, `<app>.<key>`, `validate`, `schema()`; `python3 -m vaultkit.prefs` prints it as JSON), `Store` (per principal: values, `updated`, `rev`), `read_rows` and `merge` (the migration rule); tested in `tests/test_prefs.py`, with `ui/machiya.js`'s sync rules run in Node (`tests/js/prefs_sim.mjs`) |
 | `verify.py` | drift check for a vendored copy |
 
 Consumers: **Konbini** (the board), **Kura** (every note, search, API) and **Niwa** (the published garden). The principles are in [principles.md](principles.md).
@@ -125,7 +126,7 @@ the client address, and returns `(status, [(header, value), ...], body bytes)`:
 | `POST /signin` | `handle_post(ident, headers, body, client, origins)` | same-origin only (403); urlencoded, at most `MAX_FORM` (4 KB); 303 to the safe `next` with the session cookie; the page again with 401 (one message for a wrong name or password) or 429 (throttled) |
 | `POST /signout` | `handle_signout(ident, headers)` | same-origin only (403); clears the cookie and (v0.13) the browser's HTTP cache (`Clear-Site-Data`), 303 to `/`; machiya.js empties the offline copies before posting |
 | `POST /api/pair` | `handle_pair(ident, headers, body, client)` | `{"code", "device"}` (JSON, at most 1 KB) → `{"token": "mcd_…", "principal"}` or `{"error"}` with 401/429; no cookie, so no same-origin rule |
-| `GET/PUT /api/prefs` | `handle_prefs(prefs, principal, method, headers, body, secure, origins)` | `{"prefs": {key: value}}`; a PUT merges (`null` removes), all or nothing |
+| `GET/PUT /api/prefs` | `handle_prefs(prefs, principal, method, headers, body, secure, origins)` | the room's own store ([contracts/prefs.md](contracts/prefs.md)): `{"v", "rev", "prefs", "updated"}` with `ETag: "<rev>"` (`If-None-Match`: 304); a PUT merges only the keys sent (`null` removes), checked against the schema (400), all or nothing. In hister mode with the helper the room forwards instead (`histerauth.forward_prefs`) |
 
 - **Same-origin** (`same_origin(headers, secure, origins)`): `Origin`, or `Referer` when there's no `Origin`, must
   be one of the room's own `origins` (its public address(es); every handler takes `origins=`), or without those
@@ -139,17 +140,12 @@ the client address, and returns `(status, [(header, value), ...], body bytes)`:
   characters, never `/signin` or `/signout`; anything else is `/`. Non-ASCII is percent-encoded.
 - **Bodies:** `read_body(headers, rfile, limit)` reads at most `limit` bytes (`MAX_FORM`, `MAX_PAIR`, `MAX_PREFS`) and
   answers None for a larger, chunked or short body: answer 413 and close the connection.
-- **Preferences** (`Prefs(path)`): table `prefs(principal, key, value, updated)` keyed by the principal's id in the room's own SQLite file (its
-  `*_DB` is fine). Keys `[a-z0-9_.-]{1,64}`, values strings of at most 4 KB, at most 100 keys per principal;
-  `get_all(principal, fallbacks=())`, `put(principal, changes, fallbacks=())` (raises `PrefsError`). Shared ones
-  (theme, text size) keep syncing through the `machiya_*` cookies as before; the server copy follows the person to a
-  new device.
-- **Moving to an identity file:** preferences stored without a file sit under the ambient key `ts:<hash>` of a
-  Tailscale login (below). `handle_prefs` passes `tailscale_uid` of each of the principal's own Tailscale logins
-  (`principal.tailscale`, from the file) as `fallbacks`: the first time that principal reads or writes, if it has no
-  preferences yet, the first fallback that has some is copied to its id in the same transaction; the old rows stay.
-  `prefs_moved(principal, source, moved)` records the decision, so it happens once (removed preferences never come
-  back) and later requests cost one lookup.
+- **Preferences** (`Prefs(path)`, a `prefs.Store`): table `prefs(principal, key, value, updated)` keyed by the
+  principal's id in the room's own SQLite file, plus `prefs_rev(principal, rev)` (v0.21; an older file opens as it is).
+  `snapshot(principal)` → `(rev, values, updated)`, `write(principal, changes)`; the older `get_all(principal)` and
+  `put(principal, changes)` (keys `[a-z0-9_.-]{1,64}`, values of at most 4 KB, at most 100 keys; `PrefsError`) stay.
+  `handle_prefs` checks every PUT against the schema in `vaultkit.prefs`. The shared ones also travel as the
+  `machiya_*` cookies, the first-paint and offline path.
 - Sign-in pages answer `Cache-Control: no-store` and refuse framing (`X-Frame-Options: DENY`,
   `frame-ancestors 'none'`). Every JSON answer is `no-store`.
 

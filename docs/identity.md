@@ -163,7 +163,7 @@ Stored tokens survive a key rotation; revoke them one by one. Sessions last 30 d
 | its own token for other rooms | none | `NIWA_KONBINI_TOKEN_FILE` | none | `MCP_TOKEN_FILE` |
 | one sign-in for every room | `MACHIYA_COOKIE_DOMAIN` | same | same | none |
 
-With the file, `*_USERS` (Konbini: `KANBAN_TAILNET_USERS`) is unused. In the compose `.env`, Konbini's settings are spelled `KONBINI_…`. Every room with the file also answers `POST /api/pair` and `GET`/`PUT /api/prefs` (per-person preferences, in the room's own `prefs.sqlite3`); without it they are 404.
+With the file, `*_USERS` (Konbini: `KANBAN_TAILNET_USERS`) is unused. In the compose `.env`, Konbini's settings are spelled `KONBINI_…`. Every room with the file also answers `POST /api/pair` and `GET`/`PUT /api/prefs` (per-person preferences, in the room's own `prefs.sqlite3`, [contracts/prefs.md](contracts/prefs.md)); without it they are 404.
 
 ## One room alone
 
@@ -183,7 +183,7 @@ A room mode **without the identity file**: the room asks [hister-login](services
 
 1. **The owner's Hister token**: `X-Access-Token`, or `Authorization: Bearer <token>` (scripts, pm, the MCP);
 2. **A Hister sign-in**: the `machiya_sso` cookie (browsers), or `Authorization: Bearer mhs_…` (Shiori's apps);
-3. **Nothing**: a page is sent to the helper's sign-in and comes back; an API call gets `401 {"error": "sign in", "signin": "<address>"}` (vaultkit's `machiya.js` takes the page there when the room opts in).
+3. **Nothing**: a page is sent to the helper's sign-in and comes back; an API call gets `401 {"error": "sign in", "signin": "<address>"}` (vaultkit's `machiya.js` takes the page there when the room opts in). With `MACHIYA_SIGNIN_PROVIDER` (below) the sign-in is automatic.
 
 | | Kura | Niwa | Konbini |
 |---|---|---|---|
@@ -196,11 +196,16 @@ A room mode **without the identity file**: the room asks [hister-login](services
 | its address, for the way back (required) | `KURA_PUBLIC_URL` | `NIWA_PUBLIC_URL` | `KANBAN_BOARD_URL` |
 | the shared cookie's domain | `MACHIYA_COOKIE_DOMAIN` | same | same |
 | the sign-in cookie's name (default `machiya_sso`; the helper's must match) | `MACHIYA_SSO_COOKIE` | same | same |
+| sign in automatically through the helper's provider (`oidc`: tsidp; empty: the helper's page) | `MACHIYA_SIGNIN_PROVIDER` | same | same |
 
 - **Refused at start:** no sign-in address or usernames, a `*`, `none` without the helper's address, no public address, or an identity file at the same time (not combined yet). No helper address with the `tailscale` fallback runs on the Tailscale identity alone, with a warning, so a room still stands alone.
 - **Signed out never falls back.** Only "nobody answered" does: the helper or Hister unreachable, a 5xx, or Hister's user handling off. Then a room with `tailscale` admits the owner's Tailscale login with a banner ("Signed in through the tailnet: sign-in is unavailable"), caches nothing and counts it (`fallback_total`); a room with `none` answers 503. A Hister account outside `*_HISTER_USERS` is 403, never a fallback (OAuth creates accounts on its own).
 - **The cookie** (`machiya_sso=mhs_…`, `Domain=MACHIYA_COOKIE_DOMAIN`, Secure, HttpOnly, Lax) is an opaque id; Hister's own session never leaves Hister's host. It still reaches every site under that domain, so the same advice as below holds: a domain only Machiya's rooms serve. A leaked id is revoked on the helper's sessions page. A second stack under the same domain (a [dev stack](dev-stack.md) on the same tailnet) sets its own `MACHIYA_SSO_COOKIE` in the helper, the rooms and landing, so neither stack reads the other's cookie.
-- **Preferences** stay keyed by the Tailscale login when the room has exactly one fallback login (so the fallback sees the same settings); otherwise by a hash of the Hister username.
+- **Automatic sign-in** (`MACHIYA_SIGNIN_PROVIDER=oidc`, the owner's call of 2026-10-05). An installed web app on an iPhone has its own cookie jar, so each would otherwise ask once. With this setting, a room or landing that needs a sign-in sends the page to the helper with `provider=oidc&auto=1`, and the helper goes straight through Hister's OIDC provider (tsidp knows the device), so there is no page and no tap.
+  - **The helper's page shows instead after a deliberate sign-out.** A room's `/signout`, the helper's own sign-out and its sessions page set the marker `<sign-in cookie>_out` (`machiya_sso_out`, on the shared domain, 30 days). It is cleared by the next successful sign-in, so "Sign Out" never bounces straight back in.
+  - **It also shows after a round trip that failed.** The callback lands on the page with "Sign in with Tailscale didn't work…" and a 10-minute marker, so it never loops.
+  - **The room's loop guard links to the plain page.** A tap on "Sign in with Tailscale" (a `provider=` without `auto`) always goes through.
+- **Preferences** ([contracts/prefs.md](contracts/prefs.md)): with the helper, a room's `/api/prefs` is the **account's**. The room forwards it to the helper's `/v1/prefs` with the caller's own credential (`histerauth.forward_prefs`). The fallback has no account preferences (503: the page keeps its local values). Without the helper (Tailscale identity only) the room keeps its own store: keyed by the Tailscale login when the room has exactly one fallback login, otherwise by a hash of the Hister username.
 - `/api/status` (Konbini: `/api/health`) stays open for the probes.
 
 ## Security notes

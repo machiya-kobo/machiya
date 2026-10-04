@@ -34,7 +34,18 @@ Machiya's apps are rooms in one house: each room is distinct, and they share a d
 - **One switcher in every header**, and a **Rooms** tab on phones, the fifth tab, opening a sheet. It lists the rooms front to back, **Shiori · Konbini · Niwa · Kura**, then the neighbours, **Hister · SearXNG**, then the house itself, **Machiya · home** (the [landing page](services/landing.md): the launcher, with the status page at `/status`, when the stack has one), then Settings. The footer's "Part of Machiya" links there too.
 - **One tab bar on phones, the same in every app** (v0.16): a floating pill like Shiori's, 8px from each edge and 10px above the home indicator, frosted glass (70% opaque over a 20px blur, v0.16.1), the current tab on a raised pill; its tabs share the width, so five never run off the screen. The bar sits on `--dark` with the current tab on `--hl` in a dark variant, and the reverse in a light one, which is how Shiori draws it. **Search is the third tab in every room** (Kura: Home · Recent · Search · Tags; Niwa: Garden · Stream · Search · Queue; Konbini: Board · Now · Search · Roundup; then Rooms), and no room has a search field in its header (v0.16.4): on wide screens Search is a nav link in the same third place, and "/" opens the search page. Shiori, which is all search, keeps its own tabs.
 - **A footer status line** in every app, from its `/api/status`: e.g. "Kura · synced abc1234 3 min ago · 812 notes".
-- Each room's **`/settings` page** follows Shiori's Settings: sections Display (Theme: the ten palettes, stored as `palette`; Appearance: System / Light / Dark, stored as `theme` = `system` / `day` / `night`; Text Size), the room's own section, Apps, About. Settings are per device.
+- Each room's **`/settings` page** follows Shiori's Settings, in the same order everywhere (v0.21, the owner's call of 2026-10-05):
+  1. **Shared**: Theme (the ten palettes, stored as `palette`), Appearance (System / Light / Dark, stored as `theme` = `system` / `day` / `night`), Text Size and Apps, with "Follows you on every Machiya app when signed in." and a line saying where the choices are kept now. Shiori adds its Pills; the native apps have no Apps row.
+  2. The room's own section.
+  3. **This Device**: Use This Device's Size, offline copies, addresses.
+  4. Account, then About.
+
+  Settings come in three kinds:
+  - **Shared** settings follow the signed-in person to every app and device.
+  - **Per-app** settings follow the person too, kept as `<app>.<key>`.
+  - **This Device** settings never leave the device.
+
+  Only Text Size may differ per device. The contract is [contracts/prefs.md](contracts/prefs.md).
 
 ## Who builds what
 
