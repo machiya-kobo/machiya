@@ -95,6 +95,7 @@ class Config:
         self.poll = max(15, int(env.get("LANDING_POLL") or "60"))
         self.timeout = max(0.5, float(env.get("LANDING_TIMEOUT") or "3"))
         self.token = self.secret(env.get("LANDING_TOKEN_FILE"), "LANDING_TOKEN_FILE")
+        self.hister_token = self.secret_file(env.get("LANDING_HISTER_TOKEN_FILE"), "LANDING_HISTER_TOKEN_FILE")
         self.changelogs = {k: v for k, v in pairs(env.get("LANDING_CHANGELOGS")).items() if k in probes.NAMES}  # overrides
         self.changelog_token = self.secret(env.get("LANDING_CHANGELOG_TOKEN_FILE"), "LANDING_CHANGELOG_TOKEN_FILE")
         self.changelog_poll = max(60, int(env.get("LANDING_CHANGELOG_POLL") or "900"))
@@ -119,6 +120,18 @@ class Config:
             raise SystemExit("machiya-landing: %s: no token on the first line of %s" % (name, path))
         return token
 
+    @staticmethod
+    def secret_file(path, name):
+        """A token file re-read when it changes (probes.SecretFile); None when unset. Set but missing, empty or odd:
+        refuse to start (never echoing the file)."""
+        path = (path or "").strip()
+        if not path:
+            return None
+        secret = probes.SecretFile(path) if os.path.isfile(path) else None
+        if secret is None or not secret.value:
+            raise SystemExit("machiya-landing: %s: no token on the first line of %s" % (name, path))
+        return secret
+
 
 class Landing:
     """The poller and its last answers."""
@@ -136,7 +149,7 @@ class Landing:
         c = self.config
         keys = [k for k, _, _, _ in probes.APPS]
         with ThreadPoolExecutor(max_workers=len(keys)) as pool:
-            found = dict(zip(keys, pool.map(lambda k: probes.probe(k, c.targets.get(k, ""), now, c.timeout, c.token), keys)))
+            found = dict(zip(keys, pool.map(lambda k: probes.probe(k, c.targets.get(k, ""), now, c.timeout, c.token, c.hister_token), keys)))
         kura, konbini = (found["kura"].get("data") or {}), (found["konbini"].get("data") or {})
         if kura.get("head") and konbini.get("head") and kura["head"] != konbini["head"]:
             self.board_behind_since = self.board_behind_since or now

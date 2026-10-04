@@ -5,8 +5,10 @@ doesn't answer within the timeout is "down". Only GETs are sent, never with a re
 than LIMIT bytes is cut off and counted as unreadable. Nothing here renders HTML: it turns answers into plain values.
 """
 import json
+import os
 import re
 import socket
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -41,6 +43,40 @@ FRESH = {
 }
 STATES = ("up", "behind", "starting", "error", "down", "absent")
 BAD = ("error", "down")
+
+
+TOKEN_RE = re.compile(r"[\x21-\x7e]{1,4096}")
+
+
+class SecretFile:
+    """LANDING_HISTER_TOKEN_FILE: a token kept in a file (its first line), re-read when the file changes (inode, mtime,
+    size), so a rotated token needs no restart; a file that vanishes or holds no token keeps the last good value.
+    Never in repr() or a log line."""
+
+    def __init__(self, path):
+        self.path, self.stamp, self.value, self.lock = path, None, "", threading.Lock()
+        self.get()
+
+    def get(self):
+        try:
+            st = os.stat(self.path)
+            stamp = (st.st_ino, st.st_mtime_ns, st.st_size)
+        except OSError:
+            return self.value
+        with self.lock:
+            if stamp != self.stamp:
+                try:
+                    with open(self.path, encoding="utf-8") as f:
+                        value = f.readline().strip()
+                except (OSError, UnicodeError):
+                    value = ""
+                if TOKEN_RE.fullmatch(value):
+                    self.value = value
+                self.stamp = stamp
+            return self.value
+
+    def __repr__(self):
+        return "SecretFile(%s)" % self.path
 
 
 class FetchError(Exception):
@@ -217,21 +253,31 @@ def shiori(base, now, timeout, headers):
     return result("up", ("build " + m.group(1).decode()[:7]) if m else "", "", ["hosted search page"])
 
 
-def hister(base, now, timeout, headers):
-    """GET /api/stats (page count), then the newest page by date (a search; vault notes left out: Kura's push covers
-    them). Hister doesn't report its version."""
-    h = dict(headers, Origin=HISTER_ORIGIN)
-    d = fetch_json(base + "/api/stats", h, timeout)
-    docs = num(d.get("doc_count"))
-    newest = None
+def hister(base, now, timeout, headers, token=None):
+    """Up or down from GET /health (open, even with Hister's user handling on: contracts/hister.md); then, best
+    effort, the page count (GET /api/stats) and the newest page by date (a search; vault notes left out: Kura's push
+    covers them), with the owner's token (LANDING_HISTER_TOKEN_FILE) as X-Access-Token when set. With users on and no
+    token (or a refused one) those answer 403: Hister is still up, only the count is missing. Hister doesn't report its
+    version."""
+    h = dict(headers, Origin=HISTER_ORIGIN)            # every Hister call says who it is, /health too
+    _, _, body = fetch(base + "/health", dict(h, Accept="text/plain"), timeout)
+    if body.strip()[:2].upper() != b"OK":
+        raise FetchError("not healthy")
+    value = token.get() if hasattr(token, "get") else (token or "")
+    if value:
+        h["X-Access-Token"] = value
+    docs = newest = None
+    note = ""
     try:
+        docs = num(fetch_json(base + "/api/stats", h, timeout).get("doc_count"))
         s = fetch_json(base + "/search?format=json&sort=date&q=" + quote("* -label:vault -metadata.source:vault"), h, timeout)
         first = (s.get("documents") or [None])[0]
         if isinstance(first, dict):
             newest = num(first.get("updated")) or num(first.get("added"))
-    except FetchError:
-        pass                                            # the count is enough to say it's up
-    return result("up", "", "", [plural(int(docs), "page") if docs is not None else ""], "",
+    except FetchError as e:
+        if str(e) in ("HTTP 401", "HTTP 403"):          # users on: the count needs the owner's token
+            note = "page count: the token was refused" if value else "page count needs LANDING_HISTER_TOKEN_FILE"
+    return result("up", "", "", [plural(int(docs), "page") if docs is not None else note], "",
                   {"docs": docs, "newest": newest})
 
 
@@ -297,14 +343,17 @@ def auth_headers(key, target, token):
     return {}
 
 
-def probe(key, target, now, timeout=3.0, token=""):
-    """One app's result (never raises). target: its base URL, or for vault-mirror a file path; "" = absent."""
+def probe(key, target, now, timeout=3.0, token="", hister_token=None):
+    """One app's result (never raises). target: its base URL, or for vault-mirror a file path; "" = absent.
+    hister_token: LANDING_HISTER_TOKEN_FILE's SecretFile, for Hister only."""
     if not target:
         return dict(result("absent"), ms=0)
     started = time.monotonic()
     try:
         if key == "vault-mirror":
             out = vault_mirror(target, now)
+        elif key == "hister":
+            out = hister(target.rstrip("/"), now, timeout, auth_headers(key, target, token), hister_token)
         else:
             out = READERS[key](target.rstrip("/"), now, timeout, auth_headers(key, target, token))
     except FetchError as e:

@@ -27,6 +27,7 @@ Every app is optional. The page polls only what has an address; anything else sh
 | `LANDING_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | `open` mode answers only these `Host` names |
 | `LANDING_POLL`, `LANDING_TIMEOUT` | `60`, `3` | seconds between polls (15 at least), and per request |
 | `LANDING_TOKEN_FILE` | none | a token sent as `Authorization: Bearer` to Kura, Niwa and Konbini over https only (for rooms with an identity file), for their status and changelog; never to the engines or services |
+| `LANDING_HISTER_TOKEN_FILE` | none | the owner's Hister token, sent as `X-Access-Token` to Hister only, for the page count and the newest page once Hister's user handling is on ([contracts/hister.md](../../docs/contracts/hister.md)); re-read when the file changes; set but missing or empty stops the start. Without it Hister is still shown up or down (from its open `/health`), just without the count |
 | `LANDING_CHANGELOG_POLL` | `900` | seconds between asking each app for its changelog (`GET /api/changelog`); a new version is asked for at once |
 | `LANDING_CHANGELOGS` | none | an override per app, `kura=https://…/CHANGELOG.md,…`, for an app that doesn't serve `/api/changelog` |
 | `LANDING_CHANGELOG_TOKEN_FILE` | none | a read token for the override URLs only (`Authorization: token …`, https only) |

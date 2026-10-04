@@ -6,7 +6,7 @@ One page for the whole stack: it links every room (Shiori, Konbini, Niwa, Kura),
 
 | Section | From |
 |---|---|
-| **Rooms** and **Engines**, **Stack Services**: up, behind, starting, error, down, or *Not in this stack*; version and vendored vaultkit; a fact or two (notes, cards, pages, tools) | each app's own status: Kura `/api/status`, Konbini `/api/health`, Niwa `/api/status`, Shiori's hosted page (`/`, its build hash), Hister `/api/stats` (+ its newest page), SearXNG `/healthz` and `/config`, machiya-mcp and smallweb `/api/status`, vault-mirror's `status.json` |
+| **Rooms** and **Engines**, **Stack Services**: up, behind, starting, error, down, or *Not in this stack*; version and vendored vaultkit; a fact or two (notes, cards, pages, tools) | each app's own status: Kura `/api/status`, Konbini `/api/health`, Niwa `/api/status`, Shiori's hosted page (`/`, its build hash), Hister `/health` (+ its page count and newest page, with `LANDING_HISTER_TOKEN_FILE` once Hister has users), SearXNG `/healthz` and `/config`, machiya-mcp and smallweb `/api/status`, vault-mirror's `status.json` |
 | **Sync** | the vault's last pull (Kura; the mirror), the board's commit against the vault's head and its LiveSync cycle (Konbini), unpushed garden writes (Niwa), the notes' last push into Hister (Kura), Hister's newest page |
 | **Recent Deploys** | version changes the page saw itself (below), with the changelog lines that came with them |
 

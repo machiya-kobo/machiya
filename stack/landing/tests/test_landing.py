@@ -76,7 +76,7 @@ KONBINI = {"ok": True, "version": "0.11.6", "head": KURA["head"], "cards": 78,
 NIWA = {"version": "0.4.8", "vaultkit": "v0.17.2", "head": "a6857ce8c2", "notes": 314, "published": 1,
         "sync": {"pending": 0, "ahead": 0, "error": None}, "ready": True, "error": None}
 SHIORI = (200, '<link rel="stylesheet" href="/_shiori/app.css?v=7598f33efebd">', "text/html")
-HISTER = {"/api/stats": {"doc_count": 1968, "alias_count": 14},
+HISTER = {"/health": (200, "OK", "text/plain"), "/api/stats": {"doc_count": 1968, "alias_count": 14},
           "/search": {"total": 1968, "documents": [{"url": "https://example.com/", "added": NOW - 9000, "updated": NOW - 600}]}}
 SEARXNG = {"/healthz": (200, "OK", "text/plain"), "/config": {"version": "2026.9.25+12f8b6515"}}
 MCP = {"ok": True, "version": "0.7.0", "auth": "tailscale", "rooms": ["hister", "konbini", "kura", "niwa"], "tools": 36}
@@ -92,7 +92,7 @@ class Stack(unittest.TestCase):
             "konbini": Fake({"/api/health": lambda: dict(KONBINI)}),
             "niwa": Fake({"/api/status": lambda: dict(NIWA)}),
             "shiori": Fake({"/": SHIORI}),
-            "hister": Fake(HISTER),
+            "hister": Fake(dict(HISTER)),
             "searxng": Fake(SEARXNG),
             "machiya-mcp": Fake({"/api/status": MCP}),
             "smallweb": Fake({"/api/status": SMALLWEB}),
@@ -201,6 +201,69 @@ class Readers(Stack):
         with open(path, "w") as f:
             json.dump({"head": "4ca69a1865fc", "synced_at": NOW - 7 * 3600, "error": None}, f)
         self.assertEqual(self.landing(LANDING_MIRROR_STATUS=path).poll()["apps"]["vault-mirror"]["state"], "error")
+
+
+class HisterWithUsers(Stack):
+    """Hister with user handling on: /health stays open (up or down), /api/stats and /search need the owner's token
+    (LANDING_HISTER_TOKEN_FILE, X-Access-Token, Hister only); without it the page is up with no count, never down."""
+
+    TOKEN = "LandingHisterToken0123456789"
+
+    def gated(self, body):
+        def route():
+            seen = self.fakes["hister"].seen[-1]["headers"]
+            return body if seen.get("x-access-token") == self.TOKEN else (403, b"", "text/plain")
+        return route
+
+    def setUp(self):
+        super().setUp()
+        self.fakes["hister"].routes.update({"/api/stats": self.gated(HISTER["/api/stats"]),
+                                            "/search": self.gated(HISTER["/search"])})
+        self.file = os.path.join(self.tmp, "hister.token")
+        with open(self.file, "w") as f:
+            f.write(self.TOKEN + "\n")
+
+    def test_without_a_token_up_and_no_count(self):
+        a = self.landing().poll()["apps"]["hister"]
+        self.assertEqual((a["state"], a["facts"], a["data"]["docs"]), ("up", ["page count needs LANDING_HISTER_TOKEN_FILE"], None))
+        self.assertTrue(all("x-access-token" not in s["headers"] for s in self.fakes["hister"].seen))
+
+    def test_with_the_token_the_count_and_nowhere_else(self):
+        land = self.landing(LANDING_HISTER_TOKEN_FILE=self.file)
+        snap = land.poll()
+        a = snap["apps"]["hister"]
+        self.assertEqual((a["state"], a["facts"], a["data"]["newest"]), ("up", ["1,968 pages"], NOW - 600))
+        health = [s for s in self.fakes["hister"].seen if s["path"] == "/health"]
+        self.assertTrue(health and all("x-access-token" not in s["headers"] for s in health))   # /health: no token
+        for key, fake in self.fakes.items():
+            if key != "hister":
+                self.assertTrue(all("x-access-token" not in s["headers"] for s in fake.seen), key)
+        self.assertNotIn(self.TOKEN, json.dumps(snap) + repr(land.config.hister_token))
+
+    def test_a_refused_token_says_so(self):
+        with open(self.file, "w") as f:
+            f.write("SomeOtherToken\n")
+        a = self.landing(LANDING_HISTER_TOKEN_FILE=self.file).poll()["apps"]["hister"]
+        self.assertEqual((a["state"], a["facts"]), ("up", ["page count: the token was refused"]))
+
+    def test_health_down_is_down(self):
+        self.fakes["hister"].routes["/health"] = (502, b"bad gateway", "text/plain")
+        self.assertEqual(self.landing(LANDING_HISTER_TOKEN_FILE=self.file).poll()["apps"]["hister"]["state"], "down")
+
+    def test_bad_token_file_refuses_and_rotation_is_picked_up(self):
+        empty = os.path.join(self.tmp, "empty")
+        open(empty, "w").close()
+        for path in (empty, os.path.join(self.tmp, "missing"), self.tmp):
+            with self.assertRaises(SystemExit) as cm:
+                landing.Config(self.env(LANDING_HISTER_TOKEN_FILE=path))
+            self.assertNotIn(self.TOKEN, str(cm.exception))
+        secret = probes.SecretFile(self.file)
+        with open(self.file + ".new", "w") as f:
+            f.write("RotatedToken-1\n")
+        os.replace(self.file + ".new", self.file)
+        self.assertEqual(secret.get(), "RotatedToken-1")
+        os.unlink(self.file)
+        self.assertEqual(secret.get(), "RotatedToken-1")
 
 
 class Freshness(Stack):
