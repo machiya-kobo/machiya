@@ -223,14 +223,19 @@ class NotesWriter:
                     raise ToolError("use the folder's exact name, %s/ (not %s/)" % (same[0], top))
                 raise ToolError("%r is not an existing folder: a new top-level folder is the owner's to create (nested folders "
                                 "below an existing one are fine)" % top, needs_owner=True)
+        root = os.path.realpath(self.root)
         full = os.path.realpath(os.path.join(self.root, rel))
-        if not full.startswith(os.path.realpath(self.root) + os.sep):
+        if not full.startswith(root + os.sep):
             raise ToolError("path leaves the vault")
         walk = self.root
-        for p in parts[:-1]:
+        for p in parts:                       # every component, the note itself too (sweep MACH-M-3)
             walk = os.path.join(walk, p)
             if os.path.islink(walk):
-                raise ToolError("path goes through a symlink")
+                raise ToolError("path goes through a symlink: symlinked notes and folders are never written")
+        real = os.path.relpath(full, root).replace(os.sep, "/").lower()
+        hit = Rules.first(self.rules.never_write, real)
+        if hit or os.path.basename(real) == "claude.md":
+            raise ToolError("%s is never written from here: it is protected or managed by another tool" % (hit or "CLAUDE.md"))
         return rel
 
     def path_of(self, rel):
@@ -244,22 +249,40 @@ class NotesWriter:
             return None
 
     # -- git ---------------------------------------------------------------------------------------------------------
+    def discard_stray(self):
+        """Nothing but this writer writes the clone, one commit per call, so an uncommitted change here is a leftover (a
+        write whose commit failed, a hand edit): never commit it. GitSync.pull would commit it as "notes: 1 change (sync)"
+        and push it with the next write (sweep MACH-M-3), so it is thrown away first, and logged."""
+        if not self.sync.dirty():
+            return
+        stray = self.sync.run("status", "--porcelain", "--", *self.sync.paths).strip().splitlines()
+        print("notes: discarding uncommitted changes in the write clone: %s" % ", ".join(l[3:] for l in stray[:10]), flush=True)
+        self.sync.git("reset", "-q", "--hard", "HEAD")
+        self.sync.git("clean", "-fdq", "--", *self.sync.paths)
+
     def ready(self):
+        if os.path.isdir(os.path.join(self.repo, ".git")):
+            self.discard_stray()
         if not os.path.isdir(os.path.join(self.repo, ".git")) or not self.sync.pull():
             raise ToolError("the vault clone can't sync with its remote right now; nothing was written. Retry in a moment.")
 
-    def commit(self, rel, verb, agent, intended):
-        """Commit one file, push, and report whether it landed as written."""
+    def commit(self, rel, verb, agent, intended, previous=None):
+        """Commit one file, push, and report whether it landed as written. A commit that fails puts the file back as it
+        was (`previous`; a new note is removed), so no edit is left for a later write to push."""
         relrepo = "%s/%s" % (self.subdir, rel) if self.subdir else rel
         before = self.sync.head()
         self.sync.git("add", "--", relrepo)
         self.sync.git("commit", "-q", "-m", "notes: %s %s (%s)" % (verb, rel, agent if agent.startswith("mcp:") else "mcp:" + agent[:60]))
         if self.sync.head() == before:
-            if verb == "create":
-                try:
+            self.sync.git("reset", "-q", "--", relrepo)
+            try:
+                if verb == "create" or previous is None:
                     os.unlink(self.path_of(rel))
-                except OSError:
-                    pass
+                else:
+                    with open(self.path_of(rel), "w", encoding="utf-8") as f:
+                        f.write(previous)
+            except OSError:
+                pass
             raise ToolError("the write could not be committed; nothing changed")
         self.sync.push()
         if self.sync.ahead():
@@ -362,7 +385,7 @@ class NotesWriter:
                 raise ToolError("the edit would leave the frontmatter unreadable")
             with open(self.path_of(rel), "w", encoding="utf-8") as f:
                 f.write(new)
-            out = dict(self.commit(rel, "update", agent, new), changed=True, mode=mode)
+            out = dict(self.commit(rel, "update", agent, new, previous=current), changed=True, mode=mode)
             if published:
                 out["published_note"] = True
             return out

@@ -479,6 +479,58 @@ class Settings(Base):
         self.assertIn("default folder is Notes/", text)
 
 
+class Symlinks(Base):
+    """Sweep MACH-M-3: a symlinked note writes through to its target (a protected template, say), and a failed commit
+    left its edit in the clone for the next write to push as "notes: 1 change (sync)"."""
+
+    def push_link(self, rel, target):
+        git(self.other, "pull", "-q", "--ff-only")
+        path = os.path.join(self.other, "personal", rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.symlink(target, path)
+        git(self.other, "add", "-A")
+        git(self.other, "commit", "-q", "-m", "a link")
+        git(self.other, "push", "-q", "origin", "HEAD")
+
+    def test_a_symlinked_note_is_refused(self):
+        template = self.read("Templates/Note.md")
+        self.push_link("Inbox/Link.md", "../Templates/Note.md")
+        self.push_link("Inbox/Alias.md", "../Notes/Idea.md")
+        self.w.ready()
+        for rel in ("Inbox/Link.md", "Inbox/Alias.md"):
+            self.refused(lambda rel=rel: self.update(rel, "append", text="Through the link."), "symlink")
+        self.assertEqual(self.read("Templates/Note.md"), template)
+        self.assertNotIn("Through the link", self.read("Notes/Idea.md"))
+
+    def origin_files(self):
+        return git(self.origin, "show", "--name-only", "--format=", "main").split()
+
+    EX = "Notes/Existing.md"
+
+    def test_a_failed_commit_leaves_nothing_behind(self):
+        before = self.read(self.EX)
+        hook = os.path.join(self.repo, ".git", "hooks", "pre-commit")
+        with open(hook, "w") as f:
+            f.write("#!/bin/sh\nexit 1\n")
+        os.chmod(hook, 0o755)
+        self.refused(lambda: self.update(self.EX, "append", text="Lost edit."), "could not be committed")
+        self.assertEqual(self.read(self.EX), before)
+        os.unlink(hook)
+        self.update("Notes/Idea.md", "append", text="Another note.")
+        self.assertEqual(self.origin_files(), ["personal/Notes/Idea.md"])
+        self.assertEqual(self.read(self.EX), before)
+
+    def test_stray_changes_in_the_clone_are_never_pushed(self):
+        with open(os.path.join(self.repo, "personal", "Templates", "Note.md"), "a") as f:
+            f.write("stray\n")
+        with open(os.path.join(self.repo, "personal", "Inbox", "Stray.md"), "w") as f:
+            f.write("stray\n")
+        self.update("Notes/Idea.md", "append", text="Another note.")
+        self.assertEqual(self.origin_files(), ["personal/Notes/Idea.md"])
+        self.assertNotIn("stray", self.read("Templates/Note.md"))
+        self.assertIsNone(self.read("Inbox/Stray.md"))
+
+
 class ThroughTheServer(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="notes-test-")
