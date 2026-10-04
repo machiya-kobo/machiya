@@ -234,7 +234,7 @@ class Outbound(unittest.TestCase):
         self.addCleanup(os.unlink, server.log_path)
         for name, args in (("machiya_status", {}), ("machiya_search", {"q": "x"}), ("notes_read", {"path": "Projects/Alpha.md"}),
                            ("board_set_next", {"slug": "alpha", "next": "n"}), ("garden_suggest", {"note": "Projects/Alpha.md", "reason": "A finished write-up."}),
-                           ("pages_search", {"q": "x"}), ("pages_set_label", {"url": "https://example.com/a", "label": "python"})):
+                           ("pages_labels", {}), ("pages_set_label", {"url": "https://example.com/a", "label": "python"})):
             self.assertFalse(call(server, name, args).get("isError"), name)
         for room in ("kura", "konbini", "niwa"):
             seen = self.fakes[room].seen

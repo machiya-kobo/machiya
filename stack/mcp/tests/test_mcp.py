@@ -180,7 +180,7 @@ class Protocol(Base):
             self.assertEqual(t["inputSchema"]["type"], "object")
 
     READS = {"board_list_cards", "board_get_card", "board_review", "board_roundup", "notes_search", "notes_read", "notes_recent",
-             "notes_lookup", "notes_tags", "notes_folders", "pages_search", "pages_read", "collections_list", "machiya_search",
+             "notes_lookup", "notes_tags", "notes_folders", "collections_list", "machiya_search",
              "machiya_status", "garden_candidates", "pages_labels", "collections_audit"}
     WRITES = {"board_add_backlog", "board_move", "board_set_next", "board_block", "board_set_priority", "board_set_stream",
               "board_set_dependencies", "board_tag", "board_log", "board_claim", "board_release", "garden_suggest",
@@ -192,7 +192,7 @@ class Protocol(Base):
         for name, t in self.server.tools.items():
             self.assertEqual(t["annotations"]["readOnlyHint"], name in self.READS, name)
             self.assertFalse(t["annotations"].get("openWorldHint"), name)
-            if name not in ("notes_read", "pages_read", "pages_set_label"):      # these take a URL only as a lookup key, never fetched
+            if name not in ("notes_read", "pages_set_label"):      # these take a URL only as a lookup key, never fetched
                 self.assertFalse({"url", "uri", "host"} & set(t["inputSchema"]["properties"]), name)
 
     def test_absent_room_hides_its_tools(self):
@@ -223,22 +223,22 @@ class Headers(Base):
                 self.assertEqual(req["headers"]["x-agent"], "mcp:t")
 
     def test_hister_always_has_origin_and_pages_exclude_vault(self):
-        call(self.server, "pages_search", {"q": "tailscale"})
-        call(self.server, "pages_search", {"label": "python"})
-        call(self.server, "pages_search", {"collection": "@travel", "q": "x"})
-        call(self.server, "pages_read", {"url": "https://example.com/a"})
+        call(self.server, "pages_labels")
+        self.server.census = (0.0, None)
+        call(self.server, "pages_relabel", {"query": "domain:example.com", "label": "python"})
+        call(self.server, "pages_set_label", {"url": "https://example.com/a", "label": "python"})
         call(self.server, "collections_list")
         call(self.server, "machiya_status")
+        self.assertEqual({r["path"] for r in self.fakes["hister"].seen}, {"/search", "/api/document", "/api/rules", "/api/stats"})
         for req in self.fakes["hister"].seen:
             self.assertEqual(req["headers"]["origin"], "hister://")
             self.assertEqual(req["headers"]["x-agent"], "mcp:t")
         searches = [r for r in self.fakes["hister"].seen if r["path"] == "/search"]
-        self.assertEqual(len(searches), 3)
+        self.assertTrue(len(searches) >= 3)
         for r in searches:
-            self.assertTrue(r["query"]["q"].endswith(" -label:vault -metadata.source:vault"), r["query"]["q"])
+            self.assertTrue(r["query"]["q"].endswith(" -label:vault -metadata.source:vault -label:konbini"), r["query"]["q"])
             self.assertEqual(r["query"]["format"], "json")
-        self.assertIn("label:python", searches[1]["query"]["q"])
-        self.assertIn("@travel", searches[2]["query"]["q"])
+        self.assertIn("domain:example.com", searches[-1]["query"]["q"])
 
     def test_backend_refuses_urls_and_caller_origin(self):
         b = Backend("kura", self.fakes["kura"].url)
@@ -405,29 +405,21 @@ class Board(Base):
 
 
 class Pages(Base):
-    def test_vault_docs_and_room_hosts_never_come_back(self):
-        d = data(call(self.server, "pages_search", {"q": "x"}))
-        self.assertEqual([r["url"] for r in d["results"]], [DOC["url"]])
-
-    def test_read_refuses_room_hosts_and_vault_docs(self):
-        for url in ("https://kura.example.ts.net/n/X", "https://konbini.example.ts.net/p/x", "https://niwa.x/y", "file:///etc/passwd", "javascript:1"):
-            self.assertTrue(call(self.server, "pages_read", {"url": url})["isError"], url)
-        self.fakes["hister"].routes["/api/document"] = VAULT_DOC | {"url": "https://example.com/disguised"}
-        self.assertTrue(call(self.server, "pages_read", {"url": "https://example.com/disguised"})["isError"])
-
-    def test_read_pages_text(self):
-        d = data(call(self.server, "pages_read", {"url": DOC["url"], "max_chars": 10}))
-        self.assertEqual(d["content"]["text"], "hello worl")
-        self.assertEqual(d["content"]["next_offset"], 10)
-
-    def test_reserved_collections_and_bad_words(self):
-        for args in ({"collection": "notes"}, {"collection": "@pages"}, {"label": "a b"}, {"label": "x) OR (label:vault"},
-                     {"collection": "x; y"}, {}):
-            self.assertTrue(call(self.server, "pages_search", args)["isError"], args)
+    def test_page_search_and_text_are_histers_own_mcp(self):
+        # since 0.7.0: Hister's MCP (search with @pages, get_preview) reads pages; this server keeps labels and collections
+        for name in ("pages_search", "pages_read"):
+            self.assertNotIn(name, self.server.tools)
+            r = self.server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": {}}},
+                                   "owner", "t")
+            self.assertEqual(r["error"]["code"], -32602, name)
+        self.assertEqual(set(data(call(self.server, "machiya_search", {"q": "x"}))), {"notes", "cards"})
+        self.assertFalse([r for r in self.fakes["hister"].seen if r["path"] == "/search"])
 
     def test_query_injection_cannot_drop_the_exclusion(self):
-        call(self.server, "pages_search", {"q": "label:vault"})
-        self.assertTrue(self.fakes["hister"].seen[-1]["query"]["q"].endswith(" -label:vault -metadata.source:vault"))
+        call(self.server, "pages_relabel", {"query": "label:vault", "label": "python"})
+        searches = [r for r in self.fakes["hister"].seen if r["path"] == "/search"]
+        self.assertTrue(searches)
+        self.assertTrue(searches[-1]["query"]["q"].endswith(" -label:vault -metadata.source:vault -label:konbini"))
 
     def test_collections_hide_vault_aliases(self):
         d = data(call(self.server, "collections_list"))["collections"]
@@ -867,11 +859,11 @@ class Audit(Base):
     def test_log_has_keys_not_text(self):
         call(self.server, "notes_search", {"q": "my private thought"})
         call(self.server, "board_get_card", {"slug": "alpha"})
-        call(self.server, "pages_read", {"url": "https://kura.test/n/X"})       # refused
+        call(self.server, "pages_set_label", {"url": "https://kura.test/n/X", "label": "python"})       # refused
         with open(self.server.log_path) as f:
             raw = f.read()
         rows = [json.loads(line) for line in raw.splitlines()]
-        self.assertEqual([r["tool"] for r in rows], ["notes_search", "board_get_card", "pages_read"])
+        self.assertEqual([r["tool"] for r in rows], ["notes_search", "board_get_card", "pages_set_label"])
         self.assertEqual([r["status"] for r in rows], ["ok", "ok", "refused"])
         self.assertEqual(rows[1]["args"], {"slug": "alpha"})
         self.assertNotIn("private thought", raw)
@@ -889,7 +881,7 @@ class Failures(Base):
         self.fakes["kura"].close()
         d = data(call(self.server, "machiya_search", {"q": "x"}))
         self.assertIn("error", d["notes"])
-        self.assertTrue(d["pages"]["results"])
+        self.assertNotIn("pages", d)
         self.assertTrue(d["cards"]["cards"] or d["cards"]["total"] == 0)
         st = call(self.server, "machiya_status")["structuredContent"]["rooms"]
         self.assertFalse(st["kura"]["ok"])

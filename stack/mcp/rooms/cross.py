@@ -1,9 +1,9 @@
-"""Cross-room tools: one search over notes, pages and cards, and which rooms are on."""
+"""Cross-room tools: one search over notes and cards, and which rooms are on. Pages are searched with Hister's own MCP."""
 import concurrent.futures
 import time
 
 from . import arg_int, arg_str, n, s, tool, ToolError
-from . import hister, konbini, kura
+from . import konbini, kura
 
 STATUS_PATHS = {"konbini": "/api/status", "kura": "/api/status", "niwa": "/api/status", "hister": "/api/stats"}
 
@@ -16,12 +16,10 @@ def machiya_search(ctx, args):
     jobs = {}
     if ctx.has("kura"):
         jobs["notes"] = lambda: kura.notes_search(ctx, {"q": q, "limit": limit})
-    if ctx.has("hister"):
-        jobs["pages"] = lambda: hister.pages_search(ctx, {"q": q, "limit": limit})
     if ctx.has("konbini"):
         jobs["cards"] = lambda: konbini.board_list_cards(ctx, {"text": q, "limit": limit})
     out = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         futures = {k: pool.submit(f) for k, f in jobs.items()}
         for k, f in futures.items():
             try:
@@ -44,8 +42,8 @@ def machiya_status(ctx, args):
 
 
 TOOLS = [
-    tool("machiya_search", "Search notes, saved pages and board cards at once, grouped. Use notes_search, pages_search or "
-         "board_list_cards for more of one kind.", {"q": s("Query"), "limit": n("Results per kind (default 8)")}, ["q"],
+    tool("machiya_search", "Search notes and board cards at once, grouped. Use notes_search or board_list_cards for more of "
+         "one kind, and Hister's own search (query starting @pages) for saved pages.", {"q": s("Query"), "limit": n("Results per kind (default 8)")}, ["q"],
          handler=machiya_search),
     tool("machiya_status", "Which Machiya rooms this server can reach right now, with their latest commit.",
          handler=machiya_status),

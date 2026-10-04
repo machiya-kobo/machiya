@@ -293,7 +293,7 @@ TOOLS = [
          "pages, and how far the owner's reserved aliases (MCP_RESERVED_COLLECTIONS) have drifted (reported, never edited).", handler=collections_audit),
     tool("pages_set_label", "Give one saved page an existing label (empty string clears it). A new label is the owner's; vault notes and "
          "import labels are never touched. Pass expected_label if you read the page's label first.",
-         {"url": s("The page's URL, from pages_search"), "label": s("An existing label, or empty to clear"),
+         {"url": s("The page's exact URL, from Hister's search"), "label": s("An existing label, or empty to clear"),
           "expected_label": s("The label you saw; the call fails if it changed")}, ["url", "label"], IDEMPOTENT, pages_set_label, WRITE_LIMITS),
     tool("pages_relabel", "Relabel many pages at once, in two steps. Step 1 (no apply_token): a dry run that matches the query (Hister query "
          "language; notes are always excluded), shows how many pages would change, a sample and their current labels, and returns an "

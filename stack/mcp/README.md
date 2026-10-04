@@ -1,6 +1,6 @@
 # machiya-mcp
 
-Machiya's MCP server: read tools for the board, notes and saved pages, board and garden writes, notes write tools, page labels and collections, prompts. Full description, tools, safety rules and configuration: [docs/services/mcp.md](../../docs/services/mcp.md).
+Machiya's MCP server: read tools for the board and notes, board and garden writes, notes write tools, page labels and collections, prompts. Saved pages are searched and read with Hister's own MCP (the machiya plugin connects both). Full description, tools, safety rules and configuration: [docs/services/mcp.md](../../docs/services/mcp.md).
 
 ```
 MCP_AUTH=open MCP_BIND=127.0.0.1 MCP_LOG=/tmp/mcp.log \
