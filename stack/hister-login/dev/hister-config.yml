@@ -1,0 +1,10 @@
+# The dev Hister's config: users come from HISTER__APP__USER_HANDLING (compose), the OIDC client secret from the
+# environment (HISTER__SERVER__OAUTH__OIDC__CLIENT_SECRET, an env file under $DEV_DATA/secrets), never from here.
+app:
+  public: false
+server:
+  oauth_only: false
+  oauth:
+    oidc:
+      client_id: hister
+      configuration_url: http://stub-idp:9000/.well-known/openid-configuration

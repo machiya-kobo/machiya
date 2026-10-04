@@ -1,0 +1,93 @@
+# The hister-login dev stack (gate 0): a dev Hister v0.20.0, the helper, three stand-in rooms, a stub OIDC provider and a
+# TLS front for *.machiya.test on 127.0.0.1:19043. Dummy data only. Run it with ./gate0.sh (which also makes the
+# throwaway CA, the owner and the secrets under $DEV_DATA); `podman compose -p machiya-login down -v` removes it.
+name: machiya-login
+x-room: &room
+  image: localhost/hister-login:dev
+  command: ["python3", "/dev/room.py"]
+  volumes: ["./room.py:/dev/room.py:ro"]
+  depends_on: [hister-login]
+x-common: &common
+  MACHIYA_COOKIE_DOMAIN: machiya.test
+  MACHIYA_ROOMS: "shiori=https://shiori.machiya.test:19043,konbini=https://konbini.machiya.test:19043,niwa=https://niwa.machiya.test:19043,kura=https://kura.machiya.test:19043,hister=https://hister.machiya.test:19043"
+services:
+  hister:
+    image: ghcr.io/asciimoo/hister:v0.20.0
+    environment:
+      HISTER_CONFIG: /hister/config.yml
+      HISTER__SERVER__ADDRESS: 0.0.0.0:4433
+      HISTER__SERVER__BASE_URL: https://hister.machiya.test:19043
+      HISTER__APP__USER_HANDLING: ${HISTER_USER_HANDLING:-true}
+    env_file: ["${DEV_DATA}/secrets/hister.env"]          # HISTER__SERVER__OAUTH__OIDC__CLIENT_SECRET
+    volumes:
+      - hister-data:/hister/data
+      - ./hister-config.yml:/hister/config.yml:ro
+  hister-login:
+    image: localhost/hister-login:dev
+    build: ..
+    environment:
+      <<: *common
+      HISTER_LOGIN_HISTER_URL: http://hister:4433
+      HISTER_LOGIN_PUBLIC_URL: https://hister.machiya.test:19043
+      HISTER_LOGIN_PROVIDERS: oidc
+      MACHIYA_COOKIE_DOMAIN: ${HELPER_COOKIE_DOMAIN-machiya.test}   # gate0's loop guard check empties it
+    volumes: [login-data:/data]
+    depends_on: [hister]
+  room-kura:
+    <<: *room
+    environment:
+      <<: *common
+      ROOM: kura
+      KURA_AUTH: hister
+      KURA_AUTH_URL: http://hister-login:8081
+      KURA_AUTH_SIGNIN_URL: https://hister.machiya.test:19043/machiya/signin
+      KURA_HISTER_USERS: owner
+      KURA_AUTH_FALLBACK: none
+      KURA_PUBLIC_URL: https://kura.machiya.test:19043
+  room-niwa:
+    <<: *room
+    environment:
+      <<: *common
+      ROOM: niwa
+      NIWA_AUTH: hister
+      NIWA_AUTH_URL: http://hister-login:8081
+      NIWA_AUTH_SIGNIN_URL: https://hister.machiya.test:19043/machiya/signin
+      NIWA_HISTER_USERS: owner
+      NIWA_AUTH_FALLBACK: tailscale
+      NIWA_USERS: owner@passkey
+      NIWA_BIND_BEHIND_PROXY: "1"
+      NIWA_PUBLIC_URL: https://niwa.machiya.test:19043
+  room-konbini:
+    <<: *room
+    environment:
+      <<: *common
+      ROOM: konbini
+      KANBAN_AUTH: hister
+      KANBAN_AUTH_URL: http://hister-login:8081
+      KANBAN_AUTH_SIGNIN_URL: https://hister.machiya.test:19043/machiya/signin
+      KANBAN_HISTER_USERS: owner
+      KANBAN_TAILNET_USERS: owner@passkey
+      KANBAN_BIND_BEHIND_PROXY: "1"
+      KANBAN_BOARD_URL: https://konbini.machiya.test:19043
+  stub-idp:
+    image: localhost/hister-login:dev
+    command: ["python3", "/dev/stub_idp.py"]
+    environment:
+      STUB_CLIENT_SECRET_FILE: /run/dev-secrets/oidc-client-secret
+    volumes:
+      - ./stub_idp.py:/dev/stub_idp.py:ro
+      - ${DEV_DATA}/idp:/run/dev-secrets:ro
+  front:
+    image: docker.io/nginxinc/nginx-unprivileged:1.27-alpine
+    ports: ["127.0.0.1:19043:8443"]
+    volumes:
+      - ./front.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${DEV_DATA}/certs:/certs:ro
+    depends_on: [hister-login, room-kura, room-niwa, room-konbini, stub-idp]
+volumes:
+  hister-data: {}
+  login-data: {}
+networks:
+  default:
+    ipam:
+      config: [{subnet: 10.89.77.0/24, gateway: 10.89.77.1}]
