@@ -4,7 +4,7 @@
 # Builds a multi-arch (linux/amd64 + linux/arm64 by default) image with podman, as one manifest list:
 #   tools/build-multiarch ../kura/app kura v0.3.0
 #   tools/build-multiarch --push ../kura/app kura v0.3.0        # also pushes <registry>/kura:v0.3.0
-#   add --latest to move :latest too (a release: :latest follows the newest release; a main build uses tag main-<short sha> and no --latest)
+#   add --latest to move :latest too (unused: push-image never passes it, and production pins each release by digest)
 # Without --push nothing leaves the machine; the manifest is left as localhost/<image>-manifest:<tag> for a smoke test.
 # Images are built in Docker format so the HEALTHCHECK in the Dockerfile survives (OCI format drops it).
 # The non-native architecture runs under qemu-user-static (apt install qemu-user-static), so it is slow and only fit for
