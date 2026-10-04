@@ -1023,7 +1023,9 @@ class HisterSignIn(Server):
         super().setUp()
         self.helper = Fake({"/healthz": {"ok": True},
                             "/v1/check": lambda: {"username": "owner", "user_id": 1}
-                            if self.helper.seen[-1]["headers"].get("x-machiya-session") == SID else (401, "{}", "application/json"),
+                            if self.helper.seen[-1]["headers"].get("x-machiya-session") == SID
+                            or self.helper.seen[-1]["headers"].get("x-access-token") == "owner-hister-token"
+                            else (401, "{}", "application/json"),
                             "POST /v1/signout": (204, "", "text/plain")})
         self.addCleanup(self.helper.close)
 
@@ -1092,6 +1094,51 @@ class HisterSignIn(Server):
         self.assertEqual((r.status, r.getheader("Location")), (303, "/"))
         self.assertIn("machiya_sso=;", " ".join(v for k, v in r.getheaders() if k == "Set-Cookie"))
         self.assertTrue(any(x["path"] == "/v1/signout" for x in self.helper.seen))
+
+    def one_connection(self, base, requests):
+        """[(status, location, body)] for requests sent one after another down ONE kept-alive connection, as
+        Tailscale Serve does with different people's requests."""
+        import http.client
+        conn = http.client.HTTPConnection(urlsplit(base).netloc, timeout=30)
+        out = []
+        for path, headers in requests:
+            conn.request("GET", path, headers=headers)
+            r = conn.getresponse()
+            out.append((r.status, r.getheader("Location"), r.read().decode("utf-8", "replace")))
+        conn.close()
+        return out
+
+    def test_keep_alive_never_reuses_an_answer(self):
+        """0.3.1: an answer kept on the handler decided the next request on the same connection."""
+        base = self.serve(**self.hister_env())
+        page = {"Accept": "text/html"}
+        got = self.one_connection(base, [
+            ("/status", page),                                                         # signed out: to sign in
+            ("/status", dict(page, Cookie="machiya_sso=" + SID)),                      # signed in: the page
+            ("/status", page),                                                         # signed out again
+            ("/api/status", {"X-Access-Token": "owner-hister-token"}),                 # the owner's Hister token
+            ("/api/status", {"Authorization": "Bearer owner-hister-token"}),           # ... or as a Bearer
+            ("/api/status", {}),                                                       # nobody: 401
+        ])
+        self.assertEqual([g[0] for g in got], [302, 200, 302, 200, 200, 401])
+        self.assertNotIn("Everything", got[2][2])
+
+    def test_helper_unreachable_by_name(self):
+        """0.3.1: the helper's name doesn't resolve (its container is gone): the tailnet owner gets the page with the
+        banner, nobody else gets in, and never a trip to sign in."""
+        base = self.serve(**self.hister_env(LANDING_AUTH_URL="http://hister-login.invalid:8081"))
+        page = {"Accept": "text/html"}
+        got = self.one_connection(base, [
+            ("/status", page),                                                         # no login: 503
+            ("/status", dict(page, **{"Tailscale-User-Login": "owner@example.com"})),  # the owner: the page, banner
+            ("/status", dict(page, Cookie="machiya_sso=" + SID, **{"Tailscale-User-Login": "owner@example.com"})),
+            ("/status", dict(page, **{"Tailscale-User-Login": "someone@example.com"})),
+            ("/api/status", {"X-Access-Token": "owner-hister-token"}),                 # can't be checked, no login: 503
+        ])
+        self.assertEqual([g[0] for g in got], [503, 200, 200, 403, 503])
+        self.assertTrue(all(g[1] is None for g in got))                                # never sent to sign in
+        self.assertIn("machiya-banner", got[1][2])
+        self.assertIn("machiya-banner", got[2][2])
 
     def test_setup_refusals(self):
         for drop in ("LANDING_AUTH_SIGNIN_URL", "LANDING_HISTER_USERS", "LANDING_PUBLIC_URL"):

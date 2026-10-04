@@ -307,6 +307,14 @@ def make_handler(landing):
 
         _hres = None                       # the Hister sign-in's answer, worked out once per request
 
+        def handle_one_request(self):
+            """Every request starts with no sign-in answer (0.3.1). HTTP/1.1 keeps a connection, and one handler,
+            for many requests, and Tailscale Serve sends different people's requests down the same connection: an
+            answer kept from the last request (a signed-out redirect, or worse, someone's principal) must never
+            decide this one."""
+            self._hres = None
+            return super().handle_one_request()
+
         def browser_page(self):
             """A browser asking for a page (not an API, not a write): a signed-out one is sent to sign in."""
             return self.command in ("GET", "HEAD") and not urlsplit(self.path).path.startswith("/api/") \

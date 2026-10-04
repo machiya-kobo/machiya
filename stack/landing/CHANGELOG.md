@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.3.1
+
+- **Fixed: one request's sign-in answer decided the next.** The page speaks HTTP/1.1 with keep-alive, so one handler serves many requests on a connection, and Tailscale Serve sends different people's requests down the same connection. The Hister sign-in's answer was kept on the handler, so a request inherited the answer of the one before it on that connection: with the helper down, the tailnet owner was still sent to sign in instead of getting the page with the banner, and the owner's Hister token (`X-Access-Token` or `Bearer`) got "401 sign in". Worse, a request without a credential could have inherited a signed-in answer. Every request now starts with no answer. Tests send their requests down one kept-alive connection, as Serve does, and cover the helper's name not resolving.
+
 ## 0.3.0
 
 - **Settings and sign-in like the rooms** (the owner): `LANDING_AUTH=hister` through vaultkit's `histerauth`, as Konbini and Niwa have it: Hister's users are the sign-in (`LANDING_AUTH_SIGNIN_URL`, `LANDING_HISTER_USERS`, `LANDING_AUTH_URL`, `LANDING_PUBLIC_URL`), with **the Tailscale fallback** (`LANDING_USERS`, `LANDING_BIND_BEHIND_PROXY=1`), so the status page still opens, with the banner, when Hister or the helper is down. Signed out, a page goes to sign in and an API call gets 401 JSON; `POST /signout` (same-origin) ends the Hister session; the pages carry the sign-in meta (machiya.js adds Sign Out to the Rooms menu). Settings gains **Account** (who, how, Sign Out) and the header the person button; theme and text size follow the person through `GET`/`PUT /api/prefs` (`prefs.sqlite3` beside `LANDING_STATE`, or `LANDING_PREFS`). `/healthz`, `/api/changelog` and the static files stay open. The default stays `tailscale`.
