@@ -116,7 +116,7 @@ Also verified on that Hister:
 | `CODE_IMPORT_PAUSE` | — | `Sun 02:20-02:50`: no runs in that weekly slot (Hister's backup), in `CODE_IMPORT_TZ` (default `UTC`) |
 | `CODE_IMPORT_MAX_DOCS` | `200` | markdown docs per repo |
 | `CODE_IMPORT_MAX_DOC_BYTES` | `262144` | a bigger doc is skipped |
-| `CODE_IMPORT_README_ONLY` | — | `host:owner/repo`, comma-separated (`github:owner/big-fork`): only the repo card and the README; no other docs, issues, PRs or releases, never in `caps`. Listing a repo withdraws the rest on its source's next completed run |
+| `CODE_IMPORT_README_ONLY` | — | `host:owner/repo`, comma-separated (`github:you/big-fork`: a large repo whose other docs you don't want): only the repo card and the README; no other docs, issues, PRs or releases, never in `caps`. Listing a repo withdraws the rest on its source's next completed run |
 | `CODE_IMPORT_DOC_SKIP` | — | more path globs to skip, comma-separated (`drafts/*`), on top of the defaults above |
 | `CODE_IMPORT_GAP` | `0.5` Forgejo, `0.25` GitHub | seconds between two calls to a forge (gentle on a small self-hosted Forgejo) |
 | `CODE_IMPORT_RETRY_DELAYS` | `2,8,30` | seconds before each new try of a call that failed transiently (so 4 tries) |

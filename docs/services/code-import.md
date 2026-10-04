@@ -40,7 +40,7 @@ flowchart LR
 - **Withdrawals.** A deleted, renamed, transferred, archived or newly excluded repo has its documents withdrawn. So does a deleted doc or release, and (on a full run) a deleted issue.
 - **Retries:** a transient failure (a timeout, a reset, a 5xx, a 429) is tried again after 2, 8 and 30 s; 401, 403 and 404 never are.
 - **Sources on their own, failing closed:** each owner on each forge is a source. One that still fails is named in `status.json` (`sources`), withdraws nothing, and doesn't stop the others. A source that suddenly lists nothing fails too. Hister being down stops the whole run.
-- **Caps:** a repo with more markdown docs than `CODE_IMPORT_MAX_DOCS` is named in `status.json` (`caps`). A repo listed in `CODE_IMPORT_README_ONLY` keeps only its card and README (the owner's choice for `github:owner/big-fork`, 2026-10-05).
+- **Caps:** a repo with more markdown docs than `CODE_IMPORT_MAX_DOCS` is named in `status.json` (`caps`). A repo listed in `CODE_IMPORT_README_ONLY` keeps only its card and README.
 - **Logs** carry counts and URLs of refusals, never titles or text. `status.json` feeds the healthcheck.
 
 ## The Code area in Shiori
