@@ -6,7 +6,8 @@
   engine host at least 1.5 s apart, 44 SLOW DOWN honoured.
 - GET /page?url=gemini://…|gopher://…  the page as HTML (no script; links go back through /page). A page read here
   is saved to Hister under its canonical gemini:// or gopher:// URL (not the proxy URL), without a label.
-- GET /  a plain search page over the same data. GET /api/status  for the probe (open).
+- GET /  a plain search page over the same data. GET /api/status  for the probe (open). GET /api/changelog  this app's
+  CHANGELOG.md for the landing page's recent deploys (open, like /api/status).
 - POST /api/save {"url"}  a page Shiori asks to have saved: gemini/gopher as a /page read would, or an http(s) page
   fetched once (web.py: private addresses refused unless SMALLWEB_FETCH_ALLOW names them). Never a web proxy.
 
@@ -519,12 +520,33 @@ def status():
             "known_hosts": store.tofu_count()}
 
 
+CHANGELOG_LIMIT = 64 * 1024
+CHANGELOG_FILE = os.path.join(HERE, "CHANGELOG.md")
+
+
+def changelog():
+    """GET /api/changelog (docs/contracts/smallweb-api.md; the shape of vaultkit.changelog): (status, body, headers).
+    The file's first 64 KiB cut at a whole line, text/markdown, an ETag; a missing file is a 404."""
+    try:
+        with open(CHANGELOG_FILE, "rb") as f:
+            data = f.read(CHANGELOG_LIMIT + 1)
+    except OSError:
+        return 404, b"no changelog\n", [("Content-Type", "text/plain; charset=utf-8"), ("Cache-Control", "no-store")]
+    if len(data) > CHANGELOG_LIMIT:
+        data = data[:CHANGELOG_LIMIT]
+        cut = data.rfind(b"\n")
+        data = data[:cut + 1] if cut > 0 else data
+    body = data.decode("utf-8", "replace").encode("utf-8")
+    tag = '"%s"' % hashlib.sha256(body).hexdigest()[:20]
+    return 200, body, [("Content-Type", "text/markdown; charset=utf-8"), ("ETag", tag), ("Cache-Control", "no-cache")]
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "smallweb/" + VERSION
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt, *args):
-        if not self.path.startswith("/api/status"):
+        if not self.path.startswith(("/api/status", "/api/changelog")):
             sys.stderr.write("smallweb %s %s\n" % (self.headers.get("Tailscale-User-Login", "-"), fmt % args))
 
     def allowed(self):
@@ -563,6 +585,13 @@ class Handler(BaseHTTPRequestHandler):
         qs = {k: v[-1] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
         if u.path == "/api/status":
             return self.send_json(200, status())
+        if u.path == "/api/changelog":          # open like /api/status: the landing page's "recent deploys"
+            code, body, headers = changelog()
+            tag = dict(headers).get("ETag")
+            asked = [t.strip() for t in self.headers.get("If-None-Match", "").split(",")]
+            if code == 200 and tag and (tag in asked or "*" in asked):
+                code, body = 304, b""
+            return self.send(code, body, dict(headers)["Content-Type"], [h for h in headers if h[0] != "Content-Type"])
         if not self.allowed():
             return self.send(403, "forbidden\n", "text/plain")
         if u.path == "/static/smallweb.css":

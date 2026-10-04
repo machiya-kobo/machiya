@@ -568,6 +568,21 @@ class Gateway(unittest.TestCase):
         d = json.loads(body)
         self.assertEqual((d["auth"], d["ready"], d["error"]), ("tailscale", True, None))
 
+    def test_changelog_is_open_markdown_with_etag_and_304(self):
+        code, headers, body = get("/api/changelog", user=None)                 # open, like /api/status
+        self.assertEqual(code, 200)
+        self.assertEqual(headers["Content-Type"], "text/markdown; charset=utf-8")
+        with open(smallweb.CHANGELOG_FILE, encoding="utf-8") as f:
+            self.assertEqual(body, f.read())
+        self.assertEqual(get("/api/changelog", user=None, headers={"If-None-Match": headers["ETag"]})[::2], (304, ""))
+        self.assertEqual(get("/api/changelog", user=None, headers={"If-None-Match": '"x"'})[0], 200)
+        saved = smallweb.CHANGELOG_FILE
+        smallweb.CHANGELOG_FILE = saved + ".missing"
+        try:
+            self.assertEqual(get("/api/changelog", user=None)[0], 404)
+        finally:
+            smallweb.CHANGELOG_FILE = saved
+
     def test_status_reports_real_breakage_only(self):
         smallweb.hister_state["fails"] = 3
         try:
