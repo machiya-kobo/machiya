@@ -866,6 +866,84 @@ class Gateway(unittest.TestCase):
 
 
 
+class KeepAlive(unittest.TestCase):
+    """0.2.3: Tailscale Serve sends different people's requests down one kept-alive connection; each is answered
+    alone, and a body smallweb didn't read never becomes the next request."""
+
+    def one_connection(self, requests):
+        import http.client
+        conn = http.client.HTTPConnection(BASE.split("//")[1], timeout=10)
+        out = []
+        try:
+            for method, path, user, body in requests:
+                h = {"Tailscale-User-Login": user} if user else {}
+                if body is not None:
+                    h.update({"Content-Type": "application/json", "Origin": "https://shiori.test"})
+                conn.request(method, path, body=body, headers=h)
+                r = conn.getresponse()
+                out.append((r.status, r.read()))
+        finally:
+            conn.close()
+        return out
+
+    @staticmethod
+    def raw(data):
+        import socket
+        host, port = BASE.split("//")[1].split(":")
+        s = socket.create_connection((host, int(port)), timeout=2)
+        s.sendall(data)
+        out, closed = b"", False
+        try:
+            while True:
+                chunk = s.recv(65536)
+                if not chunk:
+                    closed = True
+                    break
+                out += chunk
+        except socket.timeout:
+            pass
+        s.close()
+        return out, closed
+
+    def test_each_request_is_answered_alone(self):
+        empty = b'{"url": ""}'
+        got = self.one_connection([
+            ("GET", "/static/smallweb.css", None, None),            # nobody: 403
+            ("GET", "/static/smallweb.css", "user@test", None),     # an allowed user
+            ("GET", "/static/smallweb.css", None, None),            # nobody again
+            ("GET", "/static/smallweb.css", "other@test", None),    # a login that isn't allowed
+            ("GET", "/", "user@test", None),
+            ("POST", "/api/save", "user@test", empty),              # allowed: the body's read (400: no url)
+            ("POST", "/api/save", "user@test", empty),
+            ("POST", "/api/save", None, empty),                     # nobody: 403
+            ("POST", "/api/save", "other@test", empty),
+            ("POST", "/api/save", "user@test", empty),
+        ])
+        self.assertEqual([g[0] for g in got], [403, 200, 403, 403, 200, 400, 400, 403, 403, 400])
+
+    def test_an_unread_body_never_becomes_a_request(self):
+        form = b"url=gemini%3A%2F%2Fkeepalive.test%2F&sha256=" + b"a" * 64
+        smuggled = (b"POST /tofu HTTP/1.1\r\nHost: x\r\nOrigin: http://x\r\nTailscale-User-Login: user@test\r\n"
+                    b"Content-Type: application/x-www-form-urlencoded\r\nContent-Length: %d\r\n\r\n" % len(form)) + form
+        before = smallweb.store.tofu_count()
+        for head in (b"POST /api/save HTTP/1.1\r\nHost: x\r\n",                                  # nobody: 403
+                     b"POST /tofu HTTP/1.1\r\nHost: x\r\nTailscale-User-Login: other@test\r\n",  # 403
+                     b"GET /api/status HTTP/1.1\r\nHost: x\r\n",                                 # open, body unread
+                     b"GET /static/smallweb.css HTTP/1.1\r\nHost: x\r\n"):                       # 403
+            out, closed = self.raw(head + b"Content-Length: %d\r\n\r\n" % len(smuggled) + smuggled)
+            self.assertEqual(out.count(b"HTTP/1.1 "), 1, head)
+            self.assertTrue(closed, head)
+            self.assertIn(b"\r\nConnection: close\r\n", out)
+        self.assertEqual(smallweb.store.tofu_count(), before)
+
+    def test_a_bad_content_length_is_refused(self):
+        for value in (b"-1", b"x"):
+            out, closed = self.raw(b"POST /api/save HTTP/1.1\r\nHost: x\r\nTailscale-User-Login: user@test\r\n"
+                                   b"Content-Length: " + value + b"\r\n\r\n")
+            self.assertTrue(out.startswith(b"HTTP/1.1 400 "), value)
+            self.assertTrue(closed, value)
+
+
 class HisterToken(unittest.TestCase):
     """SMALLWEB_HISTER_TOKEN_FILE (docs/contracts/hister.md): every save carries X-Access-Token when it is set, none
     when it isn't; the token is never logged, in /api/status or on argv; a set file that is bad stops the start."""

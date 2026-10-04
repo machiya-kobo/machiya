@@ -35,7 +35,7 @@ import smolnet   # noqa: E402
 import web       # noqa: E402
 from store import Store   # noqa: E402
 
-VERSION = "0.2.2"
+VERSION = "0.2.3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -612,6 +612,30 @@ def changelog():
 class Handler(BaseHTTPRequestHandler):
     server_version = "smallweb/" + VERSION
     protocol_version = "HTTP/1.1"
+    _body_read = False                  # this request's body was read in full (reset per request)
+
+    def handle_one_request(self):
+        """Every request starts afresh (0.2.3). HTTP/1.1 keeps a connection, and one handler, for many requests, and
+        Tailscale Serve sends different people's requests down the same connection: nothing from the last request may
+        decide this one. A body this request didn't read (a refused caller's, a GET's) would be parsed as the NEXT
+        request on the connection: one smuggled past Serve, with a Tailscale-User-Login Serve never saw. So the
+        connection closes instead."""
+        self._body_read = False
+        super().handle_one_request()
+        if not self.close_connection and self.unread_body():
+            self.close_connection = True
+
+    def unread_body(self):
+        headers = getattr(self, "headers", None)
+        if headers is None or self._body_read:
+            return False
+        lengths = headers.get_all("Content-Length") or []
+        return headers.get("Transfer-Encoding") is not None or any(v.strip() != "0" for v in lengths)
+
+    def end_headers(self):
+        if not self.close_connection and self.unread_body():
+            self.send_header("Connection", "close")     # sets close_connection: the unread bytes go with it
+        super().end_headers()
 
     def log_message(self, fmt, *args):
         if not self.path.startswith(("/api/status", "/api/changelog")):
@@ -724,8 +748,15 @@ class Handler(BaseHTTPRequestHandler):
         u = urlsplit(self.path)
         origin = (self.headers.get("Origin") or "").rstrip("/")
         own = bool(self.headers.get("Host")) and urlsplit(origin or self.headers.get("Referer") or "").netloc == self.headers["Host"]
-        length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(min(length, 65536)).decode("utf-8", "replace")
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if length < 0:                  # read(-1) would wait for the connection to end
+            return self.send(400, "bad Content-Length\n", "text/plain")
+        data = self.rfile.read(min(length, 65536))
+        self._body_read = len(data) == length       # a longer body is cut, and the connection closes
+        raw = data.decode("utf-8", "replace")
         if u.path == "/api/save":
             if not (own or origin in ORIGINS):
                 return self.send_json(403, {"error": "cross-site request refused"})

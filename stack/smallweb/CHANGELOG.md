@@ -1,5 +1,14 @@
 # Changelog: smallweb
 
+## 0.2.3
+
+- **Keep-alive (security):** a request body smallweb didn't read (a refused caller's 403, a GET's) stayed on the
+  connection and was parsed as the next request: one smuggled past Tailscale Serve, with a `Tailscale-User-Login`
+  Serve never saw, so anyone who could reach smallweb could search, read and save to Hister as an allowed user. Such a
+  request now ends with `Connection: close`, and every request starts with no state from the one before
+  (`handle_one_request`). A negative or unreadable `Content-Length` is a 400 (it hung, or failed the request). Tests
+  send several people's requests down one kept-alive connection, as Serve does.
+
 ## 0.2.2
 
 - **`SMALLWEB_HISTER_TOKEN_FILE`** (phase 1 of the Hister sign-in, docs/contracts/hister.md): the owner's Hister token, sent as `X-Access-Token` with every save to Hister (and by `selftest.py --hister`). Unset sends none, as before (a Hister without users ignores it). A set file that is missing, empty or not a token stops the start; the file is re-read when it changes (a file that vanishes keeps the last good value). Never logged or shown; `/api/status` says `hister.token: true|false`. Hister's redirects are no longer followed.
