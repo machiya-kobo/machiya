@@ -1,5 +1,15 @@
 # Changelog: code-import
 
+## 0.1.3
+
+- **The secret scan catches more formats** (the 2026-10 sweep, MACH-F-6):
+  - quoted keys (JSON's `"api_key": "…"`, `'client_secret': '…'`);
+  - `Authorization: Bearer <token>` and `curl -u user:<password>` / `--user` (only the secret is redacted; `$TOKEN`, `<token>`, `user:pass` are left alone);
+  - Discord bot tokens and webhooks, Telegram bot tokens;
+  - healthchecks ping URLs (`hc-ping.com/<uuid>` or `/<ping key>/<slug>`, a self-hosted `/ping/<uuid>`).
+
+  Private-repo text with these used to reach Hister unredacted.
+
 ## 0.1.2
 
 - **`CODE_IMPORT_README_ONLY`**: a comma list of `host:owner/repo` imported as their **repo card and README only**: no other docs, issues, PRs or releases, and never named in `caps`. For a large repo (a fork of a firmware tree, say, with thousands of markdown docs) whose card and README are enough.

@@ -22,7 +22,7 @@ Runs happen every `CODE_IMPORT_INTERVAL` seconds (15 minutes by default).
 3. **Issues and pull requests** changed since the cursor: title, body and state (open, closed, merged); no comments.
    - On Forgejo, one search per owner (`/repos/issues/search?owner=…&since=…`), not one call per repo.
    - On GitHub, one conditional list per repo: an unchanged one is a free `304`.
-4. **The secret scan** ([`secretscan.py`](secretscan.py)) runs on every title and body. It looks for private keys, AWS, GitHub, GitLab, Slack, Stripe, Google, Anthropic, OpenAI, Tailscale, npm and age keys, JWTs, passwords in URLs, and `password = …`-style assignments with a random-looking value.
+4. **The secret scan** ([`secretscan.py`](secretscan.py)) runs on every title and body. It looks for private keys, AWS, GitHub, GitLab, Slack, Stripe, Google, Anthropic, OpenAI, Tailscale, npm and age keys, JWTs, Discord bot tokens and webhooks, Telegram bot tokens, healthchecks ping URLs, passwords in URLs, `Authorization: Bearer …` tokens and `curl -u user:…` passwords, and `password = …`-style assignments with a random-looking value (JSON's `"api_key": "…"` included).
    - By default it **redacts**: the match becomes `[redacted]`, and the document says `code_redacted: "true"`.
    - With `CODE_IMPORT_SECRETS=refuse`, the whole document is refused instead.
    - It never logs what it found, only the kinds.

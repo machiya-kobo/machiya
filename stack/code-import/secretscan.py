@@ -32,11 +32,24 @@ PATTERNS = [
     ("npm-token", re.compile(r"\bnpm_[A-Za-z0-9]{36}\b")),
     ("jwt", re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
     ("url-password", re.compile(r"\b[a-z][a-z0-9+.\-]*://[^\s:/@]+:[^\s@/]{6,}@")),
+    # 0.1.3 (the 2026-10 sweep, MACH-F-6)
+    ("discord-token", re.compile(r"\b[MNO][A-Za-z0-9_\-]{23,27}\.[A-Za-z0-9_\-]{6}\.[A-Za-z0-9_\-]{27,38}\b")),
+    ("discord-webhook", re.compile(r"https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_\-]{20,}")),
+    ("telegram-token", re.compile(r"(?<![0-9])[0-9]{8,10}:[A-Za-z0-9_\-]{35}(?![A-Za-z0-9_\-])")),
+    ("healthchecks-url", re.compile(r"https?://hc-ping\.com/[A-Za-z0-9_\-]{20,}(?:/[A-Za-z0-9_.\-]+)?|"
+                                    r"https?://[^\s/\"'<>]+/ping/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")),
 ]
+# (kind, pattern) whose group 1 is the secret (only it is redacted) when it looks random or isn't a placeholder:
+# `Authorization: Bearer <token>`, `curl -u user:<password>`.
+VALUES = [
+    ("bearer", re.compile(r"(?i)\bbearer[ \t]+([A-Za-z0-9._~+/\-]{16,}=*)")),
+    ("curl-user", re.compile(r"\bcurl\b[^\n]*?\s(?:-u|--user)(?:[ \t]+|=)[\"']?[^\s:\"']*:([^\s\"']+)")),
+]
+TRIVIAL = {"pass", "password", "passwd", "secret", "token", "pw", "pwd"}
 # `password = "…"`, `api_key: …`, `TOKEN=…` with a long, random-looking value. Placeholders (<…>, ${…}, xxx, your-…,
 # changeme, example) are left alone.
 ASSIGN = re.compile(r"(?i)\b([a-z0-9_.\-]*(?:passw(?:or)?d|passwd|secret|token|api[_\-]?key|access[_\-]?key|"
-                    r"client[_\-]?secret|auth)[a-z0-9_.\-]*)(\s*[:=]\s*|\s*=>\s*)([\"']?)([^\s\"'<>`]{16,})\3")
+                    r"client[_\-]?secret|auth)[a-z0-9_.\-]*)[\"']?(\s*[:=]\s*|\s*=>\s*)([\"']?)([^\s\"'<>`]{16,})\3")
 PLACEHOLDER = re.compile(r"(?i)^(?:\$\{?|%|<|\{\{)|x{4,}|\*{4,}|\.{3}|your[_\-]|changeme|example|placeholder|dummy|"
                          r"redacted|_file$|^/|^https?://|^\w+\(")
 
@@ -72,6 +85,14 @@ def scan(text):
     for kind, pat in PATTERNS:
         for m in pat.finditer(text or ""):
             hits.append((kind, m.start(), m.end()))
+    for kind, pat in VALUES:
+        for m in pat.finditer(text or ""):
+            value = m.group(1)
+            if kind == "bearer" and not random_looking(value):
+                continue
+            if kind == "curl-user" and (PLACEHOLDER.search(value) or value.lower() in TRIVIAL or len(value) < 6):
+                continue
+            hits.append((kind, m.start(1), m.end(1)))
     for m in ASSIGN.finditer(text or ""):
         value = m.group(4)
         if random_looking(value):

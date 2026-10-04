@@ -227,6 +227,43 @@ class Units(unittest.TestCase):
                          "HISTER_TOKEN_FILE=/data/secrets/owner-token"):
             self.assertEqual(secretscan.redact(harmless), (harmless, []), harmless)
 
+    def test_secret_scan_more_formats(self):
+        """0.1.3 (the 2026-10 sweep, MACH-F-6): formats the scan missed. Every value here is invented."""
+        tok = "Xk29fQz81LmPw7Rt4Va"
+        hexed = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"
+        cases = [
+            ('{"api_key": "%s"}' % tok, '{"api_key": "[redacted]"}', "assignment"),
+            ("{'client_secret': '%s'}" % tok, "{'client_secret': '[redacted]'}", "assignment"),
+            ('  "password" : "%s",' % tok, '  "password" : "[redacted]",', "assignment"),
+            ("Authorization: Bearer %s" % hexed, "Authorization: Bearer [redacted]", "bearer"),
+            ("curl -H 'Authorization: bearer %s' https://x.example" % hexed,
+             "curl -H 'Authorization: bearer [redacted]' https://x.example", "bearer"),
+            ("curl -u admin:hunter2pass https://x.example/api", "curl -u admin:[redacted] https://x.example/api",
+             "curl-user"),
+            ("curl -fsS --user 'bot:S3cr3tValue' https://x.example", "curl -fsS --user 'bot:[redacted]' https://x.example",
+             "curl-user"),
+            ("DISCORD=MTA4NzY1NDMyMTA5ODc2NTQzMg.GaBcDe.abcdefghijklmnopqrstuvwxyz0123456",
+             "DISCORD=[redacted]", "discord-token"),
+            ("hook https://discord.com/api/webhooks/123456789012345678/AbCdEf-GhIjKlMnOpQrStUvWxYz012345 x",
+             "hook [redacted] x", "discord-webhook"),
+            ("bot 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw0 here", "bot [redacted] here", "telegram-token"),
+            ("https://api.telegram.org/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw0/sendMessage",
+             "https://api.telegram.org/bot[redacted]/sendMessage", "telegram-token"),
+            ("curl -fsS -m 10 https://hc-ping.com/0c3a8d2e-5b7f-4e1a-9c6d-2f8b1e4a7d90 >/dev/null",
+             "curl -fsS -m 10 [redacted] >/dev/null", "healthchecks-url"),
+            ("ping https://hc-ping.com/Kp3xVq9LmZ2wRt7YbN4sHj/backup-db done", "ping [redacted] done", "healthchecks-url"),
+            ("https://hc.example.org/ping/0c3a8d2e-5b7f-4e1a-9c6d-2f8b1e4a7d90/fail", "[redacted]/fail",
+             "healthchecks-url"),
+        ]
+        for text, want, kind in cases:
+            self.assertEqual(secretscan.redact(text), (want, [kind]), text)
+        for harmless in ('{"api_key": "<your key>"}', "Authorization: Bearer $TOKEN", "Authorization: Bearer ${TOKEN}",
+                         "Authorization: Bearer <token>", "curl -u user:pass https://x.example",
+                         "curl -u $USER:$PASSWORD https://x.example", "curl -u \"$GITEA_USER:$GITEA_TOKEN\" https://x",
+                         "the bearer of good news", "https://hc-ping.com/", "see healthchecks.io/docs",
+                         "call 555-123-4567: for help", "at 12:30:45 on 2026-10-05"):
+            self.assertEqual(secretscan.redact(harmless), (harmless, []), harmless)
+
     def test_secret_names(self):
         for name in ("secrets.md", "notes/SECRETS.md", ".env", "deploy/.env.prod", "id_ed25519", "key.pem", "x.age"):
             self.assertTrue(secretscan.secret_name(name), name)
