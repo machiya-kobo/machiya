@@ -293,7 +293,7 @@ def scan_logs(data, needles):
 
 # -- browser ---------------------------------------------------------------------------------------------------------
 
-def browser_checks(data, password, shots, base):
+def browser_checks(data, password, shots, base, sso_cookie="machiya_sso"):
     from playwright.sync_api import sync_playwright
     os.makedirs(shots, exist_ok=True)
     U = {n: "%s:%d" % (base, p) for n, p in (("landing", 19200), ("kura", 19201), ("niwa", 19202),
@@ -351,6 +351,11 @@ def browser_checks(data, password, shots, base):
                            "kura -> sign-in %s, back at %s; rooms (no prompt, content) %s; Hister UI signed in %s"
                            % (at_signin, back, rooms, hister_in))
                     record("[%s] Kura's search page finds 'chochin'" % engine, found, "")
+                    names = {c["name"]: c["value"] for c in ctx.cookies()}
+                    other = {"machiya_sso", "machiya_dev_sso"} - {sso_cookie}
+                    record("[%s] the helper, rooms and landing use the sign-in cookie %s (DEV_SSO_COOKIE), no other"
+                           % (engine, sso_cookie), names.get(sso_cookie, "").startswith("mhs_")
+                           and not (other & set(names)), "cookies %s" % sorted(names))
                     # sign out everywhere from the helper's sessions page; the rooms send you back to sign in
                     p.goto(U["hister"] + "/machiya/sessions")
                     p.click("button[value=all]")
@@ -363,6 +368,33 @@ def browser_checks(data, password, shots, base):
                             p.wait_for_timeout(3000)
                     record("[%s] sign out everywhere: Konbini asks to sign in again (cache <= 30 s)" % engine, out,
                            p.url)
+                ctx.close()
+            # a browser that also holds a production sign-in cookie for this host (the shared-tailnet case): with the dev
+            # stack's own name it is ignored and left alone, and the sign-in doesn't loop
+            if sso_cookie != "machiya_sso":
+                ctx = browser.new_context(ignore_https_errors=True)
+                prod = "mhs_" + "p" * 40
+                ctx.add_cookies([{"name": "machiya_sso", "value": prod, "url": U["kura"] + "/"}])
+                p = ctx.new_page()
+                signins = []
+                p.on("request", lambda r: signins.append(r.url) if "/machiya/signin" in r.url and
+                     r.resource_type == "document" else None)
+                p.goto(U["kura"] + "/n/Notes/Bamboo%20frames")
+                signin(p)
+                p.wait_for_url(U["kura"] + "/**", timeout=20000)
+                p.wait_for_load_state("networkidle")
+                ok = "Bamboo frames" in p.content()
+                visits = {}
+                for name, path in (("niwa", "/"), ("konbini", "/"), ("landing", "/status")):
+                    p.goto(U[name] + path)
+                    p.wait_for_load_state("networkidle")
+                    visits[name] = p.url.startswith(U[name])
+                names = {c["name"]: c["value"] for c in ctx.cookies()}
+                record("[%s] with a production machiya_sso cookie too: one sign-in, no loop, the production cookie "
+                       "untouched" % engine, ok and all(visits.values()) and len(signins) <= 2
+                       and names.get("machiya_sso") == prod and names.get(sso_cookie, "").startswith("mhs_"),
+                       "sign-in page loads %d; rooms %s; machiya_sso kept %s; %s set %s" % (
+                           len(signins), visits, names.get("machiya_sso") == prod, sso_cookie, sso_cookie in names))
                 ctx.close()
             # the stub OIDC provider (tsidp's shape), bound to the owner
             ctx = browser.new_context(ignore_https_errors=True)
@@ -390,15 +422,20 @@ def main():
     with open(os.path.join(sec, "owner-password")) as f:
         password = f.readline().strip()
     base = os.environ.get("DEV_URL", "http://localhost").rstrip("/")
+    sso_cookie = "machiya_sso"
     try:
         with open(os.path.join(a.data, "dev.env")) as f:
-            if "DEV_ENGINE=native" in f.read():
-                OPTIONAL.add("searxng")
+            denv = f.read()
+        if "DEV_ENGINE=native" in denv:
+            OPTIONAL.add("searxng")
+        m = re.search(r"^DEV_SSO_COOKIE=(\S+)$", denv, re.M)
+        if m:
+            sso_cookie = m.group(1)
     except OSError:
         pass
     http_checks(a.data, tok, password)
     if a.browser:
-        browser_checks(a.data, password, a.shots or os.path.join(a.data, "shots"), base)
+        browser_checks(a.data, password, a.shots or os.path.join(a.data, "shots"), base, sso_cookie)
     failed = sum(1 for _, ok in RESULTS if not ok)
     print("\n%d check(s), %d failed" % (len(RESULTS), failed))
     return failed
