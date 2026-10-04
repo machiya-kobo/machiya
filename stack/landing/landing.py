@@ -306,14 +306,32 @@ def make_handler(landing):
                       [("Cache-Control", "no-store")])
 
         _hres = None                       # the Hister sign-in's answer, worked out once per request
+        _body_read = False                 # this request's body was read in full (reset per request)
 
         def handle_one_request(self):
             """Every request starts with no sign-in answer (0.3.1). HTTP/1.1 keeps a connection, and one handler,
             for many requests, and Tailscale Serve sends different people's requests down the same connection: an
             answer kept from the last request (a signed-out redirect, or worse, someone's principal) must never
-            decide this one."""
+            decide this one. And (0.3.2) a body this request didn't read (a refused PUT's, a GET's) would be parsed
+            as the NEXT request on the connection: one smuggled past Serve, with a Tailscale-User-Login Serve never
+            saw. So the connection closes instead."""
             self._hres = None
-            return super().handle_one_request()
+            self._body_read = False
+            super().handle_one_request()
+            if not self.close_connection and self.unread_body():
+                self.close_connection = True
+
+        def unread_body(self):
+            headers = getattr(self, "headers", None)
+            if headers is None or self._body_read:
+                return False
+            lengths = headers.get_all("Content-Length") or []
+            return headers.get("Transfer-Encoding") is not None or any(v.strip() != "0" for v in lengths)
+
+        def end_headers(self):
+            if not self.close_connection and self.unread_body():
+                self.send_header("Connection", "close")     # sets close_connection: the unread bytes go with it
+            super().end_headers()
 
         def browser_page(self):
             """A browser asking for a page (not an API, not a write): a signed-out one is sent to sign in."""
@@ -399,7 +417,9 @@ def make_handler(landing):
             if length < 0 or length > limit:
                 self.close_connection = True
                 return None
-            return self.rfile.read(length) if length else b""
+            data = self.rfile.read(length) if length else b""
+            self._body_read = len(data) == length
+            return data
 
         def do_GET(self):
             url = urlsplit(self.path)

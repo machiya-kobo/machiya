@@ -514,6 +514,48 @@ class Server(Stack):
         self.assertIn("theme=night", r.getheader("Set-Cookie"))
         conn.close()
 
+    def test_keep_alive_tailscale_gate_answers_each_request_alone(self):
+        """0.3.2: Serve sends different people's requests down one kept-alive connection."""
+        import http.client
+        base = self.serve(LANDING_AUTH="tailscale", LANDING_USERS="owner@example.com")
+        conn = http.client.HTTPConnection(urlsplit(base).netloc, timeout=10)
+        got = []
+        for login in (None, "owner@example.com", None, "someone@example.com", "owner@example.com", "", None):
+            conn.request("GET", "/api/status", headers={"Tailscale-User-Login": login} if login is not None else {})
+            r = conn.getresponse()
+            got.append((r.status, r.read()))
+        conn.close()
+        self.assertEqual([g[0] for g in got], [403, 200, 403, 403, 200, 403, 403])
+
+    def test_keep_alive_unread_body_never_becomes_a_request(self):
+        """0.3.2: a body landing didn't read closes the connection: kept, its bytes would be the next request, one
+        that never went through Serve (here, the owner's)."""
+        import socket
+        base = self.serve(LANDING_AUTH="tailscale", LANDING_USERS="owner@example.com")
+        host, port = urlsplit(base).netloc.split(":")
+        smuggled = b"GET /api/status HTTP/1.1\r\nHost: x\r\nTailscale-User-Login: owner@example.com\r\n\r\n"
+        for head in (b"PUT /api/prefs HTTP/1.1\r\nHost: x\r\n",                                    # nobody: 403
+                     b"POST / HTTP/1.1\r\nHost: x\r\n",                                             # 405
+                     b"GET /healthz HTTP/1.1\r\nHost: x\r\n",                                       # open, body unread
+                     b"GET /api/status HTTP/1.1\r\nHost: x\r\nTailscale-User-Login: someone@example.com\r\n"):
+            s = socket.create_connection((host, int(port)), timeout=2)
+            s.sendall(head + b"Content-Length: %d\r\n\r\n" % len(smuggled) + smuggled)
+            out, closed = b"", False
+            try:
+                while True:
+                    chunk = s.recv(65536)
+                    if not chunk:
+                        closed = True
+                        break
+                    out += chunk
+            except socket.timeout:
+                pass
+            s.close()
+            self.assertEqual(out.count(b"HTTP/1.1 "), 1, head)
+            self.assertTrue(closed, head)
+            self.assertIn(b"\r\nConnection: close\r\n", out)
+            self.assertNotIn(b'"apps"', out)
+
 
 IDENTITY = """
 version = 1

@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.3.2
+
+- **Fixed (security): a body the page didn't read became the next request.** On a kept-alive connection, a request body landing never read (a refused `PUT /api/prefs`, a `POST` it answers 405, any `GET`'s) was parsed as the next request: one smuggled past Tailscale Serve, with a `Tailscale-User-Login` Serve never saw, so anyone who could reach the page could be served as the owner (and the answer could reach the next person on that connection). Such a request now ends with `Connection: close`. Tests send several people's requests down one kept-alive connection in tailscale mode too.
+
 ## 0.3.1
 
 - **Fixed: one request's sign-in answer decided the next.** The page speaks HTTP/1.1 with keep-alive, so one handler serves many requests on a connection, and Tailscale Serve sends different people's requests down the same connection. The Hister sign-in's answer was kept on the handler, so a request inherited the answer of the one before it on that connection: with the helper down, the tailnet owner was still sent to sign in instead of getting the page with the banner, and the owner's Hister token (`X-Access-Token` or `Bearer`) got "401 sign in". Worse, a request without a credential could have inherited a signed-in answer. Every request now starts with no answer. Tests send their requests down one kept-alive connection, as Serve does, and cover the helper's name not resolving.
