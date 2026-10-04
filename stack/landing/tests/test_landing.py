@@ -55,7 +55,7 @@ class Fake:
                 for k, v in extra.items():
                     self.send_header(k, v)
                 self.send_header("Content-Length", str(len(body)))
-                if code in (301, 302):
+                if code in (301, 302) and "Location" not in extra:
                     self.send_header("Location", "http://127.0.0.1:9/elsewhere")
                 self.end_headers()
                 try:
@@ -241,9 +241,11 @@ class HisterWithUsers(Stack):
         self.assertEqual((a["state"], a["facts"], a["data"]["newest"]), ("up", ["1,968 pages"], NOW - 600))
         health = [s for s in self.fakes["hister"].seen if s["path"] == "/health"]
         self.assertTrue(health and all("x-access-token" not in s["headers"] for s in health))   # /health: no token
+        owner_paths = {"/api/cards", "/api/vaults", "/api/recent", "/feed.xml"}       # 0.2.3: the rooms' owner reads
         for key, fake in self.fakes.items():
             if key != "hister":
-                self.assertTrue(all("x-access-token" not in s["headers"] for s in fake.seen), key)
+                self.assertTrue(all("x-access-token" not in s["headers"] for s in fake.seen
+                                    if not (key in ("kura", "konbini", "niwa") and s["path"] in owner_paths)), key)
         self.assertNotIn(self.TOKEN, json.dumps(snap) + repr(land.config.hister_token))
 
     def test_a_refused_token_says_so(self):
@@ -789,6 +791,72 @@ class ZeroTwoOne(Stack):
         with open(path, "w") as f:
             f.write("{broken")
         self.assertFalse(self.landing(LANDING_SEARCH_COUNTS=path).poll()["apps"]["shiori"].get("more"))
+
+
+class OwnerToken(Stack):
+    """0.2.3: the rooms run AUTH=hister, so their owner-only reads carry the owner's token (X-Access-Token, from
+    LANDING_HISTER_TOKEN_FILE) to the configured room address only; the open probes stay credential-free."""
+
+    def setUp(self):
+        super().setUp()
+        self.path = os.path.join(self.tmp, "owner-token")
+        with open(self.path, "w") as f:
+            f.write("owner-secret\n")
+
+        def gated(fake, body):
+            def route():              # the request being answered is the fake's last one seen
+                ok = fake.seen and fake.seen[-1]["headers"].get("x-access-token") == "owner-secret"
+                return body if ok else (401, "sign in", "text/plain")
+            return route
+        self.fakes["konbini"].routes["/api/cards"] = gated(self.fakes["konbini"], CARDS)
+        self.fakes["kura"].routes["/api/vaults"] = gated(self.fakes["kura"], {"vaults": [{"name": "personal", "notes": 314},
+                                                                                        {"name": "x", "notes": 10}]})
+        self.fakes["kura"].routes["/api/recent"] = gated(self.fakes["kura"], RECENT)
+        self.fakes["niwa"].routes["/feed.xml"] = gated(self.fakes["niwa"], FEED)
+        self.fakes["kura"].routes["/api/status"] = dict(KURA, vault_count=2)
+
+    def test_without_the_token_it_degrades_quietly(self):
+        snap = self.landing().poll()
+        a, t = snap["apps"], snap["today"]
+        self.assertEqual(a["kura"]["facts"], ["314 notes", "2 vaults"])          # the open vault_count
+        self.assertEqual(a["konbini"]["facts"], ["78 cards"])
+        self.assertEqual((t["working"], t["notes"], t["garden"]), (None, None, None))
+        self.assertEqual(snap["overall"]["state"], "up")
+
+    def test_with_the_token_only_owner_reads_carry_it(self):
+        snap = self.landing(LANDING_HISTER_TOKEN_FILE=self.path).poll()
+        a, t = snap["apps"], snap["today"]
+        self.assertEqual(a["kura"]["facts"], ["2 vaults · 324 notes"])
+        self.assertEqual(a["konbini"]["facts"], ["3 in WIP", "78 cards"])
+        self.assertEqual((t["wip"], len(t["notes"]), len(t["garden"])), (3, 2, 1))
+        owner_paths = {"/api/cards", "/api/vaults", "/api/recent", "/feed.xml"}
+        for key in ("kura", "konbini", "niwa"):
+            for req in self.fakes[key].seen:
+                has = req["headers"].get("x-access-token") == "owner-secret"
+                self.assertEqual(has, req["path"] in owner_paths, (key, req["path"]))   # open probes: none
+        for key in ("shiori", "searxng", "machiya-mcp", "smallweb"):
+            self.assertFalse(any("x-access-token" in r["headers"] for r in self.fakes[key].seen), key)
+
+    def test_never_across_a_redirect(self):
+        elsewhere = Fake({"/api/cards": CARDS})
+        self.addCleanup(elsewhere.close)
+        self.fakes["konbini"].routes["/api/cards"] = (302, "", "text/plain", {"Location": elsewhere.url + "/api/cards"})
+        t = self.landing(LANDING_HISTER_TOKEN_FILE=self.path).poll()["today"]
+        self.assertIsNone(t["working"])
+        self.assertEqual(elsewhere.seen, [])
+
+    def test_only_to_room_addresses(self):
+        from probes import owner_headers, owner_url
+        secret = probes.SecretFile(self.path)
+        self.assertEqual(owner_headers("kura", "https://kura.example.ts.net", "", secret), {"X-Access-Token": "owner-secret"})
+        self.assertEqual(owner_headers("kura", "http://127.0.0.1:8080", "", secret), {"X-Access-Token": "owner-secret"})
+        self.assertEqual(owner_headers("kura", "http://kura:8080", "", secret), {})                 # plain http: never
+        for key in ("hister", "searxng", "shiori", "machiya-mcp", "smallweb"):
+            self.assertEqual(owner_headers(key, "https://%s.example.ts.net" % key, "", secret), {}, key)
+        self.assertEqual(owner_headers("kura", "https://kura.example.ts.net", "", None), {})
+        with self.assertRaises(probes.FetchError):
+            owner_url("https://kura.example.ts.net", "//evil.example/x")
+        self.assertEqual(owner_url("https://kura.example.ts.net/", "/api/vaults"), "https://kura.example.ts.net/api/vaults")
 
 
 class Launcher(Stack):

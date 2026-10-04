@@ -1,5 +1,10 @@
 # Changelog: machiya-landing
 
+## 0.2.3
+
+- **The rooms run `AUTH=hister`**, so their owner-only reads (Konbini `/api/cards` for WIP, Working On and Due Soon; Kura `/api/vaults` and `/api/recent`; Niwa's `/feed.xml`) answered 401 and `/status` lost "N in WIP" and the vault totals, and Today went empty. They now carry the owner's token, the existing `LANDING_HISTER_TOKEN_FILE` (re-read when it changes), as `X-Access-Token`: only to Kura, Konbini and Niwa at their configured address (`MACHIYA_ROOMS`, `LANDING_APPS`, `LANDING_PROBES`), only over https (or loopback), never across a redirect (none is followed) and never to another origin. The open probes (`/api/status`, `/api/health`, `/api/changelog`) stay credential-free. A refusal still degrades quietly.
+- Kura: when `/api/vaults` is refused, the card shows the open status's `vault_count` (Kura 0.6.13) beside the default vault's notes ("317 notes · 4 vaults").
+
 ## 0.2.2
 
 - The image carries `today.py`: 0.2.1's Dockerfile listed the modules by name and missed it, so the container crashed at start. It now copies every module, and a test checks the Dockerfile against the files.

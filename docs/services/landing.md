@@ -33,7 +33,8 @@ Each Today section is left out when its room is missing, down or refuses; nothin
 - **Server-side, cached.** A background thread polls every app in parallel every minute (a 3 second timeout, no redirects followed, at most 4 MB read), Today's reads included, and both pages are served from the last answers. The browser refreshes `<main>` every minute while a page is visible (never under a half-typed search).
 - **GETs, and one POST.** Hister's version comes from its MCP `initialize` (`POST /mcp`, which changes nothing; [contracts/hister.md](../contracts/hister.md)), at most every 15 minutes. Everything else is a GET.
 - **Hister** gets `Origin: hister://` on every GET (the MCP needs none); its newest-page search leaves the vault notes out.
-- **Tokens.** None by default. `LANDING_TOKEN_FILE` (for rooms with an identity file) goes to Kura, Niwa and Konbini over https only; `LANDING_CHANGELOG_TOKEN_FILE` only to the changelog URLs.
+- **The owner's token** (`LANDING_HISTER_TOKEN_FILE`, re-read when it changes) goes to Hister, and, since the rooms run `AUTH=hister`, to the rooms' owner-only reads (Konbini's cards, Kura's vaults and recent notes, Niwa's feed): only to Kura, Konbini and Niwa at their configured https address, never across a redirect. The open reads (`/api/status`, `/api/health`, `/api/changelog`) are sent without it. Without it, or refused, the WIP and vault counts and Today's room sections are left out quietly; Kura's open `vault_count` still shows.
+- **Other tokens.** None by default. `LANDING_TOKEN_FILE` (for rooms with an identity file) goes to Kura, Niwa and Konbini over https only; `LANDING_CHANGELOG_TOKEN_FILE` only to the changelog URLs.
 
 ## Recent deploys: where they come from
 

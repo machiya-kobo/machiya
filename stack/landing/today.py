@@ -9,7 +9,8 @@
 - Garden: Niwa's most recently tended published notes (GET /feed.xml), the last 30 days.
 
 Every section is optional: an app that is missing, down or refuses leaves its section out (None), never an error.
-Only GETs; the same timeouts, size limit and tokens as the probes.
+Only GETs; the same timeouts and size limit as the probes. These reads are the owner's (the rooms run AUTH=hister), so
+they carry the owner's token (probes.owner_headers: only to the room's configured address, never across a redirect).
 """
 import datetime
 import xml.etree.ElementTree as ET
@@ -31,7 +32,7 @@ def day(value):
 
 def konbini(base, link, today, timeout, headers):
     """(working, due, wip count) from Konbini's /api/cards."""
-    d = probes.fetch_json(base + "/api/cards", headers, timeout)
+    d = probes.fetch_json(probes.owner_url(base, "/api/cards"), headers, timeout)
     cards = [c for c in d.get("cards") or [] if isinstance(c, dict) and c.get("slug")]
 
     def card(c, **extra):
@@ -53,7 +54,7 @@ def konbini(base, link, today, timeout, headers):
 
 
 def kura(base, timeout, headers):
-    d = probes.fetch_json(base + "/api/recent?limit=%d" % NOTES, headers, timeout)
+    d = probes.fetch_json(probes.owner_url(base, "/api/recent?limit=%d" % NOTES), headers, timeout)
     out = []
     for n in (d.get("results") or [])[:NOTES]:
         if isinstance(n, dict) and n.get("url"):
@@ -64,7 +65,7 @@ def kura(base, timeout, headers):
 
 
 def niwa(base, now, timeout, headers):
-    _, _, body = probes.fetch(base + "/feed.xml", dict(headers, Accept="application/rss+xml, application/xml"), timeout)
+    _, _, body = probes.fetch(probes.owner_url(base, "/feed.xml"), dict(headers, Accept="application/rss+xml, application/xml"), timeout)
     try:
         root = ET.fromstring(body)
     except ET.ParseError:
@@ -102,19 +103,19 @@ def gather(config, apps, now, today=None):
         try:
             link = (config.links.get("konbini") or t).rstrip("/")
             out["working"], out["due"], out["wip"] = konbini(t, link, today, config.timeout,
-                                                             probes.auth_headers("konbini", t, config.token))
+                                                             probes.owner_headers("konbini", t, config.token, config.hister_token))
         except probes.FetchError:
             pass
     t = target("kura")
     if t:
         try:
-            out["notes"] = kura(t, config.timeout, probes.auth_headers("kura", t, config.token))
+            out["notes"] = kura(t, config.timeout, probes.owner_headers("kura", t, config.token, config.hister_token))
         except probes.FetchError:
             pass
     t = target("niwa")
     if t:
         try:
-            out["garden"] = niwa(t, now, config.timeout, probes.auth_headers("niwa", t, config.token)) or None
+            out["garden"] = niwa(t, now, config.timeout, probes.owner_headers("niwa", t, config.token, config.hister_token)) or None
         except probes.FetchError:
             pass
     h = apps.get("hister") or {}

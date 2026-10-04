@@ -228,8 +228,10 @@ def result(state="up", version="", vaultkit="", facts=(), error="", data=None):
 
 # -- one reader per app ------------------------------------------------------------------------------------------
 
-def kura(base, now, timeout, headers):
-    """GET /api/status (open; contracts/kura-api.md): the vault's head and last pull, the note count, the Hister push."""
+def kura(base, now, timeout, headers, owner=None):
+    """GET /api/status (open, sent without the owner's token; contracts/kura-api.md): the vault's head and last pull,
+    the note count, the Hister push, `vault_count`. Then, with the owner's credential (`owner`), GET /api/vaults for the
+    notes across every vault; refused (401/403), the open `vault_count` and the default vault's count stand."""
     d = fetch_json(base + "/api/status", headers, timeout)
     synced, notes = num(d.get("synced_at")), num(d.get("notes"))
     push = d.get("push") if isinstance(d.get("push"), dict) else {}
@@ -237,9 +239,12 @@ def kura(base, now, timeout, headers):
     if d.get("error"):
         state = "error"
     facts = [plural(int(notes), "note") if notes is not None else ""]
-    vaults = total = None
+    vaults, total = num(d.get("vault_count")), None          # 0.2.3: Kura 0.6.13's open status counts its vaults
+    if vaults is not None and vaults > 1:
+        facts = [facts[0], plural(int(vaults), "vault")]
     try:                    # 0.2.1: every vault, owner-only; COUNTS ONLY: a private vault's name never leaves this function
-        listed = [v for v in fetch_json(base + "/api/vaults", headers, timeout).get("vaults") or [] if isinstance(v, dict)]
+        listed = [v for v in fetch_json(owner_url(base, "/api/vaults"), owner if owner is not None else headers, timeout).get("vaults") or []
+                  if isinstance(v, dict)]
         if listed:
             vaults = len(listed)
             total = int(sum(num(v.get("notes")) or 0 for v in listed))
@@ -247,13 +252,13 @@ def kura(base, now, timeout, headers):
     except FetchError:
         pass
     return result(state, d.get("version"), vk(d.get("vaultkit")), facts, d.get("error"),
-                  {"head": text(d.get("head"), 64), "synced_at": synced, "notes": notes, "vaults": vaults,
+                  {"head": text(d.get("head"), 64), "synced_at": synced, "notes": notes, "vaults": int(vaults) if vaults is not None else None,
                    "total_notes": total, "push": {
                       "at": num(push.get("at")), "docs": num(push.get("docs")), "failed": num(push.get("failed")),
                       "error": text(push.get("error")), "complete": push.get("complete")} if push else None})
 
 
-def konbini(base, now, timeout, headers):
+def konbini(base, now, timeout, headers, owner=None):
     """GET /api/health (contracts/konbini-api.md; gated on the owner): cards, the vault head, sync and LiveSync."""
     d = fetch_json(base + "/api/health", headers, timeout)
     sync = d.get("sync") if isinstance(d.get("sync"), dict) else {}
@@ -267,7 +272,7 @@ def konbini(base, now, timeout, headers):
         wip = num(boards.get("wip"))
     else:
         try:
-            wip = sum(1 for c in fetch_json(base + "/api/cards", headers, timeout).get("cards") or []
+            wip = sum(1 for c in fetch_json(owner_url(base, "/api/cards"), owner if owner is not None else headers, timeout).get("cards") or []
                       if isinstance(c, dict) and c.get("board") == "wip")
         except FetchError:
             pass
@@ -515,6 +520,36 @@ def auth_headers(key, target, token):
     return {}
 
 
+def is_loopback_host(host):
+    host = (host or "").strip("[]").lower()
+    return host in ("localhost", "127.0.0.1", "::1") or host.startswith("127.")
+
+
+def owner_headers(key, target, token="", secret=None):
+    """The owner's credential for a room's owner-only reads (0.2.3: the rooms run AUTH=hister): LANDING_TOKEN_FILE's
+    Bearer as auth_headers says, plus the owner's Hister token (LANDING_HISTER_TOKEN_FILE, re-read when it changes) as
+    X-Access-Token, ONLY for Kura, Konbini and Niwa at their configured address (`target`, from MACHIYA_ROOMS,
+    LANDING_APPS or LANDING_PROBES), over https (or loopback, for tests and a local stack). Callers send it only to
+    URLs under `target` (owner_url), and fetch never follows a redirect, so it can't leave that origin. The open
+    reads (/api/status, /api/health, /api/changelog) never get it."""
+    h = auth_headers(key, target, token)
+    value = secret.get() if hasattr(secret, "get") else (secret or "")
+    parts = urlsplit(target or "")
+    if value and key in ROOMS_WITH_TOKEN and parts.netloc and (parts.scheme == "https" or (
+            parts.scheme == "http" and is_loopback_host(parts.hostname))):
+        h["X-Access-Token"] = value
+    return h
+
+
+def owner_url(target, path):
+    """target + path, refusing anything that would leave target's origin (a path is always ours, but be sure)."""
+    url = target.rstrip("/") + path
+    a, b = urlsplit(url), urlsplit(target)
+    if (a.scheme, a.netloc) != (b.scheme, b.netloc) or not path.startswith("/") or path.startswith("//"):
+        raise FetchError("refused: another origin")
+    return url
+
+
 def probe(key, target, now, timeout=3.0, token="", hister_token=None):
     """One app's result (never raises). target: its base URL, or for vault-mirror a file path; "" = absent.
     hister_token: LANDING_HISTER_TOKEN_FILE's SecretFile, for Hister only."""
@@ -529,7 +564,12 @@ def probe(key, target, now, timeout=3.0, token="", hister_token=None):
         elif key == "hister":
             out = hister(target.rstrip("/"), now, timeout, auth_headers(key, target, token), hister_token)
         else:
-            out = READERS[key](target.rstrip("/"), now, timeout, auth_headers(key, target, token))
+            open_headers = auth_headers(key, target, token)          # the open probes: no owner's token
+            if key in ("kura", "konbini"):
+                out = READERS[key](target.rstrip("/"), now, timeout, open_headers,
+                                   owner=owner_headers(key, target, token, hister_token))
+            else:
+                out = READERS[key](target.rstrip("/"), now, timeout, open_headers)
     except FetchError as e:
         out = result("down", error=str(e))
     except Exception as e:              # an answer we couldn't read must never take the page down
