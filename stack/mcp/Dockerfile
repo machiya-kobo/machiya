@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git openssh-cli
  && pip install --no-cache-dir "markdown>=3.7" pyyaml==6.0.3 \
  && useradd --uid 1000 --home-dir /data --no-create-home --shell /usr/sbin/nologin mcp
 WORKDIR /app
-COPY mcp.py backend.py envelope.py textver.py notes_writer.py /app/
+COPY mcp.py backend.py envelope.py textver.py notes_writer.py CHANGELOG.md /app/
 COPY rooms /app/rooms
 COPY vaultkit /app/vaultkit
 # The vendored vault core must match its manifest: edits go upstream (vaultkit in machiya-kobo/machiya), then re-vendor.

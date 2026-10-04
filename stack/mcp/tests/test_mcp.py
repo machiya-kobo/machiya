@@ -829,6 +829,53 @@ class Gate(Base):
         self.assertEqual(cm.exception.code, 405)
         self.assertTrue(json.loads(urllib.request.urlopen(base + "/healthz", timeout=5).read())["ok"])
 
+    def get(self, base, path, headers=None, method="GET"):
+        req = urllib.request.Request(base + path, headers=headers or {}, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, r.headers, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers, e.read()
+
+    def test_status_names_the_vendored_vaultkit(self):
+        _, base = self.serve(MCP_AUTH="tailscale", MCP_USERS="me@x")      # open: no login needed
+        for path in ("/api/status", "/healthz"):
+            code, _, body = self.get(base, path)
+            self.assertEqual(code, 200)
+            d = json.loads(body)
+            self.assertEqual(d["version"], mcp.VERSION)
+            self.assertRegex(d["vaultkit"], r"^v\d+\.\d+\.\d+")
+        import vaultkit
+        self.assertEqual(mcp.VAULTKIT, "v" + vaultkit.__version__)       # the manifest and the package agree
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(mcp.vaultkit_version(d), "")                 # no manifest: no claim
+
+    def test_changelog_is_open_markdown_with_an_etag(self):
+        server, base = self.serve(MCP_AUTH="tailscale", MCP_USERS="me@x")
+        self.assertEqual(server.changelog, os.path.join(os.path.dirname(os.path.abspath(mcp.__file__)), "CHANGELOG.md"))
+        code, headers, body = self.get(base, "/api/changelog")
+        self.assertEqual(code, 200)
+        self.assertEqual(headers["Content-Type"], "text/markdown; charset=utf-8")
+        self.assertEqual(headers["Cache-Control"], "no-cache")
+        self.assertTrue(body.startswith(b"# Changelog: machiya-mcp\n"))
+        self.assertIn(b"## " + mcp.VERSION.encode() + b"\n", body)         # the running version has its section
+        tag = headers["ETag"]
+        code, headers, body = self.get(base, "/api/changelog", {"If-None-Match": tag})
+        self.assertEqual((code, body, headers["ETag"]), (304, b"", tag))
+        code, headers, body = self.get(base, "/api/changelog", {"If-None-Match": '"stale"'})
+        self.assertEqual(code, 200)
+        code, headers, body = self.get(base, "/api/changelog", method="HEAD")
+        self.assertEqual((code, body, headers["ETag"]), (200, b"", tag))
+        self.assertGreater(int(headers["Content-Length"]), 0)
+
+    def test_changelog_missing_is_404(self):
+        server, base = self.serve()
+        with tempfile.TemporaryDirectory() as d:
+            server.changelog = os.path.join(d, "CHANGELOG.md")
+            code, headers, _ = self.get(base, "/api/changelog")
+        self.assertEqual(code, 404)
+        self.assertTrue(headers["Content-Type"].startswith("text/plain"))
+
     def test_oversized_body(self):
         _, base = self.serve()
         try:

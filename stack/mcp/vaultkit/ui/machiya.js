@@ -8,7 +8,7 @@
 //     device (ts.net is on the Public Suffix List: <tailnet>.ts.net is the site, every room shares its cookies).
 //  2. the Apps setting: rooms and neighbours switched off are hidden from the switcher.
 //  3. the Rooms menu (<details class="rooms">) closes on Escape or a click outside.
-//  4. "/" focuses the room's search field (form.search), unless you're typing somewhere.
+//  4. "/" focuses the search page's field, or opens the room's search page (form.search's action), unless you're typing.
 //  5. updates (v0.6): when a new service worker is waiting, a "New Version · Reload" toast; Reload tells it to take
 //     over (postMessage {type: "SKIP_WAITING"}) and reloads once it has. Checks for updates on return to the app.
 //  6. server preferences (v0.12): with <meta name="machiya-prefs" content="/api/prefs"> (shell.page(prefs_url=)),
@@ -151,8 +151,12 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "/" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
     const t = ev.target;
     if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
-    const field = document.querySelector("form.search input[type=search]");
-    if (field) { ev.preventDefault(); field.focus(); field.select(); }
+    // the header's search pill (v0.17), else a search page's own field; otherwise open the room's search page
+    const field = document.querySelector("form.search.searchbar input[type=search]")
+      || [...document.querySelectorAll("form.search input[type=search]")].find((f) => f.offsetParent !== null);
+    if (field) { ev.preventDefault(); field.focus(); field.select(); return; }
+    const form = document.querySelector("form.search");
+    if (form && form.action) { ev.preventDefault(); location.href = form.action; }
   }
 });
 
@@ -240,3 +244,64 @@ if ("serviceWorker" in navigator) {
     });
   }).catch(() => {});
 }
+
+// The header's search pill (v0.17): results as you type. It fetches the room's own search page (the form's action, ?q=)
+// and swaps this page's <main> for that page's, so each room keeps one search page and one renderer. Clearing the field
+// puts the page back. Enter still submits the form (a real search page load). Rooms whose results need script can
+// listen for "machiya:results" on document (detail: {q}) to bind them again.
+(() => {
+  const form = document.querySelector("form.search.searchbar");
+  const input = form && form.querySelector("input[type=search]");
+  const main = document.querySelector("main");
+  if (!input || !main || !window.fetch || !window.DOMParser) return;
+  const action = form.getAttribute("action") || "/search";
+  const startHTML = main.innerHTML, startURL = location.href, startTitle = document.title;
+  const onSearchPage = new URL(form.action, location.href).pathname === location.pathname;
+  let timer = 0, ctl = null, pushed = false;
+  // while results show, no tab or nav item is "here" (the page under them isn't); clearing puts them back (v0.17.2)
+  const marks = [...document.querySelectorAll('.tabbar a.here, .tabbar a[aria-current="page"], .nav b.here')];
+  const unmark = (off) => { for (const m of marks) m.classList.toggle("here-hidden", off); };
+  const show = (html, title, url) => {
+    main.innerHTML = html;
+    if (!onSearchPage) unmark(html !== startHTML);
+    for (const f of main.querySelectorAll("form.search")) f.remove();     // the search page's own field: the pill is the field
+    if (title) document.title = title;
+    if (url && url !== location.href) {
+      if (onSearchPage || pushed) history.replaceState({ live: true }, "", url);
+      else { history.pushState({ live: true }, "", url); pushed = true; }
+    }
+  };
+  const run = async (q) => {
+    if (ctl) ctl.abort();
+    if (!q.trim()) {
+      main.classList.remove("live-loading");
+      if (!onSearchPage) { show(startHTML, startTitle, startURL); }
+      return;
+    }
+    ctl = new AbortController();
+    const url = new URL(action, location.href);
+    url.searchParams.set("q", q);
+    main.classList.add("live-loading");
+    try {
+      const res = await fetch(url, { signal: ctl.signal, credentials: "same-origin", headers: { "X-Machiya-Live": "1" } });
+      if (!res.ok) return;
+      const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+      const next = doc.querySelector("main");
+      if (!next || input.value !== q) return;
+      show(next.innerHTML, doc.title, url.href);
+      document.dispatchEvent(new CustomEvent("machiya:results", { detail: { q } }));
+    } catch (err) {
+      if (err.name !== "AbortError") console.warn("live search", err);
+    } finally {
+      if (input.value === q) main.classList.remove("live-loading");
+    }
+  };
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => run(input.value), 250); });
+  form.addEventListener("submit", () => { clearTimeout(timer); if (ctl) ctl.abort(); });
+  const clear = form.querySelector(".clear");
+  if (clear) clear.addEventListener("click", () => { input.value = ""; input.focus(); clearTimeout(timer); run(""); });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && input.value) { ev.preventDefault(); input.value = ""; clearTimeout(timer); run(""); }
+  });
+  window.addEventListener("popstate", () => { if (pushed) location.reload(); });
+})();

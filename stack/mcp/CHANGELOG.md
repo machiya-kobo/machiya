@@ -1,5 +1,11 @@
 # Changelog: machiya-mcp
 
+## 0.7.1
+
+- **`GET /api/changelog`** serves this server's own `CHANGELOG.md` (`text/markdown`, the first 64 KiB, an `ETag` with 304, 404 without the file; HEAD too), open like `/api/status`, so the landing page can say what a deploy brought. The image carries the file.
+- `/api/status` (and `/healthz`) report the vendored vaultkit as `vaultkit` (its tag, as Kura and Niwa do).
+- vaultkit v0.18.0.
+
 ## 0.7.0
 
 - **Page search and page text come from Hister's own MCP now** (owner, 2026-10-04: no overlap with Hister's MCP). `pages_search` and `pages_read` are removed: Hister's `search` (a query starting `@pages`, which keeps the vault notes out) and `get_preview` replace them, connected by the machiya plugin (0.2.0) beside this server, with `get_history` denied. `machiya_search` searches notes and cards only. `collections_list` and every label and collection tool stay (Hister's MCP has no aliases, labels or writes), and every Hister query this server sends still ends with the notes exclusion. The `capture` prompt searches pages with Hister's MCP when it is connected.

@@ -22,6 +22,10 @@ ROOMS = [   # (key, name, seal, what it is) front to back through the house, the
     ("kura", "Kura", "蔵", "notes"),
 ]
 NEIGHBOURS = [("hister", "Hister", "pages"), ("searxng", "SearXNG", "the web")]
+# The house itself: the stack's front door and status page (stack/landing). Not a room in the order above: with
+# MACHIYA_ROOMS naming `machiya=<url>`, every Rooms menu ends with a "Machiya · status" row and the footer's
+# "Part of Machiya" links there; without it, nothing changes.
+HOUSE = ("machiya", "Machiya", "町", "status")
 THEMES = [("system", "System"), ("day", "Light"), ("night", "Dark")]     # the appearance (setting `theme`)
 PALETTES = palettes.CHOICES                                              # the theme (setting `palette`, v0.15)
 TEXT_SIZES = [("xsmall", "Extra Small"), ("small", "Small"), ("standard", "Standard"), ("large", "Large"),
@@ -38,6 +42,8 @@ GLYPH = {   # one glyph per room everywhere (Shiori uses SF Symbols for the same
     "hister": _SVG % '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',                         # history
     "searxng": _SVG % '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',  # web
     "person": _SVG % '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',               # who's signed in
+    "search": _SVG % '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',                                  # every room's Search tab (v0.16.2)
+    "close": _SVG % '<path d="M6 6l12 12M18 6 6 18"/>',                                 # the search pill's clear X (v0.17.1)
     "rooms": _SVG % '<path d="M3 11 12 4l9 7v9H3z"/><path d="M9 20v-5h6v5"/>',                           # the house
     "gear": _SVG % '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1'
                    'a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0'
@@ -64,8 +70,8 @@ def source_url(env=None):
 # -- configuration ----------------------------------------------------------------------------------------------
 
 def rooms(env=None):
-    """{key: url} from MACHIYA_ROOMS="shiori=https://…,konbini=https://…,niwa=…,kura=…,hister=…,searxng=…"
-    (no trailing slashes). Unset or empty = no links; a key may be left out."""
+    """{key: url} from MACHIYA_ROOMS="shiori=https://…,konbini=https://…,niwa=…,kura=…,hister=…,searxng=…,machiya=…"
+    (no trailing slashes). Unset or empty = no links; a key may be left out. `machiya` is the house (HOUSE)."""
     raw = (env if env is not None else os.environ).get("MACHIYA_ROOMS", "")
     out = {}
     for part in raw.split(","):
@@ -116,6 +122,17 @@ def search_box(q="", action="/search", placeholder="Search", label="Search"):
     return ('<form class="search" role="search" action="%s"><input type="search" name="q" value="%s" placeholder="%s" '
             'aria-label="%s" autocomplete="off" spellcheck="false" enterkeyhint="search"></form>'
             % (e(action), e(q), e(placeholder), e(label)))
+
+
+def search_bar(q="", action="/search", placeholder="Search", label="Search"):
+    """The room's search pill (v0.17): a second row of the pinned header at every width, as Shiori's field. Pass it to
+    header(search=...). machiya.js shows results as you type (it fetches the room's search page and swaps <main>), and
+    "/" focuses it."""
+    return ('<form class="search searchbar" role="search" action="%s"><div class="field"><input type="search" name="q" value="%s" '
+            'placeholder="%s" aria-label="%s" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">'
+            '<button type="button" class="clear" aria-label="Clear" title="Clear search">%s</button>'
+            '<button type="submit" class="go" aria-label="Search" title="Search">%s</button></div></form>'
+            % (e(action), e(q), e(placeholder), e(label), GLYPH["close"], GLYPH["search"]))
 
 
 def handoff(q, links=None):
@@ -256,7 +273,7 @@ def offline_row():
 
 
 def room_info(key):
-    return next((r for r in ROOMS if r[0] == key), (key, key.title(), "", ""))
+    return next((r for r in ROOMS + [HOUSE] if r[0] == key), (key, key.title(), "", ""))
 
 
 def mark(room):
@@ -279,19 +296,25 @@ def switcher(room, links, cls="rooms", settings=False, who=""):
                         % (e(links[key]), key, mark(key), e(name), e(what)))
     nb = ['<a href="%s/" data-room="%s"><span class="seal icon neighbour-icon" data-room="%s" aria-hidden="true"></span>%s<small>%s</small></a>'
           % (e(links[k]), k, k, e(n), e(w)) for k, n, w in NEIGHBOURS if k in links]      # their own logos (machiya.css)
+    key, name, _, what = HOUSE
+    home = ""
+    if room == key:
+        home = '<b data-room="%s">%s%s<small>here</small></b>' % (key, mark(key), e(name))
+    elif key in links:
+        home = '<a href="%s/" data-room="%s">%s%s<small>%s</small></a>' % (e(links[key]), key, mark(key), e(name), e(what))
     gear = ('<hr><a href="/settings"><span class="neighbour">%s</span>Settings</a>' % GLYPH["gear"]) if settings else ""
     if settings and who:
         gear = ('<hr><a href="/settings#account" class="who"><span class="neighbour">%s</span>%s<small>signed in</small></a>'
                 % (GLYPH["person"], e(who))) + gear[4:]
-    if len(rows) <= 1 and not nb and not settings:
+    if len(rows) <= 1 and not nb and not settings and not (home and room != key):
         return ""
-    return ('<details class="%s"><summary title="Rooms" aria-label="Rooms">%s</summary><nav class="menu" aria-label="Rooms">%s%s%s%s</nav></details>'
-            % (cls, GLYPH["rooms"], "".join(rows), "<hr>" if nb else "", "".join(nb), gear))
+    return ('<details class="%s"><summary title="Rooms" aria-label="Rooms">%s</summary><nav class="menu" aria-label="Rooms">%s%s%s%s%s</nav></details>'
+            % (cls, GLYPH["rooms"], "".join(rows), "<hr>" if nb else "", "".join(nb), ("<hr>" + home) if home else "", gear))
 
 
-def header(room, nav, current, links, subtitle="", tools="", settings=True, who=""):
-    """nav = [(href, key, label)]; tools = extra HTML before the switcher (e.g. a search box); who = the signed-in
-    name (v0.13): a person button before the gear, to the Account settings."""
+def header(room, nav, current, links, subtitle="", tools="", settings=True, who="", search=""):
+    """nav = [(href, key, label)]; tools = extra HTML before the switcher; who = the signed-in name (v0.13): a person
+    button before the gear, to the Account settings; search = search_bar(...) (v0.17): the pill under the top bar."""
     _, name, seal, _ = room_info(room)
     items = "".join(('<b class="here">%s</b>' % e(label)) if key == current else '<a href="%s">%s</a>' % (e(href), e(label))
                     for href, key, label in nav)
@@ -300,9 +323,9 @@ def header(room, nav, current, links, subtitle="", tools="", settings=True, who=
         gear = ('<a class="iconbtn who" href="/settings#account" title="Signed in as %s" aria-label="Signed in as %s">%s</a>'
                 % (e(who), e(who), GLYPH["person"])) + gear
     return ('<header class="top"><div class="topbar"><a class="brand" href="/">%s'
-            '<span class="word">%s</span></a>%s<nav class="nav">%s</nav><div class="tools">%s%s%s</div></div></header>\n'
+            '<span class="word">%s</span></a>%s<nav class="nav">%s</nav><div class="tools">%s%s%s</div></div>%s</header>\n'
             % (mark(room), e(name), ('<span class="subtitle">%s</span>' % e(subtitle)) if subtitle else "", items, tools,
-               switcher(room, links), gear))
+               switcher(room, links), gear, ('<div class="searchrow">%s</div>' % search) if search else ""))
 
 
 def tabbar(tabs, current, room, links, icons=None, who=""):
@@ -318,8 +341,9 @@ def tabbar(tabs, current, room, links, icons=None, who=""):
     return '<nav class="tabbar" aria-label="Sections">%s</nav>' % "".join(out)
 
 
-def footer(room, status=None, links=()):
-    """status: {"text": "synced abc1234 3 min ago · 812 notes", "state": "ok|stale|down"}; links: [(href, label)]."""
+def footer(room, status=None, links=(), house=None):
+    """status: {"text": "synced abc1234 3 min ago · 812 notes", "state": "ok|stale|down"}; links: [(href, label)].
+    house: the rooms' addresses (default: MACHIYA_ROOMS); with a `machiya` one, "Part of Machiya" links there."""
     _, name, _, _ = room_info(room)
     parts = []
     if status:
@@ -329,7 +353,11 @@ def footer(room, status=None, links=()):
     src = source_url()
     if src:
         parts.append('<a href="%s" rel="noopener">Source code</a>' % e(src))
-    parts.append('<span>Part of Machiya</span>')
+    home = (house if house is not None else rooms()).get(HOUSE[0])
+    if home and room != HOUSE[0]:
+        parts.append('<a href="%s/" class="house">Part of Machiya</a>' % e(home))
+    else:
+        parts.append('<span>Part of Machiya</span>')
     return '<footer class="foot">%s</footer>' % "".join(parts)
 
 
@@ -423,6 +451,8 @@ def apps_section(room, links, shown):
     """Which rooms and neighbours appear on this device; addresses stay on the server (MACHIYA_ROOMS)."""
     items = [toggle(name, "show_" + key, shown.get(key, True)) for key, name, _, _ in ROOMS if key != room and key in links]
     items += [toggle(name, "show_" + key, shown.get(key, True)) for key, name, _ in NEIGHBOURS if key in links]
+    if HOUSE[0] in links and room != HOUSE[0]:
+        items.append(toggle(HOUSE[1], "show_" + HOUSE[0], shown.get(HOUSE[0], True)))
     if not items:
         return None
     return ("Apps", items, "Which rooms appear in the switcher on this device. Their addresses are set on the server.")

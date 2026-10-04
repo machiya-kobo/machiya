@@ -1,4 +1,5 @@
-"""machiya-mcp: Machiya's MCP server for Claude Code and other agents. Stdlib only (the notes write tools also need vaultkit and git).
+"""machiya-mcp: Machiya's MCP server for Claude Code and other agents. Stdlib only (the notes write tools also need vaultkit and git;
+/api/changelog and the identity file need vaultkit).
 
 A legacy Streamable HTTP server (POST /mcp, JSON responses, no session, no SSE): initialize, tools/*, resources/*.
 It is a client of the rooms' HTTP APIs and changes none of them; a room's tools appear only when its URL is set
@@ -28,11 +29,27 @@ import envelope                                   # noqa: E402
 from backend import HISTER_ORIGIN, Backend, BackendError   # noqa: E402
 from rooms import ToolError, cross, hister, hister_write, konbini, kura, niwa, prompts, vault  # noqa: E402
 
-VERSION = "0.7.0"
+VERSION = "0.7.1"
+HERE = os.path.dirname(os.path.abspath(__file__))
+CHANGELOG = os.path.join(HERE, "CHANGELOG.md")    # /app/CHANGELOG.md in the image; GET /api/changelog serves it
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26")
 MAX_BODY = 1 << 20
 BIG = {"anthropic/maxResultSizeChars": 100000}
 SAFE_VALUES = {"slug", "board", "area", "period", "label", "collection", "sort", "folder", "tag", "topic", "column", "priority", "path", "mode", "name"}
+
+
+def vaultkit_version(directory=os.path.join(HERE, "vaultkit")):
+    """The vendored vaultkit's tag ('v0.18.0') from its VENDORED manifest, as Kura and Niwa report it; '' without one.
+    Read from the file, so /api/status needs no import of vaultkit (and its markdown and pyyaml)."""
+    try:
+        with open(os.path.join(directory, "VENDORED"), encoding="utf-8") as f:
+            line = f.readline().strip()
+    except OSError:
+        return ""
+    return line[len("# vaultkit "):].split(" - ")[0] if line.startswith("# vaultkit ") else ""
+
+
+VAULTKIT = vaultkit_version()
 
 
 def auth_mode(value, identity_file=""):
@@ -209,6 +226,7 @@ class Server:
 
     def __init__(self, config, backends=None, clock=time.time):
         self.config, self.clock = config, clock
+        self.changelog = CHANGELOG   # what GET /api/changelog serves (tests point it elsewhere)
         # Kura, Konbini and Niwa get the `mcp` principal's token (MCP_TOKEN_FILE); Hister never does.
         self.backends = backends if backends is not None else {
             r: Backend(r, u, origin=HISTER_ORIGIN if r == "hister" else None, token="" if r == "hister" else config.token)
@@ -540,12 +558,11 @@ def make_handler(server):
             pass
 
         def send(self, code, body=b"", ctype="application/json", extra=None):
+            headers = {"Content-Type": ctype, "Cache-Control": "no-store", **(extra or {})}   # extra may override
             self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            for k, v in (extra or {}).items():
+            for k, v in headers.items():
                 self.send_header(k, v)
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(body)
@@ -556,8 +573,12 @@ def make_handler(server):
         def do_GET(self):
             path = urlsplit(self.path).path
             if path in ("/healthz", "/api/status"):
-                return self.json(200, {"ok": True, "version": VERSION, "auth": server.config.auth,
+                return self.json(200, {"ok": True, "version": VERSION, "vaultkit": VAULTKIT, "auth": server.config.auth,
                                        "rooms": sorted(server.backends), "tools": len(server.tools)})
+            if path == "/api/changelog":                # open, like /api/status: this server's own CHANGELOG.md
+                from vaultkit import changelog          # vendored beside this file (imported here, like identity)
+                code, body, headers = changelog.handle(server.changelog, self.headers)
+                return self.send(code, body, extra=dict(headers))
             if path == "/mcp":
                 return self.send(405, b"", extra={"Allow": "POST"})
             self.json(404, {"error": "not found"})
