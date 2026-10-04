@@ -27,7 +27,7 @@ Each Today section is left out when its room is missing, down or refuses; nothin
 
 **Freshness.** A green dot is fine; a yellow dot is *behind* and stays calm; only *error* and *down* get red text and a red edge. Thresholds: the vault's pull is behind after 15 minutes and broken after 6 hours; Konbini's LiveSync cycle behind after 15 minutes, broken after 2 hours; the notes' push into Hister behind after an hour, broken after a day; Konbini's commit differing from Kura's for more than 15 minutes is behind; a writer with commits it hasn't pushed is behind; Hister's newest page is fine under three days old and behind after that, red only when Hister itself is down; feed-import is behind after an hour without a good run and broken when it says `ok: false`. An app that doesn't answer within 3 seconds is down.
 
-**Counts** read as the owner asked: below 1,000 as they are, then one decimal and k, M or B (1,050 → 1.1k, 12,340 → 12.3k), rounded half up.
+**Counts** read as the owner asked: below 1,000 as they are, then one decimal and k, M or B (1,150 → 1.1k, 12,340 → 12.3k), cut to one decimal rather than rounded, as the owner's examples read.
 
 ## Standalone and polite
 

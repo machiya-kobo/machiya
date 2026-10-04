@@ -133,7 +133,7 @@ class Readers(Stack):
         self.assertEqual(a["konbini"]["facts"], ["78 cards"])
         self.assertEqual(a["niwa"]["facts"], ["1 published"])                       # 0.2.0: published only
         self.assertEqual(a["shiori"]["version"], "build 7598f33")
-        self.assertEqual(a["hister"]["facts"], ["2k pages"])
+        self.assertEqual(a["hister"]["facts"], ["1.9k pages"])
         self.assertEqual(a["hister"]["data"]["newest"], NOW - 600)
         self.assertEqual(a["searxng"]["version"], "2026.9.25")
         self.assertEqual(a["machiya-mcp"]["facts"], ["36 tools", "4 rooms"])
@@ -238,7 +238,7 @@ class HisterWithUsers(Stack):
         land = self.landing(LANDING_HISTER_TOKEN_FILE=self.file)
         snap = land.poll()
         a = snap["apps"]["hister"]
-        self.assertEqual((a["state"], a["facts"], a["data"]["newest"]), ("up", ["2k pages"], NOW - 600))
+        self.assertEqual((a["state"], a["facts"], a["data"]["newest"]), ("up", ["1.9k pages"], NOW - 600))
         health = [s for s in self.fakes["hister"].seen if s["path"] == "/health"]
         self.assertTrue(health and all("x-access-token" not in s["headers"] for s in health))   # /health: no token
         owner_paths = {"/api/cards", "/api/vaults", "/api/recent", "/feed.xml"}       # 0.2.3: the rooms' owner reads
@@ -789,7 +789,7 @@ class ZeroTwoOne(Stack):
         html = render.main_html(snap, l.history, l.logs, l.config.links, l.config.targets, NOW)
         self.assertIn("Searches 312 today", html)
         self.assertNotIn("0.19.9", html)                        # Shiori's built-against Hister isn't shown
-        self.assertEqual(probes.compact(1250000), "1.3M")          # half up (0.3.0)
+        self.assertEqual(probes.compact(1250000), "1.2M")          # cut, not rounded (0.3.0)
         with open(path, "w") as f:
             f.write("{broken")
         self.assertFalse(self.landing(LANDING_SEARCH_COUNTS=path).poll()["apps"]["shiori"].get("more"))
@@ -931,7 +931,7 @@ class Launcher(Stack):
         self.assertIn(">All up</a>", html)
         self.assertIn('<form class="search launch" role="search" action="https://search.example.ts.net/" method="get">', html)
         self.assertIn('name="q"', html)
-        for count in ("2k pages", "3 in WIP", "1 published", "314 notes"):
+        for count in ("1.9k pages", "3 in WIP", "1 published", "314 notes"):
             self.assertIn(count, html)
         for head in ("Working On", "Due Soon", "Notes Changed", "Saved &amp; Read", "Garden"):
             self.assertIn(head, html)
@@ -976,8 +976,8 @@ class ZeroThree(Stack):
     """0.3.0: k counts, Shiori's version and rebuilds, Shiori's changelog."""
 
     def test_counts(self):
-        cases = {0: "0", 999: "999", 1000: "1k", 1049: "1k", 1050: "1.1k", 1150: "1.2k", 12340: "12.3k",
-                 999949: "999.9k", 999950: "1M", 1000000: "1M", 2000000: "2M", 1250000: "1.3M", 2500000000: "2.5B"}
+        cases = {0: "0", 999: "999", 1000: "1k", 1050: "1k", 1099: "1k", 1150: "1.1k", 1999: "1.9k", 12340: "12.3k",
+                 999999: "999.9k", 1000000: "1M", 2000000: "2M", 1250000: "1.2M", 2500000000: "2.5B"}   # cut, not rounded
         for n, want in cases.items():
             self.assertEqual(probes.count(n), want, n)
         self.assertEqual(probes.plural(1, "note"), "1 note")

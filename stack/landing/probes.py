@@ -7,7 +7,7 @@ than LIMIT bytes is cut off and counted as unreadable. Nothing here renders HTML
 import json
 import os
 import re
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, ROUND_DOWN, Decimal
 import socket
 import threading
 import time
@@ -202,16 +202,15 @@ def vk(v):
 
 def count(n):
     """A count as the owner reads it (0.3.0): below 1,000 as is; from 1,000 one decimal and k, M or B, a trailing .0
-    dropped, rounded half up (1,049 -> 1k, 1,050 -> 1.1k, 12,340 -> 12.3k, 999,950 -> 1M)."""
+    dropped, cut (not rounded) to one decimal, as the owner's examples read: 1,150 -> 1.1k, 12,340 -> 12.3k, 1,999 -> 1.9k,
+    999,999 -> 999.9k (0.3.0)."""
     n = int(n)
     if abs(n) < 1000:
         return str(n)
     for div, unit, nxt in ((10 ** 3, "k", 10 ** 6), (10 ** 6, "M", 10 ** 9), (10 ** 9, "B", None)):
         if nxt is not None and abs(n) >= nxt:
             continue
-        v = (Decimal(n) / div).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
-        if nxt is not None and abs(v) >= 1000:          # 999,950 rounds up to the next unit
-            continue
+        v = (Decimal(n) / div).quantize(Decimal("0.1"), rounding=ROUND_DOWN)
         text_ = format(v, "f")
         return (text_[:-2] if text_.endswith(".0") else text_) + unit
     return str(n)
