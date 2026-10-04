@@ -453,6 +453,101 @@ class HelperTest(unittest.TestCase):
         for secret in (sid, session, "tok-owner", "kura.example.test/n/Note"):
             self.assertNotIn(secret, log)
 
+    # -- keep-alive (0.1.2): Tailscale Serve sends different people's requests down one connection
+
+    def one_connection(self, port, requests):
+        """[(status, headers, body)] for requests sent one after another down ONE kept-alive connection."""
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        out = []
+        try:
+            for method, path, headers, *body in requests:
+                conn.request(method, path, body=body[0] if body else None, headers=headers)
+                r = conn.getresponse()
+                out.append((r.status, dict(r.getheaders()), r.read()))
+        finally:
+            conn.close()
+        return out
+
+    def raw(self, port, data):
+        """Everything the server sends back for `data` on one connection, and whether it closed the connection."""
+        import socket
+        s = socket.create_connection(("127.0.0.1", port), timeout=2)
+        s.sendall(data)
+        out, closed = b"", False
+        try:
+            while True:
+                chunk = s.recv(65536)
+                if not chunk:
+                    closed = True
+                    break
+                out += chunk
+        except socket.timeout:
+            pass
+        s.close()
+        return out, closed
+
+    def test_keep_alive_check_answers_each_request_alone(self):
+        _, sid, _ = self.sign_in()
+        _, other, _ = self.sign_in(session=self.fake.signed_in("other"))
+        sess = lambda v: {"X-Machiya-Session": v}
+        tok = lambda v: {"X-Access-Token": v}
+        got = self.one_connection(self.int, [
+            ("GET", "/v1/check", {}),                               # no credential: 400
+            ("GET", "/v1/check", sess(sid)),                        # the owner
+            ("GET", "/v1/check", sess("mhs_" + "x" * 43)),          # an unknown id
+            ("GET", "/v1/check", sess(other)),                      # another person
+            ("GET", "/v1/check", tok("tok-owner")),                 # the owner's token
+            ("GET", "/v1/check", tok("nope")),                      # a bad token
+            ("GET", "/v1/check", tok("tok-other")),                 # another person's token
+            ("GET", "/v1/check", {}),                               # nobody again
+            ("GET", "/v1/nginx", sess(sid)),                        # nginx: the owner's Hister cookie
+            ("GET", "/v1/nginx", {}),                               # ... nobody: none
+            ("GET", "/v1/nginx", sess(other)),
+            ("GET", "/v1/nginx", sess("junk")),
+        ])
+        self.assertEqual([g[0] for g in got], [400, 200, 401, 200, 200, 401, 200, 400, 200, 401, 200, 401])
+        names = [json.loads(g[2]).get("username") if g[2] else None for g in got[:8]]
+        self.assertEqual(names, [None, "owner", None, "other", "owner", None, "other", None])
+        self.assertEqual([g[1].get("X-Hister-User") for g in got[8:]], ["owner", None, "other", None])
+        self.assertTrue(all("X-Hister-Cookie" not in g[1] for g in (got[9], got[11])))
+
+    def test_keep_alive_public_pages_answer_each_request_alone(self):
+        _, sid, _ = self.sign_in()
+        _, other, _ = self.sign_in(session=self.fake.signed_in("other"))
+        sso = lambda v: {"Cookie": "machiya_sso=" + v}
+        got = self.one_connection(self.pub, [
+            ("GET", "/machiya/sessions", {}),                       # nobody: to sign in
+            ("GET", "/machiya/sessions", sso(sid)),                 # the owner's sessions
+            ("GET", "/machiya/sessions", {}),                       # nobody again
+            ("GET", "/machiya/sessions", sso("mhs_" + "x" * 43)),   # an unknown id
+            ("GET", "/machiya/sessions", sso(other)),               # another person's sessions
+            ("GET", "/machiya/sessions", sso("junk")),
+        ])
+        self.assertEqual([g[0] for g in got], [303, 200, 303, 303, 200, 303])
+        self.assertIn(b"Signed In as owner", got[1][2])
+        self.assertIn(b"Signed In as other", got[4][2])
+        self.assertNotIn(b"owner", got[4][2])
+        self.assertTrue(all(g[1]["Location"].startswith("/machiya/signin?") for g in (got[0], got[2], got[3], got[5])))
+
+    def test_keep_alive_unread_body_never_becomes_a_request(self):
+        """A body the helper doesn't read (a GET's, a 404 POST's) closes the connection: kept, its bytes would be the
+        next request, one that never went through Serve."""
+        _, sid, _ = self.sign_in()
+        smuggled = b"GET /v1/nginx HTTP/1.1\r\nHost: x\r\nX-Machiya-Session: %s\r\n\r\n" % sid.encode()
+        for port, head in ((self.int, b"GET /v1/check HTTP/1.1\r\nHost: x\r\nX-Access-Token: nope\r\n"),
+                           (self.int, b"POST /v1/nope HTTP/1.1\r\nHost: x\r\n"),
+                           (self.pub, b"GET /machiya/healthz HTTP/1.1\r\nHost: x\r\n"),
+                           (self.pub, b"POST /machiya/nope HTTP/1.1\r\nHost: x\r\n")):
+            out, closed = self.raw(port, head + b"Content-Length: %d\r\n\r\n" % len(smuggled) + smuggled)
+            self.assertEqual(out.count(b"HTTP/1.1 "), 1, head)
+            self.assertTrue(closed, head)
+            self.assertIn(b"\r\nConnection: close\r\n", out)
+            self.assertNotIn(b"X-Hister-Cookie", out)
+        # a body that was read keeps the connection
+        got = self.one_connection(self.int, [("POST", "/v1/signout", {"X-Machiya-Session": "x"}, b"{}"),
+                                             ("GET", "/v1/check", {"X-Machiya-Session": sid})])
+        self.assertEqual([g[0] for g in got], [204, 200])
+
 
 class CookieNameTest(unittest.TestCase):
     """MACHIYA_SSO_COOKIE: a second stack under the same cookie domain (a dev stack) uses its own sign-in cookie and

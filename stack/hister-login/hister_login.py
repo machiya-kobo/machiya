@@ -39,7 +39,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -532,6 +532,29 @@ class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "hister-login/" + VERSION
     protocol_version = "HTTP/1.1"
     login = None                        # set on the subclass
+    _body_read = False                  # this request's body was read in full (reset per request)
+
+    def handle_one_request(self):
+        """Every request starts afresh (0.1.2). HTTP/1.1 keeps a connection, and one handler, for many requests, and
+        Tailscale Serve sends different people's requests down the same connection: nothing from the last request may
+        decide this one. A body this request didn't read would be parsed as the NEXT request on the connection (one
+        smuggled past Serve, with headers Serve never saw), so the connection closes instead."""
+        self._body_read = False
+        super().handle_one_request()
+        if not self.close_connection and self.unread_body():
+            self.close_connection = True
+
+    def unread_body(self):
+        headers = getattr(self, "headers", None)
+        if headers is None or self._body_read:
+            return False
+        lengths = headers.get_all("Content-Length") or []
+        return headers.get("Transfer-Encoding") is not None or any(v.strip() != "0" for v in lengths)
+
+    def end_headers(self):
+        if not self.close_connection and self.unread_body():
+            self.send_header("Connection", "close")     # sets close_connection: the unread bytes go with it
+        super().end_headers()
 
     def log_message(self, fmt, *args):          # the path only: queries carry return addresses and OAuth codes
         LOG("%s %s %s" % (self.command, urlsplit(self.path).path[:120], args[1] if len(args) > 1 else ""))
@@ -559,6 +582,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         data = vsignin.read_body(self.headers, self.rfile, MAX_BODY)
         if data is None:
             self.close_connection = True
+        else:
+            self._body_read = True
         return data
 
     def query(self):

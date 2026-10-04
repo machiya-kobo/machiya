@@ -1,7 +1,12 @@
 # Changelog: hister-login
 
-## Unreleased
+## 0.1.2
 
+- **Keep-alive (security):** a request body the helper didn't read (a GET's, a refused or unknown POST's) stayed on
+  the connection and was parsed as the next request: on `:8080`, one smuggled past Tailscale Serve with headers Serve
+  never saw, whose answer could reach the next person on that connection. Such a request now ends with
+  `Connection: close`, and every request starts with no state from the one before (`handle_one_request`). Tests send
+  several people's requests down one kept-alive connection, as Serve does.
 - `MACHIYA_SSO_COOKIE` names the sign-in cookie (default `machiya_sso`), so a second stack under the same cookie domain
   (a dev stack on the same tailnet) never reads the other's. The rooms and landing read the same setting
   (vaultkit `histerauth`, unreleased).
