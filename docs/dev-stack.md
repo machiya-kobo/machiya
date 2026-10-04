@@ -11,8 +11,9 @@ Everything lives in [`compose/dev/`](../compose/dev/): `compose.yml`, the `dev` 
 | Data | From | Notes |
 |---|---|---|
 | the vault | [`sample-vault/`](../sample-vault/) plus [`seed/vault/`](../compose/dev/seed/vault/) | one commit with a fixed date, so its hash is the same everywhere (`d09e5c4…` today). Three vaults: `personal` (the default; every board column, a published garden, tags), `team` (shared) and `work` (**private**: never pushed to Hister; the word *quillwort* is only there, so a search proves where it looked) |
-| saved pages | [`seed/site/`](../compose/dev/seed/site/) through [`seed/hister.json`](../compose/dev/seed/hister.json) | invented `*.example` sites served by `fixtures`; 8 pages with labels and fixed times, the collections `@pages`, `@notes`, `@workshop`, `@travel`, and history entries (one pinned) |
+| saved pages | [`seed/site/`](../compose/dev/seed/site/) through [`seed/hister.json`](../compose/dev/seed/hister.json) | invented `*.example` sites served by `fixtures`; 8 pages with labels and fixed times, the collections `@pages`, `@notes`, `@code`, `@workshop`, `@travel`, and history entries (one pinned) |
 | a feed reader | [`seed/newsblur.json`](../compose/dev/seed/newsblur.json), served by `fake_newsblur.py` | read and starred stories pointing at the fixture sites; feed-import imports them like the real NewsBlur |
+| code forges | [`stack/code-import/dev/seed/`](../stack/code-import/dev/seed/), served by `fake_forgejo.py` and `fake_github.py` | invented repos of a user `lantern` and the orgs `workshop`/`workshop-kobo`: issues, PRs, releases, and a fork, a mirror, an archived repo, twins and an excluded name; [code-import](services/code-import.md) puts them into Hister as `metadata.source:code` (the `@code` collection; `@pages` leaves them out) |
 | the owner | made by `dev init` | Hister user `owner` (admin) with a generated password and token, bound to the stub OIDC provider's login |
 
 Secrets are generated per machine under `$DEV_DATA/secrets/` (0600) and never printed; `dev check` fails if one shows up in a service log. To exercise something the seed lacks, extend the seed (in the repository, invented) rather than pasting real data.
@@ -56,6 +57,7 @@ Everything is on `127.0.0.1` (`--bind` changes it). The public ports go through 
 | 19209 | fixture sites | plain http; `http://127.0.0.1:19209/kyoto-guide.example/` (inside the stack: `http://kyoto-guide.example/`) |
 | 19210 | fake NewsBlur | plain http |
 | 19211, 19212 | Niwa's gemini and gopher | (natively 1965 and 7070) |
+| 19213, 19214 | fake Forgejo, fake GitHub | plain http; code-import reads them with the dummy tokens in `$DEV_DATA/secrets/` (`forgejo-token`, `github-*-token`) |
 | 19224 | Hister, plain http | for agents and scripts on this machine: its MCP is `http://127.0.0.1:19224/mcp` |
 | 19226 | machiya-mcp, plain http | `http://127.0.0.1:19226/mcp` |
 
@@ -148,7 +150,7 @@ These are upstream's Dockerfile steps without its Linux-only static linking (`-l
 
 | Service | Natively |
 |---|---|
-| the rooms, landing, hister-login, machiya-mcp, smallweb, feed-import, vault-mirror, the stub OIDC provider, the fixtures, the fake NewsBlur, the front | Python 3.11+ with `markdown` and `pyyaml`, plus `git` and `openssl` |
+| the rooms, landing, hister-login, machiya-mcp, smallweb, feed-import, code-import, vault-mirror, the stub OIDC provider, the fixtures, the fake NewsBlur, Forgejo and GitHub, the front | Python 3.11+ with `markdown` and `pyyaml`, plus `git` and `openssl` |
 | Hister | a `hister` binary for the OS (`HISTER_BIN=…` at init, or on `PATH`). It is Go with cgo (SQLite, sqlite-vec): build it with Go 1.26 and a C compiler. Upstream ships Linux, macOS and Windows binaries only |
 | SearXNG | left out; run it yourself from a checkout with `SEARXNG_SETTINGS_PATH=compose/dev/config/searxng.yml` on `127.0.0.1:19237` if you need it |
 

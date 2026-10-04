@@ -59,6 +59,7 @@ PORTS = [  # (port, name, path to show)
     (19204, "hister", "/"), (19205, "searxng", "/"), (19206, "machiya-mcp", "/mcp"), (19207, "smallweb", "/"),
     (19208, "stub-oidc", "/.well-known/openid-configuration"), (19209, "fixtures", "/"),
     (19210, "fake-newsblur", "/healthz"), (19211, "niwa-gemini", ""), (19212, "niwa-gopher", ""),
+    (19213, "fake-forgejo", "/healthz"), (19214, "fake-github", "/healthz"),
     (19224, "hister-plain", "/mcp"), (19226, "mcp-plain", "/mcp")]
 FRONT_PORTS = range(19200, 19209)                  # behind `front` (https, or http behind a real Serve)
 UNVERIFIED = ssl._create_unverified_context()      # the throwaway dev CA, from this machine to itself only
@@ -192,6 +193,21 @@ def make_secrets(data):
     put("hister.env", "HISTER__SERVER__OAUTH__OIDC__CLIENT_SECRET=" + secret(data, "oidc-client-secret"))
     put("searxng.env", "SEARXNG_SECRET=" + secrets.token_hex(32))
     put("newsblur-token", "devnb_" + secrets.token_urlsafe(24))
+    put("forgejo-token", "devfj_" + secrets.token_urlsafe(24))           # code-import's fake forges
+    put("github-lantern-token", "devgh_" + secrets.token_urlsafe(24))
+    put("github-workshop-token", "devgh_" + secrets.token_urlsafe(24))
+
+
+DATA_DIRS = ("hister", "login", "kura", "niwa", "konbini", "mirror", "landing", "mcp", "smallweb", "feed-import",
+             "code-import", "logs")
+
+
+def upgrade(data, env):
+    """A stack made before a service joined gets that service's folder and generated secrets (only missing ones:
+    nothing existing, the owner's token included, ever changes)."""
+    for d in DATA_DIRS:
+        os.makedirs(os.path.join(data, d), exist_ok=True)
+    make_secrets(data)
 
 
 def git(*args, cwd=None, env=None):
@@ -319,8 +335,7 @@ def cmd_init(a):
                 die("--remote-hister %s has no %s (copy the Hister host's $DEV_DATA/secrets)" % (remote, name))
             shutil.copyfile(src, dst)
             os.chmod(dst, 0o600)
-    for d in ("hister", "login", "kura", "niwa", "konbini", "mirror", "landing", "mcp", "smallweb", "feed-import",
-              "logs"):
+    for d in DATA_DIRS:
         os.makedirs(os.path.join(data, d), exist_ok=True)
     make_secrets(data)
     head = make_vault(data)
@@ -421,7 +436,8 @@ def native_up(env, data):
     run = os.path.join(data, "run")
     os.makedirs(run, exist_ok=True)
     order = ["stub-idp", "hister", "hister-login", "front", "fixtures", "fake-newsblur", "vault-mirror", "kura",
-             "niwa", "konbini", "landing", "smallweb", "machiya-mcp", "feed-import"]
+             "niwa", "konbini", "landing", "smallweb", "machiya-mcp", "feed-import", "fake-forgejo", "fake-github",
+             "code-import"]
     plan = {p[0]: p for p in native_plan(env)}
     for name in order + [n for n in plan if n not in order]:
         _, cmd, cwd, extra, skip = plan[name]
@@ -515,6 +531,7 @@ def ready(port, path, want=None, headers=None):
 def cmd_up(a):
     data = data_dir(a.data)
     env = load(data)
+    upgrade(data, env)
     if env["DEV_ENGINE"] == "native":
         native_up(env, data)
     else:

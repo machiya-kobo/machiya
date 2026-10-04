@@ -91,13 +91,14 @@ def http_checks(data, tok, password):
               "/machiya/healthz"), ("searxng", 19205, "/healthz"), ("machiya-mcp", 19206, "/healthz"),
               ("smallweb", 19207, "/api/status"), ("stub-oidc", 19208, "/.well-known/openid-configuration"),
               ("fixtures", 19209, "/healthz"), ("fake-newsblur", 19210, "/healthz"),
+              ("fake-forgejo", 19213, "/healthz"), ("fake-github", 19214, "/healthz"),
               ("hister (plain)", 19224, "/health"), ("machiya-mcp (plain)", 19226, "/healthz")]
     seen = {}
     for name, port, path in probes:
         st, body, _ = http("GET", L(port, path), timeout=8)
         seen[name] = st
     optional = OPTIONAL & {n for n, st in seen.items() if st != 200}
-    record("every service answers on its port (19200-19210, 19224, 19226)",
+    record("every service answers on its port (19200-19210, 19213, 19214, 19224, 19226)",
            all(v == 200 for n, v in seen.items() if n not in optional),
            ", ".join("%s %s" % kv for kv in seen.items()) + ("; optional here, not running: %s" % ", ".join(
                sorted(optional)) if optional else ""))
@@ -158,7 +159,7 @@ def http_checks(data, tok, password):
     n_hist = len((hist or {}).get("documents") or []) if isinstance(hist, dict) else -1
     st3, anon, _ = http("GET", L(19224, "/api/rules"), headers={"Origin": "hister://", "Accept": "application/json"})
     record("Hister: collections (aliases) and history are the owner's; no token, no answer",
-           {"@notes", "@pages", "@travel", "@workshop"} <= set(aliases) and n_hist >= 3 and st3 in (401, 403),
+           {"@notes", "@pages", "@code", "@travel", "@workshop"} <= set(aliases) and n_hist >= 3 and st3 in (401, 403),
            "aliases %s; opened history %d; without a token HTTP %s" % (aliases, n_hist, st3))
 
     try:
@@ -172,6 +173,8 @@ def http_checks(data, tok, password):
            and counts["metadata.source:newsblur"] >= 4,
            "status.json ok=%s; fake NewsBlur served %s call(s); Hister has %s newsblur page(s)" % (
                fs.get("ok"), (nb or {}).get("calls") if isinstance(nb, dict) else nb, counts["metadata.source:newsblur"]))
+
+    code_checks(data, tok)
 
     st, body = mcp(19226, "tools/list")
     tools = sorted(t["name"] for t in ((body or {}).get("result") or {}).get("tools", [])) if isinstance(body, dict) \
@@ -219,8 +222,50 @@ def http_checks(data, tok, password):
     st, body, _ = http("GET", L(19207, "/api/status"))
     record("smallweb: up, saves into Hister", st == 200 and isinstance(body, dict) and body.get("ok"), str(body)[:300])
 
-    leaks = scan_logs(data, [tok, password])
-    record("no secret in any service log (the owner's password and token)", not leaks, ", ".join(leaks))
+    forge_tokens = []
+    for name in ("forgejo-token", "github-lantern-token", "github-workshop-token"):
+        try:
+            with open(os.path.join(data, "secrets", name)) as f:
+                forge_tokens.append(f.readline().strip())
+        except OSError:
+            pass
+    leaks = scan_logs(data, [tok, password] + forge_tokens)
+    record("no secret in any service log (the owner's password and token, the fake forges' tokens)", not leaks,
+           ", ".join(leaks))
+
+
+def code_checks(data, tok):
+    """code-import: the fake forges' synthetic repos are in Hister as metadata.source:code, found by the Code area's
+    query and its filters, and kept out of the pages. The first run may still be going: wait up to a minute."""
+    fs = {}
+    for _ in range(30):
+        try:
+            with open(os.path.join(data, "code-import", "status.json")) as f:
+                fs = json.load(f)
+        except (OSError, ValueError) as e:
+            fs = {"error": str(e)}
+        if fs.get("last_success"):
+            break
+        time.sleep(2)
+    q = {name: hister_total(tok, query) for name, query in (
+        ("code", "metadata.source:code"),
+        ("lamp", "metadata.source:code metadata.code_repo:workshop_kobo__lamp"),
+        ("open issues and PRs", "metadata.source:code metadata.code_kind:(issue|pr) metadata.code_state:open"),
+        ("merged", "metadata.source:code metadata.code_state:merged"),
+        ("@code dusk", "@code dusk"),
+        ("@pages dusk", "@pages dusk"),
+        ("left out", "metadata.source:code never imported"))}
+    st, body, _ = http("GET", L(19224, "/search?" + urllib.parse.urlencode({"q": "metadata.source:code", "limit": 100})),
+                       headers={"Origin": "hister://", "Accept": "application/json", "X-Access-Token": tok})
+    urls = {d.get("url") for d in (body or {}).get("documents") or []} if isinstance(body, dict) else set()
+    want = {"https://github.example/workshop-kobo/lamp", "http://forgejo.example/lantern/garden-notes/pulls/2",
+            "https://github.example/lantern/pixel-font/issues/4", "http://forgejo.example/lantern/dotfiles"}
+    record("code-import: a Code query finds the fake forges' synthetic repos, issues, PRs and releases (not the "
+           "forks, mirrors, twins or excluded ones), and @pages leaves them out",
+           fs.get("ok") is True and q["code"] >= 20 and q["lamp"] >= 7 and q["open issues and PRs"] >= 4
+           and q["merged"] >= 2 and q["@code dusk"] >= 1 and q["@pages dusk"] == 0 and q["left out"] == 0
+           and want <= urls,
+           "status.json ok=%s; %s; missing %s" % (fs.get("ok"), q, sorted(want - urls)))
 
 
 def scan_logs(data, needles):

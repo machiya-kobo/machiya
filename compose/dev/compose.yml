@@ -8,7 +8,8 @@
 #   19200 landing   19201 kura   19202 niwa   19203 konbini   19204 hister (+ the helper's /machiya/ and the callback)
 #   19205 searxng   19206 machiya-mcp   19207 smallweb   19208 stub OIDC provider
 # Direct, plain (on DEV_BIND, 127.0.0.1 by default):
-#   19209 fixture sites   19210 fake NewsBlur   19211 niwa gemini   19212 niwa gopher
+#   19209 fixture sites   19210 fake NewsBlur   19211 niwa gemini   19212 niwa gopher   19213 fake Forgejo
+#   19214 fake GitHub
 #   19224 Hister and 19226 machiya-mcp without TLS, for agents and scripts on this machine (their MCP endpoints)
 #
 # The x-native blocks are for ./dev --native (BSDs, Haiku, any host without containers): the same environment,
@@ -31,6 +32,8 @@ x-native:
     "stub-idp:9000": 127.0.0.1:19240
     "fixtures:80": 127.0.0.1:19209
     "fake-newsblur:8080": 127.0.0.1:19210
+    "fake-forgejo:8080": 127.0.0.1:19213
+    "fake-github:8080": 127.0.0.1:19214
 
 x-svc: &svc
   security_opt: ["no-new-privileges:true"]
@@ -425,3 +428,67 @@ services:
       cmd: ["python3", "-u", "${DEV_ROOT}/fake_newsblur.py"]
       paths: {/seed: "${DEV_ROOT}/seed", /secrets: "${DEV_DATA}/secrets"}
       env: {NEWSBLUR_BIND: "${DEV_BIND:-127.0.0.1}", NEWSBLUR_PORT: "19210"}
+
+  # -- code-import and its fake forges (stack/code-import/dev: invented repos, issues, PRs and releases) -------------
+  fake-forgejo:
+    <<: *svc
+    image: public.ecr.aws/docker/library/python:3.13-alpine
+    command: ["python3", "/fakes/fake_forgejo.py"]
+    environment:
+      FAKE_FORGEJO_SEED: /fakes/seed/forgejo.json
+      FAKE_FORGEJO_TOKEN_FILE: /secrets/forgejo-token
+      FAKE_FORGEJO_ROOT_URL: http://forgejo.example          # the html_url host: invented, never fetched
+    volumes:
+      - ../../stack/code-import/dev:/fakes:ro
+      - ${DEV_DATA}/secrets/forgejo-token:/secrets/forgejo-token:ro
+    ports: ["${DEV_BIND:-127.0.0.1}:19213:8080"]
+    x-native:
+      cmd: ["python3", "-u", "${MACHIYA_SRC}/stack/code-import/dev/fake_forgejo.py"]
+      paths: {/fakes: "${MACHIYA_SRC}/stack/code-import/dev", /secrets: "${DEV_DATA}/secrets"}
+      env: {FAKE_FORGEJO_BIND: "${DEV_BIND:-127.0.0.1}", FAKE_FORGEJO_PORT: "19213"}
+
+  fake-github:
+    <<: *svc
+    image: public.ecr.aws/docker/library/python:3.13-alpine
+    command: ["python3", "/fakes/fake_github.py"]
+    environment:
+      FAKE_GITHUB_SEED: /fakes/seed/github.json
+      FAKE_GITHUB_TOKEN_FILES: lantern=/secrets/github-lantern-token,workshop-kobo=/secrets/github-workshop-token
+      FAKE_GITHUB_WEB: https://github.example
+    volumes:
+      - ../../stack/code-import/dev:/fakes:ro
+      - ${DEV_DATA}/secrets/github-lantern-token:/secrets/github-lantern-token:ro
+      - ${DEV_DATA}/secrets/github-workshop-token:/secrets/github-workshop-token:ro
+    ports: ["${DEV_BIND:-127.0.0.1}:19214:8080"]
+    x-native:
+      cmd: ["python3", "-u", "${MACHIYA_SRC}/stack/code-import/dev/fake_github.py"]
+      paths: {/fakes: "${MACHIYA_SRC}/stack/code-import/dev", /secrets: "${DEV_DATA}/secrets"}
+      env: {FAKE_GITHUB_BIND: "${DEV_BIND:-127.0.0.1}", FAKE_GITHUB_PORT: "19214"}
+
+  code-import:
+    <<: *svc
+    build: {context: ../.., dockerfile: stack/code-import/Dockerfile}
+    environment:
+      CODE_IMPORT_FORGEJO_URL: http://fake-forgejo:8080
+      CODE_IMPORT_FORGEJO_TOKEN_FILE: /secrets/forgejo-token
+      CODE_IMPORT_FORGEJO_OWNERS: lantern,workshop
+      CODE_IMPORT_GITHUB_API: http://fake-github:8080
+      CODE_IMPORT_GITHUB_TOKEN_FILES: lantern=/secrets/github-lantern-token,workshop-kobo=/secrets/github-workshop-token
+      CODE_IMPORT_TWINS: github:workshop-kobo=forgejo:workshop,forgejo:lantern=github:lantern
+      CODE_IMPORT_HISTER_URL: http://hister:4433
+      CODE_IMPORT_HISTER_TOKEN_FILE: /secrets/owner-token
+      CODE_IMPORT_INTERVAL: "300"
+      CODE_IMPORT_GAP: "0.05"
+      CODE_IMPORT_DATA: /data
+      TZ: UTC
+    volumes:
+      - ${DEV_DATA}/code-import:/data
+      - ${DEV_DATA}/secrets/forgejo-token:/secrets/forgejo-token:ro
+      - ${DEV_DATA}/secrets/github-lantern-token:/secrets/github-lantern-token:ro
+      - ${DEV_DATA}/secrets/github-workshop-token:/secrets/github-workshop-token:ro
+      - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
+    depends_on: [hister, fake-forgejo, fake-github]
+    x-native:
+      cmd: ["python3", "-u", "codeimport.py"]
+      cwd: "${MACHIYA_SRC}/stack/code-import"
+      paths: {/data: "${DEV_DATA}/code-import", /secrets: "${DEV_DATA}/secrets"}

@@ -179,7 +179,7 @@ class NativePlan(unittest.TestCase):
                 continue
             for k, v in extra.items():
                 self.assertNotRegex(v, r"//(hister|kura|niwa|konbini|landing|stub-idp|hister-login|machiya-mcp|"
-                                       r"smallweb|searxng|fake-newsblur|fixtures):", "%s %s" % (name, k))
+                                       r"smallweb|searxng|fake-newsblur|fake-forgejo|fake-github|code-import|fixtures):", "%s %s" % (name, k))
                 self.assertFalse(re.match(r"^/(data|vault|secrets|repo|certs|seed|mirror|feed)(/|$)", v),
                                  "%s %s=%s still a container path" % (name, k, v))
                 if k.endswith("_PORT") and k != "NIWA_GOPHER_PUBLIC_PORT":

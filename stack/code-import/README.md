@@ -159,60 +159,7 @@ The command-line tests run `codeimport.py` as the image does and check its exit 
 
 ## The fake forges (`dev/`)
 
-[`dev/fake_forgejo.py`](dev/fake_forgejo.py) and [`dev/fake_github.py`](dev/fake_github.py) are stdlib servers answering the calls code-import makes, shaped like Forgejo 16's and GitHub's answers. They serve the invented seeds in [`dev/seed/`](dev/seed/): a user `lantern`, a Forgejo org `workshop` and a GitHub org `workshop-kobo`. The tests use them in-process. **To add them to the dev stack** (compose/dev, owned by the dev stack's session; not done here), add these services in the shape of `fake-newsblur`:
-
-```yaml
-  fake-forgejo:
-    <<: *svc
-    image: public.ecr.aws/docker/library/python:3.13-alpine
-    command: ["python3", "/dev/fake_forgejo.py"]
-    environment:
-      FAKE_FORGEJO_SEED: /seed/forgejo.json
-      FAKE_FORGEJO_TOKEN_FILE: /secrets/forgejo-token
-      FAKE_FORGEJO_ROOT_URL: https://forgejo.example        # the html_url host: invented, never fetched
-    volumes:
-      - ../../stack/code-import/dev/fake_forgejo.py:/dev/fake_forgejo.py:ro
-      - ../../stack/code-import/dev/seed:/seed:ro
-      - ${DEV_DATA}/secrets/forgejo-token:/secrets/forgejo-token:ro
-    ports: ["${DEV_BIND:-127.0.0.1}:19213:8080"]             # suggested ports; the dev stack picks
-  fake-github:
-    <<: *svc
-    image: public.ecr.aws/docker/library/python:3.13-alpine
-    command: ["python3", "/dev/fake_github.py"]
-    environment:
-      FAKE_GITHUB_SEED: /seed/github.json
-      FAKE_GITHUB_TOKEN_FILES: lantern=/secrets/github-lantern-token,workshop-kobo=/secrets/github-workshop-token
-      FAKE_GITHUB_WEB: https://github.example
-    volumes:
-      - ../../stack/code-import/dev/fake_github.py:/dev/fake_github.py:ro
-      - ../../stack/code-import/dev/seed:/seed:ro
-      - ${DEV_DATA}/secrets/github-lantern-token:/secrets/github-lantern-token:ro
-      - ${DEV_DATA}/secrets/github-workshop-token:/secrets/github-workshop-token:ro
-    ports: ["${DEV_BIND:-127.0.0.1}:19214:8080"]
-  code-import:
-    <<: *svc
-    build: {context: ../.., dockerfile: stack/code-import/Dockerfile}
-    environment:
-      CODE_IMPORT_FORGEJO_URL: http://fake-forgejo:8080
-      CODE_IMPORT_FORGEJO_TOKEN_FILE: /secrets/forgejo-token
-      CODE_IMPORT_FORGEJO_OWNERS: lantern,workshop
-      CODE_IMPORT_GITHUB_API: http://fake-github:8080
-      CODE_IMPORT_GITHUB_TOKEN_FILES: lantern=/secrets/github-lantern-token,workshop-kobo=/secrets/github-workshop-token
-      CODE_IMPORT_TWINS: github:workshop-kobo=forgejo:workshop,forgejo:lantern=github:lantern
-      CODE_IMPORT_HISTER_URL: http://hister:4433
-      CODE_IMPORT_HISTER_TOKEN_FILE: /secrets/owner-token
-      CODE_IMPORT_INTERVAL: "300"
-      TZ: UTC
-    volumes:
-      - ${DEV_DATA}/code-import:/data
-      - ${DEV_DATA}/secrets:/secrets:ro                     # or the four files one by one, as feed-import does
-    depends_on: [hister, fake-forgejo, fake-github]
-```
-
-To finish the dev stack:
-- `dev init` generates the three dummy forge tokens (`forgejo-token`, `github-lantern-token`, `github-workshop-token`, 0600, like `newsblur-token`).
-- Hister's dev seed gains the `@code` alias, and `@pages` gains ` -metadata.source:code`.
-- `x-native` entries follow fake-newsblur's: `FAKE_*_BIND`, `FAKE_*_PORT`.
+[`dev/fake_forgejo.py`](dev/fake_forgejo.py) and [`dev/fake_github.py`](dev/fake_github.py) are stdlib servers answering the calls code-import makes, shaped like Forgejo 16's and GitHub's answers. They serve the invented seeds in [`dev/seed/`](dev/seed/): a user `lantern`, a Forgejo org `workshop` and a GitHub org `workshop-kobo`. The tests use them in-process, and the dev stack runs them ([compose/dev](../../compose/dev/compose.yml): `fake-forgejo` on 19213, `fake-github` on 19214, and `code-import` reading them with the dummy tokens `dev init` generates). `./dev check` asks Hister for the Code area's query and its filters, and checks that `@pages` leaves code out ([docs/dev-stack.md](../../docs/dev-stack.md)).
 
 ## Layout
 

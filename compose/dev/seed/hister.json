@@ -11,8 +11,8 @@
     {"url": "http://kyoto-guide.example/packing.html", "file": "kyoto-guide.example/packing.html", "label": "", "added": "2026-09-28T12:00:00Z"}
   ],
   "aliases": {
-    "@pages": "* -label:vault -metadata.source:vault",
-    "@notes": "label:vault",
+    "@pages": "* -label:vault -metadata.source:vault -metadata.source:code",
+    "@notes": "label:vault", "@code": "metadata.source:code",
     "@workshop": "label:(crafts|paper|tools)",
     "@travel": "label:travel"
   },
