@@ -33,7 +33,7 @@ logfile="/var/log/${name}/${name}.log"
 procname="${niwa_python}"
 command="/usr/pkg/sbin/daemonize"
 command_args="-p ${pidfile} -u ${niwa_runas} -c ${niwa_dir} -a -o ${logfile} -e ${logfile} \
-    /usr/bin/env HOME=${niwa_dir} ${niwa_python} -u ${niwa_code}/niwa.py --env-file ${niwa_config}"
+    /usr/bin/env PATH=/usr/pkg/bin:/usr/bin:/bin HOME=${niwa_dir} ${niwa_python} -u ${niwa_code}/niwa.py --env-file ${niwa_config}"
 start_precmd="niwa_precmd"
 
 niwa_precmd()

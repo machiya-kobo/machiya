@@ -33,7 +33,7 @@ logfile="/var/log/${name}/${name}.log"
 procname="${konbini_python}"
 command="/usr/pkg/sbin/daemonize"
 command_args="-p ${pidfile} -u ${konbini_runas} -c ${konbini_dir} -a -o ${logfile} -e ${logfile} \
-    /usr/bin/env HOME=${konbini_dir} ${konbini_python} -u ${konbini_code}/app.py --env-file ${konbini_config}"
+    /usr/bin/env PATH=/usr/pkg/bin:/usr/bin:/bin HOME=${konbini_dir} ${konbini_python} -u ${konbini_code}/app.py --env-file ${konbini_config}"
 start_precmd="konbini_precmd"
 
 konbini_precmd()

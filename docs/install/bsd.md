@@ -2,7 +2,7 @@
 
 Native installs, packages only, no ports. Covers FreeBSD 14/15, NetBSD 10 and OpenBSD 7.7–7.9. The rc.d scripts are in [`contrib/rc.d/`](../../contrib/rc.d/).
 
-**Tested on:** OpenBSD 7.9 (Kura, run from a bundle with the sample vault). FreeBSD and NetBSD are only syntax-checked, and Niwa and Konbini have not been run on any BSD.
+**Tested on** (2026-10-04, clean test VMs, amd64): NetBSD 11.0 and OpenBSD 7.9, Kura and Niwa as rc.d services with this guide. On OpenBSD the apps need a vaultkit with the scrypt fix (OpenBSD's Python has no `hashlib.scrypt`). FreeBSD: see the dev stack ([dev-stack.md](../dev-stack.md)) and the rooms' own BSD Quickstarts.
 
 **Needs** apps that read `<APP>_BIND` and an env file (`<APP>_ENV_FILE` or `--env-file`, from vaultkit's `envfile`):
 
@@ -34,7 +34,7 @@ The apps trust the `Tailscale-User-Login` header to know the owner. `tailscale s
 
 - **A clean FreeBSD or NetBSD has no `python3` name**, only `python3.12` or `python3.13`. Make one (the Quickstarts do): `sudo ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3` on FreeBSD, `sudo ln -sf /usr/pkg/bin/python3.13 /usr/pkg/bin/python3` on NetBSD (then `/usr/pkg/bin` must be on the service's PATH; the rc.d scripts set it).
 - **A clean NetBSD has no `pkgin`** (it is a separate package), so install with `pkg_add` and point it at the binary repository first: `sudo env PKG_PATH="https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -p)/$(uname -r | cut -d_ -f1)/All" pkg_add python313 py313-markdown py313-yaml git-base curl daemonize`. If you prefer `pkgin`, add it the same way (`pkg_add pkgin`) and configure its repository first.
-- A clean FreeBSD, NetBSD or Debian also has no `git` or `curl`: they are in the lists above. Run privileged commands with `sudo` (FreeBSD, NetBSD) or `doas` (OpenBSD); `su root` needs a password on a fresh install.
+- A clean FreeBSD, NetBSD or Debian also has no `git` or `curl`: they are in the lists above. Run the privileged commands as root (`su -`), or through `sudo` or `doas` once one is set up: a fresh FreeBSD or NetBSD has no `sudo` (install it as root: `pkg install sudo`, or `pkg_add sudo` with `PKG_PATH` as above, then allow your user with `visudo`), and a fresh OpenBSD has `doas` but no `/etc/doas.conf` (as root: `echo 'permit persist :wheel' > /etc/doas.conf`).
 - The apps need `markdown` 3.7 or later; every package listed ships 3.7–3.10.
 - They need `pyyaml` 6, and nothing from pip.
 - Niwa and Konbini also call the `openssl` CLI. It's in base everywhere; on OpenBSD it's LibreSSL.
@@ -56,7 +56,7 @@ Each app runs as its own unprivileged user. Its home is its data directory: the 
 # FreeBSD
 pw useradd kura -d /var/db/kura -s /usr/sbin/nologin -c "Machiya Kura"
 # NetBSD
-useradd -d /var/db/kura -s /sbin/nologin -c "Machiya Kura" kura
+useradd -g =uid -d /var/db/kura -s /sbin/nologin -c "Machiya Kura" kura    # -g =uid: a kura group, not "users"
 # OpenBSD (underscore names for daemons; the daemon login class)
 useradd -d /var/db/kura -s /sbin/nologin -L daemon -c "Machiya Kura" _kura
 
@@ -72,11 +72,12 @@ install -d -o kura -g kura -m 0700 /var/db/kura        # OpenBSD: -o _kura -g _k
 Clone a release tag of the app, owned by root and read-only for the service:
 
 ```sh
-git clone --branch vX.Y.Z --depth 1 https://github.com/machiya-kobo/kura.git /usr/local/share/kura   # NetBSD: /usr/pkg/share/kura
-cd /usr/local/share/kura/app && python3 -m vaultkit.verify     # the vendored vaultkit is unedited
+git clone --branch vX.Y.Z --depth 1 https://github.com/machiya-kobo/kura.git /usr/local/share/kura-src   # NetBSD: /usr/pkg/share/…
+ln -s /usr/local/share/kura-src/app /usr/local/share/kura       # the rc.d scripts run /usr/local/share/<app>/<app>.py
+cd /usr/local/share/kura && python3 -m vaultkit.verify          # the vendored vaultkit is unedited
 ```
 
-The rc.d scripts expect the app files directly in `/usr/local/share/<app>/`. Clone into a directory beside it and symlink or copy `app/` there, or set `<app>_code` (FreeBSD and NetBSD) or the flags (OpenBSD) to point at `.../app`.
+The rc.d scripts expect the app files directly in `/usr/local/share/<app>/` (NetBSD: `/usr/pkg/share/<app>/`), which is what the link gives. Or set `<app>_code` (FreeBSD and NetBSD) or the flags (OpenBSD) to point at `.../app`.
 
 ## 5. The vault
 
@@ -128,9 +129,11 @@ KURA_PUBLIC_URL=https://kura.<tailnet>.ts.net
 TZ=UTC
 ```
 
-**Niwa** (web 8080, gemini 1965, gopher 7070, all on `NIWA_BIND`):
+**Niwa** (web, gemini 1965, gopher 7070, all on `NIWA_BIND`; its web port defaults to 8080 like Kura's, so give one of them another):
 ```
 NIWA_BIND=127.0.0.1
+NIWA_PORT=8082
+NIWA_REPO_SUBDIR=personal
 NIWA_USERS=you@example.com
 NIWA_REPO_URL=ssh://git@git.example.net/owner/vault.git
 NIWA_REPO_DIR=/var/db/niwa/repo
@@ -167,7 +170,7 @@ Copy the script for your BSD from `contrib/rc.d/<bsd>/<app>`, mode `0555`.
 | enable | `sysrc <app>_enable=YES` | `<app>=YES` in `/etc/rc.conf` | `rcctl enable <app>` |
 | start | `service <app> start` | `service <app> start` | `rcctl start <app>` |
 | runs as | `daemon(8) -u <app>`, restarted if it dies | `daemonize -u <app>` | `daemon_user=_<app>` |
-| log | syslog, tag `<app>` | `/var/log/<app>/<app>.log` (newsyslog) | syslog `daemon.info` → `/var/log/daemon` |
+| log | syslog, tag `<app>` | `/var/log/<app>/<app>.log` (not rotated: daemonize keeps it open; restart the service after rotating) | syslog `daemon.info` → `/var/log/daemon` |
 | settings | `<app>_config`, `_dir`, `_code`, `_python`, `_runas` in rc.conf | the same | `rcctl set <app> flags …` |
 
 The scripts pass `--env-file` to the app. They don't use rc.subr's own environment support: FreeBSD's `<name>_env_file` sources the file as shell, which expands `$` and breaks on values with spaces such as `GIT_SSH_COMMAND`.
@@ -183,7 +186,7 @@ NetBSD and OpenBSD have no supervisor in base. Restart from cron (`crontab -e` a
 Serve each app from loopback with HTTPS on the tailnet:
 
 ```sh
-tailscale serve --bg --https=443 http://127.0.0.1:8080                              # Kura/Niwa: node name
+tailscale serve --bg --https=443 http://127.0.0.1:8080                              # Kura (Niwa: 8082): node name
 tailscale serve --bg --service=svc:<service> --https=443 http://127.0.0.1:8080       # or as a Tailscale Service
 ```
 
@@ -201,10 +204,10 @@ Block the app ports on the public interface even though they're bound to loopbac
 
 ```
 # OpenBSD / FreeBSD pf.conf
-block return in quick on egress proto tcp to port { 8080 8081 1965 7070 }
+block return in quick on egress proto tcp to port { 8080 8081 8082 1965 7070 }
 ```
 
-For NetBSD's npf, add a `block in final … port { 8080, 8081, 1965, 7070 }` rule to the external interface's group. On FreeBSD with ipfw, deny those ports on the external interface.
+For NetBSD's npf, add a `block in final … port { 8080, 8081, 8082, 1965, 7070 }` rule to the external interface's group. On FreeBSD with ipfw, deny those ports on the external interface.
 
 ## 10. Monitoring, upgrades, removal
 
@@ -232,6 +235,6 @@ cd /usr/local/share/kura/app && python3 -m vaultkit.identity --file /usr/local/e
 
 ## Niwa and Konbini extras
 
-- **Niwa's gemini certificate** is made once with `openssl req -x509 -newkey ec …`. On OpenBSD that's LibreSSL; its manual documents the same options, but this is untested. If it fails, create `gemini.crt`/`gemini.key` next to `NIWA_DB` by hand and Niwa keeps them.
+- **Niwa's gemini certificate** is made once with `openssl req -x509 -newkey ec …`. On OpenBSD that's LibreSSL, which makes it fine (7.9). If it fails, create `gemini.crt`/`gemini.key` next to `NIWA_DB` by hand and Niwa keeps them.
 - **Link rot and the `hister` CLI** (Niwa, Konbini) are optional. Without `*_HISTER_URL`, dead links still get Wayback copies. Building `hister` needs Go and cgo.
 - **Konbini's blog kit** (`KANBAN_BLOG`) is optional. Without it, the posts pages are empty.

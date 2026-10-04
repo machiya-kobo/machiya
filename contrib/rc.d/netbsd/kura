@@ -33,7 +33,7 @@ logfile="/var/log/${name}/${name}.log"
 procname="${kura_python}"
 command="/usr/pkg/sbin/daemonize"
 command_args="-p ${pidfile} -u ${kura_runas} -c ${kura_dir} -a -o ${logfile} -e ${logfile} \
-    /usr/bin/env HOME=${kura_dir} ${kura_python} -u ${kura_code}/kura.py --env-file ${kura_config}"
+    /usr/bin/env PATH=/usr/pkg/bin:/usr/bin:/bin HOME=${kura_dir} ${kura_python} -u ${kura_code}/kura.py --env-file ${kura_config}"
 start_precmd="kura_precmd"
 
 kura_precmd()
