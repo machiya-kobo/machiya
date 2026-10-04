@@ -6,6 +6,9 @@
 - **Note writes (security):** a symlinked note is refused (every path component is checked, the note too, and the protected paths against the resolved one); a commit that fails puts the file back; and uncommitted leftovers in the write clone are discarded before every write, never pushed with the next one (sweep MACH-M-3). An update can't add a frontmatter block to a note that has none, and changes no frontmatter field but summary, status and tags (MACH-M-2: a block saying `publish: true` would have published the note).
 - **The login header is believed only behind the proxy (security, sweep MACH-M-5):** with `MCP_AUTH=tailscale` and no identity file the server refuses to start on a non-loopback `MCP_BIND` unless `MCP_BIND_BEHIND_PROXY=1` (set it only when the Tailscale sidecar is the only way in: machiya-mcp on a network of its own with it). A deployment on `0.0.0.0` needs the setting, with the network change, before this version starts.
 - Each connection times out after 30 s of silence, so half-sent requests can't hold the server's threads (MACH-M-6).
+- The label census pages to the end (it stopped at 8000 pages, so counts were wrong above that and a real label could be refused as new); `pages_labels` and `collections_audit` say `truncated: true` if Hister's paging stops early, and then a label missing from the census is looked up before it is called new (MACH-M-7).
+- Rollback files get unique names (two writes in one second kept one), and `collections_set` saves its rollback before the change; a rollback that can't be saved stops the write (MACH-M-8).
+- Apply tokens are minted and redeemed under a lock (MACH-M-9); `garden_suggest` checks and quotes a card slug before asking the board (MACH-M-10).
 
 ## 0.7.4
 

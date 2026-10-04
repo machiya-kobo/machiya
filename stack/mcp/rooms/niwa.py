@@ -1,6 +1,8 @@
 """Garden tools: suggest a note for the garden (Niwa's own POST /api/suggest) and find candidates. There is no publish
 tool and never will be: only the owner publishes, in Niwa's queue."""
-from . import IDEMPOTENT, WRITE, ToolError, arg_int, arg_str, n, s, tool
+from urllib.parse import quote
+
+from . import IDEMPOTENT, WRITE, ToolError, arg_int, arg_slug, arg_str, n, s, tool
 from . import kura
 
 
@@ -14,7 +16,11 @@ def garden_suggest(ctx, args):
     if "/" not in note and not note.endswith(".md"):       # a card slug: its note is the card's path
         if not ctx.has("konbini"):
             raise ToolError("give the note's vault path (Projects/Foo.md); card slugs need the board")
-        note = ctx.get("konbini", "/api/cards/" + note)["path"]
+        slug = arg_slug({"note": note}, "note")             # a slug, quoted: never a query or another route (MACH-M-10)
+        card = ctx.get("konbini", "/api/cards/" + quote(slug, safe=""))
+        if not isinstance(card, dict) or not isinstance(card.get("path"), str):
+            raise ToolError("the board has no card %r" % slug)
+        note = card["path"]
     path = kura.note_path({"path": note}, ctx)
     if ctx.has("kura"):                                     # only a default-vault note that exists
         d = ctx.get("kura", "/api/note", {"path": path})

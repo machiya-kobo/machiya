@@ -278,6 +278,7 @@ class Server:
                        "notes_write": Limiter(config.notes_per_min), "notes_write_day": Limiter(config.notes_per_day, per=86400.0),
                        "hister_write": Limiter(config.hister_writes_per_min), "bulk_hour": Limiter(config.bulk_per_hour, per=3600.0)}
         self.tokens = {}          # apply tokens: token -> (kind, caller, payload, expires); one use, ten minutes
+        self.token_lock = threading.Lock()
         self.census = (0.0, None)   # (when, label counts) for pages_labels and the audits
         self.notes, self.features = None, set()
         if config.notes_dir:
@@ -329,15 +330,17 @@ class Server:
             return True
 
     def mint(self, kind, login, payload, ttl=600):
-        now = self.clock()
-        self.tokens = {k: v for k, v in self.tokens.items() if v[3] > now}
-        token = secrets.token_urlsafe(12)
-        self.tokens[token] = (kind, login, payload, now + ttl)
-        return token
+        with self.token_lock:              # a mint's sweep of expired tokens must not drop one minted meanwhile (MACH-M-9)
+            now = self.clock()
+            self.tokens = {k: v for k, v in self.tokens.items() if v[3] > now}
+            token = secrets.token_urlsafe(12)
+            self.tokens[token] = (kind, login, payload, now + ttl)
+            return token
 
     def redeem(self, kind, login, token):
         """The payload a dry run stored, once; None when the token is unknown, used, expired or someone else's."""
-        entry = self.tokens.pop(token or "", None)
+        with self.token_lock:
+            entry = self.tokens.pop(token or "", None)
         if not entry or entry[0] != kind or entry[1] != login or entry[3] < self.clock():
             return None
         return entry[2]

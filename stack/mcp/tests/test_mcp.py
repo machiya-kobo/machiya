@@ -710,6 +710,13 @@ class Garden(Base):
         call(self.server, "garden_suggest", {"note": "alpha", "reason": "Because."})
         self.assertEqual(self.fakes["niwa"].writes()[0]["body"]["path"], "Projects/Alpha.md")
 
+    def test_a_card_slug_is_quoted_and_checked(self):
+        # sweep MACH-M-10: the slug went into the board's path unquoted
+        for bad in ("alpha?board=x", "alpha#x", "..", "alpha%2F..", ".hidden"):
+            self.assertTrue(call(self.server, "garden_suggest", {"note": bad, "reason": "Because."})["isError"], bad)
+        self.assertFalse([r for r in self.fakes["konbini"].seen if r["path"] != "/api/cards/alpha"])
+        self.assertFalse(self.fakes["niwa"].writes())
+
     def test_work_notes_and_unknown_notes_are_never_suggested(self):
         self.assertTrue(call(self.server, "garden_suggest", {"note": "Secret.md", "reason": "x"})["isError"])
         self.assertFalse(self.fakes["niwa"].writes())
@@ -967,6 +974,16 @@ class Gate(Base):
             self.assertEqual(self.post(base, b"x" * (mcp.MAX_BODY + 1))[0], 413)
         except (ConnectionError, urllib.error.URLError):
             pass            # the server answered 413 and closed while the client was still sending: also a refusal
+
+
+class ApplyTokens(Base):
+    def test_every_token_minted_under_load_is_redeemed_exactly_once(self):
+        # sweep MACH-M-9: mint's sweep of expired tokens raced with other mints and redeems
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(16) as pool:
+            tokens = list(pool.map(lambda i: self.server.mint("k", "owner", i), range(400)))
+            got = list(pool.map(lambda t: self.server.redeem("k", "owner", t), tokens + tokens))
+        self.assertEqual(sorted(g for g in got if g is not None), list(range(400)))
 
 
 class Limits(Base):
