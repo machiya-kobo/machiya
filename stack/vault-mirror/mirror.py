@@ -1,7 +1,7 @@
 """vault-mirror: the Machiya stack's one shared copy of the vault repo (docs/principles.md).
 
 Keeps a full clone at MIRROR_DIR up to date (vaultkit.Mirror: clone once, then fetch + hard reset every
-MIRROR_POLL seconds) and writes MIRROR_DIR/../status.json ({head, synced_at, error}). Kura reads the clone
+MIRROR_POLL seconds) and writes MIRROR_DIR/../status.json ({head, synced_at, error, version}). Kura reads the clone
 directly (mounted read-only); Niwa and Konbini borrow its objects for their small read-write clones
 (`git clone --reference`). Nothing writes to the mirror except this process. An app brought up standalone
 doesn't use it: it owns its own copy.
@@ -11,7 +11,7 @@ import os
 import sys
 import time
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from vaultkit.git import Mirror, read_secret   # noqa: E402
@@ -25,9 +25,10 @@ m = Mirror(URL, DIR, os.environ.get("MIRROR_BRANCH", ""), read_secret(os.environ
 
 
 def write_status(**kw):
+    """status.json for the readers: head, synced_at, error, and (0.1.1) this mirror's version."""
     tmp = STATUS + ".tmp"
     with open(tmp, "w") as f:
-        json.dump(kw, f)
+        json.dump(dict(kw, version=VERSION), f)
     os.replace(tmp, STATUS)
 
 
