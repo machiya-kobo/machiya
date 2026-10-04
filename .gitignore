@@ -10,3 +10,5 @@ secrets/
 *.sqlite3
 *.sqlite3-*
 repo/
+# Machiya's identity file (logins, token hashes, the session key): never in the repository
+identity.toml
