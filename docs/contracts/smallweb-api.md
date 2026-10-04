@@ -162,3 +162,7 @@ Errors, per save:
 - smallweb never follows links on its own.
 - `/page` honours Gemini `robots.txt` for `webproxy` and `*`, and gopher `robots.txt` for `*`. An http(s) save reads no `robots.txt` (see `POST /api/save`).
 - Egress goes through `SMALLWEB_SOCKS` (an optional SOCKS proxy), never your own IP when it is set. Some hosts refuse VPN ranges; their pages say so and offer the native link. Gemini and gopher names are resolved by the proxy; an http(s) save resolves the name itself (to check the addresses) and asks the proxy for the vetted address.
+
+## `GET /api/changelog` (open, like `/api/status`)
+
+smallweb's `CHANGELOG.md` as `text/markdown; charset=utf-8` (at most 64 KiB, an `ETag`; 404 without the file), for the [landing page](../services/landing.md)'s Recent Deploys (`vaultkit.changelog`).

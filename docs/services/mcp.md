@@ -5,7 +5,7 @@
 - **Code:** [`stack/mcp/`](../../stack/mcp/) in this repo (stdlib Python, no dependencies), Tests: `python3 -m unittest discover -s stack/mcp/tests` (from `stack/mcp/`) (fake rooms, a stateful fake Hister, and real git repos for the notes tools).
 - **Vendored vaultkit:** `stack/mcp/vaultkit/` is copied with `./vendor.sh stack/mcp vX.Y.Z` from the repo root, like the other consumers; the image build runs `python3 -m vaultkit.verify` so an edited copy fails. Only the notes write tools use it, and it is imported only when `MCP_NOTES_DIR` is set.
 - **Version:** 0.7.0 (see [CHANGELOG.md](../../stack/mcp/CHANGELOG.md); the tool list is below).
-- **Endpoint:** `POST /mcp` (legacy Streamable HTTP, plain JSON replies, no session, no SSE; protocol 2025-03-26 to 2025-11-25). `GET /healthz` and `/api/status` need no identity.
+- **Endpoint:** `POST /mcp` (legacy Streamable HTTP, plain JSON replies, no session, no SSE; protocol 2025-03-26 to 2025-11-25). `GET /healthz`, `/api/status` and `/api/changelog` (the server's `CHANGELOG.md`, `text/markdown`, for the [landing page](landing.md)) need no identity.
 
 ## Standalone
 

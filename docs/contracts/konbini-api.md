@@ -41,6 +41,10 @@ The board half of Niwa's stream: `{start, end, days, now: {wip, blocked}, entrie
 
 For the container health check: `200 ok`, plain text, no data, no identity, whatever `KANBAN_AUTH` says. `/api/health` and `/api/status` stay gated on the Tailscale identity, so a check inside the container can't use them.
 
+### `GET /api/changelog`
+
+→ Konbini's `CHANGELOG.md` as `text/markdown; charset=utf-8` (at most 64 KiB, an `ETag`; 404 without the file), gated like `/api/health`. Read by the [landing page](../services/landing.md) for Recent Deploys. Served with `vaultkit.changelog` ([ui.md](../ui.md#the-changelog-endpoint-vaultkitchangelog-v018)).
+
 ### `GET /api/review`
 
 The weekly review (the board's `/review` page) as JSON. Read by `pm review`.

@@ -30,6 +30,10 @@ Niwa serves the garden itself: the web pages, plus **gemini** (port 1965) and **
 
 `NIWA_REPO_URL` (ssh, read-write; `GIT_SSH_COMMAND` for the key), `NIWA_REPO_SUBDIR`, `NIWA_POLL`, `NIWA_USERS`, `NIWA_HOST`, `NIWA_KONBINI_URL`, `NIWA_KURA_URL`, `NIWA_HISTER_URL`/`NIWA_HISTER_PUBLIC`/`NIWA_COLD_MAP`, `NIWA_ARCHIVE` (`wayback` | `none`), `NIWA_DB`. Full table: machiya-kobo/niwa README.
 
+## Status and changes
+
+`GET /api/status`: the version, vendored vaultkit, the clone's head and sync (`pending`, `ahead`, `error`), counts, for the probes. `GET /api/changelog`: Niwa's `CHANGELOG.md` as `text/markdown; charset=utf-8` (at most 64 KiB, an `ETag`; 404 without the file), behind the same gate as `/api/status`, for the [landing page](landing.md) (`vaultkit.changelog`).
+
 ## Open suggestions
 
 `GET /api/suggestions[?days=60]` `{"suggestions": [{"path", "reason", "agent", "date"}], "days": 60}`, newest first, `days` 1 to 365. `agent` is the suggestion's `X-Agent` (or the login for a web-UI suggestion), `date` a day. The open set is each note's latest suggestion not followed by an unsuggest or a publish. Read by machiya-mcp's `garden_suggest` to avoid repeats; same access as Niwa's other reads.

@@ -135,6 +135,10 @@ The notes Kura's service worker keeps on a device for good (Machiya's shared wor
 
 → `{"head": "<commit>", "synced_at": <unix>, "notes": 120, "version": "<kura version>", "vaultkit": "v0.1.0", "error": null, "auth": "tailscale"}`, plus `vaults` with several vaults ([Vaults](#vaults)). This one needs no identity and the monitoring probes use it, so it carries no configuration: an error reads `"sync failed"` (or `"push failed"` for the Hister push), and a private vault's entry is only `{"error": …}`. A request that passes the owner gate (every request when `KURA_AUTH=open`; with the identity file, the owner) also gets `"repo": "<url without credentials>"`, `"subdir": "<vault folder>"` and the full error texts. A probe matches `"ready": true` and fails on `"error": "`.
 
+### `GET /api/changelog`
+
+→ Kura's `CHANGELOG.md` as `text/markdown; charset=utf-8` (at most 64 KiB, an `ETag`; 404 without the file), behind the same gate as `/api/status` (open). Read by the [landing page](../services/landing.md) for Recent Deploys. Served with `vaultkit.changelog` ([ui.md](../ui.md#the-changelog-endpoint-vaultkitchangelog-v018)).
+
 ### `GET /feed.xml?q=&tag=&folder=`
 
 RSS 2.0 of the 50 most recently changed matching notes (all notes without a filter). It feeds Shiori's Notes feed and OPML export. Default vault only, with no `vault` parameter; a shared vault's feed is `/v/<vault>/feed.xml`, a private vault has none.
