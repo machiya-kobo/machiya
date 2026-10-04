@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.1.3
+
+- `/machiya/signin?provider=<name>` (a provider in `HISTER_LOGIN_PROVIDERS`, e.g. `oidc`) sets the return cookie as the page does and goes straight to Hister's `/api/oauth?provider=<name>`: Shiori's "Sign In with Tailscale" is one tap. An unknown provider shows the page; a browser already signed in still finishes at once.
+
 ## 0.1.2
 
 - **Keep-alive (security):** a request body the helper didn't read (a GET's, a refused or unknown POST's) stayed on

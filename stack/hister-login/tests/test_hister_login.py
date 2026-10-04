@@ -365,6 +365,22 @@ class HelperTest(unittest.TestCase):
         self.assertIn(frag["hister"], self.fake.sessions)
         self.assertIsNone(cookie_value(headers, "machiya_sso"))          # the app holds the id, not a cookie
 
+    def test_signin_straight_to_a_provider(self):
+        """Shiori's "Sign In with Tailscale" (0.1.3): ?provider=oidc sets the return cookie and goes to Hister's OAuth."""
+        status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": "shiori://signed-in",
+                                                                                "app": "1", "provider": "oidc"}))
+        self.assertEqual(status, 303)
+        self.assertEqual(dict(headers)["Location"], "/api/oauth?provider=oidc")
+        self.assertTrue(cookie_value(headers, "machiya_return"))
+        status, headers, body = self.public("GET", "/machiya/signin?" + urlencode({"return": KURA, "provider": "github"}))
+        self.assertEqual(status, 200)                                  # a provider not offered: the page, as before
+        self.assertIn(b'id="hister-signin"', body)
+        session = self.fake.signed_in()                                # already signed in: finishes at once
+        status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": "shiori://signed-in",
+                                                                                "app": "1", "provider": "oidc"}),
+                                         {"Cookie": "hister=" + session})
+        self.assertTrue(dict(headers)["Location"].startswith("shiori://signed-in#sid=mhs_"))
+
     def test_app_flow_from_signin(self):
         session = self.fake.signed_in()
         status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": "shiori://signed-in",

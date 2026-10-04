@@ -39,7 +39,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -733,6 +733,9 @@ class Public(Handler):
         elif lg.hister.health() != "ok":
             return self.unavailable(lg.hister.health_state)
         cookies = [lg.return_cookie(ret, app)] if ret else [lg.cookie(RETURN_COOKIE, "", 0)]
+        provider = (q.get("provider") or "").strip().lower()
+        if provider and provider in lg.s.providers:     # straight to that sign-in (Shiori's "Sign In with Tailscale"):
+            return self.redirect("/api/oauth?provider=" + provider, cookies)   # the return cookie set as for the page
         self.page(200, signin_page(lg.s, self.headers, ret, app), [("Set-Cookie", c) for c in cookies])
 
     def unavailable(self, state):
