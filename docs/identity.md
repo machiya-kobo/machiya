@@ -32,7 +32,7 @@ python3 -m vaultkit.identity --file /srv/machiya/identity/identity.toml setup --
 
 - How you come in: `--tailscale LOGIN` (a Tailscale login), `--proxy LOGIN` (your proxy's login header value), `--password` (built-in sign-in; asks for it). Any mix; Tailscale is optional.
 - `--owner NAME` names your principal; `--rooms …` picks the rooms to print settings for.
-- It runs from a checkout of this repository with Python 3.11+, or inside any room's image once that image vendors vaultkit 0.12.0.
+- It runs from a checkout of this repository with Python 3.11+, or inside any room's image (every room vendors vaultkit, `app/vaultkit/`).
 
 Then, in each room:
 
@@ -112,10 +112,10 @@ python3 -m vaultkit.identity grant mcp konbini read write
 **An agent** (Claude, a script, machiya-mcp):
 
 ```sh
-python3 -m vaultkit.identity add claude-vm --kind agent
-python3 -m vaultkit.identity grant claude-vm kura read
-python3 -m vaultkit.identity grant claude-vm konbini read
-python3 -m vaultkit.identity token mint claude-vm --label "claude VM" --days 365
+python3 -m vaultkit.identity add laptop-agent --kind agent
+python3 -m vaultkit.identity grant laptop-agent kura read
+python3 -m vaultkit.identity grant laptop-agent konbini read
+python3 -m vaultkit.identity token mint laptop-agent --label "laptop agent" --days 365
 ```
 
 The token (`mch_<id>_<secret>`) is printed once; the file keeps only its hash. The agent sends it as `Authorization: Bearer …`, never in a URL. A **service** is the same with `--kind service`: Niwa's token for Konbini goes in `NIWA_KONBINI_TOKEN_FILE`, machiya-mcp's own in `MCP_TOKEN_FILE`.
@@ -133,7 +133,7 @@ python3 -m vaultkit.identity grant partner niwa read
 **A Shiori device**, either way:
 
 - **Code:** `identity pair partner --label iPhone` prints a one-time code (8 characters, good for 10 minutes; `--minutes` up to 60) and the device id. Type it in Shiori's Sign in to Machiya; Shiori trades it at any room's `POST /api/pair` for its own device token.
-- **Paste:** `identity token mint partner --label iPhone` and paste the token into Shiori's settings (Linux, Firefox, scripts).
+- **Paste:** `identity token mint partner --label iPhone` and paste the token into Shiori's settings (the Linux app, scripts).
 
 Details per app: Shiori's [docs/signing-in.md](https://github.com/machiya-kobo/shiori/blob/main/docs/signing-in.md).
 
@@ -154,7 +154,7 @@ Stored tokens survive a key rotation; revoke them one by one. Sessions last 30 d
 | | Kura | Niwa | Konbini | machiya-mcp |
 |---|---|---|---|---|
 | the file (all rooms) | `MACHIYA_IDENTITY_FILE` | same | same | same |
-| mode: `tailscale` (default), `header`, `open` | `KURA_AUTH` | `NIWA_AUTH` | `KANBAN_AUTH` | `MCP_AUTH` |
+| mode: `tailscale` (default), `header`, `open` (the rooms without the file: also `hister`, [below](#hister-sign-in-authhister)) | `KURA_AUTH` | `NIWA_AUTH` | `KANBAN_AUTH` | `MCP_AUTH` |
 | the proxy's login header | `KURA_AUTH_HEADER` | `NIWA_AUTH_HEADER` | `KANBAN_AUTH_HEADER` | `MCP_AUTH_HEADER` |
 | a header mode on a non-loopback bind | `KURA_BIND_BEHIND_PROXY=1` | `NIWA_BIND_BEHIND_PROXY=1` | `KANBAN_BIND_BEHIND_PROXY=1` | `MCP_BIND_BEHIND_PROXY=1` |
 | Tailscale tagged nodes | `KURA_ACCEPT_APP_CAPS=1` | `NIWA_ACCEPT_APP_CAPS=1` | `KANBAN_ACCEPT_APP_CAPS=1` | `MCP_ACCEPT_APP_CAPS=1` |

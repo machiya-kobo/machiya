@@ -28,7 +28,7 @@ Niwa serves the garden itself: the web pages, plus **gemini** (port 1965) and **
 
 ## Settings
 
-`NIWA_REPO_URL` (ssh, read-write; `GIT_SSH_COMMAND` for the key), `NIWA_REPO_SUBDIR`, `NIWA_POLL`, `NIWA_USERS`, `NIWA_HOST`, `NIWA_KONBINI_URL`, `NIWA_KURA_URL`, `NIWA_HISTER_URL`/`NIWA_HISTER_PUBLIC`/`NIWA_COLD_MAP`, `NIWA_ARCHIVE` (`wayback` | `none`), `NIWA_DB`. Full table: machiya-kobo/niwa README.
+`NIWA_REPO_URL` (ssh, read-write; `GIT_SSH_COMMAND` for the key), `NIWA_REPO_SUBDIR`, `NIWA_POLL`, `NIWA_AUTH` (`tailscale`, `open`, `header` or `hister`, as [Kura's](kura.md#settings)), `NIWA_USERS`, `NIWA_BIND_BEHIND_PROXY`, `NIWA_PUBLIC_URL`, `NIWA_HOST`, `NIWA_KONBINI_URL`, `NIWA_KURA_URL`, `NIWA_HISTER_URL`/`NIWA_HISTER_TOKEN_FILE`/`NIWA_HISTER_PUBLIC`/`NIWA_COLD_MAP`, `NIWA_ARCHIVE` (`wayback` | `none`), `NIWA_DB`. Full table: machiya-kobo/niwa README.
 
 ## Status and changes
 

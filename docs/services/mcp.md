@@ -2,9 +2,9 @@
 
 **One MCP endpoint for the rooms**, so Claude Code (and other MCP clients) can read and update the board, read and write the vault's notes, label saved pages and keep their collections, and suggest notes for the garden, without knowing four APIs. It is a client of the rooms' HTTP APIs and changes none of them. **Saved pages are searched and read with Hister's own MCP** ([Hister's MCP](../contracts/hister.md#histers-mcp)), not here: since 0.7.0 this server has no tool that Hister's MCP already offers.
 
-- **Code:** [`stack/mcp/`](../../stack/mcp/) in this repo (stdlib Python, no dependencies), Tests: `python3 -m unittest discover -s stack/mcp/tests` (from `stack/mcp/`) (fake rooms, a stateful fake Hister, and real git repos for the notes tools).
+- **Code:** [`stack/mcp/`](../../stack/mcp/) in this repo (stdlib Python, no dependencies), Tests: `python3 -m unittest discover -s tests` (from `stack/mcp/`, with `markdown` and `pyyaml` installed) (fake rooms, a stateful fake Hister, and real git repos for the notes tools).
 - **Vendored vaultkit:** `stack/mcp/vaultkit/` is copied with `./vendor.sh stack/mcp vX.Y.Z` from the repo root, like the other consumers; the image build runs `python3 -m vaultkit.verify` so an edited copy fails. It is imported only where it is needed: the notes write tools (when `MCP_NOTES_DIR` is set), the identity file, and `GET /api/changelog` (`vaultkit.changelog`); `/api/status` reads its version from the manifest (`vaultkit`, the tag).
-- **Version:** 0.7.1 (see [CHANGELOG.md](../../stack/mcp/CHANGELOG.md); the tool list is below).
+- **Version:** 0.7.4 (see [CHANGELOG.md](../../stack/mcp/CHANGELOG.md); the tool list is below).
 - **Endpoint:** `POST /mcp` (legacy Streamable HTTP, plain JSON replies, no session, no SSE; protocol 2025-03-26 to 2025-11-25). `GET /healthz`, `/api/status` and `/api/changelog` (the server's `CHANGELOG.md`, `text/markdown`, for the [landing page](landing.md)) need no identity.
 
 ## Standalone

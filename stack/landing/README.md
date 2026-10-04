@@ -25,7 +25,7 @@ Every app is optional. The page polls only what has an address; anything else sh
 | `LANDING_FEED_STATUS` | none | feed-import's `status.json` (its data volume, mounted read-only): the feed-import row and Sync's Feeds read |
 | `LANDING_SEARCH_COUNTS` | none | a JSON file of web searches (`{"updated", "today", "yesterday", "month", "year", "by_day"}`, UTC days, counts only) written by the deployment; the Shiori card shows today / this month / this year. Missing: left out |
 | `LANDING_SEARCH_URL` | none | Shiori's search page, `https://search.example.ts.net/`: the launcher's Search everything pill GETs `<url>?q=…` (unset: no pill) |
-| `LANDING_HISTER_TOKEN_FILE` | none | the owner's Hister token (`X-Access-Token`, re-read on change). Hister: the page count, the newest pages, Saved & Read and its version once Hister has users. The rooms with `AUTH=hister` (0.2.3): their owner-only reads (Konbini's health and cards, Kura's vaults and recent notes, Niwa's feed), sent only to their configured https address, never across a redirect; the open status reads never get it |
+| `LANDING_HISTER_TOKEN_FILE` | none | the owner's Hister token (`X-Access-Token`, re-read on change). Hister: the page count, the newest pages, Saved & Read and its version once Hister has users. The rooms with `AUTH=hister` (0.2.3): their owner-only reads (Konbini's health and cards, Kura's vaults and recent notes, Niwa's feed), sent only to their configured https address, never across a redirect; the open status reads never get it. Set but missing or empty stops the start; without it Hister is still shown up or down (from its open `/health`), just without the counts ([contracts/hister.md](../../docs/contracts/hister.md)) |
 | `LANDING_AUTH` | `tailscale` | `tailscale`: only a `Tailscale-User-Login` in `LANDING_USERS` (`*` = anyone the tailnet lets through; empty = nobody); `open`: no check, localhost only; `hister`: Hister's users through the hister-login helper (below); with the identity file also `header` (`LANDING_AUTH_HEADER`) |
 | `LANDING_AUTH_SIGNIN_URL` | none | `hister`: the helper's public sign-in (`https://hister.example.ts.net/machiya/signin`); required |
 | `LANDING_HISTER_USERS` | none | `hister`: the Hister usernames admitted (the owner's); required, never `*` |
@@ -38,7 +38,6 @@ Every app is optional. The page polls only what has an address; anything else sh
 | `LANDING_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | `open` mode answers only these `Host` names |
 | `LANDING_POLL`, `LANDING_TIMEOUT` | `60`, `3` | seconds between polls (15 at least), and per request |
 | `LANDING_TOKEN_FILE` | none | a token sent as `Authorization: Bearer` to Kura, Niwa and Konbini over https only (for rooms with an identity file), for their status and changelog; never to the engines or services |
-| `LANDING_HISTER_TOKEN_FILE` | none | the owner's Hister token, sent as `X-Access-Token` to Hister only, for the page count and the newest page once Hister's user handling is on ([contracts/hister.md](../../docs/contracts/hister.md)); re-read when the file changes; set but missing or empty stops the start. Without it Hister is still shown up or down (from its open `/health`), just without the count |
 | `LANDING_CHANGELOG_POLL` | `900` | seconds between asking each app for its changelog (`GET /api/changelog`); a new version is asked for at once |
 | `LANDING_CHANGELOGS` | none | an override per app, `kura=https://…/CHANGELOG.md,…`, for an app that doesn't serve `/api/changelog` |
 | `LANDING_CHANGELOG_TOKEN_FILE` | none | a read token for the override URLs only (`Authorization: token …`, https only) |
@@ -48,7 +47,7 @@ Every app is optional. The page polls only what has an address; anything else sh
 | `MACHIYA_COOKIE_DOMAIN` | none | shared theme and text size with the rooms, as in every room |
 | `MACHIYA_SOURCE_URL` | none | the AGPL source link in the footer and About |
 
-`AUTH=hister` will come through vaultkit, as for the rooms.
+`AUTH=hister` comes through vaultkit (`histerauth`), as for the rooms.
 
 ## Endpoints
 

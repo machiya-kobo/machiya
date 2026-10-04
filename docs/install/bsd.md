@@ -72,7 +72,7 @@ install -d -o kura -g kura -m 0700 /var/db/kura        # OpenBSD: -o _kura -g _k
 Clone a release tag of the app, owned by root and read-only for the service:
 
 ```sh
-git clone --branch v1.2.3 --depth 1 https://git.example.net/machiya/kura.git /usr/local/share/kura   # NetBSD: /usr/pkg/share/kura
+git clone --branch vX.Y.Z --depth 1 https://github.com/machiya-kobo/kura.git /usr/local/share/kura   # NetBSD: /usr/pkg/share/kura
 cd /usr/local/share/kura/app && python3 -m vaultkit.verify     # the vendored vaultkit is unedited
 ```
 
@@ -228,7 +228,7 @@ cd /usr/local/share/kura/app && python3 -m vaultkit.identity --file /usr/local/e
 - Each app runs as its own user, so give the file and its `session.key` a group the three users share, mode `0640`: `chgrp machiya` and `chmod 0640` both (make the group and add `kura`, `niwa` and `konbini` to it; on OpenBSD `_kura` and so on). The CLI keeps the mode and owner when it rewrites the file; a new key needs them again.
 - Add the printed lines to each app's env file (`MACHIYA_IDENTITY_FILE=…`, and `<APP>_SIGNIN=1` for the built-in sign-in), then restart it. With the file, `*_USERS` is unused.
 - Keep `<APP>_BIND=127.0.0.1` (§1): in `tailscale` or `header` mode the apps refuse any other address unless `<APP>_BIND_BEHIND_PROXY=1`.
-- The CLI comes with the apps once they vendor vaultkit 0.12.0; until then run it from a checkout of the Machiya repository.
+- The CLI comes with every app (its vendored `vaultkit`), so `cd` into any app's directory as above, or run it from a checkout of the Machiya repository.
 
 ## Niwa and Konbini extras
 

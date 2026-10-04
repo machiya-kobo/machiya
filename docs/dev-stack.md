@@ -1,6 +1,6 @@
 # The dev stack
 
-A standing Machiya on one development machine: every service production runs, with Hister's users as the sign-in, on **synthetic data only**. Agents and people develop and test against it by default; production is touched only to release. The same stack, the same seed and the same checks run on the test VMs, in containers or, where there are none (the BSDs, Haiku), as plain processes.
+A standing Machiya on one development machine: every service a full deployment runs, with Hister's users as the sign-in, on **synthetic data only**. Agents and people develop and test against it by default, and touch a real deployment only to release. The same stack, the same seed and the same checks run on the test VMs, in containers or, where there are none (the BSDs, Haiku), as plain processes.
 
 Everything lives in [`compose/dev/`](../compose/dev/): `compose.yml`, the `dev` script that drives it, the `seed/`, and the small stand-ins for the outside world.
 
@@ -41,12 +41,12 @@ cd machiya/compose/dev
 
 ## Ports
 
-Everything is on `127.0.0.1` (`--bind` changes it). The public ports go through `front`, which does what Tailscale Serve does in production: TLS (a throwaway CA, `$DEV_DATA/certs/ca.crt`, because the sign-in helper only sends a browser back to an `https` address), and on Hister's port it sends `/machiya/` and `/api/oauth/callback` to the hister-login helper.
+Everything is on `127.0.0.1` (`--bind` changes it). The public ports go through `front`, which does what Tailscale Serve does in a deployment: TLS (a throwaway CA, `$DEV_DATA/certs/ca.crt`, because the sign-in helper only sends a browser back to an `https` address), and on Hister's port it sends `/machiya/` and `/api/oauth/callback` to the hister-login helper.
 
 | Port | Service | Notes |
 |---|---|---|
 | 19200 | landing | `/` the launcher, `/status`; `AUTH=hister`, fallback `tailscale` |
-| 19201 | Kura | `AUTH=hister`, fallback **none** (as production) |
+| 19201 | Kura | `AUTH=hister`, fallback **none** |
 | 19202 | Niwa | `AUTH=hister`, fallback `tailscale` |
 | 19203 | Konbini | `AUTH=hister`, fallback `tailscale` |
 | 19204 | Hister + hister-login | users on; the helper's `/machiya/signin`, `/machiya/sessions` |
@@ -63,7 +63,7 @@ Everything is on `127.0.0.1` (`--bind` changes it). The public ports go through 
 
 Sign in as `owner` with the password in `$DEV_DATA/secrets/owner-password`. One sign-in covers every room; sign-out on the helper's sessions page ends it everywhere within 30 s.
 
-**How it differs from production.** All rooms share one host name, so cookies (Hister's own `hister` cookie too) are shared by port rather than by a cookie domain, and `MACHIYA_COOKIE_DOMAIN` is empty. landing signs in like the rooms (`AUTH=hister`, fallback `tailscale`); machiya-mcp and smallweb run `AUTH=open`, so the network decides who reaches them: the ports bind to `127.0.0.1`, and on the tailnet only owner-only grants should reach them. Niwa and Konbini call each other and Kura with the owner's Hister token; Hister's MCP and every service's Hister calls use it too.
+**How it differs from a deployment.** All rooms share one host name, so cookies (Hister's own `hister` cookie too) are shared by port rather than by a cookie domain, and `MACHIYA_COOKIE_DOMAIN` is empty. landing signs in like the rooms (`AUTH=hister`, fallback `tailscale`); machiya-mcp and smallweb run `AUTH=open`, so the network decides who reaches them: the ports bind to `127.0.0.1`, and on the tailnet only owner-only grants should reach them. Niwa and Konbini call each other and Kura with the owner's Hister token; Hister's MCP and every service's Hister calls use it too.
 
 ## On the tailnet
 
@@ -80,9 +80,9 @@ sudo tailscale serve status; sudo tailscale funnel status          # every line 
 
 **Serve only, never Funnel**: `tailscale serve --bg --https=…` keeps a port on the tailnet. `tailscale funnel` (or `serve --funnel`) would put the dev stack on the public internet, and a tailnet policy may well allow Funnel for every node. Undo a port with `sudo tailscale serve --https=<port> off`.
 
-`--tailnet-users` is what Niwa and Konbini admit in their Tailscale fallback, as in production. The tailnet policy must grant those ports to the owner's devices only. The ports for agents (19224, 19226) and the stand-ins (19209–19212) stay on `127.0.0.1`.
+`--tailnet-users` is what Niwa and Konbini admit in their Tailscale fallback. The tailnet policy must grant those ports to the owner's devices only. The ports for agents (19224, 19226) and the stand-ins (19209–19212) stay on `127.0.0.1`.
 
-**The sign-in cookie's name.** A production stack whose sign-in cookie is set on the tailnet's whole domain (`MACHIYA_COOKIE_DOMAIN=<tailnet>.ts.net`) also sends that cookie to the dev host, and a room reads the first `machiya_sso` it finds: a browser signed in to production would bounce between the dev rooms and the helper. So the dev stack on a tailnet names its own cookie, `--sso-cookie machiya_dev_sso` (`MACHIYA_SSO_COOKIE` in the helper, the rooms and landing). That needs rooms and a landing that vendor a vaultkit reading `MACHIYA_SSO_COOKIE`: with older ones, leave it unset (the default `machiya_sso`) and use a separate browser profile for the dev stack. To switch an existing stack, set `DEV_SSO_COOKIE=machiya_dev_sso` in `$DEV_DATA/dev.env` and `./dev up`. Tokens (agents, the MCP) are not affected either way.
+**The sign-in cookie's name.** A real stack whose sign-in cookie is set on the tailnet's whole domain (`MACHIYA_COOKIE_DOMAIN=<tailnet>.ts.net`) also sends that cookie to the dev host, and a room reads the first `machiya_sso` it finds: a browser signed in to that stack would bounce between the dev rooms and the helper. So the dev stack on a tailnet names its own cookie, `--sso-cookie machiya_dev_sso` (`MACHIYA_SSO_COOKIE` in the helper, the rooms and landing). That needs rooms and a landing that vendor a vaultkit reading `MACHIYA_SSO_COOKIE`: with older ones, leave it unset (the default `machiya_sso`) and use a separate browser profile for the dev stack. To switch an existing stack, set `DEV_SSO_COOKIE=machiya_dev_sso` in `$DEV_DATA/dev.env` and `./dev up`. Tokens (agents, the MCP) are not affected either way.
 
 ## Agents on the dev stack
 
@@ -95,7 +95,7 @@ HISTER_TOKEN_FILE=$DEV_DATA/secrets/owner-token \
   plugins/machiya/install.sh            # `install.sh check` tests the connections without changing anything
 ```
 
-From another machine on the tailnet, use `https://<machine>.<tailnet>.ts.net:19206/mcp` and `…:19204/mcp` instead, with a copy of the dummy token. The token file's path is saved, never the token; the plugin's `bin/hister-headers` reads it when Claude Code connects. To work against production (a release check), run the installer again with production's URLs and token file.
+From another machine on the tailnet, use `https://<machine>.<tailnet>.ts.net:19206/mcp` and `…:19204/mcp` instead, with a copy of the dummy token. The token file's path is saved, never the token; the plugin's `bin/hister-headers` reads it when Claude Code connects. To work against a real deployment (a release check), run the installer again with its URLs and token file.
 
 ## On a test VM
 
@@ -142,7 +142,7 @@ CGO_ENABLED=1 go126 build -trimpath -ldflags "-s -w" -o hister .
 ./hister --version                     # hister version v0.20.0
 ```
 
-These are upstream's Dockerfile steps without its Linux-only static linking (`-linkmode external -extldflags -static`, `-tags netgo,osusergo`), not yet run on FreeBSD. If `npm ci` fails on FreeBSD, build the UI on Linux (the same two npm commands, or `podman run --rm -v $PWD:/app -w /app node:24 sh -c '…'`) and copy `webui/app/build/` over: it is plain HTML, CSS and JavaScript. Then `tools/dev-test tv-freebsd --packages --native --hister-bin ./hister`. OpenBSD and NetBSD: the same steps with their Go 1.26 and Node packages, unchecked.
+These are upstream's Dockerfile steps without its Linux-only static linking (`-linkmode external -extldflags -static`, `-tags netgo,osusergo`); proven on FreeBSD 15.1 (2026-10-05, below). If `npm ci` fails on FreeBSD, build the UI on Linux (the same two npm commands, or `podman run --rm -v $PWD:/app -w /app node:24 sh -c '…'`) and copy `webui/app/build/` over: it is plain HTML, CSS and JavaScript. Then `tools/dev-test tv-freebsd --packages --native --hister-bin ./hister`. OpenBSD and NetBSD: the same steps with their Go 1.26 and Node packages, unchecked.
 
 ## Without containers (`--native`)
 
@@ -158,7 +158,7 @@ Natively the fixture sites' `*.example` names don't resolve, so feed-import stor
 
 ### Haiku
 
-Haiku has no Docker or Podman, so the dev stack runs there with `--native`. What is realistic today (R1/beta6, x86_64; HaikuPorts, checked 2026-10-04, not yet run on a Haiku machine):
+Haiku has no Docker or Podman, so the dev stack runs there with `--native`. What works today (R1/beta6, x86_64):
 
 - **Python services: yes.** Haiku packages Python 3.10–3.14 with `sqlite3` and `ssl`; only 3.14 is `python3`. `markdown` and `pyyaml` are packaged for 3.10 only (too old: the services need 3.11+), so use pip:
 
@@ -172,7 +172,6 @@ Haiku has no Docker or Podman, so the dev stack runs there with `--native`. What
   - sshd reads `AuthorizedKeysFile config/settings/ssh/authorized_keys` (relative to /boot/home), not `~/.ssh`; `ssh-keygen -A` + a reboot makes the host keys; the login user is `user` (uid 0);
   - python3.14, git, curl, openssl3 and pkgman are preinstalled;
   - **revert the VM between runs**: a second run on the same VM can hit `Address already in use` (stale sockets);
-  - `testvm start|stop|revert haiku` (services' testvm-ctl) manages it; the claude VM reaches it as `tv-haiku`.
 
   Python's own test suite skips its threading, socket and http.server tests on Haiku (they hang on some VMs), so the threaded stdlib servers are the thing to watch.
 - **FreeBSD: a native Hister builds** (proven 2026-10-05: v0.20.0 with go126 1.26.7 + node24, the recipe above, 16/16 with `--hister-bin`).

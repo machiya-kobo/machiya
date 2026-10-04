@@ -1,6 +1,6 @@
 # Shiori 栞 (the bookmark)
 
-**The search front door.** It's a native app for iPhone, iPad and Mac, plus a Safari extension, a hosted search page and a PWA. It searches three sources at once: your pages (Hister), your notes (Kura), and the web (SearXNG).
+**The search front door.** It's a native app for iPhone, iPad and Mac, plus a Safari extension, a hosted search page, a PWA and a Linux app. (For capturing pages in other browsers, use Hister's own extension.) It searches three sources at once: your pages (Hister), your notes (Kura), and the web (SearXNG).
 
 - **Repo:** [machiya-kobo/shiori](https://github.com/machiya-kobo/shiori), built on a Mac
 - **Hosted:** `https://search.example.ts.net` (the search page) and `https://shiori.example.ts.net` (the PWA). Both are owner-only, served by a small web server (nginx) next to Hister; the pages are built from the Shiori repo's sources.
@@ -13,7 +13,7 @@
 - **A note** opens in Obsidian to edit (`obsidian://open?vault=personal&file=…`), or in Kura to read. Its #tags link to Kura's tag pages.
 - **Remember What You Open:** opened results go into Hister history by URL.
 - **Summaries and answers** (Shiori's AI features, Claude on request). Notes are always refused, by host (`kura.`, `konbini.`, `niwa.`) and by label `vault`.
-- **Settings are per device.** The hosted pages get the Niwa and Konbini addresses when they are built (`SHIORI_NIWA_URL`, `SHIORI_KONBINI_URL`). RSS for any Hister query: `/shiori/feed` (a small feed service next to Hister; not part of this repository).
+- **Settings are per device.** The hosted pages get the notes' homes when they are built: Kura's address in `SHIORI_NIWA_URL` (the name is older than Kura) and Konbini's in `SHIORI_KONBINI_URL`. RSS for any Hister query: `/shiori/feed` (a small feed service next to Hister; not part of this repository).
 
 ## How it talks to the rest
 

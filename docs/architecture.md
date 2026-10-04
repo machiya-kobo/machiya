@@ -6,8 +6,8 @@
 flowchart TB
     subgraph sources["Sources"]
         vault[("Notes vault<br/>a repository on a Git host<br/>notes folder indexed")]
-        browser["Browsers + Shiori extension<br/>(pages you visit or save)"]
-        other["Other sources<br/>(feed-reader saves, importers)"]
+        browser["Browsers: Hister's extension,<br/>Shiori's Safari extension<br/>(pages you visit or save)"]
+        other["Importers<br/>(feed-import, code-import)"]
     end
 
     subgraph machiya["Machiya"]
@@ -165,3 +165,8 @@ The shared Hister network is an external Docker network created by the Hister st
 | Shiori | notes from Kura; pages from Hister with ` -label:vault` on every query |
 | vaultkit | vendored into Kura, Niwa and Konbini |
 | hister-login | optional, beside Hister: Hister's users as the one sign-in for the rooms (`*_AUTH=hister`) |
+| landing | optional: the stack's front door (`/`) and status page (`/status`) |
+| machiya-mcp | optional: one MCP endpoint for the rooms (board, notes, labels, garden suggestions) |
+| smallweb | optional: Gemini and Gopher search for Shiori, and page saves into Hister |
+| feed-import, code-import | optional: a feed reader's reads and stars, and your forges' repos, into Hister |
+| vault-mirror | optional: one shared clone of the vault for the whole stack ([principles](principles.md), 2) |
