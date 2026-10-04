@@ -29,7 +29,7 @@ import deploys                                   # noqa: E402
 import probes                                    # noqa: E402
 import render                                    # noqa: E402
 import today as todaymod                         # noqa: E402
-from vaultkit import changelog, identity, read_secret   # noqa: E402
+from vaultkit import changelog, histerauth, identity, read_secret, signin   # noqa: E402
 from vaultkit import shell as house              # noqa: E402
 
 with open(os.path.join(HERE, "VERSION"), encoding="utf-8") as _f:
@@ -41,7 +41,7 @@ ICONS = {"machiya.svg": "image/svg+xml", "machiya-small.svg": "image/svg+xml", "
          "machiya-192.png": "image/png", "machiya-512.png": "image/png", "machiya-maskable-512.png": "image/png"}
 TRUE = ("1", "on", "true", "yes")
 CHANGELOG_APPS = ("kura", "konbini", "niwa", "machiya-mcp", "smallweb")    # the apps that serve GET /api/changelog
-CHANGELOG_TYPES = ("text/markdown", "text/plain")
+CHANGELOG_PATHS = {"shiori": "/_shiori/CHANGELOG.md"}                      # 0.3.0: Shiori's hosted build serves its own
 
 
 def pairs(raw):
@@ -63,7 +63,7 @@ class Config:
     def __init__(self, env):
         has_file = bool((env.get("MACHIYA_IDENTITY_FILE") or "").strip())
         self.auth = (env.get("LANDING_AUTH") or "tailscale").strip().lower()
-        allowed = ("tailscale", "open", "header") if has_file else ("tailscale", "open")
+        allowed = ("tailscale", "open", "hister", "header") if has_file else ("tailscale", "open", "hister")
         if self.auth not in allowed:
             raise SystemExit("machiya-landing: LANDING_AUTH must be %s, not %r%s" % (
                 " or ".join(allowed), self.auth, " (header needs MACHIYA_IDENTITY_FILE)" if self.auth == "header" else ""))
@@ -84,6 +84,21 @@ class Config:
                 self.identity = identity.load_for("landing", env, bind=self.bind)
             except identity.IdentityError as e:
                 raise SystemExit("machiya-landing: identity: %s" % e)
+        # 0.3.0: Hister's users as the sign-in, like the rooms (vaultkit.histerauth): LANDING_AUTH=hister with
+        # LANDING_AUTH_SIGNIN_URL, LANDING_HISTER_USERS, LANDING_PUBLIC_URL, LANDING_AUTH_URL and the tailscale fallback
+        # (LANDING_USERS; LANDING_BIND_BEHIND_PROXY=1), so the status page still opens when sign-in is down.
+        self.public_url = (env.get("LANDING_PUBLIC_URL") or "").strip().rstrip("/")
+        if self.public_url and not self.public_url.startswith(("https://", "http://")):
+            raise SystemExit("machiya-landing: LANDING_PUBLIC_URL must be an http(s) address, not %r" % self.public_url)
+        self.secure = self.public_url.startswith("https://") if self.public_url else self.auth != "open"
+        self.hister_auth = None
+        if self.auth == "hister":
+            try:
+                self.hister_auth = histerauth.load_for("landing", env, bind=self.bind, secure=self.secure)
+            except identity.IdentityError as e:
+                raise SystemExit("machiya-landing: %s" % e)
+        state_dir = os.path.dirname((env.get("LANDING_STATE") or "").strip())
+        self.prefs_path = (env.get("LANDING_PREFS") or "").strip() or (os.path.join(state_dir, "prefs.sqlite3") if state_dir else "")
         self.users = csv(env.get("LANDING_USERS"))
         self.hosts = {h.lower() for h in csv(env.get("LANDING_ALLOWED_HOSTS") or "localhost,127.0.0.1,[::1]")}
         self.links = house.rooms(env)                     # MACHIYA_ROOMS: the rooms' and engines' public addresses
@@ -193,7 +208,11 @@ class Landing:
         if key in self.config.changelogs:
             return self.config.changelogs[key]
         target = self.config.targets.get(key, "")
-        return target.rstrip("/") + "/api/changelog" if key in CHANGELOG_APPS and target.startswith(("http://", "https://")) else ""
+        if not target.startswith(("http://", "https://")):
+            return ""
+        if key in CHANGELOG_PATHS:
+            return target.rstrip("/") + CHANGELOG_PATHS[key]
+        return target.rstrip("/") + "/api/changelog" if key in CHANGELOG_APPS else ""
 
     def fetch_changelogs(self, apps, now):
         """Each app's changelog, every LANDING_CHANGELOG_POLL seconds, and at once (at most once a minute) when the app
@@ -228,7 +247,8 @@ class Landing:
                 if str(e) not in ("HTTP 304", "HTTP 404"):
                     sys.stderr.write("machiya-landing: changelog %s: %s\n" % (key, e))
                 continue
-            sections = deploys.parse(body.decode("utf-8", "replace")) if ctype.split(";")[0].strip().lower() in CHANGELOG_TYPES else {}
+            # markdown, plain text or a static server's octet-stream; never a page (an SPA's fallback, a proxy's 404)
+            sections = deploys.parse(body.decode("utf-8", "replace")) if "html" not in ctype.lower() else {}
             if sections:
                 self.logs[key], self.etags[key] = sections, tag
             if app.get("version") not in sections:
@@ -285,39 +305,115 @@ def make_handler(landing):
             self.send(code, json.dumps(obj, ensure_ascii=False, indent=1), "application/json; charset=utf-8",
                       [("Cache-Control", "no-store")])
 
-        def allowed(self):
-            """(ok, status, reason): the owner gate."""
+        _hres = None                       # the Hister sign-in's answer, worked out once per request
+
+        def browser_page(self):
+            """A browser asking for a page (not an API, not a write): a signed-out one is sent to sign in."""
+            return self.command in ("GET", "HEAD") and not urlsplit(self.path).path.startswith("/api/") \
+                and "text/html" in (self.headers.get("Accept") or "")
+
+        def hres(self):
+            if self._hres is None:
+                self._hres = config.hister_auth.resolve(self.headers, is_page=self.browser_page(), path=self.path)
+            return self._hres
+
+        def host_ok(self):
+            if config.auth != "open":
+                return True
+            host = (self.headers.get("Host") or "").strip().lower()
+            name = host.rsplit(":", 1)[0] if not host.endswith("]") else host
+            return name in config.hosts or host in config.hosts
+
+        def gate(self):
+            """(principal or None, status, reason): the owner gate. The principal is the owner (or, with the identity
+            file, a principal with `landing` `read`)."""
+            if not self.host_ok():
+                return None, 403, "unknown Host (LANDING_ALLOWED_HOSTS)"
             if config.identity is not None:
                 # 401: no proof or a bad one (never passed over for another); 403: proven, without `landing` `read`
                 who = config.identity.resolve(self.headers, self.client_address[0] if self.client_address else "")
                 if not who:
-                    return False, who.status, who.error or "no identity"
+                    return None, who.status, who.error or "no identity"
                 if not who.principal.can("landing", "read"):
-                    return False, 403, "not allowed here"
-                return True, 200, ""
+                    return None, 403, "not allowed here"
+                return who.principal, 200, ""
+            if config.hister_auth is not None:
+                res = self.hres()
+                return res.principal, res.status, res.reason
             if config.auth == "open":
-                host = (self.headers.get("Host") or "").strip().lower()
-                name = host.rsplit(":", 1)[0] if not host.endswith("]") else host
-                return (name in config.hosts or host in config.hosts), 403, "unknown Host (LANDING_ALLOWED_HOSTS)"
+                return identity.OPEN_OWNER, 200, ""
             login = identity.ambient("tailscale", self.headers)
             ok = login is not None and ("*" in config.users or login.name.lower() in {u.lower() for u in config.users})
-            return ok, 403, "not an allowed user"
+            return (login if ok else None), 403, "not an allowed user"
+
+        def allowed(self):
+            p, status, reason = self.gate()
+            return p is not None, status, reason
+
+        def refuse(self, status, reason):
+            if config.hister_auth is not None and self.host_ok():   # a 302 to sign in, a 401 page or JSON, 403, 503
+                code, headers, body = config.hister_auth.respond(self.hres(), is_page=self.browser_page(),
+                                                                 ctx=house.prefs(self.headers.get("Cookie")))
+                ctype = dict(headers).get("Content-Type", "text/plain")
+                return self.send(code, body, ctype, [(k, v) for k, v in headers if k != "Content-Type"])
+            return self.send(status, "%s\n" % reason, "text/plain; charset=utf-8", [("Cache-Control", "no-store")])
+
+        def context(self, principal):
+            """Theme, text size and palette (cookies), plus: who is signed in (the header's person button and
+            Settings' Account), the fallback banner, and /api/prefs when there is somewhere to keep preferences."""
+            ctx = house.prefs(self.headers.get("Cookie"))
+            ctx.signin = config.hister_auth is not None
+            ctx.banner = config.hister_auth is not None and self._hres is not None and self._hres.banner
+            via = getattr(principal, "via", "") if principal is not None else ""
+            ctx.who = principal.name if principal is not None and via not in ("open", "") else ""
+            ctx.account = {"name": ctx.who, "via": via,
+                           "signout": config.hister_auth is not None and via in ("hister", "app", "token")} if ctx.who else None
+            ctx.prefs_url = "/api/prefs" if principal is not None and config.prefs_path else ""
+            return ctx
+
+        def origins(self):
+            """Where a cookie-borne prefs PUT or sign-out may come from: LANDING_PUBLIC_URL; else, in open mode, this
+            request's own Host (host_ok already checked it)."""
+            if config.public_url:
+                return [config.public_url]
+            host = (self.headers.get("Host") or "").strip()
+            return ["http://" + host, "https://" + host] if config.auth == "open" and host and self.host_ok() else []
+
+        def reply(self, status, headers, body):
+            ctype = dict(headers).get("Content-Type", "application/json")
+            return self.send(status, body, ctype, [(k, v) for k, v in headers if k != "Content-Type"])
+
+        def body(self, limit):
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if length < 0 or length > limit:
+                self.close_connection = True
+                return None
+            return self.rfile.read(length) if length else b""
 
         def do_GET(self):
             url = urlsplit(self.path)
             path, query = unquote(url.path), parse_qs(url.query)
             if path == "/healthz":                 # the container's health check: no data, no identity
                 return self.send_json(200, {"ok": True, "version": VERSION})
-            ok, status, reason = self.allowed()
-            if not ok:
-                return self.send(status, "%s\n" % reason, "text/plain; charset=utf-8", [("Cache-Control", "no-store")])
-            ctx = house.prefs(self.headers.get("Cookie"))
-            if path == "/api/changelog":           # this page's own CHANGELOG.md, behind the same gate as /api/status
+            if path == "/api/changelog":           # this page's own CHANGELOG.md: open, like every app's (0.3.0)
                 status, body, headers = changelog.handle(os.path.join(HERE, "CHANGELOG.md"), self.headers)
                 return self.send(status, body, dict(headers).pop("Content-Type"),
                                  [(k, v) for k, v in headers if k != "Content-Type"])
-            if path.startswith("/static/"):
+            if path.startswith("/static/"):        # the shared UI and icons: the sign-in pages need them too
                 return self.static(path[8:], query)
+            principal, status, reason = self.gate()
+            if principal is None:
+                return self.refuse(status, reason)
+            ctx = self.context(principal)
+            cookies = [("Set-Cookie", c) for c in (self._hres.cookies if self._hres is not None else [])]
+            if path == "/api/prefs":
+                if not config.prefs_path:
+                    return self.send_json(404, {"error": "not found"})
+                return self.reply(*signin.handle_prefs(prefs_store(config.prefs_path), principal, "GET", self.headers,
+                                                       b"", config.secure, self.origins()))
             if path == "/api/status":
                 return self.send_json(200, landing.public(landing.current()))
             if path == "/manifest.webmanifest":
@@ -333,15 +429,15 @@ def make_handler(landing):
                                     % (theme, house.COOKIE_DOMAIN)))
                 return self.send(302, "", "text/plain", [("Location", "/settings")] + cookies)
             if path == "/settings":
-                return self.send(200, render.settings(ctx, config.links, VERSION), headers=[("Cache-Control", "no-store")])
+                return self.send(200, render.settings(ctx, config.links, VERSION), headers=[("Cache-Control", "no-store")] + cookies)
             if path == "/status":
                 snap = landing.current()
                 return self.send(200, render.page(ctx, snap, landing.history, landing.logs, config.links, config.targets,
-                                                  landing.now(), config.tz), headers=[("Cache-Control", "no-store")])
+                                                  landing.now(), config.tz), headers=[("Cache-Control", "no-store")] + cookies)
             if path == "/":
                 snap = landing.current()
                 return self.send(200, render.home(ctx, snap, config.links, config.targets, config.search, landing.now(),
-                                                  config.tz), headers=[("Cache-Control", "no-store")])
+                                                  config.tz), headers=[("Cache-Control", "no-store")] + cookies)
             if path == "/api/today":
                 return self.send_json(200, landing.current().get("today") or {})
             return self.send(404, render.message(ctx, config.links, "Not Found", "There's nothing here."),
@@ -350,7 +446,29 @@ def make_handler(landing):
         do_HEAD = do_GET
 
         def do_POST(self):
-            self.send(405, "", "text/plain", [("Allow", "GET, HEAD")])
+            path = unquote(urlsplit(self.path).path)
+            if path == "/signout" and config.hister_auth is not None:     # before the gate: works while sign-in is down
+                if self.body(signin.MAX_FORM) is None:
+                    return self.send(413, "request body too large\n", "text/plain")
+                if not signin.same_origin(self.headers, config.secure, self.origins()):
+                    return self.send(403, "cross-site sign-out refused\n", "text/plain", [("Cache-Control", "no-store")])
+                _, cookies = config.hister_auth.signout(self.headers)
+                return self.send(303, "", "text/plain", [("Cache-Control", "no-store"), ("Location", "/")]
+                                 + [("Set-Cookie", c) for c in cookies])
+            self.send(405, "", "text/plain", [("Allow", "GET, HEAD, PUT")])
+
+        def do_PUT(self):
+            path = unquote(urlsplit(self.path).path)
+            principal, status, reason = self.gate()
+            if principal is None:
+                return self.refuse(status, reason)
+            if path != "/api/prefs" or not config.prefs_path:
+                return self.send_json(404, {"error": "not found"})
+            body = self.body(signin.MAX_PREFS)
+            if body is None:
+                return self.send_json(413, {"error": "request body too large"})
+            return self.reply(*signin.handle_prefs(prefs_store(config.prefs_path), principal, "PUT", self.headers,
+                                                   body, config.secure, self.origins()))
 
         def static(self, name, query):
             if name in STATIC_TYPES:
@@ -368,6 +486,18 @@ def make_handler(landing):
     return Handler
 
 
+_PREFS = {}
+_PREFS_LOCK = threading.Lock()
+
+
+def prefs_store(path):
+    """vaultkit.signin.Prefs on `path` (LANDING_PREFS, else prefs.sqlite3 beside LANDING_STATE), opened once."""
+    with _PREFS_LOCK:
+        if path not in _PREFS:
+            _PREFS[path] = signin.Prefs(path)
+        return _PREFS[path]
+
+
 def manifest(ctx, headers):
     return dict({
         "id": "/", "name": "Machiya", "short_name": "Machiya", "description": "The rooms of Machiya and how they are doing",
@@ -382,6 +512,11 @@ def main():
     config = Config(os.environ)
     if config.auth == "open":
         sys.stderr.write("machiya-landing: LANDING_AUTH=open, no identity check: use it on localhost only\n")
+    elif config.hister_auth is not None:
+        h = config.hister_auth
+        sys.stderr.write("machiya-landing: LANDING_AUTH=hister: %s, sign-in %s, fallback %s%s\n" % (
+            ",".join(sorted(h.users)), h.signin, h.fallback,
+            " (%s)" % ",".join(sorted(h.fallback_users)) if h.fallback == "tailscale" else ""))
     elif not config.users and config.identity is None:
         sys.stderr.write("machiya-landing: LANDING_USERS is empty, so every request will be refused\n")
     landing = Landing(config)

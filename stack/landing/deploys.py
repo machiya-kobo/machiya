@@ -52,19 +52,26 @@ class History:
                 self.since, changed = now, True
             for key, a in apps.items():
                 version, kit = a.get("version") or "", a.get("vaultkit") or ""
+                build = str((a.get("data") or {}).get("build") or "")    # Shiori's build: a deploy when the version stays
                 if a.get("state") in ("absent", "down") or not version:
                     continue
                 last = self.seen.get(key)
                 if last is None:
-                    self.seen[key] = {"version": version, "vaultkit": kit, "at": now}
+                    self.seen[key] = {"version": version, "vaultkit": kit, "build": build, "at": now}
                     changed = True
                     continue
-                if last.get("version") != version or (kit and last.get("vaultkit") and last.get("vaultkit") != kit):
-                    self.events.insert(0, {"app": key, "from": last.get("version"), "to": version,
-                                           "vaultkit_from": last.get("vaultkit") or "", "vaultkit_to": kit, "at": now})
+                rebuilt = last.get("version") == version and build and last.get("build") and last["build"] != build
+                if last.get("version") != version or (kit and last.get("vaultkit") and last.get("vaultkit") != kit) or rebuilt:
+                    ev = {"app": key, "from": last.get("version"), "to": version,
+                          "vaultkit_from": last.get("vaultkit") or "", "vaultkit_to": kit, "at": now}
+                    if rebuilt:
+                        ev.update(build_from=last["build"], build_to=build)
+                    self.events.insert(0, ev)
                     del self.events[KEEP:]
-                    self.seen[key] = {"version": version, "vaultkit": kit, "at": now}
+                    self.seen[key] = {"version": version, "vaultkit": kit, "build": build, "at": now}
                     changed = True
+                elif build and not last.get("build"):
+                    last["build"], changed = build, True
                 elif kit and not last.get("vaultkit"):
                     last["vaultkit"], changed = kit, True
             if changed:

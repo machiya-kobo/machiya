@@ -2,9 +2,11 @@
 Everything an app said is escaped here; nothing from an answer is ever markup."""
 import datetime
 import os
+import re
 
 import deploys
 import probes
+from vaultkit import histerauth
 from vaultkit import shell as house
 from vaultkit import verify as vk_verify
 
@@ -159,6 +161,8 @@ def deploy_item(ev, logs, now, tz):
     key = ev.get("app", "")
     name = probes.NAMES.get(key, key)
     ver = "%s → %s" % (ev["from"], ev["to"]) if ev.get("from") else ev.get("to", "")
+    if ev.get("build_from") and ev.get("from") == ev.get("to"):           # the same version, rebuilt (Shiori)
+        ver = "%s (build %s → %s)" % (ev["to"], ev["build_from"], ev["build_to"])
     kit = ""
     if ev.get("vaultkit_from") and ev.get("vaultkit_to") and ev["vaultkit_from"] != ev["vaultkit_to"]:
         kit = '<span class="chip">vaultkit %s → %s</span>' % (e(ev["vaultkit_from"]), e(ev["vaultkit_to"]))
@@ -231,26 +235,53 @@ def footer(snap, now):
     return house.footer(ROOM, {"text": text, "state": FOOT.get(snap["overall"]["state"], "ok")})
 
 
+def shell_page(ctx, title, current, links, body, scripts=True):
+    """The rooms' shell around a body (0.3.0, as Niwa's): the signed-in person button, the fallback banner at the top
+    of <main> when Hister's sign-in is down, the sign-in meta (machiya.js: Sign Out in the Rooms menu, a 401 goes to
+    sign in) and /api/prefs (theme and text size follow the person) when there's a principal and a place to keep them."""
+    who = getattr(ctx, "who", "")
+    if getattr(ctx, "banner", False):
+        body = re.sub(r"(<main[^>]*>)", lambda m: m.group(1) + histerauth.banner_html(), body, count=1)
+    head = histerauth.signin_meta("/signout") if getattr(ctx, "signin", False) else ""
+    return house.page(ctx, ROOM, title, house.header(ROOM, NAV, current, links, who=who) + body, TABS, current, links=links,
+                      head=head, stylesheets=[static_url("landing.css")], scripts=[static_url("landing.js")] if scripts else [],
+                      icons=ICONS, prefs_url=getattr(ctx, "prefs_url", ""), who=who)
+
+
 def page(ctx, snap, history, logs, links, targets, now, tz=None):
-    body = (house.header(ROOM, NAV, "status", links) + main_html(snap, history, logs, links, targets, now, tz)
-            + footer(snap, now))
-    return house.page(ctx, ROOM, house.title(ROOM, "Status"), body, TABS, "status", links=links, stylesheets=[static_url("landing.css")],
-                      scripts=[static_url("landing.js")], icons=ICONS)
+    return shell_page(ctx, house.title(ROOM, "Status"), "status", links,
+                      main_html(snap, history, logs, links, targets, now, tz) + footer(snap, now))
+
+
+ACCOUNT_NOTE = {"hister": "Signed in with Hister. Signing out ends the session in every room.",
+                "app": "Signed in with Hister. Signing out ends the session in every room.",
+                "token": "Signed in with a Hister token.",
+                "fallback": "Signed in through the tailnet: Hister's sign-in is unavailable right now.",
+                "tailscale": "Signed in through the tailnet."}
+
+
+def account_section(account):
+    """Settings' Account (0.3.0): who is signed in and how, and Sign Out (a same-origin POST /signout) for a Hister
+    sign-in. None when nobody is named (open mode)."""
+    if not account:
+        return None
+    row = '<div class="item"><span>Signed in as %s</span>%s</div>' % (
+        e(account["name"]), '<form method="post" action="/signout" class="signout"><button type="submit">Sign Out</button></form>'
+        if account.get("signout") else "")
+    return ("Account", [row], ACCOUNT_NOTE.get(account.get("via"), ""))
 
 
 def settings(ctx, links, version):
     _, rows, _ = house.about_section(ROOM, version, "", vaultkit_version())
     about = ("About", rows, "Machiya's front door and status page. Install it from the browser's menu (Add to Home Screen).")
-    sections = [house.appearance_section(ctx), house.apps_section(ROOM, links, {}), about]
-    body = house.header(ROOM, NAV, "", links) + house.settings_page(sections, ROOM)
-    return house.page(ctx, ROOM, house.title(ROOM, "Settings"), body, TABS, "", links=links,
-                      stylesheets=[static_url("landing.css")], icons=ICONS)
+    sections = [house.appearance_section(ctx, synced=bool(getattr(ctx, "prefs_url", ""))),
+                account_section(getattr(ctx, "account", None)), house.apps_section(ROOM, links, {}), about]
+    return shell_page(ctx, house.title(ROOM, "Settings"), "", links, house.settings_page(sections, ROOM), scripts=False)
 
 
 def message(ctx, links, heading, text, status_title=""):
-    body = house.header(ROOM, NAV, "", links) + house.message(heading, text, [("/", "Go to Machiya")])
-    return house.page(ctx, ROOM, house.title(ROOM, status_title or heading), body, TABS, "", links=links,
-                      stylesheets=[static_url("landing.css")], icons=ICONS)
+    return shell_page(ctx, house.title(ROOM, status_title or heading), "", links,
+                      house.message(heading, text, [("/", "Go to Machiya")]), scripts=False)
 
 
 # -- the launcher (/) -------------------------------------------------------------------------------------------------
@@ -327,7 +358,7 @@ def home_html(snap, links, targets, search, now, tz=None):
     hd = (apps.get("hister") or {}).get("data") or {}
     counts = {
         "shiori": plural_or(hd.get("docs"), "page", "search"),
-        "konbini": ("%s in WIP" % "{:,}".format(t["wip"])) if t.get("wip") is not None else (fact(apps["konbini"], "WIP") or fact(apps["konbini"], "cards")),
+        "konbini": ("%s in WIP" % probes.count(t["wip"])) if t.get("wip") is not None else (fact(apps["konbini"], "WIP") or fact(apps["konbini"], "cards")),
         "niwa": fact(apps["niwa"], "published"),
         "kura": plural_or(((apps["kura"].get("data") or {}).get("total_notes")), "note", fact(apps["kura"], "notes")),
     }
@@ -376,6 +407,4 @@ def plural_or(n, word, fallback):
 
 
 def home(ctx, snap, links, targets, search, now, tz=None):
-    body = house.header(ROOM, NAV, "home", links) + home_html(snap, links, targets, search, now, tz) + footer(snap, now)
-    return house.page(ctx, ROOM, "Machiya", body, TABS, "home", links=links, stylesheets=[static_url("landing.css")],
-                      scripts=[static_url("landing.js")], icons=ICONS)
+    return shell_page(ctx, "Machiya", "home", links, home_html(snap, links, targets, search, now, tz) + footer(snap, now))

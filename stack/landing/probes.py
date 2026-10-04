@@ -7,6 +7,7 @@ than LIMIT bytes is cut off and counted as unreadable. Nothing here renders HTML
 import json
 import os
 import re
+from decimal import ROUND_HALF_UP, Decimal
 import socket
 import threading
 import time
@@ -199,8 +200,25 @@ def vk(v):
     return v[1:] if re.match(r"v\d", v) else v
 
 
+def count(n):
+    """A count as the owner reads it (0.3.0): below 1,000 as is; from 1,000 one decimal and k, M or B, a trailing .0
+    dropped, rounded half up (1,049 -> 1k, 1,050 -> 1.1k, 12,340 -> 12.3k, 999,950 -> 1M)."""
+    n = int(n)
+    if abs(n) < 1000:
+        return str(n)
+    for div, unit, nxt in ((10 ** 3, "k", 10 ** 6), (10 ** 6, "M", 10 ** 9), (10 ** 9, "B", None)):
+        if nxt is not None and abs(n) >= nxt:
+            continue
+        v = (Decimal(n) / div).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+        if nxt is not None and abs(v) >= 1000:          # 999,950 rounds up to the next unit
+            continue
+        text_ = format(v, "f")
+        return (text_[:-2] if text_.endswith(".0") else text_) + unit
+    return str(n)
+
+
 def plural(n, word, many=None):
-    return "%s %s" % ("{:,}".format(n), word if n == 1 else (many or word + "s"))
+    return "%s %s" % (count(n), word if n == 1 else (many or word + "s"))
 
 
 def age_state(at, now, kind):
@@ -259,8 +277,16 @@ def kura(base, now, timeout, headers, owner=None):
 
 
 def konbini(base, now, timeout, headers, owner=None):
-    """GET /api/health (contracts/konbini-api.md; gated on the owner): cards, the vault head, sync and LiveSync."""
-    d = fetch_json(base + "/api/health", headers, timeout)
+    """GET /api/health (contracts/konbini-api.md): cards, the vault head, sync, LiveSync and per-board counts. With
+    AUTH=hister Konbini answers anyone a limited view (ok, version, head, cards) and the owner the full one, so it is
+    asked with the owner's credential (`owner`, the lead's decision for 0.2.3); refused (401/403), it is asked again
+    without it and the limited view stands."""
+    try:
+        d = fetch_json(owner_url(base, "/api/health"), owner if owner else headers, timeout)
+    except FetchError as e:
+        if not owner or str(e) not in ("HTTP 401", "HTTP 403"):
+            raise
+        d = fetch_json(base + "/api/health", headers, timeout)
     sync = d.get("sync") if isinstance(d.get("sync"), dict) else {}
     live = ((d.get("livesync") or {}).get("status") or {}) if isinstance(d.get("livesync"), dict) else {}
     cards = num(d.get("cards"))
@@ -276,7 +302,7 @@ def konbini(base, now, timeout, headers, owner=None):
                       if isinstance(c, dict) and c.get("board") == "wip")
         except FetchError:
             pass
-    facts = ["%s in WIP" % "{:,}".format(int(wip)) if wip is not None else "", plural(int(cards), "card") if cards is not None else ""]
+    facts = ["%s in WIP" % count(wip) if wip is not None else "", plural(int(cards), "card") if cards is not None else ""]
     return result(state, d.get("version"), vk(d.get("vaultkit")), facts, err,
                   {"head": text(d.get("head"), 64), "pending": num(sync.get("pending")), "ahead": num(sync.get("ahead")),
                    "wip": wip, "sync_error": text(sync.get("error")), "livesync": {
@@ -292,7 +318,7 @@ def niwa(base, now, timeout, headers):
     err = text(d.get("error")) or text(sync.get("error"))
     state = "error" if err else ("starting" if d.get("ready") is False else "up")
     return result(state, d.get("version"), vk(d.get("vaultkit")),
-                  ["%s published" % "{:,}".format(int(pub)) if pub is not None else ""], err,      # 0.2.0: no note count
+                  ["%s published" % count(pub) if pub is not None else ""], err,      # 0.2.0: no note count
                   {"head": text(d.get("head"), 64), "pending": num(sync.get("pending")), "ahead": num(sync.get("ahead")),
                    "sync_error": text(sync.get("error")), "published": pub})
 
@@ -322,7 +348,7 @@ def shiori(base, now, timeout, headers):
         ai = fetch_json(base + "/shiori/ai/status", headers, timeout)
         left = num(ai.get("remaining"))
         if ai.get("enabled"):
-            facts.append("AI on" + (" · %s left today" % "{:,}".format(int(left)) if left is not None else ""))
+            facts.append("AI on" + (" · %s left today" % count(left) if left is not None else ""))
         else:
             facts.append("AI off")
     except FetchError as e:
@@ -335,8 +361,7 @@ def shiori(base, now, timeout, headers):
         if str(e) != "HTTP 404":
             facts.append("feed down")
     out = result("up", version or (("build " + build) if build else ""), "", facts, "", {"build": build, "built": built})
-    out["build"] = build if version else ""
-    return out
+    return out                  # 0.3.0: the version only on the card; the build stays in data (Recent Deploys)
 
 
 HISTER_VERSION = {}             # base -> (when asked, version): Hister's MCP is asked at most every 15 minutes
@@ -433,7 +458,7 @@ def smallweb(base, now, timeout, headers):
     err = text(d.get("error"))
     state = "error" if err else ("starting" if d.get("ready") is False else "up")
     return result(state, d.get("version"), vk(d.get("vaultkit")),
-                  ["%s saved" % "{:,}".format(int(saved)) if saved is not None and h.get("enabled") else ""], err)
+                  ["%s saved" % count(saved) if saved is not None and h.get("enabled") else ""], err)
 
 
 def vault_mirror(path, now):
@@ -482,14 +507,7 @@ def feed_import(path, now):
                   {"last_success": last, "failures": fails, "error": err, "added_total": added, "running": bool(d.get("running"))})
 
 
-def compact(n):
-    """312 -> '312', 4210 -> '4,210', 51234 -> '51k', 1250000 -> '1.2M'."""
-    n = int(n)
-    if n >= 1_000_000:
-        return ("%.1fM" % (n / 1e6)).replace(".0M", "M")
-    if n >= 10_000:
-        return "%dk" % round(n / 1000)
-    return "{:,}".format(n)
+compact = count             # 0.2.1's name for the same thing
 
 
 def search_counts(path):
@@ -503,9 +521,9 @@ def search_counts(path):
         return ""
     if not isinstance(d, dict):
         return ""
-    bits = [("%s %s" % (compact(d[k]), w)) for k, w in (("today", "searches today"), ("month", "this month"), ("year", "this year"))
+    bits = [("%s %s" % (count(d[k]), w)) for k, w in (("today", "today"), ("month", "mo"), ("year", "yr"))
             if num(d.get(k)) is not None]
-    return " · ".join(bits)
+    return ("Searches " + " · ".join(bits)) if bits else ""        # 0.3.0: "Searches 112 today · 3.4k mo · 41.2k yr"
 
 
 READERS = {"kura": kura, "konbini": konbini, "niwa": niwa, "shiori": shiori, "hister": hister, "searxng": searxng,
@@ -639,7 +657,7 @@ def sync_rows(apps, now, board_behind_since=None):
         bits = []
         if fd.get("added_day") is not None:
             since = fd.get("added_since")
-            bits.append("%s added %s" % ("{:,}".format(int(fd["added_day"])),
+            bits.append("%s added %s" % (count(fd["added_day"]),
                                           "in the last day" if not since else "since the page started watching"))
         if fd.get("failures"):
             bits.append(plural(int(fd["failures"]), "failed run"))
