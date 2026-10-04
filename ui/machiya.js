@@ -8,7 +8,7 @@
 //     device (ts.net is on the Public Suffix List: <tailnet>.ts.net is the site, every room shares its cookies).
 //  2. the Apps setting: rooms and neighbours switched off are hidden from the switcher.
 //  3. the Rooms menu (<details class="rooms">) closes on Escape or a click outside.
-//  4. "/" focuses the room's search field (form.search), unless you're typing somewhere.
+//  4. "/" focuses the search page's field, or opens the room's search page (form.search's action), unless you're typing.
 //  5. updates (v0.6): when a new service worker is waiting, a "New Version · Reload" toast; Reload tells it to take
 //     over (postMessage {type: "SKIP_WAITING"}) and reloads once it has. Checks for updates on return to the app.
 //  6. server preferences (v0.12): with <meta name="machiya-prefs" content="/api/prefs"> (shell.page(prefs_url=)),
@@ -151,8 +151,12 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "/" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
     const t = ev.target;
     if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
-    const field = document.querySelector("form.search input[type=search]");
-    if (field) { ev.preventDefault(); field.focus(); field.select(); }
+    // the search page's own field when it's showing; otherwise open the room's search page (the header's field is hidden
+    // since v0.16.4: search is a tab on phones and a nav link on wide screens; its form still names the room's search URL)
+    const field = [...document.querySelectorAll("form.search input[type=search]")].find((f) => f.offsetParent !== null);
+    if (field) { ev.preventDefault(); field.focus(); field.select(); return; }
+    const form = document.querySelector("form.search");
+    if (form && form.action) { ev.preventDefault(); location.href = form.action; }
   }
 });
 
