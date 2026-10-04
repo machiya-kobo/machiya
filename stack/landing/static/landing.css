@@ -1,8 +1,6 @@
 /* landing.css: the landing page's own layout, after ui/machiya.css (the tokens, header, tab bar, cards, footer).
    Calm by design: green and yellow dots stay small and quiet; only a broken app (down, error) gets red text and a red edge. */
 
-.seal.icon[data-room="machiya"] { background-image: url("/static/icons/machiya.svg"); }
-
 main.landing { max-width: 1120px; margin: 0 auto; }
 main.landing [id] { scroll-margin-top: 72px; }
 

@@ -81,6 +81,21 @@ def fetch(url, headers=None, timeout=3.0):
         raise FetchError("connection failed")
 
 
+def fetch_text(url, headers=None, timeout=3.0):
+    """GET url -> (status, content type, body, ETag) for a text answer (a changelog); FetchError as fetch()."""
+    req = urllib.request.Request(url, headers=dict({"User-Agent": USER_AGENT}, **(headers or {})))
+    try:
+        with _OPENER.open(req, timeout=timeout) as r:
+            body = r.read(LIMIT + 1)
+            if len(body) > LIMIT:
+                raise FetchError("answer too large")
+            return r.status, r.headers.get("Content-Type", "") or "", body, r.headers.get("ETag", "") or ""
+    except urllib.error.HTTPError as e:
+        raise FetchError("HTTP %d" % e.code)
+    except (urllib.error.URLError, OSError):
+        raise FetchError("unreachable")
+
+
 def fetch_json(url, headers=None, timeout=3.0):
     _, _, body = fetch(url, headers, timeout)
     try:

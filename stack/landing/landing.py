@@ -7,7 +7,11 @@ no address shows "Not in this stack". Stdlib Python plus the vendored vaultkit (
 
 Owner-only, in the rooms' auth shape: LANDING_AUTH=tailscale (the default: Tailscale-User-Login must be in
 LANDING_USERS; `*` = anyone the tailnet lets through; unset = nobody) | open (no check; localhost only, with a Host
-allow-list). With Machiya's identity file the page needs a vaultkit that knows the `landing` room (see the README).
+allow-list). With Machiya's identity file (MACHIYA_IDENTITY_FILE) callers are principals instead and need the
+`landing` `read` grant (the owner has it); LANDING_AUTH=header then names a trusted proxy's login header.
+
+What a deploy brought comes from each app's own GET /api/changelog (its CHANGELOG.md); an app that doesn't serve
+one yet shows its versions only. LANDING_CHANGELOGS overrides the address per app.
 """
 import json
 import os
@@ -23,7 +27,7 @@ sys.path.insert(0, HERE)
 import deploys                                   # noqa: E402
 import probes                                    # noqa: E402
 import render                                    # noqa: E402
-from vaultkit import identity, read_secret       # noqa: E402
+from vaultkit import changelog, identity, read_secret   # noqa: E402
 from vaultkit import shell as house              # noqa: E402
 
 with open(os.path.join(HERE, "VERSION"), encoding="utf-8") as _f:
@@ -34,6 +38,8 @@ SHARED_UI = {"machiya.css": "text/css", "machiya.js": "text/javascript"}
 ICONS = {"machiya.svg": "image/svg+xml", "machiya-small.svg": "image/svg+xml", "machiya-apple-180.png": "image/png",
          "machiya-192.png": "image/png", "machiya-512.png": "image/png", "machiya-maskable-512.png": "image/png"}
 TRUE = ("1", "on", "true", "yes")
+CHANGELOG_APPS = ("kura", "konbini", "niwa", "machiya-mcp", "smallweb")    # the apps that serve GET /api/changelog
+CHANGELOG_TYPES = ("text/markdown", "text/plain")
 
 
 def pairs(raw):
@@ -53,9 +59,12 @@ def csv(raw):
 
 class Config:
     def __init__(self, env):
+        has_file = bool((env.get("MACHIYA_IDENTITY_FILE") or "").strip())
         self.auth = (env.get("LANDING_AUTH") or "tailscale").strip().lower()
-        if self.auth not in ("tailscale", "open"):
-            raise SystemExit("machiya-landing: LANDING_AUTH must be tailscale or open, not %r" % self.auth)
+        allowed = ("tailscale", "open", "header") if has_file else ("tailscale", "open")
+        if self.auth not in allowed:
+            raise SystemExit("machiya-landing: LANDING_AUTH must be %s, not %r%s" % (
+                " or ".join(allowed), self.auth, " (header needs MACHIYA_IDENTITY_FILE)" if self.auth == "header" else ""))
         self.bind = (env.get("LANDING_BIND") or "0.0.0.0").strip()
         self.port = int(env.get("LANDING_PORT") or "8080")
         behind = (env.get("LANDING_BIND_BEHIND_PROXY") or "").strip().lower() in TRUE
@@ -64,7 +73,7 @@ class Config:
         except identity.IdentityError as e:
             raise SystemExit("machiya-landing: %s" % str(e).replace("<ROOM>", "LANDING"))
         self.identity = None
-        if (env.get("MACHIYA_IDENTITY_FILE") or "").strip():
+        if has_file:
             if "landing" not in identity.ACTIONS:
                 raise SystemExit("machiya-landing: MACHIYA_IDENTITY_FILE is set, but this vaultkit (%s) has no `landing` "
                                  "room to grant; unset it (LANDING_USERS gates the page) or use a vaultkit that has one"
@@ -86,7 +95,7 @@ class Config:
         self.poll = max(15, int(env.get("LANDING_POLL") or "60"))
         self.timeout = max(0.5, float(env.get("LANDING_TIMEOUT") or "3"))
         self.token = self.secret(env.get("LANDING_TOKEN_FILE"), "LANDING_TOKEN_FILE")
-        self.changelogs = {k: v for k, v in pairs(env.get("LANDING_CHANGELOGS")).items() if k in probes.NAMES}
+        self.changelogs = {k: v for k, v in pairs(env.get("LANDING_CHANGELOGS")).items() if k in probes.NAMES}  # overrides
         self.changelog_token = self.secret(env.get("LANDING_CHANGELOG_TOKEN_FILE"), "LANDING_CHANGELOG_TOKEN_FILE")
         self.changelog_poll = max(60, int(env.get("LANDING_CHANGELOG_POLL") or "900"))
         self.state = (env.get("LANDING_STATE") or "").strip()
@@ -119,7 +128,7 @@ class Landing:
         self.lock = threading.Lock()
         self.snap = None
         self.history = deploys.History(config.state)
-        self.logs, self.logs_at = {}, 0.0
+        self.logs, self.logs_at, self.etags, self.fetched, self.missing = {}, 0.0, {}, {}, {}
         self.board_behind_since = None
 
     def poll(self):
@@ -136,24 +145,56 @@ class Landing:
         rows = probes.sync_rows(found, now, self.board_behind_since)
         snap = {"checked": now, "version": VERSION, "apps": found, "sync": rows, "overall": probes.overall(found, rows)}
         self.history.observe(found, now)
-        if c.changelogs and now - self.logs_at >= c.changelog_poll:
-            self.fetch_changelogs(now)
+        self.fetch_changelogs(found, now)
         with self.lock:
             self.snap = snap
         return snap
 
-    def fetch_changelogs(self, now):
-        """Each app's CHANGELOG.md, parsed; a failed fetch keeps the last good copy."""
-        self.logs_at = now
-        for key, url in self.config.changelogs.items():
-            headers = {"Accept": "text/plain, text/markdown, */*"}
-            if self.config.changelog_token and urlsplit(url).scheme == "https":
-                headers["Authorization"] = "token " + self.config.changelog_token
+    def changelog_url(self, key):
+        """Where an app's changelog is: LANDING_CHANGELOGS' override, else <its address>/api/changelog; "" for none."""
+        if key in self.config.changelogs:
+            return self.config.changelogs[key]
+        target = self.config.targets.get(key, "")
+        return target.rstrip("/") + "/api/changelog" if key in CHANGELOG_APPS and target.startswith(("http://", "https://")) else ""
+
+    def fetch_changelogs(self, apps, now):
+        """Each app's changelog, every LANDING_CHANGELOG_POLL seconds, and at once (at most once a minute) when the app
+        answers with a version its changelog doesn't have yet. A 304 or a failure keeps the last good copy; an app
+        without the endpoint (404, or not markdown) shows its versions only."""
+        due = now - self.logs_at >= self.config.changelog_poll
+        if due:
+            self.logs_at = now
+        for key in probes.NAMES:
+            url = self.changelog_url(key)
+            app = apps.get(key) or {}
+            if not url or app.get("state") in ("absent", "down"):
+                continue
+            stale = app.get("version") and app["version"] not in self.logs.get(key, {}) \
+                and self.missing.get(key) != app["version"]          # not asked again for a version it lacked
+            if not (due or (stale and now - self.fetched.get(key, 0) >= 60)):
+                continue
+            self.fetched[key] = now
+            if key in self.config.changelogs:
+                headers = {"Authorization": "token " + self.config.changelog_token} \
+                    if self.config.changelog_token and urlsplit(url).scheme == "https" else {}
+            else:
+                headers = probes.auth_headers(key, url, self.config.token)
+            headers["Accept"] = "text/markdown, text/plain;q=0.9"
+            if self.etags.get(key) and key in self.logs:
+                headers["If-None-Match"] = self.etags[key]
             try:
-                _, _, body = probes.fetch(url, headers, self.config.timeout * 2)
-                self.logs[key] = deploys.parse(body.decode("utf-8", "replace"))
+                _, ctype, body, tag = probes.fetch_text(url, headers, self.config.timeout * 2)
             except probes.FetchError as e:
-                sys.stderr.write("machiya-landing: changelog %s: %s\n" % (key, e))
+                if str(e) != "HTTP 304":
+                    self.missing[key] = app.get("version")
+                if str(e) not in ("HTTP 304", "HTTP 404"):
+                    sys.stderr.write("machiya-landing: changelog %s: %s\n" % (key, e))
+                continue
+            sections = deploys.parse(body.decode("utf-8", "replace")) if ctype.split(";")[0].strip().lower() in CHANGELOG_TYPES else {}
+            if sections:
+                self.logs[key], self.etags[key] = sections, tag
+            if app.get("version") not in sections:
+                self.missing[key] = app.get("version")
 
     def current(self):
         with self.lock:
@@ -209,9 +250,10 @@ def make_handler(landing):
         def allowed(self):
             """(ok, status, reason): the owner gate."""
             if config.identity is not None:
+                # 401: no proof or a bad one (never passed over for another); 403: proven, without `landing` `read`
                 who = config.identity.resolve(self.headers, self.client_address[0] if self.client_address else "")
                 if not who:
-                    return False, who.status, who.error or "sign in first"
+                    return False, who.status, who.error or "no identity"
                 if not who.principal.can("landing", "read"):
                     return False, 403, "not allowed here"
                 return True, 200, ""
@@ -232,6 +274,10 @@ def make_handler(landing):
             if not ok:
                 return self.send(status, "%s\n" % reason, "text/plain; charset=utf-8", [("Cache-Control", "no-store")])
             ctx = house.prefs(self.headers.get("Cookie"))
+            if path == "/api/changelog":           # this page's own CHANGELOG.md, behind the same gate as /api/status
+                status, body, headers = changelog.handle(os.path.join(HERE, "CHANGELOG.md"), self.headers)
+                return self.send(status, body, dict(headers).pop("Content-Type"),
+                                 [(k, v) for k, v in headers if k != "Content-Type"])
             if path.startswith("/static/"):
                 return self.static(path[8:], query)
             if path == "/api/status":

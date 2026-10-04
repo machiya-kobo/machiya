@@ -43,10 +43,12 @@ class Fake:
                     r = (404, b"not found", "text/plain")
                 if isinstance(r, dict):
                     r = (200, json.dumps(r).encode(), "application/json")
-                code, body, ctype = r
+                code, body, ctype, extra = (r + ({},))[:4]
                 body = body.encode() if isinstance(body, str) else body
                 self.send_response(code)
                 self.send_header("Content-Type", ctype)
+                for k, v in extra.items():
+                    self.send_header(k, v)
                 self.send_header("Content-Length", str(len(body)))
                 if code in (301, 302):
                     self.send_header("Location", "http://127.0.0.1:9/elsewhere")
@@ -441,6 +443,113 @@ class Server(Stack):
         conn.close()
 
 
+IDENTITY = """
+version = 1
+session_key_file = "session.key"
+
+[principals.owner]
+id = "ownerid00000000a"
+kind = "person"
+owner = true
+tailscale = ["owner@example.com"]
+
+[principals.guest]
+id = "guestid00000000a"
+kind = "person"
+tailscale = ["guest@example.com"]
+grants = { kura = ["read"] }
+
+[principals.viewer]
+id = "viewerid0000000a"
+kind = "person"
+tailscale = ["viewer@example.com"]
+grants = { landing = ["read"] }
+"""
+
+
+class IdentityFile(Server):
+    """With MACHIYA_IDENTITY_FILE the page asks the file: the owner and `landing` `read` get in, others 403."""
+
+    def test_grants(self):
+        with open(os.path.join(self.tmp, "identity.toml"), "w") as f:
+            f.write(IDENTITY)
+        with open(os.path.join(self.tmp, "session.key"), "wb") as f:
+            f.write(b"k" * 43)
+        base = self.serve(LANDING_AUTH="tailscale", MACHIYA_IDENTITY_FILE=os.path.join(self.tmp, "identity.toml"))
+        self.assertEqual(self.get(base + "/", {"Tailscale-User-Login": "owner@example.com"})[0], 200)
+        self.assertEqual(self.get(base + "/", {"Tailscale-User-Login": "viewer@example.com"})[0], 200)
+        self.assertEqual(self.get(base + "/", {"Tailscale-User-Login": "guest@example.com"})[0], 403)
+        self.assertEqual(self.get(base + "/api/status", {"Tailscale-User-Login": "guest@example.com"})[0], 403)
+        self.assertIn(self.get(base + "/")[0], (401, 403))
+        self.assertEqual(self.get(base + "/", {"Authorization": "Bearer mch_nope_bad"})[0], 401)
+        self.assertEqual(self.get(base + "/healthz")[0], 200)
+
+
+def changelog_route(text, seen):
+    """A fake app's GET /api/changelog, served by vaultkit.changelog (ETag, 304) from a file."""
+    from vaultkit import changelog
+    path = os.path.join(tempfile.mkdtemp(prefix="landing-cl-"), "CHANGELOG.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+    def route():
+        h = seen[-1]["headers"] if seen else {}
+        status, body, headers = changelog.handle(path, {"If-None-Match": h.get("if-none-match", "")})
+        h = dict(headers)
+        return (status, body, h.pop("Content-Type"), h)
+    return route
+
+
+class Changelogs(Stack):
+    def test_from_each_apps_own_endpoint(self):
+        self.fakes["kura"].routes["/api/changelog"] = changelog_route(CHANGELOG, self.fakes["kura"].seen)
+        self.fakes["niwa"].routes["/api/changelog"] = (404, b"no changelog\n", "text/plain")
+        self.fakes["konbini"].routes["/api/changelog"] = (200, b"<html>a page</html>", "text/html")   # not markdown
+        clock = [NOW]
+        self.fakes["kura"].routes["/api/status"] = dict(KURA, version="0.6.5", vaultkit="v0.17.1")
+        l = landing.Landing(landing.Config(self.env()), now=lambda: clock[0])
+        l.poll()
+        self.assertEqual(list(l.logs), ["kura"])                     # niwa: 404, konbini: not markdown
+        asked = lambda k: [x["path"] for x in self.fakes[k].seen].count("/api/changelog")
+        self.assertEqual((asked("kura"), asked("niwa"), asked("konbini")), (1, 1, 1))
+        self.assertEqual(asked("smallweb") + asked("machiya-mcp"), 2)
+        self.assertEqual(asked("hister") + asked("searxng") + asked("shiori"), 0)   # engines don't serve one
+        clock[0] += 120
+        self.fakes["kura"].routes["/api/status"] = dict(KURA, synced_at=clock[0])     # 0.6.8: in the log already
+        snap = l.poll()
+        self.assertEqual((asked("kura"), asked("niwa")), (1, 1))     # nothing new to ask before the next round
+        html = render.main_html(snap, l.history, l.logs, l.config.links, l.config.targets, clock[0])
+        self.assertIn("0.6.5 → 0.6.8", html)
+        self.assertIn("<b>0.6.8</b> A search pill under the header", html)
+        self.assertNotIn("Niwa</b><span class=\"dver\">0.4.6", html)
+        clock[0] += 901                                               # the next round: a 304 keeps the copy
+        l.poll()
+        self.assertEqual(asked("kura"), 2)
+        self.assertTrue(self.fakes["kura"].seen[-1]["headers"].get("if-none-match", "").startswith('"'))
+        self.assertIn("0.6.8", l.logs["kura"])
+
+    def test_a_new_version_is_asked_for_at_once(self):
+        text = [CHANGELOG]
+        from vaultkit import changelog as vk_changelog   # noqa: F401 (the shape it serves)
+        self.fakes["kura"].routes["/api/changelog"] = lambda: (200, text[0], "text/markdown; charset=utf-8")
+        clock = [NOW]
+        l = landing.Landing(landing.Config(self.env()), now=lambda: clock[0])
+        l.poll()
+        text[0] = "## 0.7.0\n\n- New.\n\n" + CHANGELOG
+        clock[0] += 90
+        self.fakes["kura"].routes["/api/status"] = dict(KURA, version="0.7.0", synced_at=clock[0])
+        l.poll()
+        self.assertIn("0.7.0", l.logs["kura"])
+
+    def test_the_pages_own_changelog(self):
+        base = Server.serve(self, LANDING_AUTH="tailscale", LANDING_USERS="owner@example.com")
+        code, headers, body = Server.get(self, base + "/api/changelog", {"Tailscale-User-Login": "owner@example.com"})
+        self.assertEqual((code, headers["Content-Type"]), (200, "text/markdown; charset=utf-8"))
+        self.assertIn("## " + landing.VERSION, body)
+        self.assertTrue(headers["ETag"])
+        self.assertEqual(Server.get(self, base + "/api/changelog")[0], 403)          # the same gate as /api/status
+
+
 class Setup(unittest.TestCase):
     def test_header_mode_needs_loopback_or_proxy(self):
         with self.assertRaises(SystemExit):
@@ -450,10 +559,10 @@ class Setup(unittest.TestCase):
 
     def test_unknown_mode_and_identity_file(self):
         with self.assertRaises(SystemExit):
-            landing.Config({"LANDING_AUTH": "header", "LANDING_BIND": "127.0.0.1"})
+            landing.Config({"LANDING_AUTH": "header", "LANDING_BIND": "127.0.0.1"})      # header needs the file
         with self.assertRaises(SystemExit) as cm:
             landing.Config({"LANDING_AUTH": "open", "LANDING_BIND": "127.0.0.1", "MACHIYA_IDENTITY_FILE": "/x/identity.toml"})
-        self.assertIn("landing", str(cm.exception))
+        self.assertIn("identity", str(cm.exception))                                     # a missing file refuses
 
     def test_token_file(self):
         d = tempfile.mkdtemp(prefix="landing-test-")

@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
  && useradd --uid 1000 --home-dir /data --no-create-home --shell /usr/sbin/nologin landing \
  && mkdir -p /data && chown 1000:1000 /data
 WORKDIR /app
-COPY VERSION landing.py probes.py deploys.py render.py /app/
+COPY VERSION CHANGELOG.md landing.py probes.py deploys.py render.py /app/
 COPY static /app/static
 COPY vaultkit /app/vaultkit
 # The vendored vault core must match its manifest: edits go upstream (vaultkit in machiya-kobo/machiya), then re-vendor.

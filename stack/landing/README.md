@@ -17,30 +17,33 @@ Every app is optional. The page polls only what has an address; anything else sh
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `MACHIYA_ROOMS` | none | the rooms' and engines' public addresses (`shiori=…,konbini=…,niwa=…,kura=…,hister=…,searxng=…`), as in every room: the links, the Rooms menu, and where each is polled |
+| `MACHIYA_ROOMS` | none | the rooms' and engines' public addresses (`shiori=…,konbini=…,niwa=…,kura=…,hister=…,searxng=…,machiya=…`), as in every room: the links, the Rooms menu, and where each is polled; `machiya=` is this page's own address (the rooms' Rooms menu and footer link here) |
 | `LANDING_APPS` | none | the stack's services, `machiya-mcp=https://…,smallweb=https://…` |
 | `LANDING_PROBES` | none | a different address to poll than to link, per app (`hister=http://hister:4433`) |
 | `LANDING_MIRROR_STATUS` | none | vault-mirror's `status.json` (its volume, mounted read-only) |
-| `LANDING_AUTH` | `tailscale` | `tailscale`: only a `Tailscale-User-Login` in `LANDING_USERS` (`*` = anyone the tailnet lets through; empty = nobody); `open`: no check, localhost only |
+| `LANDING_AUTH` | `tailscale` | `tailscale`: only a `Tailscale-User-Login` in `LANDING_USERS` (`*` = anyone the tailnet lets through; empty = nobody); `open`: no check, localhost only; with the identity file also `header` (`LANDING_AUTH_HEADER`) |
 | `LANDING_USERS` | none | the Tailscale logins allowed in |
 | `LANDING_BIND`, `LANDING_PORT` | `0.0.0.0`, `8080` | the listener; `tailscale` mode refuses a non-loopback bind unless `LANDING_BIND_BEHIND_PROXY=1` (the proxy is the only way in) |
 | `LANDING_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | `open` mode answers only these `Host` names |
 | `LANDING_POLL`, `LANDING_TIMEOUT` | `60`, `3` | seconds between polls (15 at least), and per request |
-| `LANDING_TOKEN_FILE` | none | a token sent as `Authorization: Bearer` to Kura, Niwa and Konbini over https only (for rooms with an identity file); never to the engines or services |
-| `LANDING_CHANGELOGS` | none | where each app's `CHANGELOG.md` is, `kura=https://…/CHANGELOG.md,…` (fetched every `LANDING_CHANGELOG_POLL` seconds, 900) |
-| `LANDING_CHANGELOG_TOKEN_FILE` | none | a read token for those URLs (`Authorization: token …`, https only), while the repositories are private |
+| `LANDING_TOKEN_FILE` | none | a token sent as `Authorization: Bearer` to Kura, Niwa and Konbini over https only (for rooms with an identity file), for their status and changelog; never to the engines or services |
+| `LANDING_CHANGELOG_POLL` | `900` | seconds between asking each app for its changelog (`GET /api/changelog`); a new version is asked for at once |
+| `LANDING_CHANGELOGS` | none | an override per app, `kura=https://…/CHANGELOG.md,…`, for an app that doesn't serve `/api/changelog` |
+| `LANDING_CHANGELOG_TOKEN_FILE` | none | a read token for the override URLs only (`Authorization: token …`, https only) |
+| `MACHIYA_IDENTITY_FILE` | none | Machiya's identity file: callers need the `landing` `read` grant (the owner has it); `LANDING_ACCEPT_APP_CAPS`, `LANDING_BIND_BEHIND_PROXY` as in the rooms |
 | `LANDING_STATE` | none (`/data/landing.json` in the image) | the deploy history; unset keeps it in memory |
 | `LANDING_TZ` | `UTC` | the time zone of the exact times in tooltips |
 | `MACHIYA_COOKIE_DOMAIN` | none | shared theme and text size with the rooms, as in every room |
 | `MACHIYA_SOURCE_URL` | none | the AGPL source link in the footer and About |
 
-`MACHIYA_IDENTITY_FILE` is refused for now: vaultkit's identity file has no `landing` room to grant yet. Once it has one, the page reads the file like the rooms do (the owner, or a principal with `landing` `read`), and `AUTH=hister` follows with vaultkit.
+`AUTH=hister` will come through vaultkit, as for the rooms.
 
 ## Endpoints
 
 - `GET /`: the page (no-store; it refreshes itself every minute while visible).
 - `GET /api/status`: the same as JSON (`overall`, `apps`, `sync`, `deploys`); owner-only, since it names every app's version.
+- `GET /api/changelog`: this page's own `CHANGELOG.md` (`vaultkit.changelog`), behind the same gate.
 - `GET /healthz`: `{"ok": true, "version": …}` for the container's health check and the monitoring probe; no identity, no data.
 - `/settings`, `/theme`, `/manifest.webmanifest`, `/static/…`: as in the rooms.
 
-The page sends only GETs, follows no redirect, and reads at most 4 MB from an app.
+The page sends only GETs, follows no redirect, and reads at most 4 MB from an app. It asks Kura, Konbini, Niwa, machiya-mcp and smallweb for `GET /api/changelog`; an app that answers 404 (or anything but markdown) shows its versions only.
