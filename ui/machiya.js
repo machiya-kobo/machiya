@@ -17,6 +17,10 @@
 //     first paint and offline; any failure (offline, 401, 404) is silent. Only known values are ever applied.
 //  7. sign-out (v0.13): a form posting to /signout first empties the service worker's offline copies (CLEAR_OFFLINE),
 //     so whoever uses this device next can't read what was kept; the server's answer also clears the HTTP cache.
+//  8. Hister sign-in (v0.18; inert unless the room opts in with <meta name="machiya-signin" content="/signout">,
+//     histerauth's signin_meta()): a same-origin fetch answered 401 with a JSON "signin" address sends the whole page
+//     there, with return= this page (API calls are never redirected by the server, so the page has to go itself); and
+//     every Rooms menu gains a "Sign Out" row, a form posting to that path (so 7. applies to it too).
 // Apps can listen for `machiya:setting` events ({detail: {key, value}}) to react to their own settings.
 
 const room = document.body.dataset.room || "app";
@@ -160,6 +164,41 @@ document.addEventListener("keydown", (ev) => {
   }
 });
 
+// Hister sign-in (8.): only with <meta name="machiya-signin">
+const signinMeta = document.querySelector('meta[name="machiya-signin"]');
+const signoutPath = signinMeta ? signinMeta.content || "/signout" : "";
+if (signinMeta && /^\/(?![\/\\])/.test(signoutPath)) {
+  for (const menu of document.querySelectorAll(".rooms .menu")) {
+    if (menu.querySelector("form.signout")) continue;
+    const form = document.createElement("form");
+    form.method = "post";
+    form.action = signoutPath;
+    form.className = "signout";
+    form.innerHTML = '<button type="submit">Sign Out</button>';
+    menu.append(document.createElement("hr"), form);
+  }
+}
+if (signinMeta && window.fetch) {
+  const fetchOriginal = window.fetch.bind(window);
+  let leaving = false;
+  window.fetch = async (input, init) => {
+    const res = await fetchOriginal(input, init);
+    if (res.status !== 401 || leaving) return res;
+    try {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+      if (url.origin !== location.origin) return res;
+      const data = await res.clone().json();
+      if (!data || typeof data.signin !== "string") return res;
+      const to = new URL(data.signin, location.href);
+      if (to.protocol !== "https:" && to.protocol !== "http:") return res;
+      if (to.searchParams.has("return")) to.searchParams.set("return", location.href);
+      leaving = true;
+      location.assign(to.href);
+    } catch { /* not JSON, or unreadable: the caller handles its 401 */ }
+    return res;
+  };
+}
+
 // Settings: "Offline Copies" (shell.offline_row): the counts from the service worker, and Clear Offline Copies
 function askWorker(msg) {
   return new Promise((resolve) => {
@@ -172,7 +211,7 @@ function askWorker(msg) {
   });
 }
 // sign-out (7.): the offline copies go first; at most a second's wait, then the form goes anyway
-for (const form of document.querySelectorAll('form[action="/signout"]')) {
+for (const form of document.querySelectorAll('form[action="/signout"], form.signout')) {
   form.addEventListener("submit", (ev) => {
     if (form.dataset.cleared) return;
     ev.preventDefault();

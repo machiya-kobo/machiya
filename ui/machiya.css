@@ -554,3 +554,13 @@ main.live-loading { opacity: .6; transition: opacity .15s .1s; }
 .update-toast button { border: 0; border-radius: 999px; padding: 6px 12px; background: var(--house); color: var(--bg);
   font: inherit; font-weight: 600; cursor: pointer; }
 @media (max-width: 760px) { .update-toast { bottom: calc(84px + env(safe-area-inset-bottom)); } }
+
+/* ---- Hister sign-in (vaultkit/histerauth.py, v0.18): the fallback banner and the Rooms menu's Sign Out row ------- */
+.machiya-banner { margin: var(--sp-3) 0; padding: 8px 12px; border-radius: 8px; font-size: var(--fs-s); line-height: 1.45;
+  color: var(--fg); background: color-mix(in srgb, var(--yellow) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--yellow) 45%, transparent); }
+.rooms .menu form.signout { margin: 0; }
+.rooms .menu form.signout button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px var(--sp-2);
+  border: 0; border-radius: 8px; background: none; color: var(--menu-fg, var(--fg)); font: 500 var(--fs-s) var(--font);
+  text-align: left; cursor: pointer; }
+.rooms .menu form.signout button:hover { background: var(--hl); }
