@@ -424,7 +424,8 @@ class HelperTest(unittest.TestCase):
     def test_signin_straight_to_a_provider(self):
         """Shiori's "Sign In with Tailscale" (0.1.3): ?provider=oidc sets the return cookie and goes to Hister's OAuth."""
         status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": "shiori://signed-in",
-                                                                                "app": "1", "provider": "oidc"}))
+                                                                                "app": "1", "provider": "oidc"}),
+                                         {"Sec-Fetch-Site": "none"})                 # the app's own web session
         self.assertEqual(status, 303)
         self.assertEqual(dict(headers)["Location"], "/api/oauth?provider=oidc")
         self.assertTrue(cookie_value(headers, "machiya_return"))
@@ -434,16 +435,91 @@ class HelperTest(unittest.TestCase):
         session = self.fake.signed_in()                                # already signed in: finishes at once
         status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": "shiori://signed-in",
                                                                                 "app": "1", "provider": "oidc"}),
-                                         {"Cookie": "hister=" + session})
+                                         {"Cookie": "hister=" + session, "Sec-Fetch-Site": "none"})
         self.assertTrue(dict(headers)["Location"].startswith("shiori://signed-in#sid=mhs_"))
 
     def test_app_flow_from_signin(self):
         session = self.fake.signed_in()
         status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": "shiori://signed-in",
                                                                                 "app": "1"}),
-                                         {"Cookie": "hister=" + session})
+                                         {"Cookie": "hister=" + session, "Sec-Fetch-Site": "none"})
         self.assertEqual(status, 303)
         self.assertTrue(dict(headers)["Location"].startswith("shiori://signed-in#sid=mhs_"))
+
+    def test_app_signin_never_finishes_on_a_cross_site_get(self):
+        """0.2.1 (sweep LEAD-3): any web page could navigate the owner to ?app=1&return=shiori://… with Hister's Lax
+        cookie and get both secrets sent to whatever app owns the scheme. A navigation that isn't the app's own (its
+        web session: Sec-Fetch-Site none) or this page's (same-origin) gets a confirmation page instead: no app
+        session, no return cookie, no redirect."""
+        session = self.fake.signed_in()
+        q = "/machiya/signin?" + urlencode({"return": "shiori://signed-in", "app": "1"})
+        before = self.login.store.count()
+        for site in ("cross-site", "same-site", None):
+            h = {"Cookie": "hister=" + session}
+            if site:
+                h["Sec-Fetch-Site"] = site
+            status, headers, body = self.public("GET", q, h)
+            self.assertEqual(status, 200, site)
+            self.assertNotIn("Location", dict(headers), site)
+            self.assertIsNone(cookie_value(headers, "machiya_return"), site)
+            self.assertIn(b'<form class="group" method="post" action="/machiya/signin">', body)
+            self.assertIn(b'name="return" value="shiori://signed-in"', body)
+            self.assertNotIn(b"mhs_", body)
+            self.assertNotIn(session.encode(), body)
+        # nor straight on to the provider (that would set the return cookie and finish in the callback)
+        status, headers, _ = self.public("GET", q + "&provider=oidc", {"Sec-Fetch-Site": "cross-site"})
+        self.assertEqual(status, 200)
+        self.assertIsNone(cookie_value(headers, "machiya_return"))
+        self.assertEqual(self.login.store.count(), before)                 # no stray "Shiori app" session
+        # the app's own web session and this page's own navigation finish as before
+        for site in ("none", "same-origin"):
+            status, headers, _ = self.public("GET", q, {"Cookie": "hister=" + session, "Sec-Fetch-Site": site})
+            self.assertEqual(status, 303, site)
+            self.assertTrue(dict(headers)["Location"].startswith("shiori://signed-in#sid=mhs_"), site)
+
+    def test_app_signin_confirmed_by_a_same_origin_post(self):
+        session = self.fake.signed_in()
+        form = urlencode({"return": "shiori://signed-in", "app": "1"}).encode()
+
+        def post(extra, body=form):
+            h = {"Cookie": "hister=" + session, "Content-Type": "application/x-www-form-urlencoded",
+                 "Content-Length": str(len(body))}
+            h.update(extra)
+            return self.public("POST", "/machiya/signin", h, body)
+        before = self.login.store.count()
+        for bad in ({}, {"Origin": "https://evil.example"}, {"Origin": "null"}, {"Referer": "https://evil.example/x"}):
+            status, headers, _ = post(bad)
+            self.assertEqual(status, 403, bad)
+            self.assertNotIn("Location", dict(headers))
+        self.assertEqual(self.login.store.count(), before)
+        status, headers, _ = post({"Origin": PUBLIC})
+        self.assertEqual(status, 303)
+        loc = urlsplit(dict(headers)["Location"])
+        self.assertEqual((loc.scheme, loc.netloc), ("shiori", "signed-in"))
+        frag = {k: v[0] for k, v in parse_qs(loc.fragment).items()}
+        self.assertEqual(self.check(frag["sid"])[1]["kind"], "app")
+        # signed out of Hister: the confirmed POST goes on to the sign-in (the return cookie set now)
+        status, headers, body = self.public("POST", "/machiya/signin", {
+            "Origin": PUBLIC, "Content-Type": "application/x-www-form-urlencoded", "Content-Length": str(len(form))}, form)
+        self.assertEqual(status, 200)
+        self.assertIn(b'id="hister-signin"', body)
+        self.assertTrue(cookie_value(headers, "machiya_return"))
+        # only the app flow is confirmed this way; a bad return is still refused
+        bad = urlencode({"return": "shiori://anything", "app": "1"}).encode()
+        self.assertEqual(post({"Origin": PUBLIC}, bad)[0], 400)
+
+    def test_app_return_is_exactly_signed_in(self):
+        """LEAD-3: the app flow returns only to shiori://signed-in (the address HisterKit sends), never another path."""
+        session = self.fake.signed_in()
+        for bad in ("shiori://anything", "shiori://signed-in/x", "shiori://signed-in?x=1", "shiori:signed-in",
+                    "shiori://evil@signed-in", "SHIORI://anything"):
+            status, _, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": bad, "app": "1"}),
+                                       {"Cookie": "hister=" + session, "Sec-Fetch-Site": "none"})
+            self.assertEqual(status, 400, bad)
+        status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": "shiori://signed-in",
+                                                                                "app": "1"}),
+                                         {"Cookie": "hister=" + session, "Sec-Fetch-Site": "none"})
+        self.assertEqual(status, 303)
 
     def test_try_again_link_is_this_path(self):
         """0.2.1 (sweep LEAD-6): routing reads the path of the target, so GET //evil.example/machiya/signin reaches the

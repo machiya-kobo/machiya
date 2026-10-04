@@ -460,10 +460,9 @@ class Login:
         return None, False
 
     def safe(self, ret, app=False):
-        ret = histerauth.safe_return(ret, self.s.return_hosts, self.s.app_schemes if app else ())
-        if app and ret and ret.lower().startswith("https://"):
-            return None                 # the app flow returns to the app, never to a page
-        return ret
+        if app:     # 0.2.1 (sweep LEAD-3): exactly <scheme>://signed-in (HisterKit's callbackURL), no other path
+            return ret if isinstance(ret, str) and ret in ("%s://signed-in" % s for s in self.s.app_schemes) else None
+        return histerauth.safe_return(ret, self.s.return_hosts, ())
 
     def finish(self, hister_session, answer, ret, app, headers, label=""):
         """A good Hister session: an id for it, and where to go. -> (location, cookies)."""
@@ -554,6 +553,20 @@ def signin_page(s, headers, ret, app, error=""):
         '</main>'
     ) % (alert, e(nxt), oauth)
     return render(headers, "Sign In · Machiya", body, ["/static/signin.js?v=%s" % VERSION])
+
+
+def confirm_page(headers, ret, provider=""):
+    """The app sign-in asked for by a navigation that wasn't the app's own web session (0.2.1, sweep LEAD-3): one
+    same-origin POST finishes it; nothing is created or remembered until then."""
+    fields = [("return", ret), ("app", "1")] + ([("provider", provider)] if provider else [])
+    body = (
+        '<main class="signin"><h1>Sign In to the App?</h1>'
+        '<p>An app on this device (%s) asked to sign in to Hister and Machiya as you. Continue only if you just started '
+        'signing in from that app.</p>'
+        '<form class="group" method="post" action="/machiya/signin">%s<button type="submit">Continue</button></form>'
+        '<p class="footnote">Didn\'t start a sign-in? Close this page.</p></main>'
+    ) % (e(ret.split(":", 1)[0]), "".join('<input type="hidden" name="%s" value="%s">' % (e(k), e(v)) for k, v in fields))
+    return render(headers, "Sign In to the App? · Machiya", body)
 
 
 def message_page(headers, heading, text, actions=()):
@@ -875,9 +888,10 @@ class Public(Handler):
         self.send(200, [("Content-Type", entry[1]), ("Cache-Control", "public, max-age=86400"),
                         ("X-Content-Type-Options", "nosniff")], data)
 
-    def signin(self):
+    def signin(self, form=None):
+        """GET /machiya/signin, or (form) the confirmed app sign-in's same-origin POST."""
         lg = self.login
-        q = self.query()
+        q = self.query() if form is None else form
         app = q.get("app") == "1"
         ret = lg.safe(q.get("return"), app)
         if q.get("return") and not ret:
@@ -885,6 +899,11 @@ class Public(Handler):
         if app and not ret:
             return self.page(400, message_page(self.headers, "Can't Sign In", "This app's sign-in address isn't one "
                                                "Machiya knows."))
+        if app and form is None and (self.headers.get("Sec-Fetch-Site") or "").strip().lower() not in ("none",
+                                                                                                    "same-origin"):
+            # not the app's own web session, nor this page: a cross-site link must never hand the app's scheme a
+            # session (LEAD-3); confirm with a same-origin POST, creating and remembering nothing until then
+            return self.page(200, confirm_page(self.headers, ret, (q.get("provider") or "").strip().lower()[:20]))
         session = hister_cookie(self.headers)
         if session:
             answer = lg.hister.profile(session=session)
@@ -973,6 +992,8 @@ class Public(Handler):
 
     def _post(self):
         path = urlsplit(self.path).path
+        if path == "/machiya/signin":
+            return self.signin_post()
         if path == "/machiya/signout":
             return self.signout()
         if path == "/machiya/sessions":
@@ -980,6 +1001,22 @@ class Public(Handler):
         if path == "/machiya/api/app-session":
             return self.app_session()
         self.json(404, {"error": "not found"})
+
+    def signin_post(self):
+        """POST /machiya/signin (0.2.1): the confirmation page's Continue for the app sign-in. Same-origin only; the app
+        flow only (a browser's own sign-in is a GET)."""
+        data = self.body()
+        if data is None:
+            return self.json(413, {"error": "request body too large"})
+        if not self.same_origin():
+            return self.page(403, message_page(self.headers, "Refused", "That must come from the sign-in page."))
+        try:
+            form = {k: v[0] for k, v in parse_qs(data.decode("utf-8"), max_num_fields=8).items()}
+        except (ValueError, UnicodeError):
+            return self.json(400, {"error": "unreadable form"})
+        if form.get("app") != "1":
+            return self.page(400, message_page(self.headers, "Can't Sign In", "Only an app's sign-in is confirmed here."))
+        return self.signin(form)
 
     def signout(self):
         """POST /machiya/signout: a browser (same-origin, its machiya_sso and hister cookies) or an app

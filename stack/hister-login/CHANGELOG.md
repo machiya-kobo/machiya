@@ -2,6 +2,12 @@
 
 ## 0.2.1
 
+- **The app sign-in never finishes on another site's link** (the 2026-10 sweep, LEAD-3). Any page could send the owner to `/machiya/signin?app=1&return=shiori://anything`. Hister's Lax cookie went along, and the helper created an app session and sent `#sid=…&hister=…` to whatever app owns the `shiori:` scheme on that device. Now:
+  - the app return is exactly `<scheme>://signed-in` (HisterKit's `callbackURL`), no other path;
+  - `app=1` finishes, or goes on to a provider, only on the app's own web session (`Sec-Fetch-Site: none`) or this page's own navigation (`same-origin`);
+  - anything else, a missing header included, gets a confirmation page: its Continue is a same-origin `POST /machiya/signin`, and no session or return cookie exists before it.
+
+  Shiori's apps change nothing: ASWebAuthenticationSession's first load is `none`, and the password form's return is same-origin.
 - **Try Again links to this path only** (the 2026-10 sweep, LEAD-6): the link on the "Sign-In Is Unavailable" page is the request's path and query, never its raw target, which could be `//other.host/…` (routing reads only the path). Python 3.12+'s http.server already folds a leading `//`; this no longer depends on it.
 
 ## 0.2.0
