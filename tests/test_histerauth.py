@@ -73,6 +73,15 @@ def make(fallback="tailscale", users=("owner",), fallback_users=("me@passkey",),
     return auth, helper, clock
 
 
+def cookie_value(cookies, name):
+    """The value a Set-Cookie list gives `name` (None when it isn't set)."""
+    for c in cookies:
+        k, _, rest = c.partition("=")
+        if k == name:
+            return rest.split(";", 1)[0]
+    return None
+
+
 def quiet(fn, *a, **kw):
     with redirect_stderr(io.StringIO()):
         return fn(*a, **kw)
@@ -245,7 +254,9 @@ class CookieNameTest(unittest.TestCase):
             with self.assertRaises(ha.IdentityError):
                 ha.sso_cookie_name({"MACHIYA_SSO_COOKIE": bad})
         a = ha.load_for("niwa", dict(LoadForTest.BASE, MACHIYA_SSO_COOKIE="machiya_dev_sso"))
-        self.assertEqual((a.sso_cookie, a.try_cookie), ("machiya_dev_sso", "machiya_dev_sso_try"))
+        self.assertEqual((a.sso_cookie, a.room_cookie, a.try_cookie, a.state_cookie, a.out_cookie),
+                         ("machiya_dev_sso", "__Host-machiya_dev_sso_niwa", "__Host-machiya_dev_sso_niwa_try",
+                          "__Host-machiya_dev_sso_niwa_state", "__Host-machiya_dev_sso_niwa_out"))
         self.assertEqual(ha.load_for("niwa", dict(LoadForTest.BASE)).sso_cookie, "machiya_sso")
 
     def test_own_name_only(self):
@@ -262,8 +273,9 @@ class CookieNameTest(unittest.TestCase):
                          200)
         r = a.resolve(Headers(("Cookie", "machiya_dev_sso=" + other)), path="/")      # signed out: its own cleared
         self.assertTrue(any(c.startswith("machiya_dev_sso=;") and "Max-Age=0" in c for c in r.cookies))
-        self.assertTrue(any(c.startswith("machiya_dev_sso_try=1;") for c in r.cookies))
-        self.assertFalse(any(c.startswith(("machiya_sso=", "machiya_sso_try=")) for c in r.cookies))
+        self.assertTrue(any(c.startswith("__Host-machiya_dev_sso_niwa_try=1;") for c in r.cookies))
+        self.assertFalse(any(c.startswith(("machiya_sso=", "machiya_sso_try=", "__Host-machiya_sso"))
+                             for c in r.cookies))
         with self.assertRaises(ha.IdentityError):
             ha.HisterAuth("niwa", SIGNIN, ("owner",), "https://n.example", "http://hl:8081", sso_cookie="bad name")
 
@@ -279,7 +291,8 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual((r.status, r.reason, r.actor, r.banner, r.cookies), (200, "ok", "hister:owner", False, []))
         self.assertTrue(r.principal.owner)
         self.assertEqual(r.principal.uid, tailscale_uid("me@passkey"))   # the one fallback login keys preferences
-        self.assertEqual(h.calls[0][1:], ("/v1/check", {"X-Machiya-Session": SID, "Accept": "application/json"}, 2.0))
+        self.assertEqual(h.calls[0][1:], ("/v1/check", {"X-Machiya-Session": SID, "Accept": "application/json",
+                                                         "X-Machiya-Room": "https://niwa.example.ts.net"}, 2.0))
 
     def test_app_and_token(self):
         a, h, _ = make()
@@ -313,16 +326,19 @@ class ResolveTest(unittest.TestCase):
         r = a.resolve(Headers(("Cookie", "machiya_sso=" + SID), ("Tailscale-User-Login", "me@passkey")),
                       path="/n/Note?x=1")
         self.assertEqual((r.status, r.reason, r.principal), (401, "signed-out", None))
-        self.assertEqual(r.location, SIGNIN + "?return=https%3A%2F%2Fniwa.example.ts.net%2Fn%2FNote%3Fx%3D1")
+        nonce = cookie_value(r.cookies, "__Host-machiya_sso_niwa_state")
+        self.assertEqual(r.location, SIGNIN + "?return=https%3A%2F%2Fniwa.example.ts.net%2Fn%2FNote%3Fx%3D1&state="
+                         + ha.state_hash(nonce))
         self.assertIn("machiya_sso=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure; Domain=example.ts.net",
                       r.cookies)
-        self.assertTrue(any(c.startswith("machiya_sso_try=1;") and "Max-Age=30" in c and "Domain" not in c
-                            for c in r.cookies))
+        self.assertTrue(any(c.startswith("__Host-machiya_sso_niwa_try=1;") and "Max-Age=30" in c
+                            and "Domain" not in c for c in r.cookies))
         # the guard is set: the next one is a page with a link, not another redirect
-        r2 = a.resolve(Headers(("Cookie", "machiya_sso_try=1")))
+        r2 = a.resolve(Headers(("Cookie", "__Host-machiya_sso_niwa_try=1")))
         self.assertEqual((r2.status, r2.location), (401, None))
         self.assertTrue(r2.signin.startswith(SIGNIN + "?return="))
-        self.assertFalse(any(c.startswith("machiya_sso_try=1") for c in r2.cookies))
+        self.assertIn("&state=", r2.signin)                                       # the link comes back with a code
+        self.assertFalse(any(c.startswith("__Host-machiya_sso_niwa_try=1") for c in r2.cookies))
 
     def test_signed_out_cached_5s(self):
         a, h, clock = make()
@@ -466,9 +482,9 @@ class ResolveTest(unittest.TestCase):
     def test_guard_cleared_on_success(self):
         a, h, _ = make()
         h.ok(SID)
-        r = a.resolve(Headers(("Cookie", "machiya_sso=%s; machiya_sso_try=1" % SID)))
+        r = a.resolve(Headers(("Cookie", "machiya_sso=%s; __Host-machiya_sso_niwa_try=1" % SID)))
         self.assertEqual(r.status, 200)
-        self.assertTrue(any(c.startswith("machiya_sso_try=;") and "Max-Age=0" in c for c in r.cookies))
+        self.assertTrue(any(c.startswith("__Host-machiya_sso_niwa_try=;") and "Max-Age=0" in c for c in r.cookies))
 
     def test_lru_bound(self):
         a, h, _ = make()
@@ -531,7 +547,7 @@ class PiecesTest(unittest.TestCase):
         status, headers, body = a.respond(r)
         self.assertEqual(status, 302)
         self.assertIn(("Location", r.location), headers)
-        r2 = a.resolve(Headers(("Cookie", "machiya_sso_try=1")))
+        r2 = a.resolve(Headers(("Cookie", "__Host-machiya_sso_niwa_try=1")))
         status, headers, body = a.respond(r2)
         self.assertEqual(status, 401)
         self.assertIn(b"Sign In", body)
@@ -553,6 +569,206 @@ class PiecesTest(unittest.TestCase):
         self.assertIn("if (signinMeta && window.fetch)", js)
         with open(os.path.join(root, "machiya.css")) as f:
             self.assertIn(".machiya-banner", f.read())
+
+
+RSID = "mhr_" + "R" * 43
+RSID2 = "mhr_" + "S" * 43
+RTOK = "mht_" + "T" * 43
+CODE = "mhc_" + "C" * 43
+NIWA = "https://niwa.example.ts.net"
+
+
+class RoomSessionTest(unittest.TestCase):
+    """v0.22: a host-only cookie per room (__Host-<base>_<room>) from a one-time code; room tokens; X-Machiya-Room."""
+
+    def room_ok(self, h, cred=RSID, room=NIWA, kind="room"):
+        h.answers[("/v1/check", cred)] = (200, json.dumps({"username": "owner", "user_id": 1, "via": "session",
+                                                           "kind": kind, "room": room}).encode())
+
+    def test_origin_helpers(self):
+        self.assertEqual(ha.origin_of("https://Kura.Example:443/x?y"), "https://kura.example")
+        self.assertEqual(ha.origin_of("http://h:8080/"), "http://h:8080")
+        self.assertEqual(ha.origin_of("https://127.0.0.3:19201"), "https://127.0.0.3:19201")
+        for bad in ("", "ftp://x", "https://", "https://u@x", "https://x\\y", "https://x y", None, "javascript:x"):
+            self.assertIsNone(ha.origin_of(bad), bad)
+        self.assertEqual(ha.origins_header("https://a.example, https://b.example:8443"),
+                         ["https://a.example", "https://b.example:8443"])
+        self.assertEqual(ha.origins_header("https://a.example, junk"), [])
+        n = ha.new_nonce()
+        self.assertTrue(ha.NONCE_RE.match(n) and ha.NONCE_RE.match(ha.state_hash(n)))
+        self.assertNotEqual(ha.state_hash(n), n)
+
+    def test_cookie_names(self):
+        a, _, _ = make()
+        self.assertEqual((a.room_cookie, a.state_cookie, a.try_cookie, a.out_cookie),
+                         ("__Host-machiya_sso_niwa", "__Host-machiya_sso_niwa_state", "__Host-machiya_sso_niwa_try",
+                          "__Host-machiya_sso_niwa_out"))
+        plain = ha.HisterAuth("kura", SIGNIN, ("owner",), "http://localhost:8080", "http://hl:8081", "none",
+                              secure=False, fetch=FakeHelper())
+        self.assertEqual(plain.room_cookie, "machiya_sso_kura")      # no __Host- without https
+        self.assertTrue(all("Secure" not in c for c in plain.clear_cookies()))
+
+    def test_credentials(self):
+        a, _, _ = make()
+        c = a.credential
+        self.assertEqual(c(Headers(("Cookie", "__Host-machiya_sso_niwa=" + RSID))), ("room", RSID, True))
+        self.assertEqual(c(Headers(("Authorization", "Bearer " + RSID))), ("room", RSID, False))
+        self.assertEqual(c(Headers(("Authorization", "Bearer " + RTOK))), ("rtoken", RTOK, False))
+        # the room's own cookie first, the legacy shared-domain one after it
+        self.assertEqual(c(Headers(("Cookie", "machiya_sso=%s; __Host-machiya_sso_niwa=%s" % (SID, RSID)))),
+                         ("room", RSID, True))
+        self.assertEqual(c(Headers(("Cookie", "machiya_sso=" + SID))), ("sid", SID, True))
+        # another room's cookie (a dev stack: one host, rooms on ports) is not this room's
+        self.assertEqual(c(Headers(("Cookie", "__Host-machiya_sso_kura=" + RSID))), (None, "", False))
+        for bad in (Headers(("Cookie", "__Host-machiya_sso_niwa=" + SID)),          # an mhs_ in the room cookie
+                    Headers(("Cookie", "__Host-machiya_sso_niwa=junk"))):
+            self.assertEqual(c(bad), ("bad", "", True))
+        for bad in ("Bearer mhr_short", "Bearer mht_short", "Bearer " + CODE):
+            self.assertEqual(c(Headers(("Authorization", bad)))[0], "bad", bad)
+
+    def test_room_session_names_the_room(self):
+        a, h, _ = make()
+        self.room_ok(h)
+        r = a.resolve(Headers(("Cookie", "__Host-machiya_sso_niwa=" + RSID)))
+        self.assertEqual((r.status, r.actor, r.principal.via), (200, "hister:owner", "hister"))
+        self.assertEqual(h.calls[-1][2], {"X-Machiya-Session": RSID, "X-Machiya-Room": NIWA,
+                                          "Accept": "application/json"})
+
+    def test_room_session_of_another_room_is_refused(self):
+        a, h, _ = make()
+        self.room_ok(h, room="https://kura.example.ts.net")          # a helper that didn't check (or a mix-up)
+        r = a.resolve(Headers(("Cookie", "__Host-machiya_sso_niwa=" + RSID)), is_page=False)
+        self.assertEqual((r.status, r.json()["reason"]), (401, "wrong-room"))
+        self.assertTrue(any(c.startswith("__Host-machiya_sso_niwa=;") and "Max-Age=0" in c for c in r.cookies))
+
+    def test_room_token(self):
+        a, h, _ = make()
+        self.room_ok(h, RTOK, kind="token")
+        h.answers[("/v1/check", RTOK)] = (200, json.dumps({"username": "owner", "user_id": 1, "via": "token",
+                                                           "kind": "token"}).encode())
+        r = a.resolve(Headers(("Authorization", "Bearer " + RTOK)), is_page=False)
+        self.assertEqual((r.status, r.actor, r.principal.via), (200, "token:owner", "token"))
+        self.assertEqual(h.calls[-1][2]["X-Machiya-Session"], RTOK)
+
+    def test_legacy_refusal_says_why(self):
+        a, h, _ = make()
+        h.answers[("/v1/check", "htok")] = (401, b'{"reason":"legacy-off"}')
+        r = a.resolve(Headers(("X-Access-Token", "htok")), is_page=False)
+        body = r.json()
+        self.assertEqual((r.status, body["reason"]), (401, "legacy-off"))
+        self.assertIn("room token", body["detail"])
+
+    def test_accept_origins(self):
+        env = dict(LoadForTest.BASE, NIWA_AUTH_ACCEPT_ORIGINS="https://search.example.ts.net, https://shiori.example.ts.net/")
+        a = quiet(ha.load_for, "niwa", env)
+        self.assertEqual(a.audiences, [NIWA, "https://search.example.ts.net", "https://shiori.example.ts.net"])
+        for bad in ("search.example", "https://x/path", "ftp://x"):
+            with self.assertRaises(IdentityError):
+                quiet(ha.load_for, "niwa", dict(env, NIWA_AUTH_ACCEPT_ORIGINS=bad))
+        h = FakeHelper()
+        a.fetch = h
+        self.room_ok(h, room="https://search.example.ts.net")       # the hosted pages' cookie, passed on by nginx
+        r = a.resolve(Headers(("Cookie", "__Host-machiya_sso_niwa=" + RSID)))
+        self.assertEqual(r.status, 200)
+        self.assertEqual(h.calls[-1][2]["X-Machiya-Room"],
+                         NIWA + ", https://search.example.ts.net, https://shiori.example.ts.net")
+
+    def test_page_trip_carries_state(self):
+        a, h, _ = make()
+        r = a.resolve(Headers(), path="/n/Note")
+        nonce = cookie_value(r.cookies, "__Host-machiya_sso_niwa_state")
+        self.assertTrue(ha.NONCE_RE.match(nonce))
+        state = [c for c in r.cookies if c.startswith("__Host-machiya_sso_niwa_state=")][0]
+        for attr in ("Path=/", "HttpOnly", "Secure", "SameSite=Lax", "Max-Age=600"):
+            self.assertIn(attr, state)
+        self.assertNotIn("Domain", state)
+        self.assertTrue(r.location.endswith("&state=" + ha.state_hash(nonce)))
+        self.assertNotIn(nonce, r.location)                             # only its hash travels
+        api = a.resolve(Headers(), is_page=False, path="/api/x")        # an API's address: no state (no cookie
+        self.assertNotIn("state=", api.signin)                          # behind it); the page makes its own trip
+        self.assertIsNone(cookie_value(api.cookies, "__Host-machiya_sso_niwa_state"))
+        self.assertEqual(a.signin_location("/machiya/callback?code=x"),
+                         SIGNIN + "?return=https%3A%2F%2Fniwa.example.ts.net%2F")    # never back to a used code
+
+    def callback(self, a, code=CODE, nonce="N" * 43, extra=()):
+        cookie = "__Host-machiya_sso_niwa_state=%s; __Host-machiya_sso_niwa_try=1" % nonce if nonce else ""
+        return a.resolve(Headers(("Cookie", cookie), *extra), True, "/machiya/callback?code=" + code)
+
+    def test_callback_trades_the_code(self):
+        a, h, _ = make()
+        h.answers[("/v1/redeem", None)] = (200, json.dumps({
+            "session": RSID, "return": NIWA + "/n/Note?x=1", "username": "owner", "user_id": 1,
+            "max_age": 86400 * 10, "prefs": {"theme": "night"}}).encode())
+        r = self.callback(a)
+        self.assertEqual((r.status, r.reason, r.location, r.principal), (302, "callback", NIWA + "/n/Note?x=1", None))
+        method, path, sent, timeout = h.calls[-1]
+        self.assertEqual((method, path), ("POST", "/v1/redeem"))
+        self.assertEqual((sent["X-Machiya-Code"], sent["X-Machiya-Room"], sent["X-Machiya-State"]),
+                         (CODE, NIWA, "N" * 43))
+        room = [c for c in r.cookies if c.startswith("__Host-machiya_sso_niwa=" + RSID)][0]
+        for attr in ("Path=/", "HttpOnly", "Secure", "SameSite=Lax", "Max-Age=864000"):
+            self.assertIn(attr, room)
+        self.assertNotIn("Domain", room)
+        for gone in ("__Host-machiya_sso_niwa_state", "__Host-machiya_sso_niwa_try", "__Host-machiya_sso_niwa_out"):
+            self.assertEqual(cookie_value(r.cookies, gone), "", gone)
+        status, headers, body = a.respond(r, is_page=False)            # always a redirect, even for odd clients
+        self.assertEqual((status, dict(headers)["Location"], dict(headers)["Referrer-Policy"]),
+                         (302, NIWA + "/n/Note?x=1", "no-referrer"))
+        self.assertIn(("Set-Cookie", room), headers)
+        # the next request with the new cookie is answered from the cache the redeem filled
+        n = len(h.calls)
+        ok = a.resolve(Headers(("Cookie", "__Host-machiya_sso_niwa=" + RSID)))
+        self.assertEqual((ok.status, ok.prefs, len(h.calls)), (200, {"theme": "night"}, n))
+
+    def test_callback_return_stays_in_the_room(self):
+        a, h, _ = make()
+        for ret in ("https://evil.example/", NIWA + ".evil.example/", "https://kura.example.ts.net/x", None):
+            h.answers[("/v1/redeem", None)] = (200, json.dumps({"session": RSID, "return": ret,
+                                                               "username": "owner"}).encode())
+            self.assertEqual(self.callback(a).location, NIWA + "/", ret)
+
+    def test_callback_refused_is_a_page_not_a_loop(self):
+        a, h, _ = make()
+        h.answers[("/v1/redeem", None)] = (401, b'{"reason":"bad-code"}')
+        for r in (self.callback(a), self.callback(a, nonce=""), self.callback(a, code="mhc_short")):
+            self.assertEqual((r.status, r.location, r.principal), (401, None, None))
+            nonce = cookie_value(r.cookies, "__Host-machiya_sso_niwa_state")
+            self.assertTrue(nonce and r.signin.endswith("&state=" + ha.state_hash(nonce)))    # a fresh trip, by hand
+            status, _, body = a.respond(r)
+            self.assertEqual(status, 401)
+            self.assertIn(b"Sign In", body)
+        self.assertEqual(sum(1 for c in h.calls if c[1] == "/v1/redeem"), 1)    # no nonce, a bad code: not asked
+
+    def test_callback_helper_down(self):
+        a, h, _ = make()
+        h.down = True
+        r = quiet(self.callback, a)
+        self.assertEqual((r.status, r.reason), (503, "unavailable"))
+
+    def test_signout_room_session(self):
+        a, h, _ = make()
+        self.room_ok(h)
+        hdr = Headers(("Cookie", "__Host-machiya_sso_niwa=" + RSID))
+        self.assertEqual(a.resolve(hdr).status, 200)
+        ended, cookies = a.signout(hdr)
+        self.assertTrue(ended)
+        method, path, sent, _ = h.calls[-1]
+        self.assertEqual((method, path, sent["X-Machiya-Session"], sent["X-Machiya-Room"]),
+                         ("POST", "/v1/signout", RSID, NIWA))
+        self.assertEqual(cookie_value(cookies, "__Host-machiya_sso_niwa"), "")
+        marker = [c for c in cookies if c.startswith("__Host-machiya_sso_niwa_out=1")][0]
+        self.assertNotIn("Domain", marker)
+        self.assertEqual(a.resolve(hdr).status, 401)                    # this room's cached answer is gone at once
+
+    def test_forward_prefs_with_a_room_session(self):
+        a, h, _ = make()
+        self.room_ok(h)
+        hdr = Headers(("Cookie", "__Host-machiya_sso_niwa=" + RSID))
+        res = a.resolve(hdr)
+        h.answers[("/v1/prefs", RSID)] = (200, b'{"v":1,"rev":2,"prefs":{"theme":"day"},"updated":{"theme":1}}')
+        status, _, body = a.forward_prefs(res, "GET", hdr)
+        self.assertEqual((status, json.loads(body)["prefs"]), (200, {"theme": "day"}))
+        self.assertEqual((h.calls[-1][2]["X-Machiya-Session"], h.calls[-1][2]["X-Machiya-Room"]), (RSID, NIWA))
 
 
 if __name__ == "__main__":

@@ -311,20 +311,25 @@ class AutoSigninTest(unittest.TestCase):
         res = quiet(auth.resolve, Headers(), True, "/garden")
         self.assertEqual(res.status, 401)
         self.assertIn("provider=oidc&auto=1", res.location)                    # the first trip: automatic
-        self.assertTrue(any(c.startswith("machiya_sso_try=1") for c in res.cookies))
+        self.assertTrue(any(c.startswith("__Host-machiya_sso_niwa_try=1") for c in res.cookies))
         api = quiet(auth.resolve, Headers(), False, "/api/garden")
         self.assertIn("provider=oidc", api.json()["signin"])                    # machiya.js takes the page there
-        again = quiet(auth.resolve, Headers(("Cookie", "machiya_sso_try=1")), True, "/garden")
+        again = quiet(auth.resolve, Headers(("Cookie", "__Host-machiya_sso_niwa_try=1")), True, "/garden")
         self.assertIsNone(again.location)                                       # no loop: a page with a link,
         self.assertNotIn("provider", again.signin)                              # to the plain sign-in page
 
     def test_signout_sets_the_marker(self):
+        """v0.22: the marker is this room's own (host-only); the helper remembers the deliberate sign-out itself."""
         auth, _ = self.make()
         ended, cookies = auth.signout(Headers(("Cookie", "machiya_sso=" + SID)))
-        marker = [c for c in cookies if c.startswith("machiya_sso_out=1")]
+        marker = [c for c in cookies if c.startswith("__Host-machiya_sso_niwa_out=1")]
         self.assertEqual(len(marker), 1)
-        for attr in ("Domain=example.ts.net", "HttpOnly", "Secure", "Max-Age=%d" % ha.OUT_MAX_AGE):
+        for attr in ("HttpOnly", "Secure", "Path=/", "Max-Age=%d" % ha.OUT_MAX_AGE):
             self.assertIn(attr, marker[0])
+        self.assertNotIn("Domain", marker[0])
+        # and the next trip from this room shows the helper's page: no provider, no auto
+        res = quiet(auth.resolve, Headers(("Cookie", "__Host-machiya_sso_niwa_out=1")), True, "/")
+        self.assertNotIn("provider", res.location)
 
     def test_load_for(self):
         env = {"NIWA_AUTH": "hister", "NIWA_AUTH_SIGNIN_URL": "https://h/machiya/signin", "NIWA_HISTER_USERS": "owner",
