@@ -3,6 +3,9 @@
 ## 0.8.0
 
 - **Code and notes stay out of AI, enforced** (the owner, 2026-10-05; sweep MACH-M-4, MACH-F-10). `pages_search` and `pages_read` are back, and the machiya plugin stops connecting Hister's own MCP (whose `search` and `get_preview` hand vault notes and code documents to any client). Every page query still ends with the notes, code and cards exclusion, and now every document Hister returns is checked again before any of it reaches the model: a note, a card, a code document, a room's host, a non-page URL, or a document of a shape this server doesn't know (no `metadata` field) is withheld, and `pages_read` refuses anything but a page whose stored URL is the one asked for.
+- **Note writes (security):** a symlinked note is refused (every path component is checked, the note too, and the protected paths against the resolved one); a commit that fails puts the file back; and uncommitted leftovers in the write clone are discarded before every write, never pushed with the next one (sweep MACH-M-3). An update can't add a frontmatter block to a note that has none, and changes no frontmatter field but summary, status and tags (MACH-M-2: a block saying `publish: true` would have published the note).
+- **The login header is believed only behind the proxy (security, sweep MACH-M-5):** with `MCP_AUTH=tailscale` and no identity file the server refuses to start on a non-loopback `MCP_BIND` unless `MCP_BIND_BEHIND_PROXY=1` (set it only when the Tailscale sidecar is the only way in: machiya-mcp on a network of its own with it). A deployment on `0.0.0.0` needs the setting, with the network change, before this version starts.
+- Each connection times out after 30 s of silence, so half-sent requests can't hold the server's threads (MACH-M-6).
 
 ## 0.7.4
 

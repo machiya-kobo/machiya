@@ -126,7 +126,7 @@ def rooms():
 def make_server(fakes, **env):
     log = tempfile.NamedTemporaryFile(delete=False, suffix=".log")
     log.close()
-    e = {"MCP_AUTH": "open", "MCP_LOG": log.name}
+    e = {"MCP_AUTH": "open", "MCP_LOG": log.name, "MCP_BIND": "127.0.0.1"}
     e.update({k.upper() + "_URL": f.url for k, f in fakes.items()})
     e.update(env)
     server = mcp.Server(mcp.Config(e))
@@ -855,6 +855,35 @@ class Gate(Base):
         self.assertEqual(self.post(base, self.PING)[0], 403)
         self.assertEqual(self.post(base, self.PING, {"Tailscale-User-Login": "evil@x"})[0], 403)
         self.assertEqual(self.post(base, self.PING, {"Tailscale-User-Login": "you@x"})[0], 200)
+
+    def test_a_login_header_is_believed_only_behind_the_proxy(self):
+        # sweep MACH-M-5: on 0.0.0.0 any neighbouring container could send Tailscale-User-Login and be the owner
+        env = {"MCP_AUTH": "tailscale", "MCP_USERS": "me@x", "MCP_LOG": os.devnull}
+        for bind in ("0.0.0.0", "::", "10.1.2.3"):
+            with self.assertRaises(SystemExit) as cm:
+                mcp.check_bind(mcp.Config(dict(env, MCP_BIND=bind)))
+            self.assertIn("MCP_BIND_BEHIND_PROXY", str(cm.exception))
+        mcp.check_bind(mcp.Config(env | {"MCP_BIND": "0.0.0.0", "MCP_BIND_BEHIND_PROXY": "1"}))
+        for bind in ("127.0.0.1", "::1", "localhost"):
+            mcp.check_bind(mcp.Config(dict(env, MCP_BIND=bind)))
+        mcp.check_bind(mcp.Config({"MCP_AUTH": "open", "MCP_BIND": "0.0.0.0", "MCP_LOG": os.devnull}))
+        _, base = self.serve(MCP_AUTH="tailscale", MCP_USERS="me@x", MCP_BIND="0.0.0.0")     # started anyway: still refused
+        self.assertEqual(self.post(base, self.PING, {"Tailscale-User-Login": "me@x"})[0], 403)
+        _, base = self.serve(MCP_AUTH="tailscale", MCP_USERS="me@x", MCP_BIND="0.0.0.0", MCP_BIND_BEHIND_PROXY="1")
+        self.assertEqual(self.post(base, self.PING, {"Tailscale-User-Login": "me@x"})[0], 200)
+
+    def test_a_half_sent_request_times_out(self):
+        # sweep MACH-M-6: 200 half-sent requests held 200 threads
+        handler = mcp.make_handler(self.server)
+        self.assertEqual(handler.timeout, 30)
+        quick = type("Quick", (handler,), {"timeout": 0.5})
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), quick)
+        threading.Thread(target=httpd.serve_forever, args=(0.02,), daemon=True).start()
+        self.addCleanup(lambda: (httpd.shutdown(), httpd.server_close()))
+        import socket
+        with socket.create_connection(httpd.server_address, timeout=5) as c:
+            c.sendall(b"POST /mcp HTTP/1.1\r\nHost: x\r\nContent-Length: 100\r\n")
+            self.assertEqual(c.recv(100), b"")                  # the server gave up and closed
 
     def test_open_mode_ignores_the_header(self):
         server, base = self.serve(MCP_AUTH="open")

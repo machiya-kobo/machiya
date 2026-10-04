@@ -16,6 +16,7 @@ grant, and its `limits` replace the buckets' defaults. The rooms see only this s
 `mcp` with its own token (MCP_TOKEN_FILE), the caller's name in X-Agent as a label, never on anyone's behalf. Hister
 (with user handling on) gets the owner's token from HISTER_TOKEN_FILE as X-Access-Token on every call; the token is
 admin, so no write may change a page's owner (check_route)."""
+import ipaddress
 import json
 import os
 import re
@@ -63,6 +64,24 @@ def auth_mode(value, identity_file=""):
         raise SystemExit("machiya-mcp: MCP_AUTH must be %s, not %r%s" % (
             " or ".join(allowed), value, "" if identity_file or value != "header" else " (header needs MACHIYA_IDENTITY_FILE)"))
     return value
+
+
+def is_loopback(bind):
+    try:
+        return ipaddress.ip_address(bind.strip("[]")).is_loopback
+    except ValueError:
+        return bind == "localhost"
+
+
+def check_bind(config):
+    """MCP_AUTH=tailscale trusts the Tailscale-User-Login header, so whoever can reach the port can claim to be the owner
+    (sweep MACH-M-5: about twelve containers share the production networks). Without the identity file (which checks
+    this itself, vaultkit.identity.check_bind) the server listens on loopback behind the proxy, or MCP_BIND_BEHIND_PROXY=1
+    says the proxy is the only way in (the server on a network of its own with the Tailscale sidecar). Else it won't start."""
+    if config.identity is None and config.auth == "tailscale" and not config.header_trusted:
+        raise SystemExit("machiya-mcp: MCP_AUTH=tailscale trusts a login header, so the server must listen on 127.0.0.1 behind "
+                         "the proxy (MCP_BIND), or set MCP_BIND_BEHIND_PROXY=1 when the proxy is the only way in (its own "
+                         "network with the Tailscale sidecar); not on %r" % config.bind)
 
 
 def load_identity(env, bind):
@@ -158,6 +177,8 @@ class Config:
     def __init__(self, env):
         self.auth = auth_mode(env.get("MCP_AUTH"), (env.get("MACHIYA_IDENTITY_FILE") or "").strip())
         self.bind = env.get("MCP_BIND", "0.0.0.0").strip() or "0.0.0.0"
+        self.behind_proxy = (env.get("MCP_BIND_BEHIND_PROXY") or "").strip().lower() in ("1", "on", "true", "yes")
+        self.header_trusted = is_loopback(self.bind) or self.behind_proxy     # may Tailscale-User-Login be believed?
         self.identity = load_identity(env, self.bind)        # None: the MCP_USERS gate, as before
         self.token = room_token(env.get("MCP_TOKEN_FILE"))   # the `mcp` principal's token for the rooms; "" without one
         self.hister_token = hister_token(env.get("HISTER_TOKEN_FILE"))   # the owner's, for Hister only; None without
@@ -288,6 +309,8 @@ class Server:
         """The caller's login, or None when refused. Open mode trusts nothing in the header and says `local`."""
         if self.config.auth == "open":
             return "local"
+        if not getattr(self.config, "header_trusted", False):     # check_bind refuses to start like this; fail closed anyway
+            return None
         who = (headers.get("Tailscale-User-Login") or "").strip()
         return who if who and who in self.config.users else None
 
@@ -577,6 +600,7 @@ def make_handler(server):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "machiya-mcp"
+        timeout = 30                        # a half-sent request can't hold a thread for ever (sweep MACH-M-6)
         _body_read = False                  # this request's body was read in full (reset per request)
 
         def handle_one_request(self):
@@ -685,6 +709,7 @@ def make_handler(server):
 
 def main():
     config = Config(os.environ)
+    check_bind(config)
     if config.identity is not None:
         sys.stderr.write("machiya-mcp: identity file %s, MCP_AUTH=%s: callers need the mcp use grant%s\n" % (
             config.identity.path, config.auth, "; open mode admits anyone without a token as the owner" if config.auth == "open" else ""))
