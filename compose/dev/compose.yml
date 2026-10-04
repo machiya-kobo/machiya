@@ -1,0 +1,426 @@
+# The Machiya dev stack: every service of production, on SYNTHETIC data only, with Hister's users as the sign-in
+# (AUTH=hister in every room, the fallbacks as in production: Kura none, Niwa and Konbini tailscale). Driven by
+# ./dev (init, up, seed, check, reset, down; see docs/dev-stack.md), which writes $DEV_DATA/dev.env and passes it
+# with --env-file and the project name machiya-dev. Never run it on real notes or pages.
+#
+# Public ports (`front`, Tailscale Serve's stand-in: https with the throwaway dev certificate, or plain http when a real
+# Serve terminates TLS in front of it; each is also its public address, ${DEV_URL}:<port>):
+#   19200 landing   19201 kura   19202 niwa   19203 konbini   19204 hister (+ the helper's /machiya/ and the callback)
+#   19205 searxng   19206 machiya-mcp   19207 smallweb   19208 stub OIDC provider
+# Direct, plain (on DEV_BIND, 127.0.0.1 by default):
+#   19209 fixture sites   19210 fake NewsBlur   19211 niwa gemini   19212 niwa gopher
+#   19224 Hister and 19226 machiya-mcp without TLS, for agents and scripts on this machine (their MCP endpoints)
+#
+# The x-native blocks are for ./dev --native (BSDs, Haiku, any host without containers): the same environment,
+# with service names rewritten to 127.0.0.1:<port> (x-native.hosts) and container paths to $DEV_DATA (paths), plus
+# what differs (env). Change a service's environment here and both modes follow.
+name: machiya-dev
+
+x-native:
+  hosts:                                       # host:port in an environment value -> its native address
+    "landing:8080": 127.0.0.1:19230
+    "kura:8080": 127.0.0.1:19231
+    "niwa:8080": 127.0.0.1:19232
+    "konbini:8081": 127.0.0.1:19233
+    "hister:4433": 127.0.0.1:19224
+    "hister-login:8080": 127.0.0.1:19235
+    "hister-login:8081": 127.0.0.1:19236
+    "searxng:8080": 127.0.0.1:19237
+    "machiya-mcp:8080": 127.0.0.1:19226
+    "smallweb:8080": 127.0.0.1:19239
+    "stub-idp:9000": 127.0.0.1:19240
+    "fixtures:80": 127.0.0.1:19209
+    "fake-newsblur:8080": 127.0.0.1:19210
+
+x-svc: &svc
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  pids_limit: 1024
+  init: true
+  user: "${DEV_UID}:${DEV_GID}"
+  userns_mode: ${DEV_USERNS:-}                 # rootless podman: keep-id (dev init sets it); empty for Docker
+  restart: unless-stopped
+
+x-rooms-env: &rooms-env
+  MACHIYA_ROOMS: "konbini=${DEV_URL}:19203,niwa=${DEV_URL}:19202,kura=${DEV_URL}:19201,hister=${DEV_URL}:19204,searxng=${DEV_URL}:19205,machiya=${DEV_URL}:19200"
+  MACHIYA_COOKIE_DOMAIN: ${DEV_COOKIE_DOMAIN:-}
+  TZ: UTC
+
+services:
+  # -- engines -------------------------------------------------------------------------------------------------------
+  hister:
+    <<: *svc
+    image: ghcr.io/asciimoo/hister:v0.20.0
+    environment:
+      HISTER_CONFIG: /hister/config.yml
+      HISTER__SERVER__BASE_URL: ${DEV_URL}:19204
+      HISTER__APP__SEARCH_URL: ${DEV_URL}:19205/search?q={query}
+    env_file: ["${DEV_DATA}/secrets/hister.env"]        # HISTER__SERVER__OAUTH__OIDC__CLIENT_SECRET
+    volumes:
+      - ${DEV_DATA}/hister:/hister/data
+      - ./config/hister.yml:/hister/config.yml:ro
+    ports: ["${DEV_BIND:-127.0.0.1}:19224:4433"]          # plain, for agents on this machine (Hister's MCP)
+    depends_on: [stub-idp]
+    x-native:
+      cmd: ["${HISTER_BIN:-hister}", "listen"]
+      paths: {/hister/data: "${DEV_DATA}/hister", /hister/config.yml: "${DEV_ROOT}/config/hister.yml"}
+      env: {HISTER_DATA_DIR: "${DEV_DATA}/hister", HISTER__SERVER__ADDRESS: "127.0.0.1:19224",
+            HISTER__SERVER__OAUTH__OIDC__CONFIGURATION_URL: "http://127.0.0.1:19240/.well-known/openid-configuration"}
+      env_file: "${DEV_DATA}/secrets/hister.env"
+
+  hister-login:
+    <<: *svc
+    build: ../../stack/hister-login
+    environment:
+      <<: *rooms-env
+      HISTER_LOGIN_PUBLIC_URL: ${DEV_URL}:19204
+      HISTER_LOGIN_HISTER_URL: http://hister:4433
+      HISTER_LOGIN_PROVIDERS: oidc
+      HISTER_LOGIN_OIDC_LABEL: "Tailscale (dev stub)"
+      HISTER_LOGIN_RETURN_HOSTS: "${DEV_HOST}:19200,${DEV_HOST}:19201,${DEV_HOST}:19202,${DEV_HOST}:19203,${DEV_HOST}:19204"
+      HISTER_LOGIN_DB: /data/hister-login.sqlite3
+    volumes: ["${DEV_DATA}/login:/data"]
+    depends_on: [hister]
+    x-native:
+      cmd: ["python3", "-u", "hister_login.py"]
+      cwd: "${MACHIYA_SRC}/stack/hister-login"
+      paths: {/data: "${DEV_DATA}/login"}
+      env: {HISTER_LOGIN_BIND: "127.0.0.1", HISTER_LOGIN_PORT: "19235", HISTER_LOGIN_INTERNAL_PORT: "19236"}
+
+  stub-idp:                                           # a tsidp-shaped OIDC provider (stack/hister-login/dev)
+    <<: *svc
+    image: public.ecr.aws/docker/library/python:3.13-alpine
+    command: ["python3", "/dev/stub_idp.py"]
+    environment:
+      STUB_PUBLIC: ${DEV_URL}:19208
+      STUB_INTERNAL: http://stub-idp:9000
+      STUB_REDIRECT: ${DEV_URL}:19204/api/oauth/callback?provider=oidc
+      STUB_LOGIN: owner@dev
+      STUB_EMAIL: owner@dev.idp.example
+      STUB_CLIENT_SECRET_FILE: /secrets/oidc-client-secret
+    volumes:
+      - ../../stack/hister-login/dev/stub_idp.py:/dev/stub_idp.py:ro
+      - ${DEV_DATA}/secrets/oidc-client-secret:/secrets/oidc-client-secret:ro
+    x-native:
+      cmd: ["python3", "-u", "${MACHIYA_SRC}/stack/hister-login/dev/stub_idp.py"]
+      paths: {/secrets: "${DEV_DATA}/secrets"}
+      env: {STUB_BIND: "127.0.0.1", STUB_PORT: "19240"}
+
+  searxng:                                            # the image's own user and entrypoint
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    image: docker.io/searxng/searxng:2026.9.25-12f8b6515
+    environment:
+      SEARXNG_BASE_URL: ${DEV_URL}:19205/
+    env_file: ["${DEV_DATA}/secrets/searxng.env"]      # SEARXNG_SECRET
+    volumes: ["./config/searxng.yml:/etc/searxng/settings.yml:ro"]
+    x-native:
+      skip: "SearXNG natively is optional: run it from a checkout with SEARXNG_SETTINGS_PATH=compose/dev/config/searxng.yml on 127.0.0.1:19237 (docs/dev-stack.md)"
+
+  front:                                              # Tailscale Serve's stand-in: TLS (or not) and the routes
+    <<: *svc
+    image: public.ecr.aws/docker/library/python:3.13-alpine
+    command: ["python3", "/dev/front.py"]
+    environment:
+      FRONT_TLS_CERT: ${DEV_TLS_CERT:-}               # /certs/tls.crt: https with the throwaway dev CA; empty: http
+      FRONT_TLS_KEY: ${DEV_TLS_KEY:-}
+      FRONT_SITES: >-
+        {"19200": "/=http://landing:8080", "19201": "/=http://kura:8080", "19202": "/=http://niwa:8080",
+         "19203": "/=http://konbini:8081",
+         "19204": "/machiya/=http://hister-login:8080 =/api/oauth/callback=http://hister-login:8080 /=http://hister:4433",
+         "19205": "/=http://searxng:8080", "19206": "/=http://machiya-mcp:8080", "19207": "/=http://smallweb:8080",
+         "19208": "/=http://stub-idp:9000"}
+    volumes:
+      - ./front.py:/dev/front.py:ro
+      - ${DEV_DATA}/certs:/certs:ro
+    ports:
+      - "${DEV_BIND:-127.0.0.1}:19200-19208:19200-19208"
+    depends_on: [hister, hister-login, stub-idp]
+    x-native:
+      cmd: ["python3", "-u", "${DEV_ROOT}/front.py"]
+      paths: {/certs: "${DEV_DATA}/certs"}
+      env: {FRONT_BIND: "${DEV_BIND:-127.0.0.1}"}
+
+  # -- the vault -----------------------------------------------------------------------------------------------------
+  vault-mirror:
+    <<: *svc
+    build: {context: ../.., dockerfile: stack/vault-mirror/Dockerfile}
+    environment:
+      MIRROR_URL: file://${DEV_DATA}/vault.git
+      MIRROR_DIR: /data/vault
+      MIRROR_POLL: "15"
+    volumes:
+      - ${DEV_DATA}/mirror:/data
+      - ${DEV_DATA}/vault.git:${DEV_DATA}/vault.git:ro
+    x-native:
+      cmd: ["python3", "-u", "${MACHIYA_SRC}/stack/vault-mirror/mirror.py"]
+      paths: {/data: "${DEV_DATA}/mirror"}
+      env: {PYTHONPATH: "${MACHIYA_SRC}", HOME: "${DEV_DATA}/mirror"}
+
+  # -- the rooms (AUTH=hister) ---------------------------------------------------------------------------------------
+  kura:
+    <<: *svc
+    build: ${KURA_SRC}/app
+    environment:
+      <<: *rooms-env
+      KURA_AUTH: hister
+      KURA_AUTH_URL: http://hister-login:8081
+      KURA_AUTH_SIGNIN_URL: ${DEV_URL}:19204/machiya/signin
+      KURA_HISTER_USERS: owner
+      KURA_AUTH_FALLBACK: none                        # production's rule: Kura never falls back
+      KURA_PUBLIC_URL: ${DEV_URL}:19201
+      KURA_REPO_DIR: /vault                           # the mirror, read-only (no clone of its own)
+      KURA_VAULTS: "personal=/vault#personal,team+shared:Team=/vault#team,work:Work=/vault#work"
+      KURA_REPO_SUBDIR: personal
+      KURA_POLL: "20"
+      KURA_NIWA_URL: ${DEV_URL}:19202
+      KURA_KONBINI_URL: ${DEV_URL}:19203
+      KURA_HISTER_URL: http://hister:4433
+      KURA_HISTER_TOKEN_FILE: /secrets/owner-token
+      KURA_DB: /data/kura.sqlite3
+      HOME: /data
+    volumes:
+      - ${DEV_DATA}/kura:/data
+      - ${DEV_DATA}/mirror/vault:/vault:ro
+      - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
+    depends_on: [vault-mirror, hister-login]
+    x-native:
+      cmd: ["python3", "-u", "kura.py"]
+      cwd: "${KURA_SRC}/app"
+      paths: {/data: "${DEV_DATA}/kura", /vault: "${DEV_DATA}/mirror/vault", /secrets: "${DEV_DATA}/secrets"}
+      env: {KURA_BIND: "127.0.0.1", KURA_PORT: "19231"}
+
+  niwa:
+    <<: *svc
+    build: ${NIWA_SRC}/app
+    environment:
+      <<: *rooms-env
+      NIWA_AUTH: hister
+      NIWA_AUTH_URL: http://hister-login:8081
+      NIWA_AUTH_SIGNIN_URL: ${DEV_URL}:19204/machiya/signin
+      NIWA_HISTER_USERS: owner
+      NIWA_AUTH_FALLBACK: tailscale                   # production's rule: Niwa falls back to the tailnet login
+      NIWA_USERS: ${DEV_TAILNET_USERS:-owner@dev}
+      NIWA_BIND_BEHIND_PROXY: "1"
+      NIWA_PUBLIC_URL: ${DEV_URL}:19202
+      NIWA_HOST: ${DEV_HOST}
+      NIWA_REPO_URL: file://${DEV_DATA}/vault.git
+      NIWA_REPO_SUBDIR: personal
+      NIWA_REPO_REFERENCE: ${DEV_DATA}/mirror/vault
+      NIWA_REPO_SPARSE: personal,.garden,.board
+      NIWA_REPO_DIR: /data/repo
+      NIWA_DB: /data/niwa.sqlite3
+      NIWA_POLL: "20"
+      NIWA_KURA_URL: ${DEV_URL}:19201
+      NIWA_KONBINI_URL: ${DEV_URL}:19203
+      NIWA_KONBINI_API_URL: http://konbini:8081
+      NIWA_KONBINI_TOKEN_FILE: /secrets/owner-token
+      NIWA_GOPHER_PUBLIC_PORT: "19212"
+      NIWA_HISTER_URL: http://hister:4433
+      NIWA_HISTER_TOKEN_FILE: /secrets/owner-token
+      NIWA_HISTER_PUBLIC: ${DEV_URL}:19204
+      NIWA_ARCHIVE: none
+      HOME: /data
+    volumes:
+      - ${DEV_DATA}/niwa:/data
+      - ${DEV_DATA}/vault.git:${DEV_DATA}/vault.git
+      - ${DEV_DATA}/mirror/vault:${DEV_DATA}/mirror/vault:ro
+      - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
+    ports:
+      - "${DEV_BIND:-127.0.0.1}:19211:1965"
+      - "${DEV_BIND:-127.0.0.1}:19212:7070"
+    depends_on: [vault-mirror, hister-login]
+    x-native:
+      cmd: ["python3", "-u", "niwa.py"]
+      cwd: "${NIWA_SRC}/app"
+      paths: {/data: "${DEV_DATA}/niwa", /secrets: "${DEV_DATA}/secrets"}
+      env: {NIWA_BIND: "127.0.0.1", NIWA_PORT: "19232", NIWA_GOPHER_PUBLIC_PORT: "7070"}   # gemini 1965, gopher 7070 natively
+
+  konbini:
+    <<: *svc
+    build: ${KONBINI_SRC}/app
+    environment:
+      <<: *rooms-env
+      KANBAN_AUTH: hister
+      KANBAN_AUTH_URL: http://hister-login:8081
+      KANBAN_AUTH_SIGNIN_URL: ${DEV_URL}:19204/machiya/signin
+      KANBAN_HISTER_USERS: owner
+      KANBAN_AUTH_FALLBACK: tailscale                 # production's rule: Konbini falls back to the tailnet login
+      KANBAN_TAILNET_USERS: ${DEV_TAILNET_USERS:-owner@dev}
+      KANBAN_BIND_BEHIND_PROXY: "1"
+      KANBAN_BOARD_URL: ${DEV_URL}:19203
+      KANBAN_REPO: /repo
+      KANBAN_REPO_SUBDIR: personal
+      KANBAN_REPO_REFERENCE: ${DEV_DATA}/mirror/vault
+      KANBAN_REPO_SPARSE: personal,.board
+      KANBAN_DB: /data/kanban.sqlite3
+      KANBAN_KURA_URL: ${DEV_URL}:19201
+      KANBAN_NIWA_URL: ${DEV_URL}:19202
+      KANBAN_HISTER_URL: http://hister:4433
+      KANBAN_HISTER_TOKEN_FILE: /secrets/owner-token
+      KANBAN_HISTER_PUBLIC: ${DEV_URL}:19204
+      KANBAN_ARCHIVE: none
+      KANBAN_GIT_AUTHOR_NAME: project-board
+      KANBAN_GIT_AUTHOR_EMAIL: project-board@dev.example
+      KANBAN_TAILNET_PORT: "8081"
+      HOME: /data
+    volumes:
+      - ${DEV_DATA}/konbini:/data
+      - ${DEV_DATA}/konbini-repo:/repo
+      - ${DEV_DATA}/vault.git:${DEV_DATA}/vault.git
+      - ${DEV_DATA}/mirror/vault:${DEV_DATA}/mirror/vault:ro
+      - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
+    depends_on: [vault-mirror, hister-login]
+    x-native:
+      cmd: ["python3", "-u", "app.py"]
+      cwd: "${KONBINI_SRC}/app"
+      paths: {/data: "${DEV_DATA}/konbini", /repo: "${DEV_DATA}/konbini-repo", /secrets: "${DEV_DATA}/secrets"}
+      env: {KANBAN_BIND: "127.0.0.1", KANBAN_TAILNET_PORT: "19233"}
+
+  # -- the stack's services ------------------------------------------------------------------------------------------
+  landing:
+    <<: *svc
+    build: ../../stack/landing
+    environment:
+      <<: *rooms-env
+      LANDING_AUTH: hister                            # as the rooms (landing 0.3.0); fallback tailscale, as advised
+      LANDING_AUTH_URL: http://hister-login:8081
+      LANDING_AUTH_SIGNIN_URL: ${DEV_URL}:19204/machiya/signin
+      LANDING_HISTER_USERS: owner
+      LANDING_AUTH_FALLBACK: tailscale
+      LANDING_USERS: ${DEV_TAILNET_USERS:-owner@dev}
+      LANDING_BIND_BEHIND_PROXY: "1"
+      LANDING_PUBLIC_URL: ${DEV_URL}:19200
+      LANDING_APPS: "machiya-mcp=${DEV_URL}:19206,smallweb=${DEV_URL}:19207"
+      LANDING_PROBES: "hister=http://hister:4433,kura=http://kura:8080,niwa=http://niwa:8080,konbini=http://konbini:8081,searxng=http://searxng:8080,machiya-mcp=http://machiya-mcp:8080,smallweb=http://smallweb:8080"
+      LANDING_MIRROR_STATUS: /mirror/status.json        # vault-mirror's
+      LANDING_FEED_STATUS: /feed/status.json
+      LANDING_HISTER_TOKEN_FILE: /secrets/owner-token
+      LANDING_STATE: /data/landing.json
+      LANDING_POLL: "20"
+    volumes:
+      - ${DEV_DATA}/landing:/data
+      - ${DEV_DATA}/mirror:/mirror:ro
+      - ${DEV_DATA}/feed-import:/feed:ro
+      - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
+    x-native:
+      cmd: ["python3", "-u", "landing.py"]
+      cwd: "${MACHIYA_SRC}/stack/landing"
+      paths: {/data: "${DEV_DATA}/landing", /mirror: "${DEV_DATA}/mirror", /feed: "${DEV_DATA}/feed-import",
+              /secrets: "${DEV_DATA}/secrets"}
+      env: {LANDING_BIND: "127.0.0.1", LANDING_PORT: "19230"}
+
+  machiya-mcp:
+    <<: *svc
+    build: ../../stack/mcp
+    environment:
+      MCP_AUTH: open                                  # dev: no identity check; the rooms see the owner's Hister token
+      KURA_URL: http://kura:8080
+      KONBINI_URL: http://konbini:8081
+      NIWA_URL: http://niwa:8080
+      HISTER_URL: http://hister:4433
+      MCP_TOKEN_FILE: /secrets/owner-token            # AUTH=hister rooms accept the owner's Hister token as Bearer
+      HISTER_TOKEN_FILE: /secrets/owner-token
+      MCP_LOG: /data/mcp.log
+      MCP_ROLLBACK_DIR: /data/rollback
+      MCP_NOTES_DIR: /data/vault
+      MCP_NOTES_REPO_URL: file://${DEV_DATA}/vault.git
+      MCP_NOTES_SUBDIR: personal
+      MCP_NOTES_REFERENCE: ${DEV_DATA}/mirror/vault
+      MCP_NOTES_SPARSE: personal
+      MCP_NOTES_CARDS: "Projects/"
+      TZ: UTC
+      HOME: /data
+    volumes:
+      - ${DEV_DATA}/mcp:/data
+      - ${DEV_DATA}/vault.git:${DEV_DATA}/vault.git
+      - ${DEV_DATA}/mirror/vault:${DEV_DATA}/mirror/vault:ro
+      - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
+    ports: ["${DEV_BIND:-127.0.0.1}:19226:8080"]          # plain, for agents on this machine
+    depends_on: [kura, konbini, niwa]
+    x-native:
+      cmd: ["python3", "-u", "mcp.py"]
+      cwd: "${MACHIYA_SRC}/stack/mcp"
+      paths: {/data: "${DEV_DATA}/mcp", /secrets: "${DEV_DATA}/secrets"}
+      env: {MCP_BIND: "127.0.0.1", MCP_PORT: "19226"}
+
+  smallweb:
+    <<: *svc
+    build: ../../stack/smallweb
+    environment:
+      SMALLWEB_AUTH: open
+      SMALLWEB_PUBLIC_URL: ${DEV_URL}:19207
+      SMALLWEB_HISTER_URL: http://hister:4433
+      SMALLWEB_HISTER_TOKEN_FILE: /secrets/owner-token
+      SMALLWEB_FETCH_ALLOW: lantern-supply.example,kyoto-guide.example,workshop-journal.example
+      SMALLWEB_DATA: /data
+      TZ: UTC
+    volumes:
+      - ${DEV_DATA}/smallweb:/data
+      - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
+    x-native:
+      cmd: ["python3", "-u", "smallweb.py"]
+      cwd: "${MACHIYA_SRC}/stack/smallweb"
+      paths: {/data: "${DEV_DATA}/smallweb", /secrets: "${DEV_DATA}/secrets"}
+      env: {SMALLWEB_BIND: "127.0.0.1", SMALLWEB_PORT: "19239"}
+
+  feed-import:
+    <<: *svc
+    build: {context: ../.., dockerfile: stack/feed-import/Dockerfile}
+    environment:
+      FEED_IMPORT_READERS: newsblur
+      FEED_IMPORT_NEWSBLUR_URL: http://fake-newsblur:8080
+      FEED_IMPORT_NEWSBLUR_TOKEN_FILE: /secrets/newsblur-token
+      FEED_IMPORT_HISTER_URL: http://hister:4433
+      FEED_IMPORT_HISTER_TOKEN_FILE: /secrets/owner-token
+      FEED_IMPORT_FETCH_ALLOW: lantern-supply.example,kyoto-guide.example,workshop-journal.example
+      FEED_IMPORT_INTERVAL: "300"
+      FEED_IMPORT_DATA: /data
+      TZ: UTC
+    volumes:
+      - ${DEV_DATA}/feed-import:/data
+      - ${DEV_DATA}/secrets/newsblur-token:/secrets/newsblur-token:ro
+      - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
+    depends_on: [hister, fake-newsblur, fixtures]
+    x-native:
+      cmd: ["python3", "-u", "feedimport.py"]
+      cwd: "${MACHIYA_SRC}/stack/feed-import"
+      paths: {/data: "${DEV_DATA}/feed-import", /secrets: "${DEV_DATA}/secrets"}
+      # natively the fixture names (*.example) don't resolve: the first failure stores the reader's copy instead
+      env: {PYTHONPATH: "${MACHIYA_SRC}/stack/smallweb", FEED_IMPORT_MAX_TRIES: "1"}
+
+  # -- synthetic outside world ---------------------------------------------------------------------------------------
+  fixtures:                                           # the synthetic web: *.example sites on port 80 inside the network
+    image: public.ecr.aws/docker/library/python:3.13-alpine
+    command: ["python3", "/dev/fixture_site.py"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    environment: {FIXTURE_ROOT: /site, FIXTURE_PORT: "80"}
+    volumes: ["./fixture_site.py:/dev/fixture_site.py:ro", "./seed/site:/site:ro"]
+    ports: ["${DEV_BIND:-127.0.0.1}:19209:80"]
+    networks:
+      default:
+        aliases: [lantern-supply.example, kyoto-guide.example, workshop-journal.example]
+    restart: unless-stopped
+    x-native:
+      cmd: ["python3", "-u", "${DEV_ROOT}/fixture_site.py"]
+      env: {FIXTURE_ROOT: "${DEV_ROOT}/seed/site", FIXTURE_BIND: "${DEV_BIND:-127.0.0.1}", FIXTURE_PORT: "19209"}
+
+  fake-newsblur:
+    <<: *svc
+    image: public.ecr.aws/docker/library/python:3.13-alpine
+    command: ["python3", "/dev/fake_newsblur.py"]
+    environment:
+      NEWSBLUR_SEED: /seed/newsblur.json
+      NEWSBLUR_SITE: /seed/site
+      NEWSBLUR_TOKEN_FILE: /secrets/newsblur-token
+    volumes:
+      - ./fake_newsblur.py:/dev/fake_newsblur.py:ro
+      - ./seed:/seed:ro
+      - ${DEV_DATA}/secrets/newsblur-token:/secrets/newsblur-token:ro
+    ports: ["${DEV_BIND:-127.0.0.1}:19210:8080"]
+    x-native:
+      cmd: ["python3", "-u", "${DEV_ROOT}/fake_newsblur.py"]
+      paths: {/seed: "${DEV_ROOT}/seed", /secrets: "${DEV_DATA}/secrets"}
+      env: {NEWSBLUR_BIND: "${DEV_BIND:-127.0.0.1}", NEWSBLUR_PORT: "19210"}

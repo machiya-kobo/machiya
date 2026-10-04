@@ -1,0 +1,16 @@
+{
+  "_comment": "The fake NewsBlur's synthetic account (dev seed): two feeds, stories read one by one (newest read first) and starred stories. The permalinks are the fixture site's pages, so feed-import fetches the originals from it. Everything is invented.",
+  "feeds": {
+    "7": {"feed_title": "Workshop Journal", "folder": "Crafts"},
+    "9": {"feed_title": "Kyoto Guide", "folder": "Travel"}
+  },
+  "read": [
+    {"story_hash": "7:a1b2c3", "feed": "7", "title": "LED inserts that fit the bottom cap", "permalink": "http://workshop-journal.example/posts/led-inserts.html", "timestamp": "2026-09-26T08:00:00Z", "file": "workshop-journal.example/posts/led-inserts.html"},
+    {"story_hash": "7:d4e5f6", "feed": "7", "title": "Three weeks of glue tests", "permalink": "http://workshop-journal.example/posts/glue-tests.html", "timestamp": "2026-09-12T08:00:00Z", "file": "workshop-journal.example/posts/glue-tests.html"},
+    {"story_hash": "7:0a0b0c", "feed": "7", "title": "Turning lantern caps", "permalink": "http://workshop-journal.example/posts/caps.html", "timestamp": "2026-09-05T08:00:00Z", "file": "workshop-journal.example/posts/caps.html"}
+  ],
+  "starred": [
+    {"story_hash": "7:778899", "feed": "7", "title": "Building a wet and dry bench", "permalink": "http://workshop-journal.example/posts/bench-build.html", "timestamp": "2026-09-20T08:00:00Z", "starred": "2026-09-21T09:30:00Z", "user_tags": ["tools"], "file": "workshop-journal.example/posts/bench-build.html"},
+    {"story_hash": "7:a1b2c3", "feed": "7", "title": "LED inserts that fit the bottom cap", "permalink": "http://workshop-journal.example/posts/led-inserts.html", "timestamp": "2026-09-26T08:00:00Z", "starred": "2026-09-26T21:00:00Z", "user_tags": ["crafts"], "file": "workshop-journal.example/posts/led-inserts.html"}
+  ]
+}

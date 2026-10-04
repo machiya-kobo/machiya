@@ -1,0 +1,709 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Micheal Waltz and Machiya contributors
+"""dev - the Machiya dev stack: every service, synthetic data only, Hister's users as the sign-in (docs/dev-stack.md).
+
+    ./dev init [--url URL] [--behind-serve] [--bind ADDR] [--data DIR] [--native] [--siblings DIR]
+               [--tailnet-users LOGINS]
+    ./dev up                 build and start everything (the vault mirror first), wait, then seed Hister once
+    ./dev seed               (again) the synthetic Hister corpus: pages, labels, collections, history; idempotent
+    ./dev check [--browser] [--shots DIR]   the checks (HTTP; --browser adds Playwright, Chromium and WebKit)
+    ./dev status             the addresses, and what runs
+    ./dev logs SERVICE       a service's log
+    ./dev down               stop it (the data stays)
+    ./dev reset [--yes]      down, delete the data, init with the same settings, up: the same seed again
+
+The public base is https://localhost by default: `front` terminates TLS with a throwaway CA made here
+($DEV_DATA/certs/ca.crt; the helper sends a browser back only to https addresses). On the tailnet, init with
+--url https://<this machine's tailnet name> --behind-serve: Tailscale Serve terminates TLS and the front speaks http.
+
+init writes $DEV_DATA (default: ./data here; `--data` or MACHIYA_DEV_DATA elsewhere, remembered in .data-dir): the
+sample vault plus seed/vault as a bare git repository with fixed commit dates (the same commit on every machine), the
+board's clone, generated secrets (0600, never printed: the dummy owner's password and Hister token, the OIDC client
+secret, SearXNG's secret, the fake NewsBlur's token), the dummy owner in Hister (`hister create-user` in a pseudo-TTY),
+bound to the stub OIDC provider's login, and dev.env (the compose's settings: no secrets in it).
+
+Engines: rootless podman (`podman compose`, a user API socket is started under $DEV_DATA when DOCKER_HOST is unset),
+Docker (`docker compose`), or --native: every service as a plain process from the checkouts (compose.yml's x-native
+blocks; Hister from $HISTER_BIN or `hister` on PATH, SearXNG optional), for hosts without containers.
+The rooms are built from checkouts of kura, niwa and konbini next to the machiya checkout (or --siblings).
+Standard library only (--native also needs pyyaml, which the rooms need anyway).
+"""
+import argparse
+import calendar
+import json
+import os
+import re
+import secrets
+import shutil
+import signal
+import socket
+import sqlite3
+import ssl
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+MACHIYA = os.path.dirname(os.path.dirname(HERE))
+PROJECT = "machiya-dev"
+HISTER_IMAGE = "ghcr.io/asciimoo/hister:v0.20.0"
+OWNER = "owner"
+OIDC_ID = "oidc-owner@dev.idp.example"            # the stub provider's login, bound to the owner (STUB_EMAIL in compose)
+SEED_DATE = "2026-10-01T00:00:00Z"                # the vault commit's date: the same hash everywhere
+PORTS = [  # (port, name, path to show)
+    (19200, "landing", "/"), (19201, "kura", "/"), (19202, "niwa", "/"), (19203, "konbini", "/"),
+    (19204, "hister", "/"), (19205, "searxng", "/"), (19206, "machiya-mcp", "/mcp"), (19207, "smallweb", "/"),
+    (19208, "stub-oidc", "/.well-known/openid-configuration"), (19209, "fixtures", "/"),
+    (19210, "fake-newsblur", "/healthz"), (19211, "niwa-gemini", ""), (19212, "niwa-gopher", ""),
+    (19224, "hister-plain", "/mcp"), (19226, "mcp-plain", "/mcp")]
+FRONT_PORTS = range(19200, 19209)                  # behind `front` (https, or http behind a real Serve)
+UNVERIFIED = ssl._create_unverified_context()      # the throwaway dev CA, from this machine to itself only
+
+
+def say(*a):
+    print("dev:", *a, flush=True)
+
+
+def die(msg):
+    print("dev: " + msg, file=sys.stderr, flush=True)
+    sys.exit(1)
+
+
+# -- where things are ------------------------------------------------------------------------------------------------
+
+def data_dir(explicit=None):
+    if explicit:
+        return os.path.abspath(explicit)
+    if os.environ.get("MACHIYA_DEV_DATA"):
+        return os.path.abspath(os.environ["MACHIYA_DEV_DATA"])
+    try:
+        with open(os.path.join(HERE, ".data-dir")) as f:
+            return f.read().strip()
+    except OSError:
+        return os.path.join(HERE, "data")
+
+
+def read_env(path):
+    out = {}
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                out[k.strip()] = v.strip()
+    return out
+
+
+def load(data):
+    envf = os.path.join(data, "dev.env")
+    if not os.path.exists(envf):
+        die("no dev stack at %s: run ./dev init first" % data)
+    env = read_env(envf)
+    SCHEME["front"] = env.get("DEV_FRONT_SCHEME", "https")
+    return env
+
+
+def secret(data, name):
+    with open(os.path.join(data, "secrets", name)) as f:
+        return f.readline().strip()
+
+
+# -- engines ---------------------------------------------------------------------------------------------------------
+
+def detect_engine():
+    if shutil.which("podman"):
+        return "podman"
+    if shutil.which("docker") and subprocess.run(["docker", "info"], capture_output=True).returncode == 0:
+        return "docker"
+    die("neither podman nor docker found: use --native")
+
+
+def podman_socket(data):
+    """`podman compose` drives docker-compose through an API socket: DOCKER_HOST, the user's podman.socket, or one
+    started here (left running in the background, like the stack)."""
+    if os.environ.get("DOCKER_HOST"):
+        return os.environ["DOCKER_HOST"]
+    run_dir = os.environ.get("XDG_RUNTIME_DIR") or "/run/user/%d" % os.getuid()
+    user_sock = os.path.join(run_dir, "podman", "podman.sock")
+    for sock in (user_sock, os.path.join(data, "podman.sock")):
+        if os.path.exists(sock):
+            try:
+                with socket.socket(socket.AF_UNIX) as s:
+                    s.connect(sock)
+                return "unix://" + sock
+            except OSError:
+                pass
+    sock = os.path.join(data, "podman.sock")
+    if os.path.exists(sock):
+        os.unlink(sock)
+    subprocess.Popen(["podman", "system", "service", "--time=0", "unix://" + sock], stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    for _ in range(50):
+        if os.path.exists(sock):
+            break
+        time.sleep(0.1)
+    return "unix://" + sock
+
+
+def compose_cmd(env, data, *args):
+    return [env["DEV_ENGINE"], "compose", "--project-name", PROJECT, "--env-file", os.path.join(data, "dev.env"),
+            "-f", os.path.join(HERE, "compose.yml")] + list(args)
+
+
+def compose_env(env, data):
+    e = dict(os.environ)
+    if env["DEV_ENGINE"] == "podman":
+        e["DOCKER_HOST"] = podman_socket(data)
+        e.setdefault("PODMAN_COMPOSE_WARNING_LOGS", "false")
+    return e
+
+
+def compose(env, data, *args, check=True, capture=False):
+    engine = env["DEV_ENGINE"]
+    r = subprocess.run(compose_cmd(env, data, *args), cwd=HERE, env=compose_env(env, data), capture_output=capture,
+                       text=True)
+    if check and r.returncode != 0:
+        die("%s compose %s failed (exit %d)%s" % (engine, " ".join(args), r.returncode,
+                                                   ("\n" + r.stderr[-3000:]) if capture else ""))
+    return r
+
+
+# -- init ------------------------------------------------------------------------------------------------------------
+
+def make_secrets(data):
+    sec = os.path.join(data, "secrets")
+    os.makedirs(sec, exist_ok=True)
+    os.chmod(sec, 0o700)
+
+    def put(name, value, mode=0o600):
+        path = os.path.join(sec, name)
+        if not os.path.exists(path):
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+            with os.fdopen(fd, "w") as f:
+                f.write(value + "\n")
+        os.chmod(path, mode)
+
+    put("owner-password", secrets.token_urlsafe(18))
+    put("oidc-client-secret", secrets.token_urlsafe(24))
+    put("hister.env", "HISTER__SERVER__OAUTH__OIDC__CLIENT_SECRET=" + secret(data, "oidc-client-secret"))
+    put("searxng.env", "SEARXNG_SECRET=" + secrets.token_hex(32))
+    put("newsblur-token", "devnb_" + secrets.token_urlsafe(24))
+
+
+def git(*args, cwd=None, env=None):
+    e = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="Machiya Dev Seed",
+             GIT_AUTHOR_EMAIL="dev-seed@example.invalid", GIT_COMMITTER_NAME="Machiya Dev Seed",
+             GIT_COMMITTER_EMAIL="dev-seed@example.invalid", GIT_AUTHOR_DATE=SEED_DATE,
+             GIT_COMMITTER_DATE=SEED_DATE, **(env or {}))
+    e.pop("GIT_DIR", None)
+    return subprocess.run(["git", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"] + list(args),
+                          cwd=cwd, env=e, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def make_certs(data, host):
+    """A throwaway CA and a leaf certificate (825 days) for localhost, 127.0.0.1 and the dev host."""
+    certs = os.path.join(data, "certs")
+    os.makedirs(certs, exist_ok=True)
+    if os.path.exists(os.path.join(certs, "tls.crt")):
+        return
+    def ossl(*args):
+        subprocess.run(["openssl"] + list(args), cwd=certs, check=True, capture_output=True)
+    ossl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.crt", "-days", "825",
+         "-subj", "/CN=Machiya dev stack throwaway CA")
+    ossl("req", "-newkey", "rsa:2048", "-nodes", "-keyout", "tls.key", "-out", "tls.csr", "-subj", "/CN=" + host)
+    names = ["DNS:localhost", "IP:127.0.0.1"] + ([("IP:" if re.fullmatch(r"[0-9.]+", host) else "DNS:") + host]
+                                                if host not in ("localhost", "127.0.0.1") else [])
+    with open(os.path.join(certs, "ext.cnf"), "w") as f:
+        f.write("subjectAltName=%s\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n" % ",".join(names))
+    ossl("x509", "-req", "-in", "tls.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial", "-out", "tls.crt",
+         "-days", "825", "-extfile", "ext.cnf")
+    for f in ("ca.key", "tls.key"):
+        os.chmod(os.path.join(certs, f), 0o600)
+
+
+def make_vault(data):
+    """sample-vault/ + seed/vault/ (work: private, team: shared) as one commit with a fixed date, then a bare
+    repository (the services' VAULT_REPO_URL) and the board's clone."""
+    bare, work = os.path.join(data, "vault.git"), os.path.join(data, "vault-src")
+    if os.path.exists(bare):
+        return git("rev-parse", "HEAD", cwd=bare)
+    shutil.rmtree(work, ignore_errors=True)
+    shutil.copytree(os.path.join(MACHIYA, "sample-vault"), work)
+    os.unlink(os.path.join(work, "README.md"))
+    seed = os.path.join(HERE, "seed", "vault")
+    for top in sorted(os.listdir(seed)):
+        if top != "README.md":
+            shutil.copytree(os.path.join(seed, top), os.path.join(work, top))
+    git("init", "-q", cwd=work)
+    git("add", "-A", cwd=work)
+    git("commit", "-q", "-m", "dev seed: the sample vault, a private work vault and a shared team vault", cwd=work)
+    head = git("rev-parse", "HEAD", cwd=work)
+    git("clone", "-q", "--bare", work, bare)
+    shutil.rmtree(work)
+    git("clone", "-q", bare, os.path.join(data, "konbini-repo"))
+    return head
+
+
+def hister_cmd(env, data, *args, tty=False):
+    """The hister CLI on the dev Hister's data (Hister itself stopped or not started yet)."""
+    conf = os.path.join(HERE, "config", "hister.yml")
+    if env["DEV_ENGINE"] == "native":
+        e = dict(HISTER_CONFIG=conf, HISTER_DATA_DIR=os.path.join(data, "hister"), HISTER__APP__USER_HANDLING="true",
+                 **read_env(os.path.join(data, "secrets", "hister.env")))
+        return [env.get("HISTER_BIN") or "hister"] + list(args), e
+    cmd = [env["DEV_ENGINE"], "run", "--rm"] + (["-it"] if tty else []) + [
+        "--env-file", os.path.join(data, "secrets", "hister.env"),
+        "-e", "HISTER_CONFIG=/hister/config.yml", "-e", "HISTER__APP__USER_HANDLING=true",
+        "-v", "%s:/hister/data" % os.path.join(data, "hister"), "-v", "%s:/hister/config.yml:ro" % conf,
+        "--user", "%s:%s" % (env["DEV_UID"], env["DEV_GID"])]
+    if env.get("DEV_USERNS"):
+        cmd += ["--userns", env["DEV_USERNS"]]
+    return cmd + [HISTER_IMAGE] + list(args), {}
+
+
+def make_owner(env, data):
+    """The dummy owner: `hister create-user` (it insists on a TTY: tty_create_user.py types the password from its file),
+    its token to secrets/owner-token, and the stub OIDC login bound to it (as tsidp's is bound in production)."""
+    tok = os.path.join(data, "secrets", "owner-token")
+    if os.path.exists(tok) and os.path.getsize(tok):
+        return
+    cmd, extra = hister_cmd(env, data, "create-user", OWNER, "--admin", tty=True)
+    r = subprocess.run([sys.executable, os.path.join(MACHIYA, "stack", "hister-login", "dev", "tty_create_user.py"),
+                        os.path.join(data, "secrets", "owner-password")] + cmd,
+                       env=dict(os.environ, **extra), capture_output=True, text=True)
+    if r.returncode != 0 or "User created" not in r.stdout:
+        die("hister create-user failed: %s %s" % (r.stdout.strip()[-500:], r.stderr.strip()[-500:]))
+    cmd, extra = hister_cmd(env, data, "show-user", OWNER, "--token")
+    r = subprocess.run(cmd, env=dict(os.environ, **extra), capture_output=True, text=True)
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", r.stdout)
+    m = re.search(r"^\s*Token\s*:\s*(\S+)", plain, re.M)
+    if not m:
+        die("hister show-user gave no token (exit %d)" % r.returncode)
+    fd = os.open(tok, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(m.group(1) + "\n")
+    db = sqlite3.connect(os.path.join(data, "hister", "db.sqlite3"))
+    db.execute("UPDATE users SET o_auth_id = ? WHERE username = ?", (OIDC_ID, OWNER))
+    db.commit()
+    db.close()
+    say("Hister owner '%s' made (password and token in %s, not shown); OIDC login bound" % (OWNER, os.path.dirname(tok)))
+
+
+def cmd_init(a):
+    data = data_dir(a.data)
+    if os.path.exists(os.path.join(data, "dev.env")):
+        die("%s already holds a dev stack: ./dev reset to start over, or ./dev up" % data)
+    siblings = os.path.abspath(a.siblings or os.environ.get("MACHIYA_DEV_SIBLINGS") or os.path.dirname(MACHIYA))
+    for repo in ("kura", "niwa", "konbini"):
+        if not os.path.isdir(os.path.join(siblings, repo, "app")):
+            die("%s/%s/app not found: clone %s next to machiya (or --siblings DIR)" % (siblings, repo, repo))
+    url = (a.url or "https://localhost").rstrip("/")
+    u = urllib.parse.urlsplit(url)
+    if u.scheme not in ("http", "https") or not u.hostname or u.port or (u.path not in ("", "/")):
+        die("--url is a scheme and a host only (each service adds its port): http://localhost, "
+            "https://claude.example.ts.net")
+    engine = "native" if a.native else (a.engine or detect_engine())
+    os.makedirs(data, exist_ok=True)
+    for d in ("hister", "login", "kura", "niwa", "konbini", "mirror", "landing", "mcp", "smallweb", "feed-import",
+              "logs"):
+        os.makedirs(os.path.join(data, d), exist_ok=True)
+    make_secrets(data)
+    head = make_vault(data)
+    tls = u.scheme == "https" and not a.behind_serve
+    if tls:
+        make_certs(data, u.hostname)
+    else:
+        os.makedirs(os.path.join(data, "certs"), exist_ok=True)
+    userns = ""
+    if engine == "podman":
+        userns = "keep-id"
+    env = {
+        "DEV_ENGINE": engine, "DEV_URL": url, "DEV_HOST": u.hostname, "DEV_BIND": a.bind,
+        "DEV_DATA": data, "DEV_ROOT": HERE, "MACHIYA_SRC": MACHIYA,
+        "KURA_SRC": os.path.join(siblings, "kura"), "NIWA_SRC": os.path.join(siblings, "niwa"),
+        "KONBINI_SRC": os.path.join(siblings, "konbini"),
+        "DEV_UID": str(os.getuid()), "DEV_GID": str(os.getgid()), "DEV_USERNS": userns,
+        "DEV_COOKIE_DOMAIN": a.cookie_domain or "", "DEV_TAILNET_USERS": a.tailnet_users or "owner@dev",
+        "DEV_FRONT_SCHEME": "https" if tls else "http",
+        "DEV_TLS_CERT": "/certs/tls.crt" if tls else "", "DEV_TLS_KEY": "/certs/tls.key" if tls else "",
+    }
+    if engine == "native" and os.environ.get("HISTER_BIN"):
+        env["HISTER_BIN"] = os.path.abspath(os.environ["HISTER_BIN"])
+    pointer = os.path.join(HERE, ".data-dir")
+    if data != os.path.join(HERE, "data") and not os.path.exists(pointer):    # the first stack made here is the default
+        with open(pointer, "w") as f:
+            f.write(data + "\n")
+    if engine != "native":
+        subprocess.run([engine, "pull", "-q", HISTER_IMAGE], capture_output=True)
+    elif not shutil.which(env.get("HISTER_BIN") or "hister"):
+        die("--native needs the hister binary: HISTER_BIN=/path/to/hister or `hister` on PATH (docs/dev-stack.md)")
+    make_owner(env, data)
+    with open(os.path.join(data, "dev.env"), "w") as f:            # last: its presence means "initialised"
+        f.write("# Written by compose/dev/dev init. The dev stack's settings (no secrets here; those are in secrets/).\n")
+        for k, v in env.items():
+            f.write("%s=%s\n" % (k, v))
+    say("ready: %s (engine %s, vault commit %s, public base %s)" % (data, engine, head[:12], url))
+    say("next: ./dev up")
+
+
+# -- native ----------------------------------------------------------------------------------------------------------
+
+VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-?])([^}]*))?\}")
+
+
+def interpolate(value, env):
+    def sub(m):
+        name, op, arg = m.group(1), m.group(2), m.group(3)
+        v = env.get(name)
+        if op == ":-":
+            return v if v else arg
+        if op == "-":
+            return v if v is not None else arg
+        if op in (":?", "?"):
+            if not v:
+                die("%s is required: %s" % (name, arg))
+        return v or ""
+    return VAR_RE.sub(sub, str(value))
+
+
+def native_plan(env):
+    import yaml                                   # the rooms need pyyaml anyway
+    with open(os.path.join(HERE, "compose.yml")) as f:
+        spec = yaml.safe_load(f)
+    hosts = spec["x-native"]["hosts"]
+    plan = []
+    for name, svc in spec["services"].items():
+        nat = svc.get("x-native") or {}
+        if nat.get("skip"):
+            plan.append((name, None, None, None, nat["skip"]))
+            continue
+        raw = svc.get("environment") or {}
+        if isinstance(raw, list):
+            raw = dict(x.split("=", 1) for x in raw)
+        out = {}
+        for k, v in raw.items():
+            v = interpolate("" if v is None else v, env)
+            for src, dst in hosts.items():
+                v = v.replace("//" + src, "//" + dst)
+            for src, dst in (nat.get("paths") or {}).items():      # /data, /data/x, name=/vault#sub, a,/b
+                v = re.sub(r"(^|[=,])" + re.escape(src) + r"(?=$|[/#,])",
+                           lambda m: m.group(1) + interpolate(dst, env), v)
+            out[k] = v
+        if nat.get("env_file"):
+            out.update(read_env(interpolate(nat["env_file"], env)))
+        for k, v in (nat.get("env") or {}).items():
+            out[k] = interpolate(v, env)
+        cmd = [interpolate(c, env) for c in nat["cmd"]]
+        cwd = interpolate(nat.get("cwd") or env["DEV_DATA"], env)
+        plan.append((name, cmd, cwd, out, None))
+    return plan
+
+
+def native_up(env, data):
+    run = os.path.join(data, "run")
+    os.makedirs(run, exist_ok=True)
+    order = ["stub-idp", "hister", "hister-login", "front", "fixtures", "fake-newsblur", "vault-mirror", "kura",
+             "niwa", "konbini", "landing", "smallweb", "machiya-mcp", "feed-import"]
+    plan = {p[0]: p for p in native_plan(env)}
+    for name in order + [n for n in plan if n not in order]:
+        _, cmd, cwd, extra, skip = plan[name]
+        if skip:
+            say("%s: skipped natively (%s)" % (name, skip))
+            continue
+        pidf = os.path.join(run, name + ".pid")
+        if os.path.exists(pidf):
+            try:
+                os.kill(int(open(pidf).read()), 0)
+                continue                                   # already running
+            except (OSError, ValueError):
+                pass
+        if name == "hister" and not shutil.which(cmd[0]):
+            say("hister: no binary (%s): skipped; the rooms answer 503 until a Hister runs on 127.0.0.1:19224" % cmd[0])
+            continue
+        log = open(os.path.join(data, "logs", name + ".log"), "ab")
+        e = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONDONTWRITEBYTECODE="1", **extra)
+        p = subprocess.Popen(cmd, cwd=cwd, env=e, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                             start_new_session=True)
+        with open(pidf, "w") as f:
+            f.write(str(p.pid))
+        say("%s: started (pid %d, log logs/%s.log)" % (name, p.pid, name))
+        if name == "vault-mirror":
+            wait_for(lambda: os.path.exists(os.path.join(data, "mirror", "vault", ".git")), 120, "the vault mirror")
+        time.sleep(0.3)
+
+
+def native_down(data):
+    run = os.path.join(data, "run")
+    for f in sorted(os.listdir(run)) if os.path.isdir(run) else []:
+        if f.endswith(".pid"):
+            try:
+                pid = int(open(os.path.join(run, f)).read())
+                os.killpg(pid, signal.SIGTERM)
+                say("%s: stopped" % f[:-4])
+            except (OSError, ValueError):
+                pass
+            os.unlink(os.path.join(run, f))
+
+
+# -- up, seed --------------------------------------------------------------------------------------------------------
+
+def wait_for(fn, seconds, what):
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            if fn():
+                return True
+        except Exception:
+            pass
+        time.sleep(2)
+    die("timed out waiting for %s" % what)
+
+
+def http(method, url, data=None, headers=None, form=False, timeout=15):
+    body = None
+    h = dict(headers or {})
+    if data is not None:
+        body = (urllib.parse.urlencode(data) if form else json.dumps(data)).encode()
+        h["Content-Type"] = "application/x-www-form-urlencoded" if form else "application/json"
+    req = urllib.request.Request(url, body, h, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=UNVERIFIED) as r:
+            raw = r.read()
+            status = r.status
+    except urllib.error.HTTPError as e:
+        raw, status = e.read(), e.code
+    try:
+        return status, json.loads(raw) if raw.strip() else None
+    except ValueError:
+        return status, raw.decode("utf-8", "replace")
+
+
+SCHEME = {"front": "https"}
+
+
+def local(port, path=""):
+    """This machine's own address of a port: the front's ports in its scheme, the rest plain http."""
+    return "%s://127.0.0.1:%d%s" % (SCHEME["front"] if port in FRONT_PORTS else "http", port, path)
+
+
+def ready(port, path, want=None, headers=None):
+    st, body = http("GET", local(port, path), headers=headers, timeout=5)
+    return st == 200 and (want is None or (isinstance(body, dict) and want(body)))
+
+
+def cmd_up(a):
+    data = data_dir(a.data)
+    env = load(data)
+    if env["DEV_ENGINE"] == "native":
+        native_up(env, data)
+    else:
+        say("building the images (log: %s)" % os.path.join(data, "logs", "build.log"))
+        with open(os.path.join(data, "logs", "build.log"), "w") as log:
+            r = subprocess.run(compose_cmd(env, data, "build"), cwd=HERE, env=compose_env(env, data), stdout=log,
+                               stderr=subprocess.STDOUT)
+        if r.returncode:
+            die("the build failed: see %s" % os.path.join(data, "logs", "build.log"))
+        compose(env, data, "up", "-d", "vault-mirror")
+        wait_for(lambda: os.path.exists(os.path.join(data, "mirror", "vault", ".git")), 120, "the vault mirror")
+        for attempt in range(3):
+            r = compose(env, data, "up", "-d", check=attempt == 2)
+            if r.returncode == 0:
+                break
+            # rootless podman sometimes gives a keep-id container a broken uid map when many are created at once
+            # ("no mapping found for uid 0"); the containers that never started are made again
+            ids = subprocess.run(["podman" if env["DEV_ENGINE"] == "podman" else "docker", "ps", "-aq", "--filter",
+                                  "label=com.docker.compose.project=" + PROJECT, "--filter", "status=created"],
+                                 capture_output=True, text=True).stdout.split()
+            say("compose up failed; recreating %d container(s) that never started, again" % len(ids))
+            if ids:
+                subprocess.run([env["DEV_ENGINE"], "rm", "-f"] + ids, capture_output=True)
+    say("waiting for the services")
+    wait_for(lambda: ready(19224, "/health"), 120, "Hister (19224/health)")
+    wait_for(lambda: ready(19204, "/health"), 60, "the front (19204)")
+    wait_for(lambda: ready(19204, "/machiya/healthz", lambda b: b.get("hister") == "ok"), 60, "the helper")
+    wait_for(lambda: ready(19201, "/api/status", lambda b: b.get("ready")), 180, "Kura")
+    wait_for(lambda: ready(19202, "/api/status", lambda b: b.get("ready")), 180, "Niwa")
+    wait_for(lambda: ready(19203, "/healthz"), 180, "Konbini")
+    wait_for(lambda: ready(19200, "/healthz"), 60, "landing")
+    seed(env, data, quiet=True)
+    skip = {"shiori"} | ({"searxng"} if env["DEV_ENGINE"] == "native" else set())       # a client; optional natively
+    owner = {"Authorization": "Bearer " + secret(data, "owner-token")}      # landing signs in like the rooms
+    wait_for(lambda: ready(19200, "/api/status", lambda b: all(
+        (v or {}).get("state") == "up" for k, v in b.get("apps", {}).items() if k not in skip), owner), 120,
+        "landing to see every app up")
+    status(env, data)
+
+
+def html_text(path):
+    with open(path, encoding="utf-8") as f:
+        page = f.read()
+    title = re.search(r"<title>(.*?)</title>", page, re.S).group(1).strip()
+    body = re.search(r"<body>(.*)</body>", page, re.S).group(1)
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body)).strip()
+    return title, text, body.strip()
+
+
+def seed(env, data, quiet=False):
+    """The synthetic Hister corpus (seed/hister.json), through Hister's API with the dummy owner's token. Idempotent:
+    a page is re-added only when Hister doesn't have it, aliases are set, history entries added once."""
+    with open(os.path.join(HERE, "seed", "hister.json")) as f:
+        spec = json.load(f)
+    h = {"Origin": "hister://", "Accept": "application/json", "X-Access-Token": secret(data, "owner-token")}
+    base = local(19224)                                  # Hister itself, plain
+    added = 0
+    for p in spec["pages"]:
+        st, _ = http("GET", base + "/api/document?" + urllib.parse.urlencode({"url": p["url"]}), headers=h)
+        if st == 200:
+            continue
+        title, text, body = html_text(os.path.join(HERE, "seed", "site", p["file"]))
+        doc = {"url": p["url"], "title": title, "text": text, "html": body, "label": p["label"],
+               "added": calendar.timegm(time.strptime(p["added"], "%Y-%m-%dT%H:%M:%SZ")),
+               "metadata": {"source": "dev-seed"}}
+        st, out = http("POST", base + "/api/add", doc, headers=h)
+        if st not in (200, 201):
+            die("Hister refused %s: HTTP %d %s" % (p["url"], st, str(out)[:200]))
+        added += 1
+    st, rules = http("GET", base + "/api/rules", headers=h)
+    have = (rules or {}).get("aliases") or {} if isinstance(rules, dict) else {}
+    for k, v in spec["aliases"].items():
+        if have.get(k) != v:
+            st, _ = http("POST", base + "/api/add_alias", {"alias-keyword": k, "alias-value": v}, headers=h, form=True)
+            if st != 200:
+                die("Hister refused the alias @%s: HTTP %d" % (k, st))
+    st, hist = http("GET", base + "/api/history?opened=true", headers=h)
+    items = (hist or {}).get("documents") or [] if isinstance(hist, dict) else []
+    seen = {(i.get("url"), i.get("query")) for i in items if isinstance(i, dict)}
+    for entry in spec["history"]:
+        if (entry["url"], entry["query"]) not in seen:
+            st, _ = http("POST", base + "/api/history", entry, headers=h)
+            if st != 200:
+                die("Hister refused a history entry: HTTP %d" % st)
+    with open(os.path.join(data, "seeded.json"), "w") as f:
+        json.dump({"pages": len(spec["pages"]), "aliases": sorted(spec["aliases"]), "history": len(spec["history"]),
+                   "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, f)
+    say("seeded Hister: %d page(s) added (%d in the seed), %d alias(es), %d history entr(ies)" % (
+        added, len(spec["pages"]), len(spec["aliases"]), len(spec["history"])))
+
+
+def cmd_seed(a):
+    data = data_dir(a.data)
+    seed(load(data), data)
+
+
+def status(env, data):
+    host = env["DEV_URL"]
+    print("\nMachiya dev stack (%s, data %s); synthetic data only" % (env["DEV_ENGINE"], data))
+    for port, name, path in PORTS:
+        if name.startswith("niwa-"):
+            scheme = "gemini" if name.endswith("gemini") else "gopher"
+            print("  %-14s %s://%s:%d/" % (name, scheme, env["DEV_HOST"], port if env["DEV_ENGINE"] != "native"
+                                          else {19211: 1965, 19212: 7070}[port]))
+        else:
+            print("  %-14s %s:%d%s" % (name, host if port in FRONT_PORTS else "http://127.0.0.1", port, path))
+    print("  sign in as '%s', password in %s (never printed)" % (OWNER, os.path.join(data, "secrets",
+                                                                                     "owner-password")))
+    if env.get("DEV_FRONT_SCHEME") == "https":
+        print("  TLS: the throwaway dev CA is %s (trust it in a browser, or accept the warning)"
+              % os.path.join(data, "certs", "ca.crt"))
+    print("  agents: MACHIYA_MCP_URL=http://127.0.0.1:19226/mcp HISTER_MCP_URL=http://127.0.0.1:19224/mcp "
+          "HISTER_TOKEN_FILE=%s" % os.path.join(data, "secrets", "owner-token"))
+
+
+def cmd_status(a):
+    data = data_dir(a.data)
+    env = load(data)
+    status(env, data)
+    if env["DEV_ENGINE"] != "native":
+        compose(env, data, "ps", "--format", "table {{.Service}}\t{{.Status}}", check=False)
+
+
+def cmd_logs(a):
+    data = data_dir(a.data)
+    env = load(data)
+    if env["DEV_ENGINE"] == "native":
+        os.execvp("tail", ["tail", "-n", "200", os.path.join(data, "logs", a.service + ".log")])
+    compose(env, data, "logs", "--tail", "200", a.service, check=False)
+
+
+def cmd_down(a):
+    data = data_dir(a.data)
+    env = load(data)
+    if env["DEV_ENGINE"] == "native":
+        native_down(data)
+    else:
+        compose(env, data, "down", "--remove-orphans")
+
+
+def cmd_reset(a):
+    data = data_dir(a.data)
+    env = load(data)
+    if not a.yes:
+        die("reset deletes %s and makes it again from the seed: add --yes" % data)
+    cmd_down(a)
+    if env["DEV_ENGINE"] == "podman":       # files the containers made under keep-id are ours; anything else isn't
+        subprocess.run(["podman", "unshare", "rm", "-rf", data], check=False)
+    shutil.rmtree(data, ignore_errors=True)
+    init = argparse.Namespace(data=data, url=env["DEV_URL"], bind=env["DEV_BIND"], native=env["DEV_ENGINE"] == "native",
+                              behind_serve=env["DEV_URL"].startswith("https") and env.get("DEV_FRONT_SCHEME") == "http",
+                              engine=env["DEV_ENGINE"] if env["DEV_ENGINE"] != "native" else None,
+                              siblings=os.path.dirname(env["KURA_SRC"]), tailnet_users=env.get("DEV_TAILNET_USERS"),
+                              cookie_domain=env.get("DEV_COOKIE_DOMAIN"))
+    cmd_init(init)
+    a.verbose = False
+    cmd_up(a)
+
+
+def cmd_check(a):
+    data = data_dir(a.data)
+    env = load(data)
+    args = [sys.executable, os.path.join(HERE, "checks.py"), "--data", data]
+    if a.browser:
+        args += ["--browser", "--shots", a.shots or os.path.join(data, "shots")]
+    if a.python:
+        args[0] = a.python
+    sys.exit(subprocess.run(args, env=dict(os.environ, DEV_URL=env["DEV_URL"],
+                                           DEV_FRONT_SCHEME=env.get("DEV_FRONT_SCHEME", "https"))).returncode)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--data", help="the dev stack's data folder (default: MACHIYA_DEV_DATA, .data-dir, ./data)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("init")
+    p.add_argument("--url", help="the public base, scheme and host only (default https://localhost)")
+    p.add_argument("--behind-serve", action="store_true",
+                   help="a real Tailscale Serve terminates TLS for --url: the front speaks plain http")
+    p.add_argument("--bind", default="127.0.0.1", help="the address the ports are published on (default 127.0.0.1)")
+    p.add_argument("--native", action="store_true", help="no containers: run every service as a process")
+    p.add_argument("--engine", choices=["podman", "docker"], help="default: podman if installed, else docker")
+    p.add_argument("--siblings", help="where the kura, niwa and konbini checkouts are (default: next to machiya)")
+    p.add_argument("--tailnet-users", help="Niwa's and Konbini's fallback login(s) (default owner@dev)")
+    p.add_argument("--cookie-domain", help="MACHIYA_COOKIE_DOMAIN (default: none, host-only cookies)")
+    p.set_defaults(fn=cmd_init)
+    p = sub.add_parser("up")
+    p.add_argument("--verbose", action="store_true")
+    p.set_defaults(fn=cmd_up)
+    sub.add_parser("seed").set_defaults(fn=cmd_seed)
+    p = sub.add_parser("check")
+    p.add_argument("--browser", action="store_true", help="also the Playwright checks (Chromium and WebKit)")
+    p.add_argument("--shots", help="screenshots folder (default $DEV_DATA/shots)")
+    p.add_argument("--python", help="a Python with Playwright for --browser (default: this one)")
+    p.set_defaults(fn=cmd_check)
+    sub.add_parser("status").set_defaults(fn=cmd_status)
+    p = sub.add_parser("logs")
+    p.add_argument("service")
+    p.set_defaults(fn=cmd_logs)
+    sub.add_parser("down").set_defaults(fn=cmd_down)
+    p = sub.add_parser("reset")
+    p.add_argument("--yes", action="store_true")
+    p.set_defaults(fn=cmd_reset)
+    a = ap.parse_args()
+    a.fn(a)
+
+
+if __name__ == "__main__":
+    main()

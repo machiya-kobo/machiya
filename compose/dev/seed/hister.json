@@ -1,0 +1,24 @@
+{
+  "_comment": "The dev stack's synthetic Hister corpus (dev seed). Pages come from seed/site/<host>/<path> and are added with POST /api/add under http://<host>/<path>; the times are fixed so every machine gets the same index. Everything is invented.",
+  "pages": [
+    {"url": "http://lantern-supply.example/", "file": "lantern-supply.example/index.html", "label": "crafts", "added": "2026-09-02T09:00:00Z"},
+    {"url": "http://lantern-supply.example/washi-grades.html", "file": "lantern-supply.example/washi-grades.html", "label": "paper", "added": "2026-09-03T10:15:00Z"},
+    {"url": "http://lantern-supply.example/bamboo-ribs.html", "file": "lantern-supply.example/bamboo-ribs.html", "label": "crafts", "added": "2026-09-05T18:40:00Z"},
+    {"url": "http://lantern-supply.example/nori-paste.html", "file": "lantern-supply.example/nori-paste.html", "label": "tools", "added": "2026-09-08T08:05:00Z"},
+    {"url": "http://kyoto-guide.example/", "file": "kyoto-guide.example/index.html", "label": "travel", "added": "2026-09-15T20:30:00Z"},
+    {"url": "http://kyoto-guide.example/autumn-festivals.html", "file": "kyoto-guide.example/autumn-festivals.html", "label": "travel", "added": "2026-09-16T21:10:00Z"},
+    {"url": "http://kyoto-guide.example/machiya-stays.html", "file": "kyoto-guide.example/machiya-stays.html", "label": "travel", "added": "2026-09-17T07:45:00Z"},
+    {"url": "http://kyoto-guide.example/packing.html", "file": "kyoto-guide.example/packing.html", "label": "", "added": "2026-09-28T12:00:00Z"}
+  ],
+  "aliases": {
+    "@pages": "* -label:vault -metadata.source:vault",
+    "@notes": "label:vault",
+    "@workshop": "label:(crafts|paper|tools)",
+    "@travel": "label:travel"
+  },
+  "history": [
+    {"url": "http://lantern-supply.example/washi-grades.html", "title": "Washi grades for lantern skins", "query": "washi weight"},
+    {"url": "http://kyoto-guide.example/autumn-festivals.html", "title": "Autumn lantern festivals in Kyoto", "query": "kyoto lanterns"},
+    {"url": "http://lantern-supply.example/bamboo-ribs.html", "title": "Pre-split bamboo ribs", "query": "bamboo ribs", "pin": true}
+  ]
+}

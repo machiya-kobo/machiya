@@ -12,3 +12,6 @@ secrets/
 repo/
 # Machiya's identity file (logins, token hashes, the session key): never in the repository
 identity.toml
+# the dev stack's local state: where its data lives, and the file Hister writes beside its config natively
+compose/dev/.data-dir
+compose/dev/config/tui.yaml

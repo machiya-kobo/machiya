@@ -84,4 +84,5 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    ThreadingHTTPServer(("0.0.0.0", 9000), H).serve_forever()
+    ThreadingHTTPServer((os.environ.get("STUB_BIND", "0.0.0.0"), int(os.environ.get("STUB_PORT", "9000"))),
+                        H).serve_forever()
