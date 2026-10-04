@@ -6,11 +6,6 @@
       "headers": {
         "X-Agent": "${MACHIYA_AGENT:-claude-code}"
       }
-    },
-    "hister": {
-      "type": "http",
-      "url": "${HISTER_MCP_URL:-https://hister.example.ts.net/mcp}",
-      "headersHelper": "${CLAUDE_PLUGIN_ROOT}/bin/hister-headers"
     }
   }
 }

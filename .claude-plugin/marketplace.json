@@ -6,7 +6,7 @@
     {
       "name": "machiya",
       "source": "./plugins/machiya",
-      "description": "Machiya for Claude Code: the Machiya MCP server and Hister's MCP, and the cross-room skills (backlog-add, weekly-review, recall, garden-suggest, tidy-collections)."
+      "description": "Machiya for Claude Code: the Machiya MCP server and the cross-room skills (backlog-add, weekly-review, recall, garden-suggest, tidy-collections)."
     }
   ]
 }

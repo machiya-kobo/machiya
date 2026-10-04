@@ -1,5 +1,6 @@
 """The machiya plugin's scripts (plugins/machiya): bin/hister-headers never hands a production token to anything but a
-production address (sweep MACH-M-1). Run as a real process with a fake `hpass` on PATH and a throwaway HOME."""
+production address (sweep MACH-M-1), and install.sh denies Hister's own MCP to AI clients (plugin 0.3.0). Both run as
+real processes with a fake `hpass` and a fake `claude` on PATH and a throwaway HOME."""
 import json
 import os
 import shutil
@@ -79,6 +80,42 @@ class HisterHeaders(Scratch):
         with open(self.token_file, "w") as f:
             f.write('bad"token\n')
         self.assertEqual(self.headers(HISTER_TOKEN_FILE=self.token_file, HISTER_MCP_URL="https://h.example/mcp"), {})
+
+
+class Install(Scratch):
+    def settings(self):
+        with open(os.path.join(self.dir, ".claude", "settings.json")) as f:
+            return json.load(f)
+
+    def test_hister_mcp_is_denied_and_pages_come_from_machiya_mcp(self):
+        os.makedirs(os.path.join(self.dir, ".claude"))
+        H = "mcp__plugin_machiya_hister__"
+        old = {"permissions": {"allow": [H + "search", H + "get_preview", "Bash(ls)"], "deny": [H + "get_history"]},
+               "env": {"HISTER_MCP_URL": "http://127.0.0.1:19224/mcp"}}
+        with open(os.path.join(self.dir, ".claude", "settings.json"), "w") as f:
+            json.dump(old, f)
+        r = subprocess.run(["bash", INSTALL, "hister-remove"], capture_output=True, text=True, timeout=60,
+                           env=self.env(MACHIYA_AGENT_NAME="t@test"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        p = self.settings()["permissions"]
+        self.assertNotIn(H + "search", p["allow"])
+        self.assertNotIn(H + "get_preview", p["allow"])
+        self.assertIn("Bash(ls)", p["allow"])
+        for name in ("mcp__plugin_machiya_machiya__pages_search", "mcp__plugin_machiya_machiya__pages_read"):
+            self.assertIn(name, p["allow"])
+        for name in (H + "*", "mcp__hister__*", H + "search", H + "get_preview", H + "get_history", "mcp__hister__get_history"):
+            self.assertIn(name, p["deny"])
+        self.assertEqual(len(p["deny"]), len(set(p["deny"])))
+        r = subprocess.run(["bash", INSTALL, "uninstall"], capture_output=True, text=True, timeout=60, env=self.env())
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = self.settings()
+        self.assertIn(H + "*", d["permissions"]["deny"])           # the denies stay
+        self.assertNotIn("HISTER_MCP_URL", d["env"])
+
+    def test_the_plugin_connects_no_hister_mcp(self):
+        with open(os.path.join(PLUGIN, ".mcp.json")) as f:
+            servers = json.load(f)["mcpServers"]
+        self.assertEqual(list(servers), ["machiya"])
 
 
 if __name__ == "__main__":
