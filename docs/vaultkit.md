@@ -52,7 +52,9 @@ Behind the sanitizer, every HTML page a room serves carries `shell.security_head
 anywhere; forms and frames only to and by the room), `X-Content-Type-Options: nosniff` and `Referrer-Policy:
 same-origin`.
 
-**The installed app's colours** (v0.14): `shell.manifest_colors(theme, headers)` gives the manifest's
+**Themes** (v0.15): `vaultkit.palettes` holds ten palettes, each with a dark and a light variant, and writes machiya.css's palette section (`css()`). `shell.prefs()` reads the `palette` cookie (`machiya_palette` when shared) into `ctx.palette`, `page()` puts `palette-<key>` on `<body>` and uses the palette's bar colours in the theme-color metas, and `appearance_section` (now titled Display) offers Theme (the palette) and Appearance (System / Light / Dark). Rooms pass `ctx.palette` to `manifest_colors`.
+
+**The installed app's colours** (v0.14): `shell.manifest_colors(theme, headers, palette)` gives the manifest's
 `background_color` and `theme_color` (the splash screen and title bar): Night or Day as chosen, and with System the
 device's own scheme when the browser sends `Sec-CH-Prefers-Color-Scheme` (`security_headers()` now includes the
 `Accept-CH` that asks for it), else Night, plus `user_preferences.color_scheme_dark` for browsers that read per-scheme

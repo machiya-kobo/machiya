@@ -13,6 +13,8 @@ import json
 import os
 from urllib.parse import unquote
 
+from . import palettes
+
 ROOMS = [   # (key, name, seal, what it is) front to back through the house, then the neighbours
     ("shiori", "Shiori", "栞", "search"),
     ("konbini", "Konbini", "店", "board"),
@@ -20,7 +22,8 @@ ROOMS = [   # (key, name, seal, what it is) front to back through the house, the
     ("kura", "Kura", "蔵", "notes"),
 ]
 NEIGHBOURS = [("hister", "Hister", "pages"), ("searxng", "SearXNG", "the web")]
-THEMES = [("system", "System"), ("night", "Tokyo Night"), ("day", "Tokyo Night Day")]
+THEMES = [("system", "System"), ("day", "Light"), ("night", "Dark")]     # the appearance (setting `theme`)
+PALETTES = palettes.CHOICES                                              # the theme (setting `palette`, v0.15)
 TEXT_SIZES = [("xsmall", "Extra Small"), ("small", "Small"), ("standard", "Standard"), ("large", "Large"),
               ("xlarge", "Extra Large")]
 
@@ -76,9 +79,10 @@ def rooms(env=None):
 class Prefs:
     """Per-device settings the server needs for the first render (cookies written by machiya.js)."""
 
-    def __init__(self, theme="system", text="standard", extra=None):
+    def __init__(self, theme="system", text="standard", extra=None, palette=palettes.DEFAULT):
         self.theme = theme if theme in ("system", "night", "day") else "system"
         self.text = text if text in dict(TEXT_SIZES) else "standard"
+        self.palette = palette if palette in palettes.PALETTES else palettes.DEFAULT
         self.extra = extra or {}
 
 
@@ -88,7 +92,7 @@ SHARED_PREFIX = "machiya_"      # shared cookies (Domain=COOKIE_DOMAIN): machiya
 
 def is_shared(key):
     """Settings one choice of which covers every room on the device (with MACHIYA_COOKIE_DOMAIN set)."""
-    return key in ("theme", "textSize") or key.startswith("show_")
+    return key in ("theme", "palette", "textSize") or key.startswith("show_")
 
 
 def prefs(cookie_header):
@@ -103,7 +107,8 @@ def prefs(cookie_header):
         jar[k[len(SHARED_PREFIX):]] = jar.pop(k)
     theme = jar.get("theme", "system")
     return Prefs("system" if theme == "auto" else theme, jar.get("textSize", "standard"),
-                 {k: v for k, v in jar.items() if k not in ("theme", "textSize")})
+                 {k: v for k, v in jar.items() if k not in ("theme", "textSize", "palette")},
+                 jar.get("palette", palettes.DEFAULT))
 
 
 def search_box(q="", action="/search", placeholder="Search", label="Search"):
@@ -151,25 +156,32 @@ def security_headers(csp=CSP):
 # -- the manifest's colours (v0.14) -------------------------------------------------------------------------------------
 
 COLOR_HINT = "Sec-CH-Prefers-Color-Scheme"
-NIGHT = {"background_color": "#1a1b26", "theme_color": "#16161e"}
-DAY = {"background_color": "#e1e2e7", "theme_color": "#d0d5e3"}
+def _colors(palette, mode):
+    v = palettes.PALETTES.get(palette, palettes.PALETTES[palettes.DEFAULT])[3][mode]
+    return {"background_color": v["bg"], "theme_color": v["dark"]}
+
+
+NIGHT = _colors(palettes.DEFAULT, "dark")
+DAY = _colors(palettes.DEFAULT, "light")
 MANIFEST_VARY = "Cookie, " + COLOR_HINT      # the manifest's Vary header: the theme cookie and the hint choose it
 
 
-def manifest_colors(theme, headers=None):
+def manifest_colors(theme, headers=None, palette=palettes.DEFAULT):
     """The manifest's background_color and theme_color: what an installed app's splash screen and title bar use.
     Night or Day as chosen in Settings; with System, the device's own scheme when the browser says it
     (Sec-CH-Prefers-Color-Scheme, which security_headers' Accept-CH asks for), else Night. With System the answer also
     carries user_preferences.color_scheme_dark (the manifest's per-scheme colours, where a browser supports them), so
-    a light install still opens dark when the device is dark. Serve the manifest with Vary: MANIFEST_VARY."""
+    a light install still opens dark when the device is dark. Serve the manifest with Vary: MANIFEST_VARY.
+    palette (v0.15): the chosen theme's colours (its bg and its bars' colour), Tokyo Night by default."""
     theme = "system" if theme == "auto" else theme
+    night, day = _colors(palette, "dark"), _colors(palette, "light")
     if theme == "night":
-        return dict(NIGHT)
+        return night
     if theme == "day":
-        return dict(DAY)
+        return day
     hint = ((headers.get(COLOR_HINT) if headers is not None else "") or "").strip().strip('"').lower()
-    out = dict(DAY if hint == "light" else NIGHT)
-    out["user_preferences"] = {"color_scheme_dark": dict(NIGHT)}
+    out = dict(day if hint == "light" else night)
+    out["user_preferences"] = {"color_scheme_dark": night}
     return out
 
 
@@ -340,15 +352,18 @@ def page(ctx, room, title, body, tabs=(), current="", links=None, head="", style
     theme = getattr(ctx, "theme", "system")
     theme = "system" if theme == "auto" else theme
     text = getattr(ctx, "text", "standard")
+    palette = getattr(ctx, "palette", palettes.DEFAULT)
+    palette = palette if palette in palettes.PALETTES else palettes.DEFAULT
     _, name, _, _ = room_info(room)
+    bar = {m: _colors(palette, m)["theme_color"] for m in ("dark", "light")}
     if theme == "night":
-        scheme, colors = "dark", '<meta name="theme-color" content="#16161e">'
+        scheme, colors = "dark", '<meta name="theme-color" content="%s">' % bar["dark"]
     elif theme == "day":
-        scheme, colors = "light", '<meta name="theme-color" content="#d0d5e3">'
+        scheme, colors = "light", '<meta name="theme-color" content="%s">' % bar["light"]
     else:
         scheme = "dark light"
-        colors = ('<meta name="theme-color" content="#16161e" media="(prefers-color-scheme: dark)">'
-                  '<meta name="theme-color" content="#d0d5e3" media="(prefers-color-scheme: light)">')
+        colors = ('<meta name="theme-color" content="%s" media="(prefers-color-scheme: dark)">'
+                  '<meta name="theme-color" content="%s" media="(prefers-color-scheme: light)">' % (bar["dark"], bar["light"]))
     css = "".join('<link rel="stylesheet" href="%s">\n' % e(h) for h in [ui_url("machiya.css")] + list(stylesheets))
     js = "".join('<script type="module" src="%s"></script>\n' % e(h) for h in [ui_url("machiya.js")] + list(scripts))
     return (
@@ -360,10 +375,11 @@ def page(ctx, room, title, body, tabs=(), current="", links=None, head="", style
         '<meta name="apple-mobile-web-app-capable" content="yes">\n<meta name="mobile-web-app-capable" content="yes">\n'
         '<meta name="apple-mobile-web-app-status-bar-style" content="%s">\n'
         '<meta name="apple-mobile-web-app-title" content="%s">\n%s%s%s%s'
-        '</head>\n<body class="theme-%s room-%s" data-room="%s" data-text="%s"%s>\n%s\n%s\n</body>\n</html>\n'
+        '</head>\n<body class="theme-%s%s room-%s" data-room="%s" data-text="%s"%s>\n%s\n%s\n</body>\n</html>\n'
     ) % (e(title), scheme, colors,
          '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">\n' if manifest else "",
-         room, room, "default" if theme == "day" else "black-translucent", e(name), prefs_meta(prefs_url) if prefs_url else "", css, js, head, theme, room, room, e(text),
+         room, room, "default" if theme == "day" else "black-translucent", e(name), prefs_meta(prefs_url) if prefs_url else "", css, js, head, theme,
+         "" if palette == palettes.DEFAULT else " palette-" + palette, room, room, e(text),
          (' data-cookie-domain="%s"' % e(COOKIE_DOMAIN)) if COOKIE_DOMAIN else "", body,
          tabbar(tabs, current, room, links, icons, who) if tabs else "")
 
@@ -371,11 +387,14 @@ def page(ctx, room, title, body, tabs=(), current="", links=None, head="", style
 # -- /settings ----------------------------------------------------------------------------------------------------
 
 def appearance_section(ctx, synced=False):
-    """synced (v0.13): the page has a prefs_url, so theme and text size also follow the person to other devices."""
+    """Display: the theme (palette, v0.15), its appearance (System follows the device; Light, Dark) and the text
+    size. synced (v0.13): the page has a prefs_url, so they also follow the person to other devices."""
     theme = getattr(ctx, "theme", "system")
     text = getattr(ctx, "text", "standard")
-    return ("Appearance", [
-        select("Theme", "theme", THEMES, theme, cookie=True),
+    palette = getattr(ctx, "palette", palettes.DEFAULT)
+    return ("Display", [
+        select("Theme", "palette", PALETTES, palette, cookie=True),
+        select("Appearance", "theme", THEMES, theme, cookie=True),
         select("Text Size", "textSize", TEXT_SIZES, text, cookie=True),
     ], "Saved to your account, so your other devices follow." if synced else "Kept in this browser only.")
 

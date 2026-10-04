@@ -465,7 +465,7 @@ class ShellTest(unittest.TestCase):
                                      "Preview Pane shows a note beside the list."),
                                     shell.apps_section("kura", shell.rooms(self.ENV), {"hister": False}),
                                     shell.about_section("kura", "0.3.0", "synced abc 3 min ago")], "kura")
-        self.assertIn('<option value="day" selected>Tokyo Night Day</option>', page)
+        self.assertIn('<option value="day" selected>Light</option>', page)
         self.assertIn('<option value="small" selected>Small</option>', page)
         self.assertIn('data-set="previewPane" data-cookie checked', page)
         self.assertIn('data-set="show_hister">', page)                                         # off
@@ -581,6 +581,67 @@ class SourceLinkTest(unittest.TestCase):
         self.assertEqual(shell.source_url({"MACHIYA_SOURCE_URL": "https://x.example/r"}), "https://x.example/r")
         self.assertEqual(shell.source_url({}), "")
 
+
+
+class PalettesTest(unittest.TestCase):
+    """v0.15: ten themes, each dark and light; the stylesheet is generated from vaultkit/palettes.py."""
+
+    def setUp(self):
+        from vaultkit import palettes, shell
+        self.p, self.shell = palettes, shell
+
+    def test_ten_themes_twenty_variants(self):
+        self.assertEqual(list(self.p.PALETTES), ["tokyo-night", "solarized", "nord", "dracula", "catppuccin",
+                                                 "gruvbox", "rose-pine", "kanagawa", "everforest", "ayu"])
+        for key, (name, dark, light, variants) in self.p.PALETTES.items():
+            self.assertEqual(set(variants), {"dark", "light"}, key)
+            for mode, raw in variants.items():
+                self.assertEqual(set(raw), set(self.p.TOKENS), (key, mode))
+
+    def test_every_variant_is_readable(self):
+        for key in self.p.PALETTES:
+            for mode in ("dark", "light"):
+                v = self.p.variant(key, mode)
+                lum = self.p.luminance
+                self.assertEqual(lum(v["bg"]) > lum(v["fg"]), mode == "light", (key, mode))
+                for t in self.p.TEXT:
+                    self.assertGreaterEqual(self.p.contrast(v[t], v["bg"]), self.p.minimum(mode, t), (key, mode, t))
+
+    def test_tokyo_night_is_unchanged(self):
+        night, day = self.p.variant("tokyo-night", "dark"), self.p.variant("tokyo-night", "light")
+        self.assertEqual((night["bg"], night["fg"], night["comment"], night["blue"]), ("#1a1b26", "#c0caf5", "#565f89", "#7aa2f7"))
+        self.assertEqual((day["bg"], day["fg"], day["comment"], day["blue"]), ("#e1e2e7", "#3760bf", "#5a6391", "#155fc5"))
+
+    def test_the_stylesheet_is_the_table(self):
+        css = open(os.path.join(ROOT, "ui", "machiya.css"), encoding="utf-8").read()
+        block = css[css.index(self.p.BEGIN) + len(self.p.BEGIN):css.index(self.p.END)]
+        self.assertEqual(block, self.p.css(), "run: python3 -m vaultkit.palettes, and paste between the markers")
+
+    def test_machiya_js_knows_the_same_themes(self):
+        import re
+        js = open(os.path.join(ROOT, "ui", "machiya.js"), encoding="utf-8").read()
+        listed = re.search(r"const PALETTES = \[([^\]]*)\]", js).group(1)
+        self.assertEqual(re.findall(r'"([a-z-]+)"', listed), list(self.p.PALETTES))
+
+    def test_pages_and_manifest_wear_the_theme(self):
+        sh = self.shell
+        ctx = sh.prefs("palette=nord; theme=day")
+        self.assertEqual(ctx.palette, "nord")
+        page = sh.page(ctx, "kura", "t", "")
+        self.assertIn('class="theme-day palette-nord room-kura"', page)
+        self.assertIn('<meta name="theme-color" content="#e5e9f0">', page)
+        self.assertIn('class="theme-system room-kura"', sh.page(sh.prefs(""), "kura", "t", ""))   # Tokyo Night: no class
+        self.assertEqual(sh.prefs("palette=<script>").palette, "tokyo-night")                      # unknown: the default
+        self.assertEqual(sh.prefs("palette=nord; machiya_palette=ayu").palette, "ayu")              # shared cookie wins
+        self.assertTrue(sh.is_shared("palette"))
+        m = sh.manifest_colors("system", {"Sec-CH-Prefers-Color-Scheme": "light"}, "gruvbox")
+        self.assertEqual((m["background_color"], m["user_preferences"]["color_scheme_dark"]["background_color"]),
+                         ("#fbf1c7", "#282828"))
+        self.assertEqual(sh.manifest_colors("night", None, "dracula")["theme_color"], "#21222c")
+        self.assertEqual(sh.manifest_colors("night", None, "nope")["theme_color"], "#16161e")
+        section = sh.appearance_section(ctx)
+        self.assertEqual(section[0], "Display")
+        self.assertIn('<option value="nord" selected>Nord</option>', section[1][0])
 
 
 class SharedUITest(unittest.TestCase):

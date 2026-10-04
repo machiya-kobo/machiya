@@ -9,7 +9,7 @@ This is how the web rooms (Kura, Niwa, Konbini) put the [design language](design
    `MACHIYA_ROOMS=shiori=https://shiori.example.ts.net,konbini=https://konbini.example.ts.net,niwa=https://niwa.example.ts.net,kura=https://kura.example.ts.net,hister=https://hister.example.ts.net,searxng=https://searxng.example.ts.net`
    `shell.rooms()` reads it. Unset, there's no switcher (standalone). Your own `*_NIWA_URL` / `*_KONBINI_URL` settings can stay for in-page links.
 3. **Pages**: build every page with `shell.page(ctx, room, title, body, tabs, current, stylesheets=["/static/<app>.css?v=…"], scripts=["/static/<app>.js?v=…"], icons={…})`, with `shell.header(room, nav, current, links, subtitle, tools)` at the top of `body` and `shell.footer(room, status, links)` at the end.
-   - `ctx = shell.prefs(self.headers.get("Cookie"))` gives `.theme` (system/night/day; `auto` is read as system) and `.text` (text size).
+   - `ctx = shell.prefs(self.headers.get("Cookie"))` gives `.theme` (the appearance: system/night/day; `auto` is read as system), `.palette` (the theme, v0.15: a `vaultkit.palettes` key, `tokyo-night` when unset or unknown) and `.text` (text size).
    - `room` is `kura`, `niwa` or `konbini`: it sets the seal, the wordmark and `--room`.
    - Nav labels are Title Case. Up to four phone tabs, plus the automatic Rooms tab, whose menu ends in Settings.
 4. **Theme**: keep `/theme?set=` working as a no-JavaScript fallback (set the `theme` cookie, accept `system` and `auto`), but link the header to `/settings`, not the old night/day/auto links.
@@ -25,14 +25,14 @@ This is how the web rooms (Kura, Niwa, Konbini) put the [design language](design
 
 **Shared settings (settings stay per device, and one choice covers every room).**
 - Set `MACHIYA_COOKIE_DOMAIN` in the stack's compose (for a tailnet: `<tailnet>.ts.net`). `shell.page` puts it on `<body data-cookie-domain>`.
-- machiya.js then writes theme, textSize and the Apps `show_*` switches as `machiya_<key>` cookies on that domain. `ts.net` is on the Public Suffix List, so `<tailnet>.ts.net` is the site and every room shares them.
+- machiya.js then writes theme, palette, textSize and the Apps `show_*` switches as `machiya_<key>` cookies on that domain. `ts.net` is on the Public Suffix List, so `<tailnet>.ts.net` is the site and every room shares them.
 - `shell.prefs()` prefers `machiya_<key>` over the room's own cookie. Nothing to change in the apps beyond vendoring.
 - Unset (standalone on its own host): per-room cookies, as before.
 - Shiori's web app reads the same `machiya_theme`, `machiya_textSize` and `machiya_show_*` cookies.
 
 **Server preferences (theme and text size follow the person to a new device).**
 - A room that serves `/api/prefs` (`vaultkit.signin.handle_prefs`, with an identity file or `identity.ambient`) passes `prefs_url="/api/prefs"` to `shell.page` on every page whose request has a principal. The page then carries `<meta name="machiya-prefs" content="/api/prefs">` (`shell.prefs_meta`; a local path only). Leave it out where nobody is signed in (the sign-in page, a 401), so a stranger's page never asks.
-- machiya.js then GETs it on load (`credentials: "same-origin"`): when the server's `theme` / `text_size` differ from the cookies, it writes the cookies as the settings page does (`machiya_<key>` on `MACHIYA_COOKIE_DOMAIN`, else the room's own) and applies them without a reload. A change of theme or text size on `/settings` is also PUT there as `{"prefs": {"theme": …, "text_size": …}}` (JSON, same-origin, so the room's `origins` rule passes). Only known values are applied: theme `system`/`night`/`day`, text size `xsmall`/`small`/`standard`/`large`/`xlarge`; anything else from the server is ignored. Every failure (offline, 401, 404, bad JSON) is silent: the cookies stay the fast path for the first paint and offline. A choice made on the page wins over a server answer that arrives later.
+- machiya.js then GETs it on load (`credentials: "same-origin"`): when the server's `theme` / `palette` / `text_size` differ from the cookies, it writes the cookies as the settings page does (`machiya_<key>` on `MACHIYA_COOKIE_DOMAIN`, else the room's own) and applies them without a reload. A change of theme or text size on `/settings` is also PUT there as `{"prefs": {"theme": …, "palette": …, "text_size": …}}` (JSON, same-origin, so the room's `origins` rule passes). Only known values are applied: theme `system`/`night`/`day`, palette one of the ten keys, text size `xsmall`/`small`/`standard`/`large`/`xlarge`; anything else from the server is ignored. Every failure (offline, 401, 404, bad JSON) is silent: the cookies stay the fast path for the first paint and offline. A choice made on the page wins over a server answer that arrives later.
 - The service worker never touches `/api/prefs` (it is in the core's `bypass`; the rooms' `^/api/` covers it too), and the answer is `no-store`.
 
 **Room search (a room searches its own things, then hands off to Shiori).**
@@ -115,7 +115,7 @@ unpublished or owner-only things (Niwa's `/queue` and `/stream`).
 | Niwa | Garden | Link Previews (toggle) |
 | Konbini | Board | Group By (Area / Family), Done Cards (5 / 10 / All) |
 
-All rooms get Appearance (Theme: System / Tokyo Night / Tokyo Night Day, and Text Size), Apps and About.
+All rooms get Display (Theme: the ten palettes; Appearance: System / Light / Dark; Text Size), Apps and About. The page's `<body>` carries `theme-<appearance>` and, for any palette but Tokyo Night, `palette-<key>`; machiya.css's palette section is generated from `vaultkit/palettes.py` (`python3 -m vaultkit.palettes`), and machiya.js sets the browser bar to the new palette's `--dark` when the theme changes on the page.
 
 ## The source link (AGPL section 13)
 

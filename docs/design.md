@@ -4,7 +4,7 @@ Machiya's apps are rooms in one house: each room is distinct, and they share a d
 
 ## The house
 
-- **Tokyo Night / Tokyo Night Day** everywhere, with **Shiori's contrast-safe Day hues** (each ≥ 4.5:1 on `#e1e2e7`, checked by a contrast test) in every app.
+- **Ten themes, each dark and light** (v0.15, `vaultkit/palettes.py`): Tokyo Night (the default), Solarized, Nord, Dracula (Alucard for light), Catppuccin (Mocha / Latte), Gruvbox, Rosé Pine (Dawn for light), Kanagawa (Wave / Lotus), Everforest and Ayu. Each uses its own published colours, with any that would be hard to read as text moved in lightness only (never hue) until it is: text and accents ≥ 4.5:1 on the background (Tokyo Night Day's rule from Shiori), checked by a contrast test.
 - **Blue is the house colour:** links, focus rings, primary buttons, and Shiori's native tint.
 - **One shared stylesheet, `ui/machiya.css`** in this repo, vendored into each web app at a tag with the same drift check as vaultkit (principle 8). It holds the tokens and the shared components; each app keeps only its own `<app>.css` for its room.
 - **Scales:**
@@ -33,7 +33,7 @@ Machiya's apps are rooms in one house: each room is distinct, and they share a d
 
 - **One switcher in every header**, and a **Rooms** tab on phones, the fifth tab, opening a sheet. It lists the rooms front to back, **Shiori · Konbini · Niwa · Kura**, then the neighbours, **Hister · SearXNG**.
 - **A footer status line** in every app, from its `/api/status`: e.g. "Kura · synced abc1234 3 min ago · 812 notes".
-- Each room's **`/settings` page** follows Shiori's Settings: sections Appearance (Theme: System / Tokyo Night / Tokyo Night Day, stored as `system`; Text Size), the room's own section, Apps, About. Settings are per device.
+- Each room's **`/settings` page** follows Shiori's Settings: sections Display (Theme: the ten palettes, stored as `palette`; Appearance: System / Light / Dark, stored as `theme` = `system` / `day` / `night`; Text Size), the room's own section, Apps, About. Settings are per device.
 
 ## Who builds what
 
