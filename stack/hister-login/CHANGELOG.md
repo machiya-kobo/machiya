@@ -1,5 +1,11 @@
 # Changelog: hister-login
 
+## Unreleased
+
+- `MACHIYA_SSO_COOKIE` names the sign-in cookie (default `machiya_sso`), so a second stack under the same cookie domain
+  (a dev stack on the same tailnet) never reads the other's. The rooms and landing read the same setting
+  (vaultkit `histerauth`, unreleased).
+
 ## 0.1.1
 
 - The container's healthcheck reads the reply before closing: closing early left a `ConnectionResetError` traceback in the helper's log every minute.

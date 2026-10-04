@@ -43,7 +43,8 @@ VERSION = "0.1.1"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
-SSO, RETURN_COOKIE, HISTER_COOKIE = histerauth.SSO_COOKIE, "machiya_return", "hister"
+SSO, RETURN_COOKIE, HISTER_COOKIE = histerauth.SSO_COOKIE, "machiya_return", "hister"    # SSO: the default name
+COOKIE_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,60}\Z")
 VERIFY_TTL = 30                 # an id checked with Hister this recently is answered from the row
 TOKEN_TTL_OK, TOKEN_TTL_OUT = 30, 5
 SESSION_DAYS, CAP_DAYS = 30, 180
@@ -81,6 +82,10 @@ class Settings:
             raise SystemExit("hister-login: HISTER_LOGIN_PUBLIC_URL must be Hister's public address, "
                              "https://hister.example.ts.net (no path)")
         self.secure = self.public_url.startswith("https://")
+        # MACHIYA_SSO_COOKIE: the sign-in cookie's name (vaultkit.histerauth reads the same setting in the rooms)
+        self.sso = (env.get("MACHIYA_SSO_COOKIE") or "").strip() or SSO
+        if not COOKIE_NAME_RE.match(self.sso):
+            raise SystemExit("hister-login: MACHIYA_SSO_COOKIE must be a cookie name (letters, digits, _ and -)")
         u = urlsplit(self.public_url)
         own = u.hostname + ("" if u.port in (None, 443) else ":%d" % u.port)
         hosts = env.get("HISTER_LOGIN_RETURN_HOSTS")
@@ -372,12 +377,12 @@ class Login:
         return "; ".join(attrs)
 
     def sso_cookie(self, sid):
-        return self.cookie(SSO, sid, CAP_DAYS * 86400, domain=True)
+        return self.cookie(self.s.sso, sid, CAP_DAYS * 86400, domain=True)
 
     def sso_clear(self):
-        out = [self.cookie(SSO, "", 0, domain=True)]
+        out = [self.cookie(self.s.sso, "", 0, domain=True)]
         if self.s.cookie_domain:
-            out.append(self.cookie(SSO, "", 0))
+            out.append(self.cookie(self.s.sso, "", 0))
         return out
 
     def return_cookie(self, ret, app):
@@ -410,7 +415,7 @@ class Login:
             sid = self.store.create(hister_session, username, user_id, "app", label or "Shiori app")
             return ret + "#" + urlencode({"sid": sid, "hister": hister_session}), []
         cookies = []
-        for value in histerauth.HisterAuth.cookie_values(headers.get("Cookie"), SSO)[:4]:
+        for value in histerauth.HisterAuth.cookie_values(headers.get("Cookie"), self.s.sso)[:4]:
             row = self.store.get(value)
             if row and row["hister_hash"] == sha(hister_session):
                 break                   # this browser already holds an id for this session
@@ -436,8 +441,8 @@ def hister_cookie(headers):
     return None
 
 
-def sso_value(headers):
-    for value in histerauth.HisterAuth.cookie_values(headers.get("Cookie"), SSO)[:4]:
+def sso_value(headers, name=SSO):
+    for value in histerauth.HisterAuth.cookie_values(headers.get("Cookie"), name)[:4]:
         if SID_RE.match(value):
             return value
     return None
@@ -746,7 +751,7 @@ class Public(Handler):
 
     def sessions(self):
         lg = self.login
-        sid = sso_value(self.headers)
+        sid = sso_value(self.headers, self.login.s.sso)
         outcome, row = lg.check_sid(sid) if sid else ("out", None)
         if outcome in ("down", "off"):
             return self.unavailable("user-handling-off" if outcome == "off" else "down")
@@ -781,7 +786,7 @@ class Public(Handler):
         if not self.same_origin():
             return self.page(403, message_page(self.headers, "Refused", "A sign-out must come from this page."))
         cookies, ended = [], set()
-        row = lg.store.get(sso_value(self.headers))
+        row = lg.store.get(sso_value(self.headers, self.login.s.sso))
         if row:
             cookies += lg.end_hister(row["hister_session"])
             ended.add(row["hister_hash"])
@@ -799,7 +804,7 @@ class Public(Handler):
             return self.json(413, {"error": "request body too large"})
         if not self.same_origin():
             return self.page(403, message_page(self.headers, "Refused", "That must come from the sessions page."))
-        outcome, me = lg.check_sid(sso_value(self.headers) or "")
+        outcome, me = lg.check_sid(sso_value(self.headers, self.login.s.sso) or "")
         if outcome != "ok":
             return self.redirect("/machiya/sessions")
         try:
@@ -882,8 +887,9 @@ def main():
     os.umask(0o077)
     s = Settings()
     login = Login(s)
-    LOG("hister-login %s: public :%d, internal :%d, Hister %s, return hosts %s, cookie domain %s"
-        % (VERSION, s.port, s.internal_port, s.hister_url, ",".join(s.return_hosts), s.cookie_domain or "(none)"))
+    LOG("hister-login %s: public :%d, internal :%d, Hister %s, return hosts %s, cookie %s, domain %s"
+        % (VERSION, s.port, s.internal_port, s.hister_url, ",".join(s.return_hosts), s.sso,
+           s.cookie_domain or "(none)"))
     serve(login, s.bind, s.port, s.internal_port)
     stop = threading.Event()
     try:

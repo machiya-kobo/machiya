@@ -47,6 +47,7 @@ browser on the hosted pages' host.
 | `HISTER_LOGIN_PUBLIC_URL` | required | Hister's public address, `https://hister.example.ts.net` (no path): cookies get `Secure` when it is https; same-origin checks use it |
 | `HISTER_LOGIN_HISTER_URL` | `http://hister:4433` | Hister on the internal network |
 | `MACHIYA_COOKIE_DOMAIN` | none (warned) | the shared domain of `machiya_sso`; without it no room sees the cookie |
+| `MACHIYA_SSO_COOKIE` | `machiya_sso` | the sign-in cookie's name (letters, digits, `_`, `-`); the rooms and landing must use the same (vaultkit's `histerauth` reads the same setting). A second stack under the same cookie domain, such as a dev stack on the same tailnet, sets its own (`machiya_dev_sso`) so neither reads the other's cookie |
 | `HISTER_LOGIN_RETURN_HOSTS` | the https hosts in `MACHIYA_ROOMS`, minus searxng | where a browser may be sent back to (`host` or `host:port`, exact); the helper's own host is always allowed |
 | `HISTER_LOGIN_APP_SCHEMES` | `shiori` | URL schemes the app flow (`app=1`) may return to |
 | `HISTER_LOGIN_PROVIDERS` | none | `oidc` shows "Sign in with …" (Hister's `/api/oauth?provider=oidc`) |

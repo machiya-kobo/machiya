@@ -45,7 +45,8 @@ class HelperTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.fake = FakeHister()
-        env = dict(ENV, HISTER_LOGIN_HISTER_URL=self.fake.url, HISTER_LOGIN_DB=os.path.join(self.tmp, "d", "hl.db"))
+        env = dict(ENV, HISTER_LOGIN_HISTER_URL=self.fake.url, HISTER_LOGIN_DB=os.path.join(self.tmp, "d", "hl.db"),
+                   **getattr(self, "EXTRA", {}))
         self.err = io.StringIO()
         with redirect_stderr(self.err):
             self.settings = hl.Settings(env)
@@ -453,7 +454,43 @@ class HelperTest(unittest.TestCase):
             self.assertNotIn(secret, log)
 
 
+class CookieNameTest(unittest.TestCase):
+    """MACHIYA_SSO_COOKIE: a second stack under the same cookie domain (a dev stack) uses its own sign-in cookie and
+    never reads the default one."""
+    EXTRA = {"MACHIYA_SSO_COOKIE": "machiya_dev_sso"}
+    setUp, tearDown, req, public, internal, check = (HelperTest.setUp, HelperTest.tearDown, HelperTest.req,
+                                                     HelperTest.public, HelperTest.internal, HelperTest.check)
+
+    def test_custom_cookie_name(self):
+        session = self.fake.signed_in()
+        status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": KURA}),
+                                         {"Cookie": "hister=" + session})
+        self.assertEqual(status, 303)
+        self.assertIsNone(cookie_value(headers, "machiya_sso"))
+        sid = cookie_value(headers, "machiya_dev_sso")
+        self.assertTrue(sid and hl.SID_RE.match(sid))
+        # the default-named cookie (another stack's) is ignored: a new id is issued, not reused
+        status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": KURA}),
+                                         {"Cookie": "hister=%s; machiya_sso=%s" % (session, sid)})
+        self.assertTrue(cookie_value(headers, "machiya_dev_sso"))
+        # sign-out clears the custom name only
+        cookie = "hister=%s; machiya_dev_sso=%s" % (session, sid)
+        status, headers, _ = self.public("POST", "/machiya/signout", {"Cookie": cookie, "Content-Length": "0",
+                                                                      "Origin": PUBLIC})
+        cs = cookies_of(headers)
+        self.assertTrue(any(c.startswith("machiya_dev_sso=;") and "Max-Age=0" in c for c in cs))
+        self.assertFalse(any(c.startswith("machiya_sso=") for c in cs))
+        self.assertEqual(self.check(sid)[0], 401)
+
+
 class SettingsTest(unittest.TestCase):
+    def test_cookie_name_checked(self):
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(hl.Settings({"HISTER_LOGIN_PUBLIC_URL": "https://h.example"}).sso, "machiya_sso")
+            for bad in ("a b", "x;y", "é", "a=b"):
+                with self.assertRaises(SystemExit):
+                    hl.Settings({"HISTER_LOGIN_PUBLIC_URL": "https://h.example", "MACHIYA_SSO_COOKIE": bad})
+
     def test_public_url_required(self):
         with redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
