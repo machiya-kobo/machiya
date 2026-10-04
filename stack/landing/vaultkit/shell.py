@@ -23,9 +23,9 @@ ROOMS = [   # (key, name, seal, what it is) front to back through the house, the
 ]
 NEIGHBOURS = [("hister", "Hister", "pages"), ("searxng", "SearXNG", "the web")]
 # The house itself: the stack's front door and status page (stack/landing). Not a room in the order above: with
-# MACHIYA_ROOMS naming `machiya=<url>`, every Rooms menu ends with a "Machiya · status" row and the footer's
+# MACHIYA_ROOMS naming `machiya=<url>`, every Rooms menu ends with a "Machiya · home" row (v0.19.1) and the footer's
 # "Part of Machiya" links there; without it, nothing changes.
-HOUSE = ("machiya", "Machiya", "町", "status")
+HOUSE = ("machiya", "Machiya", "町", "home")
 THEMES = [("system", "System"), ("day", "Light"), ("night", "Dark")]     # the appearance (setting `theme`)
 PALETTES = palettes.CHOICES                                              # the theme (setting `palette`, v0.15)
 TEXT_SIZES = [("xsmall", "Extra Small"), ("small", "Small"), ("standard", "Standard"), ("large", "Large"),

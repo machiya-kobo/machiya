@@ -1,5 +1,12 @@
 # Changelog: machiya-landing
 
+## 0.2.0
+
+- **`/` is a launcher now** (the owner's pick, "Launcher + Today"): the day and a status pill ("All up", "1 needs a look"; it links the status page), a **Search everything** pill that sends the query to Shiori's search page (`LANDING_SEARCH_URL`, another origin: a plain form, no live results; the page's CSP allows that one form target), the four rooms with one count each (pages, cards in WIP, published, notes), and **Today**: Working On (Konbini's WIP cards with their next step), Due Soon (cards due in the next 14 days, or overdue), Notes Changed (Kura's newest), Saved & Read (Hister's newest pages, a feed reader's reads and stars marked), Garden (Niwa's tended notes of the last 30 days). Each section leaves itself out when its room is missing or refuses. `GET /api/today` is the same as JSON.
+- **The status page moves to `/status`.** Niwa shows its published count only; Hister its version (from its MCP `initialize`, the one POST this page sends, with the owner's token when set, at most every 15 minutes); vault-mirror its version (0.1.1's `status.json`); Shiori its version, build, AI ("AI on · N left today", "AI down") and feed health from `/_shiori/status.json`, `/shiori/ai/status` and `/shiori/healthz` (the build stamp when the file isn't there yet), with no vaultkit line.
+- **feed-import** joins the stack services, from its `status.json` (`LANDING_FEED_STATUS`), and Sync gets **Feeds read**: the last good run, pages added in the last day (from the page's own samples), failed runs. **Pages indexed** is judged now: fine while Hister is up and its newest page is under three days old, behind after that, red only when Hister is down.
+- vaultkit after v0.19.0 (the Rooms menu's house row reads "Machiya · home"); re-vendor at the release tag.
+
 ## 0.1.2
 
 - Hister shows Up again: its `/health` answers 200 with an empty body, which 0.1.1 read as "not healthy". Any 2xx from `/health` now means up; the test's fake Hister answers the same way.

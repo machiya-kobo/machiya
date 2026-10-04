@@ -1,7 +1,8 @@
-"""Machiya's landing page: one front door for the stack, and its status page (docs/services/landing.md).
+"""Machiya's landing page: one front door for the stack (docs/services/landing.md).
 
-It links every room, engine and stack service, and shows for each whether it answers, its version (and vendored
-vaultkit), how fresh the vault's sync is, and what was deployed lately. It polls the apps' own status endpoints in the
+`/` is the launcher: Search everything, the rooms, and Today (what the rooms say is going on; today.py). `/status` links
+every room, engine and stack service, and shows for each whether it answers, its version (and vendored vaultkit), how
+fresh the vault's sync is, and what was deployed lately. It polls the apps' own status endpoints in the
 background (GETs only, short timeouts, every LANDING_POLL seconds) and serves the last answers from memory; an app with
 no address shows "Not in this stack". Stdlib Python plus the vendored vaultkit (the shell, the auth helpers).
 
@@ -27,6 +28,7 @@ sys.path.insert(0, HERE)
 import deploys                                   # noqa: E402
 import probes                                    # noqa: E402
 import render                                    # noqa: E402
+import today as todaymod                         # noqa: E402
 from vaultkit import changelog, identity, read_secret   # noqa: E402
 from vaultkit import shell as house              # noqa: E402
 
@@ -91,6 +93,17 @@ class Config:
         mirror = (env.get("LANDING_MIRROR_STATUS") or "").strip()
         if mirror:
             self.targets["vault-mirror"] = mirror
+        feeds = (env.get("LANDING_FEED_STATUS") or "").strip()          # feed-import's status.json (read-only mount)
+        if feeds:
+            self.targets["feed-import"] = feeds
+        # The launcher's search pill: a form that GETs <url>?q=… (Shiori's search page, another origin); unset: no pill
+        self.search = (env.get("LANDING_SEARCH_URL") or "").strip()
+        if self.search and (not self.search.startswith(("http://", "https://"))
+                            or any(c.isspace() or c in '<>"\'' for c in self.search)):
+            raise SystemExit("machiya-landing: LANDING_SEARCH_URL must be a plain http(s) address, not %r" % self.search)
+        origin = urlsplit(self.search)
+        self.csp = house.CSP.replace("form-action 'self'", "form-action 'self' %s://%s" % (origin.scheme, origin.netloc)) \
+            if self.search else house.CSP
         self.targets = {k: v for k, v in self.targets.items() if k in probes.NAMES}
         self.poll = max(15, int(env.get("LANDING_POLL") or "60"))
         self.timeout = max(0.5, float(env.get("LANDING_TIMEOUT") or "3"))
@@ -155,8 +168,17 @@ class Landing:
             self.board_behind_since = self.board_behind_since or now
         else:
             self.board_behind_since = None
+        feeds = found["feed-import"].get("data") or {}
+        if feeds.get("added_total") is not None:              # "N added in the last day", from the page's own samples
+            feeds["added_day"], feeds["added_since"] = self.history.sample("feed-import.added", feeds["added_total"], now)
         rows = probes.sync_rows(found, now, self.board_behind_since)
-        snap = {"checked": now, "version": VERSION, "apps": found, "sync": rows, "overall": probes.overall(found, rows)}
+        try:
+            today = todaymod.gather(c, found, now)
+        except Exception as e:                                   # Today is a nicety: never the reason a poll fails
+            sys.stderr.write("machiya-landing: today: %s\n" % type(e).__name__)
+            today = {}
+        snap = {"checked": now, "version": VERSION, "apps": found, "sync": rows, "overall": probes.overall(found, rows),
+                "today": today}
         self.history.observe(found, now)
         self.fetch_changelogs(found, now)
         with self.lock:
@@ -250,7 +272,7 @@ def make_handler(landing):
             for k, v in headers:
                 self.send_header(k, v)
             if ctype.startswith("text/html"):
-                for k, v in house.security_headers():
+                for k, v in house.security_headers(config.csp):
                     self.send_header(k, v)
             self.end_headers()
             if self.command != "HEAD":
@@ -309,10 +331,16 @@ def make_handler(landing):
                 return self.send(302, "", "text/plain", [("Location", "/settings")] + cookies)
             if path == "/settings":
                 return self.send(200, render.settings(ctx, config.links, VERSION), headers=[("Cache-Control", "no-store")])
-            if path == "/":
+            if path == "/status":
                 snap = landing.current()
                 return self.send(200, render.page(ctx, snap, landing.history, landing.logs, config.links, config.targets,
                                                   landing.now(), config.tz), headers=[("Cache-Control", "no-store")])
+            if path == "/":
+                snap = landing.current()
+                return self.send(200, render.home(ctx, snap, config.links, config.targets, config.search, landing.now(),
+                                                  config.tz), headers=[("Cache-Control", "no-store")])
+            if path == "/api/today":
+                return self.send_json(200, landing.current().get("today") or {})
             return self.send(404, render.message(ctx, config.links, "Not Found", "There's nothing here."),
                              headers=[("Cache-Control", "no-store")])
 

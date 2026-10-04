@@ -30,6 +30,7 @@ APPS = [
     ("machiya-mcp", "machiya-mcp", "services", "MCP for agents"),
     ("smallweb", "smallweb", "services", "Gemini and Gopher"),
     ("vault-mirror", "vault-mirror", "services", "the vault's shared copy"),
+    ("feed-import", "feed-import", "services", "feeds into Hister"),
 ]
 NAMES = {k: n for k, n, _, _ in APPS}
 ROOMS_WITH_TOKEN = ("kura", "niwa", "konbini")     # LANDING_TOKEN_FILE goes to these only (never Hister or SearXNG)
@@ -40,7 +41,10 @@ FRESH = {
     "livesync": (15 * 60, 2 * 3600),    # Konbini's LiveSync cycle
     "push": (60 * 60, 24 * 3600),       # Kura's last push of the notes into Hister
     "board": (15 * 60, None),           # Konbini's commit differs from Kura's for this long
+    "pages": (3 * 86400, None),         # Hister's newest page (0.2.0: judged; red only when Hister is down)
+    "feeds": (60 * 60, None),           # feed-import's last good run (it runs every 10 min; ok=false is broken)
 }
+READERS_NAMES = {"newsblur": "NewsBlur", "miniflux": "Miniflux", "freshrss": "FreshRSS", "feedbin": "Feedbin"}
 STATES = ("up", "behind", "starting", "error", "down", "absent")
 BAD = ("error", "down")
 
@@ -130,6 +134,33 @@ def fetch_text(url, headers=None, timeout=3.0):
         raise FetchError("HTTP %d" % e.code)
     except (urllib.error.URLError, OSError):
         raise FetchError("unreachable")
+
+
+def post_json(url, payload, headers=None, timeout=3.0):
+    """POST a JSON body -> the JSON answer (a dict). Only for Hister's MCP `initialize`, which changes nothing."""
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST", headers=dict(
+        {"User-Agent": USER_AGENT, "Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
+        **(headers or {})))
+    try:
+        with _OPENER.open(req, timeout=timeout) as r:
+            raw = r.read(LIMIT + 1)
+    except urllib.error.HTTPError as e:
+        raise FetchError("HTTP %d" % e.code)
+    except (urllib.error.URLError, OSError):
+        raise FetchError("unreachable")
+    if len(raw) > LIMIT:
+        raise FetchError("answer too large")
+    text_ = raw.decode("utf-8", "replace").strip()
+    if text_.startswith("event:") or text_.startswith("data:"):      # an SSE reply: the first data line
+        text_ = next((l[5:].strip() for l in text_.splitlines() if l.startswith("data:")), "")
+    try:
+        data = json.loads(text_)
+    except ValueError:
+        raise FetchError("not JSON")
+    if not isinstance(data, dict):
+        raise FetchError("unexpected answer")
+    return data
 
 
 def fetch_json(url, headers=None, timeout=3.0):
@@ -235,48 +266,116 @@ def niwa(base, now, timeout, headers):
     err = text(d.get("error")) or text(sync.get("error"))
     state = "error" if err else ("starting" if d.get("ready") is False else "up")
     return result(state, d.get("version"), vk(d.get("vaultkit")),
-                  ["%s published" % "{:,}".format(int(pub)) if pub is not None else "",
-                   plural(int(notes), "note") if notes is not None else ""], err,
+                  ["%s published" % "{:,}".format(int(pub)) if pub is not None else ""], err,      # 0.2.0: no note count
                   {"head": text(d.get("head"), 64), "pending": num(sync.get("pending")), "ahead": num(sync.get("ahead")),
-                   "sync_error": text(sync.get("error"))})
+                   "sync_error": text(sync.get("error")), "published": pub})
 
 
 BUILD_RE = re.compile(rb"""(?:app|theme)\.(?:js|css)\?v=([0-9a-f]{6,40})""")
 
 
 def shiori(base, now, timeout, headers):
-    """GET / (the hosted search page): up when it answers with a page; its build is the assets' ?v= hash."""
+    """The hosted search page (GET /: up when it answers with a page), then best effort:
+    - /_shiori/status.json ({"version", "build", "built"}, Shiori's build stamp); without it, the assets' ?v= hash;
+    - /shiori/ai/status ({"enabled", "remaining", ...}: requests left of the day's); a non-JSON answer is "AI down";
+    - /shiori/healthz (shiori-feed: 200 "ok").
+    None of those makes Shiori down; a 404 leaves its part out."""
     _, ctype, body = fetch(base + "/", dict(headers, Accept="text/html"), timeout)
     if "html" not in ctype.lower():
         raise FetchError("not a page")
-    m = BUILD_RE.search(body)
-    return result("up", ("build " + m.group(1).decode()[:7]) if m else "", "", ["hosted search page"])
+    version, build, built = "", "", None
+    try:
+        st = fetch_json(base + "/_shiori/status.json", headers, timeout)
+        version, build = text(st.get("version"), 40), text(st.get("build"), 40)
+        built = text(st.get("built"), 40)
+    except FetchError:
+        m = BUILD_RE.search(body)
+        build = m.group(1).decode()[:7] if m else ""
+    facts = []
+    try:
+        ai = fetch_json(base + "/shiori/ai/status", headers, timeout)
+        left = num(ai.get("remaining"))
+        if ai.get("enabled"):
+            facts.append("AI on" + (" · %s left today" % "{:,}".format(int(left)) if left is not None else ""))
+        else:
+            facts.append("AI off")
+    except FetchError as e:
+        if str(e) != "HTTP 404":
+            facts.append("AI down")
+    try:
+        _, _, ok = fetch(base + "/shiori/healthz", dict(headers, Accept="text/plain"), timeout)
+        facts.append("feed ok" if ok.strip()[:2].lower() == b"ok" else "feed down")
+    except FetchError as e:
+        if str(e) != "HTTP 404":
+            facts.append("feed down")
+    out = result("up", version or (("build " + build) if build else ""), "", facts, "", {"build": build, "built": built})
+    out["build"] = build if version else ""
+    return out
+
+
+HISTER_VERSION = {}             # base -> (when asked, version): Hister's MCP is asked at most every 15 minutes
+HISTER_VERSION_TTL = 15 * 60
+
+
+def hister_version(base, now, timeout, headers):
+    """Hister's version from its MCP `initialize` (result.serverInfo.version, "v0.20.0"): open without users, the
+    owner's token with them. A POST, but it changes nothing; cached for 15 minutes; "" when it can't be read."""
+    cached = HISTER_VERSION.get(base)
+    if cached and now - cached[0] < HISTER_VERSION_TTL:
+        return cached[1]
+    version = ""
+    try:
+        d = post_json(base + "/mcp", {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": "machiya-landing", "version": "0"}}}, headers, timeout)
+        info = ((d.get("result") or {}).get("serverInfo") or {}) if isinstance(d.get("result"), dict) else {}
+        version = vk(info.get("version"))
+    except FetchError:
+        pass
+    HISTER_VERSION[base] = (now, version)
+    return version
+
+
+def page_entry(doc):
+    """One Hister document for Today's Saved & Read: plain values only."""
+    meta = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+    source = text(meta.get("via") or meta.get("source"), 40).lower()
+    reader = READERS_NAMES.get(source, "")
+    stream = text(meta.get(source + "_stream"), 20).lower() if reader else ""
+    starred = reader and (stream == "starred" or bool(meta.get(source + "_starred")))
+    url = text(doc.get("url"), 2000)
+    return {"title": text(doc.get("title"), 200) or text(doc.get("domain"), 100) or url, "url": url,
+            "domain": text(doc.get("domain"), 100), "at": num(doc.get("updated")) or num(doc.get("added")),   # Hister's order
+            "reader": reader, "starred": bool(starred), "label": text(doc.get("label"), 40)}
 
 
 def hister(base, now, timeout, headers, token=None):
     """Up or down from GET /health (open, even with Hister's user handling on: contracts/hister.md); then, best
     effort, the page count (GET /api/stats) and the newest page by date (a search; vault notes left out: Kura's push
     covers them), with the owner's token (LANDING_HISTER_TOKEN_FILE) as X-Access-Token when set. With users on and no
-    token (or a refused one) those answer 403: Hister is still up, only the count is missing. Hister doesn't report its
-    version."""
+    token (or a refused one) those answer 403: Hister is still up, only the count is missing. 0.2.0: its version from
+    its MCP `initialize` (hister_version), and the newest pages for Today."""
     h = dict(headers, Origin=HISTER_ORIGIN)            # every Hister call says who it is, /health too
     fetch(base + "/health", dict(h, Accept="text/plain"), timeout)      # any 2xx is up: Hister's /health is 200, empty body
     value = token.get() if hasattr(token, "get") else (token or "")
     if value:
         h["X-Access-Token"] = value
+    version = hister_version(base, now, timeout, {"X-Access-Token": value} if value else {})
     docs = newest = None
+    pages = []
     note = ""
     try:
         docs = num(fetch_json(base + "/api/stats", h, timeout).get("doc_count"))
         s = fetch_json(base + "/search?format=json&sort=date&q=" + quote("* -label:vault -metadata.source:vault"), h, timeout)
-        first = (s.get("documents") or [None])[0]
-        if isinstance(first, dict):
-            newest = num(first.get("updated")) or num(first.get("added"))
+        found = [d for d in (s.get("documents") or []) if isinstance(d, dict)]
+        if found:
+            newest = num(found[0].get("updated")) or num(found[0].get("added"))
+        pages = [page_entry(d) for d in found[:8]]
     except FetchError as e:
         if str(e) in ("HTTP 401", "HTTP 403"):          # users on: the count needs the owner's token
             note = "page count: the token was refused" if value else "page count needs LANDING_HISTER_TOKEN_FILE"
-    return result("up", "", "", [plural(int(docs), "page") if docs is not None else note], "",
-                  {"docs": docs, "newest": newest})
+    return result("up", version, "", [plural(int(docs), "page") if docs is not None else note], "",
+                  {"docs": docs, "newest": newest, "pages": pages})
 
 
 def searxng(base, now, timeout, headers):
@@ -329,6 +428,34 @@ def vault_mirror(path, now):
                   {"head": text(d.get("head"), 64), "synced_at": synced})
 
 
+def feed_import(path, now):
+    """feed-import's status.json ({version, ok, running, started, last_success, failures_in_a_row, error, counts}),
+    read from its volume (mounted read-only). ok=false is broken; no good run for an hour is behind."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        raise FetchError("no status file yet")
+    except (OSError, ValueError):
+        raise FetchError("status file unreadable")
+    if not isinstance(d, dict):
+        raise FetchError("status file unreadable")
+    counts = d.get("counts") if isinstance(d.get("counts"), dict) else {}
+    added = sum(num((c or {}).get("added")) or 0 for c in counts.values() if isinstance(c, dict))
+    last = num(d.get("last_success"))
+    fails = num(d.get("failures_in_a_row")) or 0
+    err = text(d.get("error"))
+    if d.get("ok") is False:
+        state = "error"
+    elif last:
+        state = age_state(last, now, "feeds")
+    else:
+        state = "starting"
+    readers = [READERS_NAMES.get(k, k) for k in sorted(counts)]
+    return result(state, d.get("version"), "", [", ".join(readers)], err if d.get("ok") is False else "",
+                  {"last_success": last, "failures": fails, "error": err, "added_total": added, "running": bool(d.get("running"))})
+
+
 READERS = {"kura": kura, "konbini": konbini, "niwa": niwa, "shiori": shiori, "hister": hister, "searxng": searxng,
            "machiya-mcp": machiya_mcp, "smallweb": smallweb}
 
@@ -350,6 +477,8 @@ def probe(key, target, now, timeout=3.0, token="", hister_token=None):
     try:
         if key == "vault-mirror":
             out = vault_mirror(target, now)
+        elif key == "feed-import":
+            out = feed_import(target, now)
         elif key == "hister":
             out = hister(target.rstrip("/"), now, timeout, auth_headers(key, target, token), hister_token)
         else:
@@ -410,9 +539,25 @@ def sync_rows(apps, now, board_behind_since=None):
                 plural(int(push["failed"]), "failure") if push.get("failed") else ""]
         rows.append({"key": "push", "label": "Notes indexed", "source": "Kura → Hister", "state": st, "at": push.get("at"),
                      "text": " · ".join(x for x in bits if x), "error": push.get("error", "")})
-    if h.get("state") == "up" and hd:
-        rows.append({"key": "pages", "label": "Pages indexed", "source": "Hister", "state": "up", "at": hd.get("newest"),
-                     "text": "newest page" if hd.get("newest") else "", "error": "", "quiet": True})
+    if h.get("state") == "up":
+        rows.append({"key": "pages", "label": "Pages indexed", "source": "Hister",
+                     "state": age_state(hd.get("newest"), now, "pages") or "up", "at": hd.get("newest"),
+                     "text": "newest page" if hd.get("newest") else "", "error": ""})
+    elif h.get("state") in BAD:
+        rows.append({"key": "pages", "label": "Pages indexed", "source": "Hister", "state": "error", "at": None,
+                     "text": "", "error": "Hister is %s" % ("down" if h["state"] == "down" else "failing")})
+    f = apps.get("feed-import") or {}
+    fd = f.get("data") or {}
+    if f.get("state") not in (None, "absent", "down") and fd:
+        bits = []
+        if fd.get("added_day") is not None:
+            since = fd.get("added_since")
+            bits.append("%s added %s" % ("{:,}".format(int(fd["added_day"])),
+                                          "in the last day" if not since else "since the page started watching"))
+        if fd.get("failures"):
+            bits.append(plural(int(fd["failures"]), "failed run"))
+        rows.append({"key": "feeds", "label": "Feeds read", "source": "feed-import", "state": f["state"],
+                     "at": fd.get("last_success"), "text": " · ".join(bits), "error": fd.get("error", "")})
     return rows
 
 
@@ -429,7 +574,8 @@ def writes(d):
     return ", ".join(bits) or "all pushed"
 
 
-ROW_APP = {"pull": "kura", "mirror": "vault-mirror", "board": "konbini", "garden": "niwa", "push": "kura", "pages": "hister"}
+ROW_APP = {"pull": "kura", "mirror": "vault-mirror", "board": "konbini", "garden": "niwa", "push": "kura", "pages": "hister",
+           "feeds": "feed-import"}
 
 
 def overall(apps, rows):
@@ -440,9 +586,10 @@ def overall(apps, rows):
     behind += [r["label"] for r in rows if r["state"] == "behind"]
     present = [k for k, a in apps.items() if a.get("state") != "absent"]
     if bad:
-        return {"state": "error", "text": "%s need%s a look: %s" % (len(bad), "s" if len(bad) == 1 else "", ", ".join(bad))}
+        return {"state": "error", "count": len(bad),
+                "text": "%s need%s a look: %s" % (len(bad), "s" if len(bad) == 1 else "", ", ".join(bad))}
     if behind:
-        return {"state": "behind", "text": "Everything answers; %s %s behind: %s" % (
+        return {"state": "behind", "count": len(behind), "text": "Everything answers; %s %s behind: %s" % (
             len(behind), "is" if len(behind) == 1 else "are", ", ".join(behind))}
     if not present:
         return {"state": "behind", "text": "No apps are configured yet"}

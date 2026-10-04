@@ -34,10 +34,15 @@ class Fake:
             def log_message(self, *a):
                 pass
 
-            def do_GET(self):
+            def do_POST(self):
+                self.do_GET("POST")
+
+            def do_GET(self, method="GET"):
                 u = urlsplit(self.path)
-                fake.seen.append({"path": u.path, "query": u.query, "headers": {k.lower(): v for k, v in self.headers.items()}})
-                r = fake.routes.get(u.path)
+                raw = self.rfile.read(int(self.headers.get("Content-Length") or 0)) if method == "POST" else b""
+                fake.seen.append({"method": method, "path": u.path, "query": u.query, "body": raw,
+                                  "headers": {k.lower(): v for k, v in self.headers.items()}})
+                r = fake.routes.get(u.path if method == "GET" else "POST " + u.path)
                 r = r() if callable(r) else r
                 if r is None:
                     r = (404, b"not found", "text/plain")
@@ -121,11 +126,12 @@ class Readers(Stack):
         a = snap["apps"]
         self.assertEqual({k: v["state"] for k, v in a.items()},
                          {"shiori": "up", "konbini": "up", "niwa": "up", "kura": "up", "hister": "up", "searxng": "up",
-                          "machiya-mcp": "up", "smallweb": "up", "vault-mirror": "absent"})
+                          "machiya-mcp": "up", "smallweb": "up", "vault-mirror": "absent",
+                          "feed-import": "absent"})
         self.assertEqual((a["kura"]["version"], a["kura"]["vaultkit"]), ("0.6.8", "0.17.2"))
         self.assertEqual(a["kura"]["facts"], ["314 notes"])
         self.assertEqual(a["konbini"]["facts"], ["78 cards"])
-        self.assertEqual(a["niwa"]["facts"], ["1 published", "314 notes"])
+        self.assertEqual(a["niwa"]["facts"], ["1 published"])                       # 0.2.0: published only
         self.assertEqual(a["shiori"]["version"], "build 7598f33")
         self.assertEqual(a["hister"]["facts"], ["1,968 pages"])
         self.assertEqual(a["hister"]["data"]["newest"], NOW - 600)
@@ -136,7 +142,7 @@ class Readers(Stack):
 
     def test_hister_gets_its_origin_and_vault_notes_are_left_out(self):
         self.landing().poll()
-        seen = self.fakes["hister"].seen
+        seen = [s for s in self.fakes["hister"].seen if s["method"] == "GET"]      # the MCP POST needs no Origin
         self.assertTrue(seen and all(s["headers"].get("origin") == "hister://" for s in seen))
         search = [s for s in seen if s["path"] == "/search"][0]
         self.assertIn("-label%3Avault", search["query"])
@@ -611,6 +617,206 @@ class Changelogs(Stack):
         self.assertIn("## " + landing.VERSION, body)
         self.assertTrue(headers["ETag"])
         self.assertEqual(Server.get(self, base + "/api/changelog")[0], 403)          # the same gate as /api/status
+
+
+SHIORI_STATUS = {"version": "0.1.0", "build": "9862094", "built": "2026-10-04T16:06:25Z"}
+AI = {"enabled": True, "engine": "anthropic", "model": "m", "remaining": 87, "answer": True}
+MCP_INIT = {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-06-18", "serverInfo": {"name": "hister", "version": "v0.20.0"}}}
+CARDS = {"cards": [
+    {"slug": "a", "title": "Alpha", "board": "wip", "rank": None, "priority": 1, "updated": "2026-01-01", "next": "do a", "area": "tools", "due": ""},
+    {"slug": "b", "title": "Beta", "board": "wip", "rank": None, "priority": None, "updated": "2026-01-03", "next": "", "area": "", "due": ""},
+    {"slug": "c", "title": "Gamma", "board": "wip", "rank": None, "priority": None, "updated": "2026-01-02", "next": "", "area": "", "due": ""},
+    {"slug": "late", "title": "Late", "board": "backlog", "rank": None, "priority": None, "updated": "", "next": "", "area": "", "due": "2025-12-30"},
+    {"slug": "soon", "title": "Soon", "board": "ready", "rank": None, "priority": None, "updated": "", "next": "", "area": "", "due": "2026-01-03"},
+    {"slug": "far", "title": "Far", "board": "ready", "rank": None, "priority": None, "updated": "", "next": "", "area": "", "due": "2026-03-01"},
+    {"slug": "shut", "title": "Shut", "board": "done", "rank": None, "priority": None, "updated": "", "next": "", "area": "", "due": "2026-01-02"},
+]}
+RECENT = {"total": 2, "results": [{"title": "Lantern", "url": "https://kura.example.ts.net/n/Lantern", "folder": "Notes", "changed": NOW - 300},
+                                  {"title": "<b>x</b>", "url": "https://kura.example.ts.net/n/X", "folder": "", "changed": NOW - 900}]}
+FEED = (200, '<?xml version="1.0"?><rss version="2.0"><channel><title>Niwa</title>'
+             '<item><title>Culture</title><link>https://niwa.example.ts.net/n/Culture</link><pubDate>Wed, 31 Dec 2025 00:00:00 GMT</pubDate></item>'
+             '<item><title>Old</title><link>https://niwa.example.ts.net/n/Old</link><pubDate>Mon, 01 Sep 2025 00:00:00 GMT</pubDate></item>'
+             '</channel></rss>', "application/rss+xml")
+PAGES = {"total": 3, "documents": [
+    {"url": "https://example.com/read", "title": "A Read Story", "domain": "example.com", "added": NOW - 9000, "updated": NOW - 60,
+     "metadata": {"source": "newsblur", "via": "newsblur", "newsblur_stream": "read"}},
+    {"url": "https://example.com/star", "title": "A Starred One", "domain": "example.com", "added": NOW - 9000, "updated": NOW - 120,
+     "metadata": {"source": "newsblur", "newsblur_stream": "starred"}},
+    {"url": "https://example.org/visit", "title": "", "domain": "example.org", "added": NOW - 400, "updated": NOW - 300, "metadata": {}}]}
+
+
+class ZeroTwo(Stack):
+    """0.2.0: Shiori's status, Hister's version, Niwa's published count, the mirror's and feed-import's files, Pages."""
+
+    def test_shiori_status_ai_and_feed(self):
+        self.fakes["shiori"].routes.update({"/_shiori/status.json": SHIORI_STATUS, "/shiori/ai/status": AI,
+                                            "/shiori/healthz": (200, "ok", "text/plain")})
+        a = self.landing().poll()["apps"]["shiori"]
+        self.assertEqual((a["state"], a["version"], a["build"], a["vaultkit"]), ("up", "0.1.0", "9862094", ""))
+        self.assertEqual(a["facts"], ["AI on · 87 left today", "feed ok"])
+        self.assertIn("0.1.0 · build 9862094", render.version_line(a))
+        self.fakes["shiori"].routes["/shiori/ai/status"] = (503, "<html>down</html>", "text/html")
+        self.fakes["shiori"].routes["/shiori/healthz"] = (502, "bad", "text/plain")
+        a = self.landing().poll()["apps"]["shiori"]
+        self.assertEqual((a["state"], a["facts"]), ("up", ["AI down", "feed down"]))     # never makes Shiori down
+        del self.fakes["shiori"].routes["/_shiori/status.json"]
+        a = self.landing().poll()["apps"]["shiori"]
+        self.assertEqual((a["version"], a["build"]), ("build 7598f33", ""))             # today's build stamp
+
+    def test_hister_version_from_its_mcp(self):
+        self.fakes["hister"].routes["POST /mcp"] = MCP_INIT
+        probes.HISTER_VERSION.clear()
+        path = os.path.join(self.tmp, "hister-token")
+        with open(path, "w") as f:
+            f.write("owner-token\n")
+        clock = [NOW]
+        l = landing.Landing(landing.Config(self.env(LANDING_HISTER_TOKEN_FILE=path)), now=lambda: clock[0])
+        self.assertEqual(l.poll()["apps"]["hister"]["version"], "0.20.0")
+        posts = [x for x in self.fakes["hister"].seen if x["method"] == "POST"]
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(json.loads(posts[0]["body"])["method"], "initialize")
+        self.assertEqual(posts[0]["headers"].get("x-access-token"), "owner-token")
+        clock[0] += 60
+        l.poll()
+        self.assertEqual(len([x for x in self.fakes["hister"].seen if x["method"] == "POST"]), 1)   # cached
+        probes.HISTER_VERSION.clear()
+        del self.fakes["hister"].routes["POST /mcp"]
+        self.assertEqual(self.landing().poll()["apps"]["hister"]["version"], "")                  # unreadable: none
+
+    def test_mirror_version_and_feed_import(self):
+        mirror, feeds = os.path.join(self.tmp, "mirror.json"), os.path.join(self.tmp, "feeds.json")
+        with open(mirror, "w") as f:
+            json.dump({"head": "4ca69a1865fc", "synced_at": NOW - 20, "error": None, "version": "0.1.1"}, f)
+
+        def write(added, **kw):
+            with open(feeds, "w") as f:
+                json.dump(dict({"version": "0.1.1", "ok": True, "running": False, "last_success": clock[0] - 100,
+                                "failures_in_a_row": 0, "error": None,
+                                "counts": {"newsblur": {"added": added, "known": 4}}}, **kw), f)
+        clock = [NOW]
+        write(100)
+        l = landing.Landing(landing.Config(self.env(LANDING_MIRROR_STATUS=mirror, LANDING_FEED_STATUS=feeds)), now=lambda: clock[0])
+        snap = l.poll()
+        self.assertEqual(snap["apps"]["vault-mirror"]["version"], "0.1.1")
+        f = snap["apps"]["feed-import"]
+        self.assertEqual((f["state"], f["version"], f["facts"]), ("up", "0.1.1", ["NewsBlur"]))
+        row = {r["key"]: r for r in snap["sync"]}["feeds"]
+        self.assertEqual((row["label"], row["source"], row["state"]), ("Feeds read", "feed-import", "up"))
+        self.assertEqual(row["text"], "0 added since the page started watching")
+        clock[0] += 86400 + 60
+        self.fakes["kura"].routes["/api/status"] = dict(KURA, synced_at=clock[0], push=dict(KURA["push"], at=clock[0]))
+        write(130)
+        row = {r["key"]: r for r in l.poll()["sync"]}["feeds"]
+        self.assertEqual(row["text"], "30 added in the last day")
+        write(130, ok=False, error="newsblur: HTTP 502", failures_in_a_row=3)
+        snap = l.poll()
+        row = {r["key"]: r for r in snap["sync"]}["feeds"]
+        self.assertEqual((row["state"], row["error"]), ("error", "newsblur: HTTP 502"))
+        self.assertIn("3 failed runs", row["text"])
+        self.assertIn("feed-import", snap["overall"]["text"])
+        self.assertNotIn("Feeds read", snap["overall"]["text"])                           # the app, not twice
+        write(130, last_success=clock[0] - 2 * 3600)
+        self.assertEqual(l.poll()["apps"]["feed-import"]["state"], "behind")
+
+    def test_pages_row_is_judged(self):
+        clock = [NOW]
+        l = landing.Landing(landing.Config(self.env()), now=lambda: clock[0])
+        rows = lambda: {r["key"]: r for r in l.poll()["sync"]}
+        self.assertEqual(rows()["pages"]["state"], "up")
+        clock[0] += 2 * 86400                                       # under three days: still calm
+        self.fakes["kura"].routes["/api/status"] = dict(KURA, synced_at=clock[0], push=dict(KURA["push"], at=clock[0]))
+        self.fakes["konbini"].routes["/api/health"] = dict(KONBINI, livesync={"status": {"daemon": "running", "last_cycle_ts": clock[0]}})
+        self.assertEqual(rows()["pages"]["state"], "up")
+        clock[0] += 2 * 86400
+        self.fakes["kura"].routes["/api/status"] = dict(KURA, synced_at=clock[0], push=dict(KURA["push"], at=clock[0]))
+        self.fakes["konbini"].routes["/api/health"] = dict(KONBINI, livesync={"status": {"daemon": "running", "last_cycle_ts": clock[0]}})
+        self.assertEqual(rows()["pages"]["state"], "behind")
+        self.fakes["hister"].routes["/health"] = (502, "", "text/plain")
+        row = rows()["pages"]
+        self.assertEqual((row["state"], row["error"]), ("error", "Hister is down"))
+
+
+class Launcher(Stack):
+    """0.2.0: / is the launcher (the rooms and Today); the status page is /status."""
+
+    def setUp(self):
+        super().setUp()
+        self.fakes["konbini"].routes["/api/cards"] = CARDS
+        self.fakes["kura"].routes["/api/recent"] = RECENT
+        self.fakes["niwa"].routes["/feed.xml"] = FEED
+        self.fakes["hister"].routes["/search"] = PAGES
+
+    def today(self, **env):
+        l = self.landing(**env)
+        snap = l.poll()
+        return l, snap, snap["today"]
+
+    def test_today(self):
+        _, _, t = self.today()
+        self.assertEqual(t["wip"], 3)
+        self.assertEqual([c["title"] for c in t["working"]], ["Alpha", "Beta", "Gamma"])     # priority, then newest
+        self.assertTrue(t["working"][0]["url"].endswith("/p/a"))
+        self.assertEqual([(c["title"], c["days"]) for c in t["due"]], [("Late", -2), ("Soon", 2)])   # not far, not done
+        self.assertEqual([n["title"] for n in t["notes"]], ["Lantern", "<b>x</b>"])
+        self.assertEqual([g["title"] for g in t["garden"]], ["Culture"])                      # the last 30 days
+        self.assertEqual([(p["title"], p["reader"], p["starred"]) for p in t["pages"]],
+                         [("A Read Story", "NewsBlur", False), ("A Starred One", "NewsBlur", True), ("example.org", "", False)])
+
+    def test_sections_degrade_quietly(self):
+        self.fakes["konbini"].routes["/api/cards"] = (403, "forbidden", "text/plain")
+        self.fakes["niwa"].routes["/feed.xml"] = (200, "<html>not a feed", "text/html")
+        env = self.env(MACHIYA_ROOMS="konbini=%s,niwa=%s" % (self.fakes["konbini"].url, self.fakes["niwa"].url))
+        l = landing.Landing(landing.Config(env), now=lambda: NOW)
+        t = l.poll()["today"]
+        self.assertEqual((t["working"], t["due"], t["notes"], t["garden"], t["pages"]), (None, None, None, None, None))
+        html = render.home_html(l.current(), l.config.links, l.config.targets, "", NOW)
+        self.assertNotIn("Working On", html)
+        self.assertNotIn('class="today"', html)
+        self.assertIn('data-app="konbini"', html)                       # the tile stays, with the card count
+
+    def test_home_page(self):
+        l, snap, _ = self.today(LANDING_SEARCH_URL="https://search.example.ts.net/")
+        html = render.home_html(snap, l.config.links, l.config.targets, l.config.search, NOW)
+        self.assertIn('<a class="pill" href="/status" data-state="up"', html)
+        self.assertIn(">All up</a>", html)
+        self.assertIn('<form class="search launch" role="search" action="https://search.example.ts.net/" method="get">', html)
+        self.assertIn('name="q"', html)
+        for count in ("1,968 pages", "3 in WIP", "1 published", "314 notes"):
+            self.assertIn(count, html)
+        for head in ("Working On", "Due Soon", "Notes Changed", "Saved &amp; Read", "Garden"):
+            self.assertIn(head, html)
+        self.assertIn("&lt;b&gt;x&lt;/b&gt;", html)                     # escaped
+        self.assertIn("2 days overdue", html)
+        self.assertIn("Read in NewsBlur", html)
+        self.assertIn("Starred in NewsBlur", html)
+        self.assertNotIn("form class=\"search launch\"", render.home_html(snap, l.config.links, l.config.targets, "", NOW))
+
+    def test_pill_counts(self):
+        self.assertIn(">1 needs a look<", render.pill({"state": "error", "count": 1, "text": "x"}))
+        self.assertIn(">3 need a look<", render.pill({"state": "error", "count": 3, "text": "x"}))
+        self.assertIn(">2 behind<", render.pill({"state": "behind", "count": 2, "text": "x"}))
+
+    def test_routes_and_csp(self):
+        base = Server.serve(self, LANDING_SEARCH_URL="https://search.example.ts.net/")
+        code, headers, body = Server.get(self, base + "/")
+        self.assertEqual(code, 200)
+        self.assertIn("form-action 'self' https://search.example.ts.net;", headers["Content-Security-Policy"])
+        self.assertIn('class="landing home"', body)
+        self.assertIn('<b class="here">Home</b>', body)
+        code, _, body = Server.get(self, base + "/status")
+        self.assertEqual(code, 200)
+        self.assertIn('<b class="here">Status</b>', body)
+        self.assertIn('id="sync"', body)
+        self.assertIn("<title>Status - Machiya</title>", body)
+        code, _, body = Server.get(self, base + "/api/today")
+        self.assertEqual((code, json.loads(body)["wip"]), (200, 3))
+        base = Server.serve(self)
+        self.assertIn("form-action 'self';", Server.get(self, base + "/")[1]["Content-Security-Policy"])
+
+    def test_search_url_must_be_plain(self):
+        for bad in ("javascript:alert(1)", "https://x/\"onx", "ftp://x/"):
+            with self.assertRaises(SystemExit):
+                landing.Config({"LANDING_AUTH": "open", "LANDING_BIND": "127.0.0.1", "LANDING_SEARCH_URL": bad})
 
 
 class Setup(unittest.TestCase):

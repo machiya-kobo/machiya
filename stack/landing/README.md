@@ -1,6 +1,6 @@
 # machiya-landing
 
-Machiya's front door and status page: one page that links every room, engine and stack service and shows how each is doing (up or down, version and vendored vaultkit), how fresh the vault's sync is, and what was deployed lately. It looks like the rooms (vaultkit's shell, tab bar and Rooms menu). Full description: [docs/services/landing.md](../../docs/services/landing.md).
+Machiya's front door: `/` is a launcher (Search everything, the rooms, and Today: cards in progress and due, changed notes, saved and read pages, the garden), and `/status` links every room, engine and stack service and shows how each is doing (up or down, version and vendored vaultkit), how fresh the vault's sync is, and what was deployed lately. It looks like the rooms (vaultkit's shell, tab bar and Rooms menu). Full description: [docs/services/landing.md](../../docs/services/landing.md).
 
 ```
 LANDING_AUTH=open LANDING_BIND=127.0.0.1 LANDING_PORT=8080 LANDING_STATE=/tmp/landing.json \
@@ -21,6 +21,9 @@ Every app is optional. The page polls only what has an address; anything else sh
 | `LANDING_APPS` | none | the stack's services, `machiya-mcp=https://…,smallweb=https://…` |
 | `LANDING_PROBES` | none | a different address to poll than to link, per app (`hister=http://hister:4433`) |
 | `LANDING_MIRROR_STATUS` | none | vault-mirror's `status.json` (its volume, mounted read-only) |
+| `LANDING_FEED_STATUS` | none | feed-import's `status.json` (its data volume, mounted read-only): the feed-import row and Sync's Feeds read |
+| `LANDING_SEARCH_URL` | none | Shiori's search page, `https://search.example.ts.net/`: the launcher's Search everything pill GETs `<url>?q=…` (unset: no pill) |
+| `LANDING_HISTER_TOKEN_FILE` | none | the owner's Hister token (`X-Access-Token`, Hister only, re-read on change): the page count, the newest pages, Saved & Read and Hister's version once Hister has users |
 | `LANDING_AUTH` | `tailscale` | `tailscale`: only a `Tailscale-User-Login` in `LANDING_USERS` (`*` = anyone the tailnet lets through; empty = nobody); `open`: no check, localhost only; with the identity file also `header` (`LANDING_AUTH_HEADER`) |
 | `LANDING_USERS` | none | the Tailscale logins allowed in |
 | `LANDING_BIND`, `LANDING_PORT` | `0.0.0.0`, `8080` | the listener; `tailscale` mode refuses a non-loopback bind unless `LANDING_BIND_BEHIND_PROXY=1` (the proxy is the only way in) |
@@ -41,10 +44,12 @@ Every app is optional. The page polls only what has an address; anything else sh
 
 ## Endpoints
 
-- `GET /`: the page (no-store; it refreshes itself every minute while visible).
-- `GET /api/status`: the same as JSON (`overall`, `apps`, `sync`, `deploys`); owner-only, since it names every app's version.
+- `GET /`: the launcher (no-store; it refreshes itself every minute while visible, never under a half-typed search).
+- `GET /status`: the status page (the same refresh).
+- `GET /api/today`: Today as JSON (owner-only).
+- `GET /api/status`: the status page as JSON (`overall`, `apps`, `sync`, `deploys`); owner-only, since it names every app's version.
 - `GET /api/changelog`: this page's own `CHANGELOG.md` (`vaultkit.changelog`), behind the same gate.
 - `GET /healthz`: `{"ok": true, "version": …}` for the container's health check and the monitoring probe; no identity, no data.
 - `/settings`, `/theme`, `/manifest.webmanifest`, `/static/…`: as in the rooms.
 
-The page sends only GETs, follows no redirect, and reads at most 4 MB from an app. It asks Kura, Konbini, Niwa, machiya-mcp and smallweb for `GET /api/changelog`; an app that answers 404 (or anything but markdown) shows its versions only.
+The page sends GETs, plus one POST: Hister's MCP `initialize` (it changes nothing), at most every 15 minutes, for Hister's version. It follows no redirect and reads at most 4 MB from an app. It asks Kura, Konbini, Niwa, machiya-mcp and smallweb for `GET /api/changelog`; an app that answers 404 (or anything but markdown) shows its versions only.

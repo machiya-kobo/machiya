@@ -29,6 +29,7 @@ class History:
     def __init__(self, path=""):
         self.path, self.lock = path, threading.Lock()
         self.seen, self.events, self.since, self.error = {}, [], None, ""
+        self.samples = {}           # key -> [[time, value], ...]: counters sampled for "in the last day" (0.2.0)
         if path:
             try:
                 with open(path, encoding="utf-8") as f:
@@ -36,6 +37,8 @@ class History:
                 self.seen = {k: v for k, v in (data.get("seen") or {}).items() if isinstance(v, dict)}
                 self.events = [e for e in (data.get("events") or []) if isinstance(e, dict)][:KEEP]
                 self.since = data.get("since")
+                self.samples = {k: [p for p in v if isinstance(p, list) and len(p) == 2]
+                                for k, v in (data.get("samples") or {}).items() if isinstance(v, list)}
             except FileNotFoundError:
                 pass
             except (OSError, ValueError, AttributeError) as e:
@@ -74,11 +77,28 @@ class History:
         tmp = self.path + ".tmp"
         try:
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"since": self.since, "seen": self.seen, "events": self.events}, f, indent=1)
+                json.dump({"since": self.since, "seen": self.seen, "events": self.events, "samples": self.samples}, f, indent=1)
             os.replace(tmp, self.path)
             self.error = ""
         except OSError as e:
             self.error = "history not saved (%s)" % (e.strerror or type(e).__name__)
+
+    def sample(self, key, value, now, day=86400, every=600):
+        """Keep a counter's value over time (at most every `every` seconds, or on a change; 26 hours kept) and return
+        (growth over the last day, since): since is None when the samples reach back a day, else the oldest sample's
+        time (the growth since then). (None, None) without a value."""
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return None, None
+        with self.lock:
+            points = self.samples.setdefault(key, [])
+            if not points or now - points[-1][0] >= every or points[-1][1] != value:
+                points.append([now, value])
+                del points[:max(0, len(points) - 400)]
+                points[:] = [p for p in points if now - p[0] <= day + 2 * 3600]
+                self.save()
+            old = [p for p in points if now - p[0] >= day]
+            base = old[-1] if old else points[0]
+            return max(0, value - base[1]), (None if old else base[0])
 
     def recent(self, now, days=30, limit=12):
         with self.lock:
