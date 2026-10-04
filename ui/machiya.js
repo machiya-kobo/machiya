@@ -8,7 +8,10 @@
 //     one choice covers every room on this device (ts.net is on the Public Suffix List: <tailnet>.ts.net is the site,
 //     every room shares its cookies). Without it they are the room's own cookies.
 //  2. the Apps setting: rooms and neighbours switched off are hidden from the switcher.
-//  3. the Rooms menu (<details class="rooms">) closes on Escape or a click outside.
+//  3. menus (2026-10-05): the Rooms menu (<details class="rooms">, the header's and the phone's Rooms sheet), a room's own
+//     <details data-menu>, open <dialog>s and popovers close on Escape, a click outside (the menus), a link or form
+//     inside them, and whenever the page is shown again (pageshow, popstate, pagehide), so the back/forward cache never
+//     brings a page back with its menu open.
 //  4. "/" focuses the search page's field, or opens the room's search page (form.search's action), unless you're typing.
 //  5. updates (v0.6): when a new service worker is waiting, a "New Version · Reload" toast; Reload tells it to take
 //     over (postMessage {type: "SKIP_WAITING"}) and reloads once it has. Checks for updates on return to the app.
@@ -434,12 +437,47 @@ for (const el of document.querySelectorAll("[data-set]")) {
   });
 }
 
-// the Rooms menu: close on Escape or an outside click
+// 3. menus. Why they close on the way out (2026-10-05): a tap on Settings in the Rooms menu followed the link with the
+// <details> still open, and the back/forward cache (always on in an installed app on iOS) brought the page back exactly
+// as it was left: menu open. Now a link or form inside a menu closes it before the page goes (so even the snapshot iOS
+// shows during the back swipe is closed), and pageshow/popstate/pagehide close whatever is still open.
+const MENUS = "details.rooms[open], details[data-menu][open]";
+const SHEETS = MENUS + ", dialog[open]";
+function openMenus() {
+  const out = [...document.querySelectorAll(SHEETS)];
+  try { out.push(...document.querySelectorAll(":popover-open")); } catch { /* no popovers in this browser */ }
+  return out;
+}
+function shut(m) {
+  if (m.tagName === "DETAILS") m.open = false;
+  else if (m.tagName === "DIALOG" && m.open) { if (typeof m.close === "function") m.close(); else m.removeAttribute("open"); }
+  else if (typeof m.hidePopover === "function") { try { m.hidePopover(); } catch { /* already hidden */ } }
+}
+// every: dialogs and popovers too (a room may open one on load, so a fresh page keeps those; menus are never open then)
+function closeMenus(every) { for (const m of openMenus()) if (every || m.tagName === "DETAILS") shut(m); }
+function holder(el) {                                  // the menu, sheet or popover an element sits in
+  if (!el || !el.closest) return null;
+  const m = el.closest(SHEETS);
+  if (m) return m;
+  try { return el.closest(":popover-open"); } catch { return null; }
+}
 document.addEventListener("click", (ev) => {
-  for (const d of document.querySelectorAll("details.rooms[open]")) if (!d.contains(ev.target)) d.open = false;
+  for (const d of document.querySelectorAll(MENUS)) if (!d.contains(ev.target)) d.open = false;
+  const a = ev.target && ev.target.closest ? ev.target.closest("a[href]") : null;
+  if (!a || ev.defaultPrevented || ev.button || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+  if ((a.target && a.target !== "_self") || a.hasAttribute("download")) return;   // this page stays: leave it open
+  const m = holder(a);
+  if (m) shut(m);
 });
+document.addEventListener("submit", (ev) => {
+  const m = holder(ev.target);                         // a sheet's own form the room handles (preventDefault) stays
+  if (m && (m.tagName === "DETAILS" || !ev.defaultPrevented)) shut(m);
+});
+window.addEventListener("pageshow", (ev) => closeMenus(ev.persisted));
+window.addEventListener("popstate", () => closeMenus(true));
+window.addEventListener("pagehide", () => closeMenus(true));
 document.addEventListener("keydown", (ev) => {
-  if (ev.key === "Escape") for (const d of document.querySelectorAll("details.rooms[open]")) d.open = false;
+  if (ev.key === "Escape") for (const d of document.querySelectorAll(MENUS)) d.open = false;
   if (ev.key === "/" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
     const t = ev.target;
     if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
@@ -632,3 +670,4 @@ if ("serviceWorker" in navigator) {
   });
   window.addEventListener("popstate", () => { if (pushed) location.reload(); });
 })();
+

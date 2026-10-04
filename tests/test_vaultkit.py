@@ -776,6 +776,55 @@ class SharedUITest(unittest.TestCase):
             self.shell.COOKIE_DOMAIN = old
 
 
+@unittest.skipUnless(shutil.which("node"), "needs node")
+class MenusTest(unittest.TestCase):
+    """The real ui/machiya.js in Node (tests/js/ui_sim.mjs): menus closed on the way out and on return (the owner's
+    report of 2026-10-05: Rooms -> Settings -> back showed the menu still open)."""
+
+    @classmethod
+    def setUpClass(cls):
+        r = subprocess.run(["node", os.path.join(ROOT, "tests", "js", "ui_sim.mjs")], capture_output=True, text=True,
+                           timeout=120)
+        if r.returncode:
+            raise AssertionError("ui_sim.mjs failed:\n" + r.stderr[-3000:])
+        out = json.loads(r.stdout)
+        cls.menus = out["menus"]
+
+    ALL_CLOSED = {"headerRooms": False, "tabRooms": False, "cardMenu": False, "disclosure": True, "sheet": False,
+                  "popover": False}
+
+    def test_a_link_in_the_menu_closes_it_before_the_page_goes(self):
+        m = self.menus
+        self.assertFalse(m["settingsTap"])           # the report: so the back/forward cache keeps it closed
+        self.assertFalse(m["otherRoomTap"])
+        self.assertFalse(m["cardMenuTap"])           # a room's own <details data-menu>
+        self.assertFalse(m["sheetTap"])              # a <dialog> sheet (Konbini's card sheet)
+        self.assertFalse(m["popoverTap"])
+        self.assertFalse(m["signoutSubmit"])         # Sign Out, though machiya.js holds that form a moment
+
+    def test_this_page_stays_so_does_the_menu(self):
+        m = self.menus
+        self.assertTrue(m["blankTap"])               # target=_blank
+        self.assertTrue(m["metaTap"])                # a new tab
+        self.assertTrue(m["preventedTap"])           # the room handled the tap
+        self.assertTrue(m["disclosureTap"])          # an ordinary <details> in the page is content, not a menu
+        self.assertTrue(m["sheetFormHandled"])       # the room's own form in its sheet (fetch)
+        self.assertFalse(m["sheetFormSubmit"])
+
+    def test_shown_again_means_closed(self):
+        m = self.menus
+        self.assertFalse(m["bfcache"])
+        for case in ("bfcacheAll", "popstate", "pagehide"):
+            self.assertEqual(m[case], self.ALL_CLOSED, case)
+        self.assertTrue(m["sheetCloseEvent"])        # dialog.close(): the room hears "close"
+        # a fresh load closes menus only: a dialog or popover open then is the room's doing
+        self.assertEqual(m["freshLoad"], dict(self.ALL_CLOSED, sheet=True, popover=True))
+        # a browser without popovers (:popover-open throws): the rest still closes
+        self.assertEqual(m["noPopoverSupport"], dict(self.ALL_CLOSED, popover=True))
+        self.assertEqual(m["escape"], [False, False])
+        self.assertFalse(m["outside"])
+
+
 class EnvFileTest(unittest.TestCase):
     TEXT = """# Kura on a server
 KURA_BIND=127.0.0.1
