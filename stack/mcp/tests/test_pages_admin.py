@@ -88,6 +88,34 @@ class Reads(Base):
             self.assertTrue(q["q"].endswith(" -label:vault -metadata.source:vault -metadata.source:code -label:konbini"), q["q"])
             self.assertEqual(headers.get("Origin"), "hister://")
 
+    def test_census_counts_past_8000_pages(self):
+        # sweep MACH-M-7: the census stopped at 8000 pages, so a label whose pages all sat past it was refused as new
+        for i in range(8100):
+            self.h.docs["https://bulk.example/p/%05d" % i] = {"url": "https://bulk.example/p/%05d" % i, "title": "b", "domain": "bulk.example",
+                                                              "label": "bulk", "metadata": {}, "text": "t", "score": 1.0, "added": 1}
+        for i in range(3):
+            self.h.docs["https://zz.example/p/%d" % i] = {"url": "https://zz.example/p/%d" % i, "title": "z", "domain": "zz.example",
+                                                          "label": "zzlate", "metadata": {}, "text": "t", "score": 1.0, "added": 1}
+        d = self.ok("pages_labels")
+        by = {x["label"]: x["count"] for x in d["labels"]}
+        self.assertEqual((by["bulk"], by["zzlate"], d["pages"]), (8100, 3, 8347))
+        self.assertNotIn("truncated", d)
+        self.ok("pages_set_label", url=TECH, label="zzlate")
+
+    def test_an_incomplete_census_says_so_and_never_calls_a_label_new(self):
+        import rooms.hister_write as hw
+        self.addCleanup(setattr, hw, "MAX_BATCHES", hw.MAX_BATCHES)
+        hw.MAX_BATCHES = 1                                          # stop after the first 100 (sorted by URL: no tech page)
+        d = self.ok("pages_labels")
+        self.assertTrue(d["truncated"])
+        self.assertNotIn("tech", {x["label"] for x in d["labels"]})
+        self.assertTrue(self.ok("collections_audit")["truncated"])
+        music = "https://music.example/p/000"
+        self.ok("pages_set_label", url=music, label="tech")          # exists past the cut: asked of Hister, not refused
+        self.assertEqual(self.label_of(music), "tech")
+        self.server.census = (0.0, None)
+        self.err("pages_set_label", "not an existing label", owner=True, url=music, label="nosuchlabel")
+
     def test_census_is_cached_and_dropped_after_a_write(self):
         self.ok("pages_labels"); n1 = len(self.h.requests)
         self.ok("pages_labels"); self.assertEqual(len(self.h.requests), n1)

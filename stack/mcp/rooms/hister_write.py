@@ -26,10 +26,15 @@ WRITE_LIMITS = ("hister_write",)
 
 # -- helpers ---------------------------------------------------------------------------------------------------------
 
-def all_docs(ctx, query, cap=8000):
-    """Every page matching `query` (Hister pages 100 at a time with page_key; the last page still carries a key)."""
-    docs, key, fetched = [], None, 0
-    for _ in range(90):
+MAX_BATCHES = 2000          # 200,000 documents: past this a census says it is incomplete
+
+
+def all_docs(ctx, query, cap=None):
+    """(pages, complete): every page matching `query`, or the first `cap` and more (Hister pages 100 at a time with
+    page_key; the last page still carries a key). `complete` is False when the paging stopped before the end: the safety
+    limit, or a page_key Hister repeats (sweep MACH-M-7: an 8000-page cap made larger libraries miscount silently)."""
+    docs, key, fetched, seen = [], None, 0, set()
+    for _ in range(MAX_BATCHES):
         params = {"q": query, "format": "json", "limit": 100}
         if key:
             params["page_key"] = key
@@ -38,20 +43,39 @@ def all_docs(ctx, query, cap=8000):
         fetched += len(batch)
         docs += [x for x in batch if is_page(x) and x.get("label") != "konbini"]
         key, total = d.get("page_key"), d.get("total")
-        if not batch or not key or len(docs) >= cap or (total is not None and fetched >= total):
-            break
-    return docs
+        if not batch or not key or (total is not None and fetched >= total) or (cap is not None and len(docs) >= cap):
+            return docs, True
+        if key in seen:
+            return docs, False
+        seen.add(key)
+    return docs, False
 
 
 def census(ctx):
-    """{label: count} over every page (never a note); cached five minutes, dropped after any write."""
+    """{label: count} over every page (never a note); cached five minutes, dropped after any write. When Hister's
+    paging stopped early, ctx.server.census_complete is False and the counts are a lower bound."""
     stamp, data = ctx.server.census
     if data is not None and ctx.server.clock() - stamp < CENSUS_TTL:
         return data
-    counts = collections.Counter((d.get("label") or "") for d in all_docs(ctx, "*" + EXCL))
-    data = dict(counts)
+    docs, complete = all_docs(ctx, "*" + EXCL)
+    data = dict(collections.Counter((d.get("label") or "") for d in docs))
     ctx.server.census = (ctx.server.clock(), data)
+    ctx.server.census_complete = complete
     return data
+
+
+def complete(ctx):
+    return getattr(ctx.server, "census_complete", True)
+
+
+def label_exists(ctx, label):
+    """Is `label` on at least one page? From the census, or, when the census is incomplete, by asking Hister for it."""
+    if label in topics(ctx):
+        return True
+    if complete(ctx):
+        return False
+    d = ctx.get("hister", "/search", {"q": "label:%s%s" % (label, EXCL), "format": "json", "limit": 5})
+    return any(is_page(x) and x.get("label") == label for x in d.get("documents") or [])
 
 
 def forget(ctx):
@@ -77,7 +101,7 @@ def check_label(ctx, label, allow_empty=True):
         raise ToolError("a label is one flat word like python (letters, digits, - and _)")
     if reserved(ctx, label):
         raise ToolError("%r marks the vault notes or an import, not a topic: never applied here" % label)
-    if label not in topics(ctx):
+    if not label_exists(ctx, label):
         raise ToolError("%r is not an existing label: a new label is the owner's to create. Existing: %s"
                         % (label, ", ".join(sorted(topics(ctx))[:40])), needs_owner=True)
     return label
@@ -135,7 +159,8 @@ def pages_labels(ctx, args):
     return {"labels": sorted(({"label": l, "count": c} for l, c in counts.items() if l and not reserved(ctx, l)),
                              key=lambda x: (-x["count"], x["label"])),
             "unlabelled": counts.get("", 0), "other": {l: c for l, c in counts.items() if l and reserved(ctx, l)},
-            "pages": sum(counts.values())}
+            "pages": sum(counts.values()),
+            **({} if complete(ctx) else {"truncated": True, "note": "Hister's paging stopped early: these counts are a lower bound"})}
 
 
 def collections_audit(ctx, args):
@@ -157,6 +182,9 @@ def collections_audit(ctx, args):
         out["%s_drift" % r] = {"labels_missing_from_%s" % r: sorted(l for l in counts if l not in listed),
                                "labels_in_%s_with_no_pages" % r: sorted(l for l in listed if counts.get(l, 0) == 0 and not reserved(ctx, l)),
                                "note": "%s is the owner's own keyword: reported, never edited here" % r}
+    if not complete(ctx):
+        out["truncated"] = True
+        out["note"] = "Hister's paging stopped early: page counts are a lower bound, and a label may look dead when it isn't"
     return out
 
 
@@ -207,7 +235,7 @@ def pages_relabel(ctx, args):
         query = arg_str(args, "query", maxlen=300)
         if not query:
             raise ToolError("query is required (Hister query language, e.g. label:tech domain:example.com)")
-    docs = all_docs(ctx, query + EXCL, cap + 1)
+    docs, _ = all_docs(ctx, query + EXCL, cap + 1)
     todo = [d for d in docs if (d.get("label") or "") != label and not reserved(ctx, d.get("label") or "")]
     if len(docs) > cap:
         raise ToolError("the query matches more than %d pages: narrow it (a domain, a label, a date) and run the dry run again" % cap)
