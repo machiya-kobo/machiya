@@ -424,16 +424,16 @@ class ShellTest(unittest.TestCase):
         self.assertEqual(shell.rooms({}), {})
 
     def test_house_row_and_footer_link(self):
-        """v0.18: with `machiya=<url>` in MACHIYA_ROOMS every Rooms menu ends with "Machiya · status" (before Settings)
+        """v0.18: with `machiya=<url>` in MACHIYA_ROOMS every Rooms menu ends with "Machiya · home" (v0.19.1; before Settings)
         and the footer's "Part of Machiya" links there; without it, the menu and footer are as before."""
         from vaultkit import shell
         plain = shell.rooms(self.ENV)
         links = shell.rooms(dict(self.ENV, MACHIYA_ROOMS=self.ENV["MACHIYA_ROOMS"] + ",machiya=https://machiya.t/"))
         self.assertEqual(links["machiya"], "https://machiya.t")
-        self.assertEqual(shell.room_info("machiya"), ("machiya", "Machiya", "町", "status"))
+        self.assertEqual(shell.room_info("machiya"), ("machiya", "Machiya", "町", "home"))
         menu = shell.switcher("kura", links, settings=True)
         row = ('<hr><a href="https://machiya.t/" data-room="machiya"><span class="seal icon" data-room="machiya" '
-               'title="Machiya (町)" aria-hidden="true">町</span>Machiya<small>status</small></a>')
+               'title="Machiya (町)" aria-hidden="true">町</span>Machiya<small>home</small></a>')
         self.assertIn(row, menu)
         self.assertLess(menu.index("SearXNG"), menu.index(row))                                # after the engines
         self.assertLess(menu.index(row), menu.index("Settings"))                               # before Settings
