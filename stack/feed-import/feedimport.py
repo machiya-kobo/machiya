@@ -49,19 +49,12 @@ from newsblur import NewsBlur                                  # noqa: E402
 from readers import Entry, ReaderError, secret_file            # noqa: E402
 from store import Store                                        # noqa: E402
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 USER_AGENT = "Mozilla/5.0 (compatible; machiya-feed-import/%s; opens what its owner read in a feed reader)" % VERSION
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 WINDOW_RE = re.compile(r"^(%s)[a-z]*\s+([01]?\d|2[0-3]):([0-5]\d)\s*-\s*([01]?\d|2[0-3]):([0-5]\d)$" % "|".join(DAYS), re.I)
 TRANSIENT_HTTP = {408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
 MIN_COPY = 500          # characters: a reader's copy shorter than this never replaces a fetched original
-
-
-def read_secret(path):
-    if not path:
-        return ""
-    with open(path) as f:
-        return f.read().strip()
 
 
 def pause_window(value):
@@ -403,7 +396,8 @@ def build(env, dry_run=False, fetch=True):
     hister_url = env.get("FEED_IMPORT_HISTER_URL", "")
     if not hister_url and not dry_run:
         raise SystemExit("feed-import: FEED_IMPORT_HISTER_URL is required (unset is allowed only with --dry-run)")
-    hister = histermod.Hister(hister_url, read_secret(env.get("FEED_IMPORT_HISTER_TOKEN_FILE", ""))) if hister_url else None
+    token = histermod.token_file(env.get("FEED_IMPORT_HISTER_TOKEN_FILE"))     # checked at start even for a dry run
+    hister = histermod.Hister(hister_url, token) if hister_url else None
     data = env.get("FEED_IMPORT_DATA", "/data")
     store = Store(":memory:" if dry_run else os.path.join(data, "feed-import.sqlite3"))
     fetcher = Fetcher(env.get("FEED_IMPORT_FETCH_ALLOW", ""), env.get("FEED_IMPORT_SOCKS", "")) if fetch else None

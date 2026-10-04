@@ -1,14 +1,71 @@
 """feed-import's Hister calls (docs/contracts/hister.md): `Origin: hister://` on every call, and the owner's token as
-`X-Access-Token` once Hister's user handling is on (FEED_IMPORT_HISTER_TOKEN_FILE; unset today).
+`X-Access-Token` from FEED_IMPORT_HISTER_TOKEN_FILE (ignored by a Hister without users). The file is checked at start
+(token_file), re-read when it changes, and while a token is set a redirect from Hister is never followed: urllib would
+carry the header to wherever it points.
 
 Only four calls: GET /api/document (is this URL known?), POST /api/add (a new page), POST /api/label (label a page
 that has none), GET /api/rules (the topic labels, from the aliases). Never a re-index of a known URL.
 """
 import json
+import os
 import re
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+
+
+TOKEN_RE = re.compile(r"[\x21-\x7e]{1,4096}")
+
+
+class SecretFile:
+    """A token kept in a file (its first line), re-read when the file changes (inode, mtime, size), so a rotated token
+    is picked up without a restart. A file that vanishes or holds no token keeps the last good value (a rotation in
+    progress). The value is never in repr() or a log line."""
+
+    def __init__(self, path):
+        self.path, self.stamp, self.value, self.lock = path, None, "", threading.Lock()
+        self.get()
+
+    def get(self):
+        try:
+            st = os.stat(self.path)
+            stamp = (st.st_ino, st.st_mtime_ns, st.st_size)
+        except OSError:
+            return self.value
+        with self.lock:
+            if stamp != self.stamp:
+                try:
+                    with open(self.path, encoding="utf-8") as f:
+                        value = f.readline().strip()
+                except (OSError, UnicodeError):
+                    value = ""
+                if TOKEN_RE.fullmatch(value):
+                    self.value = value
+                self.stamp = stamp
+            return self.value
+
+    def __repr__(self):
+        return "SecretFile(%s)" % self.path
+
+
+def token_file(path):
+    """FEED_IMPORT_HISTER_TOKEN_FILE -> a SecretFile, or None when unset (no token, as before). Set but missing, empty
+    or not a token: refuse to start (never echoing the file's contents)."""
+    path = (path or "").strip()
+    if not path:
+        return None
+    if not os.path.isfile(path):
+        raise SystemExit("feed-import: FEED_IMPORT_HISTER_TOKEN_FILE: no token in %s" % path)
+    secret = SecretFile(path)
+    if not secret.value:
+        raise SystemExit("feed-import: FEED_IMPORT_HISTER_TOKEN_FILE: %s doesn't hold a token on its first line" % path)
+    return secret
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
 
 
 class HisterDown(Exception):
@@ -32,8 +89,19 @@ def norm(url):
 
 
 class Hister:
-    def __init__(self, base, token="", timeout=60):
-        self.base, self.token, self.timeout = base.rstrip("/"), token, timeout
+    def __init__(self, base, token=None, timeout=60):
+        """token: a SecretFile (FEED_IMPORT_HISTER_TOKEN_FILE), a plain string (tests), or None/"" for none."""
+        self.base, self.timeout = base.rstrip("/"), timeout
+        self.token = token if token else None
+        self.opener = urllib.request.build_opener(NoRedirect) if self.token else urllib.request.build_opener()
+
+    def __repr__(self):                 # never the token
+        return "Hister(%s%s)" % (self.base, ", token" if self.token else "")
+
+    def token_value(self):
+        if self.token is None:
+            return ""
+        return self.token.get() if hasattr(self.token, "get") else self.token
 
     def call(self, method, path, body=None):
         """(status, parsed JSON or text). 4xx come back; 5xx and network errors raise HisterDown."""
@@ -42,13 +110,17 @@ class Hister:
         if body is not None:
             data = json.dumps(body).encode()
             headers["Content-Type"] = "application/json"
-        if self.token:
-            headers["X-Access-Token"] = self.token
+        token = self.token_value()
+        if token:
+            headers["X-Access-Token"] = token
         req = urllib.request.Request(self.base + path, data=data, method=method, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            with self.opener.open(req, timeout=self.timeout) as r:
                 status, raw = r.status, r.read()
         except urllib.error.HTTPError as e:
+            if self.token is not None and 300 <= e.code < 400:
+                raise HisterDown("Hister %s %s: a redirect (%d), not followed with the token"
+                                 % (method, path.split("?")[0], e.code))
             if e.code >= 500:
                 raise HisterDown("Hister %s %s: HTTP %d" % (method, path.split("?")[0], e.code))
             status, raw = e.code, e.read()[:500]

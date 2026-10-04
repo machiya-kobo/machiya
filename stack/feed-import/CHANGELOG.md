@@ -1,5 +1,9 @@
 # Changelog: feed-import
 
+## 0.1.1
+
+- **`FEED_IMPORT_HISTER_TOKEN_FILE` done properly** (phase 1 of the Hister sign-in, docs/contracts/hister.md): a set file that is missing, empty or not a token now stops the start (it used to send no token, or crash on a missing file); the file is re-read when it changes, so a rotated token needs no restart (a file that vanishes keeps the last good value); and while a token is set a redirect from Hister is never followed (urllib would have carried `X-Access-Token` to wherever it pointed): the run stops as if Hister were down. The token is never logged or in a repr. Every Hister call (`/api/document`, `/api/add`, `/api/label`, `/api/rules`) still carries it.
+
 ## 0.1.0
 
 - The reader interface (`readers.py`) and the NewsBlur reader: GET only, with an OAuth token. It reads the stories you read one by one (the last 1,001, which is all NewsBlur keeps) and every starred story.

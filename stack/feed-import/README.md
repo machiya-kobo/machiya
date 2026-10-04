@@ -86,7 +86,7 @@ Inoreader is left out: its API needs a Pro plan, OAuth refresh tokens, and 100 r
 | `FEED_IMPORT_FEEDBIN_PASSWORD_FILE` | — | a file holding its password (required for feedbin) |
 | `FEED_IMPORT_FEEDBIN_LOOKBACK` | `14` | days of read entries each run walks |
 | `FEED_IMPORT_HISTER_URL` | — | `http://hister:4433` (required, except for `--dry-run`) |
-| `FEED_IMPORT_HISTER_TOKEN_FILE` | — | the owner's Hister token, sent as `X-Access-Token`, once Hister's user handling is on. Unset means no token is sent |
+| `FEED_IMPORT_HISTER_TOKEN_FILE` | — | the owner's Hister token (the file's first line), sent as `X-Access-Token` on every Hister call ([contracts/hister.md](../../docs/contracts/hister.md)); a Hister without users ignores it. Set but missing, empty or not a token: refuses to start. Re-read when the file changes (a file that vanishes keeps the last good value); while it is set, a redirect from Hister is never followed. Unset means no token is sent |
 | `FEED_IMPORT_INTERVAL` | `600` | seconds between runs (at least 60) |
 | `FEED_IMPORT_PAUSE` | — | `Sun 02:20-02:50`: no runs in that weekly slot (Hister's backup), in `FEED_IMPORT_TZ` (default `UTC`) |
 | `FEED_IMPORT_STARRED_LABEL` | `starred` | label for a starred page that no tag matches |

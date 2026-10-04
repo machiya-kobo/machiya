@@ -415,6 +415,71 @@ class Pipeline(Base):
         self.importer().run()
         self.assertTrue(all("X-Access-Token" not in c[3] for c in H.calls))
 
+    def test_token_file_sent_on_every_call_and_reread(self):
+        path = os.path.join(self.tmp, "hister.token")
+        with open(path, "w") as f:
+            f.write("owner-token-one\n")
+        secret = histermod.token_file(path)
+        H.docs[WEB + "/article/known"] = {"url": WEB + "/article/known", "label": ""}
+        NB.read = [story("r1", "/article/1", "One")]
+        NB.starred = [(story("s1", "/article/known", "Known"), 1700000000)]
+        self.importer(token=secret).run()
+        paths = {c[1] for c in H.calls}
+        self.assertTrue({"/api/document", "/api/add", "/api/label"} <= paths, paths)
+        self.assertTrue(all(c[3].get("X-Access-Token") == "owner-token-one" for c in H.calls))
+        with open(path + ".new", "w") as f:                       # rotated: picked up without a restart
+            f.write("owner-token-two\n")
+        os.replace(path + ".new", path)
+        H.calls = []
+        NB.read = [story("r2", "/article/2", "Two")] + NB.read
+        self.importer(token=secret).run()
+        self.assertTrue(H.calls and all(c[3].get("X-Access-Token") == "owner-token-two" for c in H.calls))
+        os.unlink(path)                                           # vanished: the last good value stays
+        self.assertEqual(secret.get(), "owner-token-two")
+        self.assertNotIn("owner-token", repr(secret) + repr(histermod.Hister(H_URL, secret)))
+        self.assertFalse(any("owner-token" in x for x in self.lines))
+
+    def test_token_file_refusals(self):
+        empty = os.path.join(self.tmp, "empty")
+        open(empty, "w").close()
+        spaced = os.path.join(self.tmp, "spaced")
+        with open(spaced, "w") as f:
+            f.write("secret with spaces\n")
+        for path in (empty, spaced, os.path.join(self.tmp, "missing"), self.tmp):
+            with self.assertRaises(SystemExit, msg=path) as cm:
+                histermod.token_file(path)
+            self.assertNotIn("secret with", str(cm.exception))
+        self.assertIsNone(histermod.token_file(""))
+        self.assertIsNone(histermod.token_file(None))
+        env = {"FEED_IMPORT_READERS": "newsblur", "FEED_IMPORT_NEWSBLUR_URL": NB_URL,
+               "FEED_IMPORT_NEWSBLUR_TOKEN_FILE": spaced, "FEED_IMPORT_HISTER_URL": H_URL,
+               "FEED_IMPORT_HISTER_TOKEN_FILE": empty, "FEED_IMPORT_DATA": os.path.join(self.tmp, "data")}
+        with self.assertRaises(SystemExit):
+            feedimport.build(env)
+
+    def test_no_redirect_with_the_token(self):
+        elsewhere = []
+
+        class Redirect(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                elsewhere.append(dict(self.headers)) if self.path.startswith("/landed") else None
+                self.send_response(302 if not self.path.startswith("/landed") else 404)
+                self.send_header("Location", "/landed")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+        srv, url = serve(Redirect)
+        with self.assertRaises(histermod.HisterDown) as cm:
+            histermod.Hister(url, "owner-token").document("https://x.test/a")
+        self.assertIn("not followed", str(cm.exception))
+        self.assertNotIn("owner-token", str(cm.exception))
+        self.assertEqual(elsewhere, [])
+        self.assertIsNone(histermod.Hister(url).document("https://x.test/a"))  # without a token, as before (404)
+        self.assertEqual(len(elsewhere), 1)
+        self.assertNotIn("X-Access-Token", elsewhere[0])
+
     def test_dry_run_writes_nothing(self):
         H.docs[WEB + "/article/known"] = {"url": WEB + "/article/known", "label": ""}
         NB.read = [story("r%d" % i, "/article/%d" % i, "S%d" % i) for i in range(15)]
