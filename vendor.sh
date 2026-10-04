@@ -10,7 +10,7 @@ dest="${1:?usage: vendor.sh <dest dir> [ref]}"
 ref="${2:-HEAD}"
 [[ -d $dest ]] || { echo "vendor.sh: $dest is not a directory" >&2; exit 1; }
 
-desc=$(git -C "$here" describe --tags --always "$ref")
+desc=$(git -C "$here" describe --tags --match 'v[0-9]*' --always "$ref")   # vaultkit's own tags (not mcp-v…, landing-v…)
 [[ $ref == HEAD && -n $(git -C "$here" status --porcelain -- vaultkit) ]] && desc="$desc-dirty"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
