@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.1.2
+
+- Hister shows Up again: its `/health` answers 200 with an empty body, which 0.1.1 read as "not healthy". Any 2xx from `/health` now means up; the test's fake Hister answers the same way.
+
 ## 0.1.1
 
 - **Hister with users** (phase 1 of the Hister sign-in): Hister is up or down by its open `GET /health` now, not `/api/stats`, which answers 403 once Hister's user handling is on. The page count and the newest page are best effort: with **`LANDING_HISTER_TOKEN_FILE`** (the owner's token, `X-Access-Token`, to Hister only; re-read when the file changes; a set file that is missing or empty stops the start) they keep showing; without it (or with a refused token) Hister is still up and the card says the count needs the token. Every Hister call, `/health` included, sends `Origin: hister://`; the token is never logged or in the page's JSON.

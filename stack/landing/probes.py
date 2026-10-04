@@ -260,9 +260,7 @@ def hister(base, now, timeout, headers, token=None):
     token (or a refused one) those answer 403: Hister is still up, only the count is missing. Hister doesn't report its
     version."""
     h = dict(headers, Origin=HISTER_ORIGIN)            # every Hister call says who it is, /health too
-    _, _, body = fetch(base + "/health", dict(h, Accept="text/plain"), timeout)
-    if body.strip()[:2].upper() != b"OK":
-        raise FetchError("not healthy")
+    fetch(base + "/health", dict(h, Accept="text/plain"), timeout)      # any 2xx is up: Hister's /health is 200, empty body
     value = token.get() if hasattr(token, "get") else (token or "")
     if value:
         h["X-Access-Token"] = value

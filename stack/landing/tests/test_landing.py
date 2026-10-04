@@ -76,7 +76,7 @@ KONBINI = {"ok": True, "version": "0.11.6", "head": KURA["head"], "cards": 78,
 NIWA = {"version": "0.4.8", "vaultkit": "v0.17.2", "head": "a6857ce8c2", "notes": 314, "published": 1,
         "sync": {"pending": 0, "ahead": 0, "error": None}, "ready": True, "error": None}
 SHIORI = (200, '<link rel="stylesheet" href="/_shiori/app.css?v=7598f33efebd">', "text/html")
-HISTER = {"/health": (200, "OK", "text/plain"), "/api/stats": {"doc_count": 1968, "alias_count": 14},
+HISTER = {"/health": (200, "", "text/plain"), "/api/stats": {"doc_count": 1968, "alias_count": 14},
           "/search": {"total": 1968, "documents": [{"url": "https://example.com/", "added": NOW - 9000, "updated": NOW - 600}]}}
 SEARXNG = {"/healthz": (200, "OK", "text/plain"), "/config": {"version": "2026.9.25+12f8b6515"}}
 MCP = {"ok": True, "version": "0.7.0", "auth": "tailscale", "rooms": ["hister", "konbini", "kura", "niwa"], "tools": 36}
