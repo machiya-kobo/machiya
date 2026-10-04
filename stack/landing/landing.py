@@ -439,15 +439,14 @@ def make_handler(landing):
             return self.send(status, body, ctype, [(k, v) for k, v in headers if k != "Content-Type"])
 
         def body(self, limit):
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-            except ValueError:
-                length = -1
-            if length < 0 or length > limit:
+            """The request body through vaultkit.signin.read_body (0.4.1, sweep LEAD-2): a chunked body, a duplicate
+            or odd Content-Length, one over `limit` or one that ends early is None (the caller answers 413), and the
+            connection closes, so none of its bytes is ever read as the next request."""
+            data = signin.read_body(self.headers, self.rfile, limit)
+            if data is None:
                 self.close_connection = True
                 return None
-            data = self.rfile.read(length) if length else b""
-            self._body_read = len(data) == length
+            self._body_read = True
             return data
 
         def do_GET(self):

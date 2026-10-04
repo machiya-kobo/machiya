@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.4.1
+
+- **A chunked body is refused** (the 2026-10 sweep, LEAD-2): `PUT /api/prefs` and `POST /signout` read their body with vaultkit's `signin.read_body`, so a `Transfer-Encoding: chunked` body, a duplicate or odd `Content-Length`, an oversized or a short one answers 413 and closes the connection. Before, a chunked body was read as empty and its bytes were parsed as the next request on a kept-alive connection (behind a proxy other than Tailscale Serve).
+
 ## 0.4.0
 
 - **The Shared settings follow you** (the owner, 2026-10-05; [docs/contracts/prefs.md](../../docs/contracts/prefs.md)): in `LANDING_AUTH=hister` mode with the helper, `/api/prefs` is the account's. It is forwarded to hister-login's `/v1/prefs` with the caller's own credential and never kept here, so a theme picked in Kura shows here on the next load, and on every other device. In the Tailscale fallback it answers 503 (no account while sign-in is down) and the page keeps its cookies. Without the helper, `LANDING_PREFS` as before.

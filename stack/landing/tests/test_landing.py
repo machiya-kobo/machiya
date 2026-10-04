@@ -566,6 +566,36 @@ class Server(Stack):
             self.assertIn(b"\r\nConnection: close\r\n", out)
             self.assertNotIn(b'"apps"', out)
 
+    def test_keep_alive_chunked_body_never_becomes_a_request(self):
+        """0.4.1 (sweep LEAD-2): a chunked body (no Content-Length) on PUT /api/prefs is refused with 413 and the
+        connection closes: read as an empty body, its bytes were the next request (a 403, then a 200 with the status
+        JSON). A duplicate Content-Length is refused the same way."""
+        import socket
+        base = self.serve(LANDING_PREFS=os.path.join(self.tmp, "prefs.sqlite3"))
+        netloc = urlsplit(base).netloc
+        host, port = netloc.split(":")
+        smuggled = b"GET /api/status HTTP/1.1\r\nHost: %s\r\n\r\n" % netloc.encode()
+        for head in (b"PUT /api/prefs HTTP/1.1\r\nHost: %s\r\nTransfer-Encoding: chunked\r\n" % netloc.encode(),
+                     b"PUT /api/prefs HTTP/1.1\r\nHost: %s\r\nContent-Length: 0\r\nContent-Length: 0\r\n"
+                     % netloc.encode()):
+            s = socket.create_connection((host, int(port)), timeout=2)
+            s.sendall(head + b"\r\n" + smuggled)
+            out, closed = b"", False
+            try:
+                while True:
+                    chunk = s.recv(65536)
+                    if not chunk:
+                        closed = True
+                        break
+                    out += chunk
+            except socket.timeout:
+                pass
+            s.close()
+            self.assertEqual(out.count(b"HTTP/1.1 "), 1, out)
+            self.assertTrue(closed, head)
+            self.assertNotIn(b'"apps"', out)
+            self.assertTrue(out.startswith(b"HTTP/1.1 413"), out[:40])
+
 
 IDENTITY = """
 version = 1
