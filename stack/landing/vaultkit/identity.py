@@ -103,15 +103,28 @@ def utc(value):
     raise IdentityError("expected a date, not %r" % (value,))
 
 
+# hashlib.scrypt needs OpenSSL: a Python built against LibreSSL (OpenBSD's) has none. Then everything that hashes a
+# password or a pairing code (the built-in sign-in, POST /api/pair, the CLI's passwd/setup --password/pair) refuses
+# with SCRYPT_MISSING, and everything else (open, tailscale, header and hister modes, tokens) works as before.
+HAVE_SCRYPT = hasattr(hashlib, "scrypt")
+SCRYPT_MISSING = ("this Python's hashlib has no scrypt (built against LibreSSL, as on OpenBSD): password sign-in and "
+                  "pairing codes are unavailable here; use Tailscale, a proxy header, Hister's sign-in or tokens")
+
+
 def hash_password(password, salt=None):
-    """-> 'scrypt$N$r$p$salt$hash' (base64url)."""
+    """-> 'scrypt$N$r$p$salt$hash' (base64url). IdentityError when this Python has no scrypt."""
+    if not HAVE_SCRYPT:
+        raise IdentityError(SCRYPT_MISSING)
     salt = salt or secrets.token_bytes(16)
     digest = hashlib.scrypt(password.encode(), salt=salt, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, dklen=32)
     return "scrypt$%d$%d$%d$%s$%s" % (SCRYPT_N, SCRYPT_R, SCRYPT_P, b64e(salt), b64e(digest))
 
 
 def check_password(password, stored):
-    """Constant-time check of `password` against hash_password's output. False on any malformed hash."""
+    """Constant-time check of `password` against hash_password's output. False on any malformed hash, and always
+    False without scrypt."""
+    if not HAVE_SCRYPT:
+        return False
     try:
         if not valid_hash(stored):
             return False
@@ -133,7 +146,15 @@ def valid_hash(stored):
         return False
 
 
-DUMMY_HASH = hash_password("not a password", b"\0" * 16)     # spends the same time for an unknown name
+_DUMMY = []
+
+
+def dummy_hash():
+    """A hash to check an unknown name against, so it spends the same time as a known one. Made on first use, not
+    at import: importing vaultkit must work where scrypt is missing (OpenBSD)."""
+    if not _DUMMY:
+        _DUMMY.append(hash_password("not a password", b"\0" * 16))
+    return _DUMMY[0]
 
 
 def token_hash(secret):
@@ -740,6 +761,8 @@ class Identity:
         behind a proxy every client shares the proxy's address."""
         if not self.signin:
             return Result(None, 404, "sign-in is off in this room")
+        if not HAVE_SCRYPT:
+            return Result(None, 503, "password sign-in is unavailable here (no scrypt in this Python)")
         if not isinstance(name, str) or not isinstance(password, str):
             return Result(None, 401, "wrong name or password")
         config, key = self.current()
@@ -761,7 +784,7 @@ class Identity:
         try:
             p = config.principals.get(name)
             stored = config.raw[name]["password"] if p else None
-            ok = check_password(password, stored or DUMMY_HASH) and bool(stored) and p.kind == "person"
+            ok = check_password(password, stored or dummy_hash()) and bool(stored) and p.kind == "person"
         finally:
             HASHING.release()
         if not ok:
@@ -777,6 +800,8 @@ class Identity:
         """A Shiori device trades a one-time code (the CLI's `pair`) for a device token. -> (Result, token or "")."""
         if not isinstance(code, str) or len(code) > 64:
             return Result(None, 401, "unknown or expired code"), ""
+        if not HAVE_SCRYPT:
+            return Result(None, 503, "pairing is unavailable here (no scrypt in this Python)"), ""
         config, key = self.current()
         if not self.pair_addrs.take(client):
             return Result(None, 429, "too many tries; wait a few minutes"), ""
@@ -817,6 +842,8 @@ def load_for(room, env=None, bind="0.0.0.0", secure=True):
     prefix = {"konbini": "KANBAN"}.get(room, room.upper())
     auth = (env.get(prefix + "_AUTH") or "tailscale").strip().lower()
     signin = (env.get(prefix + "_SIGNIN") or "").strip().lower() in ("1", "on", "true", "yes")
+    if signin and not HAVE_SCRYPT:
+        raise IdentityError("%s_SIGNIN=1: %s" % (prefix, SCRYPT_MISSING))
     behind = (env.get(prefix + "_BIND_BEHIND_PROXY") or "").strip().lower() in ("1", "on", "true", "yes")
     check_bind(auth, bind, behind)
     caps = (env.get(prefix + "_ACCEPT_APP_CAPS") or "").strip().lower() in ("1", "on", "true", "yes")
@@ -1070,6 +1097,8 @@ def setup(path, args, interactive=None):
         p["proxy"] = sorted(set(p.get("proxy", [])) | {proxy})
     if not (p.get("tailscale") or p.get("proxy") or password or p.get("password")):
         return refuse("%r would have no way to sign in: give --tailscale LOGIN, --proxy LOGIN or --password" % owner)
+    if password and not HAVE_SCRYPT:
+        return refuse(SCRYPT_MISSING)
     if password:
         pw = getpass.getpass("new password for %s: " % owner)
         if len(pw) < 12:
@@ -1217,6 +1246,8 @@ def main(argv=None):
     elif cmd == "passwd":
         if len(args) != 1:
             raise SystemExit("passwd NAME")
+        if not HAVE_SCRYPT:
+            raise SystemExit("identity: " + SCRYPT_MISSING)
         p = principal(args[0])
         pw = getpass.getpass("new password for %s: " % args[0])
         if len(pw) < 12:
@@ -1254,6 +1285,8 @@ def main(argv=None):
             label, minutes = opt("--label", ""), int(opt("--minutes", "10"))
             if len(args) != 1 or not 1 <= minutes <= 60:
                 raise SystemExit("pair NAME [--label L] [--minutes 1..60]")
+            if not HAVE_SCRYPT:
+                raise SystemExit("identity: " + SCRYPT_MISSING)
             principal(args[0])
             t = datetime.datetime.now(datetime.timezone.utc)
             data["pairing"] = [e for e in data.get("pairing", []) if utc(e["expires"]) > t]    # drop expired ones

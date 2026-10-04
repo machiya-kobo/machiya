@@ -7,6 +7,7 @@
 - **Automatic sign-in** with `MACHIYA_SIGNIN_PROVIDER=oidc`, as the rooms: a page that needs a sign-in goes through tsidp with no taps. Sign Out sets the marker that makes the helper show its page instead until the next sign-in.
 - A fresh browser's first page is drawn in the account's theme (the sign-in check carries it).
 - vaultkit re-vendored (v0.21 for the settings, untagged).
+- **Starts on OpenBSD** (the fleet test): vaultkit no longer computes a scrypt hash at import, which crashed it at start on a Python without `hashlib.scrypt` (LibreSSL).
 
 ## 0.3.4
 

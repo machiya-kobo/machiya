@@ -14,6 +14,7 @@
   - **A tap** on "Sign In with Tailscale" (`provider=` without `auto`) always goes through.
 - Tests: the store and its keys, every credential, the refusals, a cookie `PUT`'s `Origin`, no CORS, keep-alive (different people's prefs requests down one connection) and an unread prefs body that never becomes a request; the import rule; the automatic sign-in, the marker and a failed round trip.
 - vaultkit re-vendored (the `prefs` module, `MACHIYA_SIGNIN_PROVIDER`).
+- **Starts on OpenBSD** (the fleet test): vaultkit no longer computes a scrypt hash at import, which crashed it at start on a Python without `hashlib.scrypt` (LibreSSL).
 
 ## 0.1.3
 
