@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.2.1
+
+- **More stats on `/status`** (the owner, through shiori): Konbini shows **N in WIP** beside its card count (from Konbini's per-board counts in `/api/health` when it has them, else counted from `/api/cards`); Kura shows **N vaults · N notes** across every vault from `GET /api/vaults` (counts only: a private vault's name never leaves the probe), and the launcher's Kura tile counts all of them too; Shiori shows **web searches** today, this month and this year ("312 searches today · 4,210 this month · 51k this year") from a counts file the deployment writes (`LANDING_SEARCH_COUNTS`; every SearXNG search; left out quietly when the file is missing). Shiori's `status.json` `hister` field (the Hister it was built against) isn't shown: Hister's own row shows the running one.
+
 ## 0.2.0
 
 - **`/` is a launcher now** (the owner's pick, "Launcher + Today"): the day and a status pill ("All up", "1 needs a look"; it links the status page), a **Search everything** pill that sends the query to Shiori's search page (`LANDING_SEARCH_URL`, another origin: a plain form, no live results; the page's CSP allows that one form target), the four rooms with one count each (pages, cards in WIP, published, notes), and **Today**: Working On (Konbini's WIP cards with their next step), Due Soon (cards due in the next 14 days, or overdue), Notes Changed (Kura's newest), Saved & Read (Hister's newest pages, a feed reader's reads and stars marked), Garden (Niwa's tended notes of the last 30 days). Each section leaves itself out when its room is missing or refuses. `GET /api/today` is the same as JSON.

@@ -736,6 +736,61 @@ class ZeroTwo(Stack):
         self.assertEqual((row["state"], row["error"]), ("error", "Hister is down"))
 
 
+class ZeroTwoOne(Stack):
+    """0.2.1: Konbini's WIP, Kura's vaults and total notes (counts only), Shiori's web searches."""
+
+    def test_konbini_wip(self):
+        self.fakes["konbini"].routes["/api/cards"] = CARDS
+        a = self.landing().poll()["apps"]["konbini"]
+        self.assertEqual(a["facts"], ["3 in WIP", "78 cards"])
+        self.fakes["konbini"].routes["/api/health"] = dict(KONBINI, boards={"wip": 9, "done": 4})   # preferred when present
+        self.fakes["konbini"].seen.clear()
+        a = self.landing().poll()["apps"]["konbini"]
+        self.assertEqual(a["facts"][0], "9 in WIP")
+        self.assertEqual(self.fakes["konbini"].seen[0]["path"], "/api/health")           # the probe's own call
+        probe_calls = [x["path"] for x in self.fakes["konbini"].seen[:1]]
+        self.assertNotIn("/api/cards", probe_calls)
+
+    def test_kura_vaults_counts_only(self):
+        self.fakes["kura"].routes["/api/vaults"] = {"vaults": [
+            {"name": "personal", "title": "Personal", "default": True, "private": False, "notes": 314},
+            {"name": "secretclient", "title": "Secret Client", "default": False, "private": True, "notes": 1000},
+            {"name": "acmecorp", "title": "Acme Corp", "default": False, "private": True, "notes": 108}]}
+        l = self.landing()
+        snap = l.poll()
+        a = snap["apps"]["kura"]
+        self.assertEqual(a["facts"], ["3 vaults · 1,422 notes"])
+        dumped = json.dumps(snap) + json.dumps(l.public(snap))
+        for name in ("secretclient", "Secret Client", "acmecorp", "Acme Corp"):
+            self.assertNotIn(name, dumped)
+        html = render.page(landing.house.prefs(""), snap, l.history, l.logs, l.config.links, l.config.targets, NOW) + \
+            render.home_html(snap, l.config.links, l.config.targets, "", NOW)
+        self.assertNotIn("Secret Client", html)
+        self.assertIn("1,422 notes", html)                      # the launcher's tile counts every vault too
+        self.fakes["kura"].routes["/api/vaults"] = (403, "forbidden", "text/plain")
+        self.assertEqual(self.landing().poll()["apps"]["kura"]["facts"], ["314 notes"])     # quietly the default's
+
+    def test_search_counts(self):
+        path = os.path.join(self.tmp, "searches.json")
+        a = self.landing(LANDING_SEARCH_COUNTS=path).poll()["apps"]["shiori"]
+        self.assertFalse(a.get("more"))                                           # missing: left out
+        with open(path, "w") as f:
+            json.dump({"updated": "2026-01-01T00:00:00Z", "today": 312, "yesterday": 290, "month": 4210, "year": 51234,
+                       "by_day": {"2026-01-01": 312}}, f)
+        self.fakes["shiori"].routes["/_shiori/status.json"] = dict(SHIORI_STATUS, hister="v0.19.9")
+        l = self.landing(LANDING_SEARCH_COUNTS=path)
+        snap = l.poll()
+        a = snap["apps"]["shiori"]
+        self.assertEqual(a["more"], "312 searches today · 4,210 this month · 51k this year")
+        html = render.main_html(snap, l.history, l.logs, l.config.links, l.config.targets, NOW)
+        self.assertIn("312 searches today", html)
+        self.assertNotIn("0.19.9", html)                        # Shiori's built-against Hister isn't shown
+        self.assertEqual(probes.compact(1250000), "1.2M")
+        with open(path, "w") as f:
+            f.write("{broken")
+        self.assertFalse(self.landing(LANDING_SEARCH_COUNTS=path).poll()["apps"]["shiori"].get("more"))
+
+
 class Launcher(Stack):
     """0.2.0: / is the launcher (the rooms and Today); the status page is /status."""
 

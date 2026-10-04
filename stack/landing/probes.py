@@ -237,8 +237,18 @@ def kura(base, now, timeout, headers):
     if d.get("error"):
         state = "error"
     facts = [plural(int(notes), "note") if notes is not None else ""]
+    vaults = total = None
+    try:                    # 0.2.1: every vault, owner-only; COUNTS ONLY: a private vault's name never leaves this function
+        listed = [v for v in fetch_json(base + "/api/vaults", headers, timeout).get("vaults") or [] if isinstance(v, dict)]
+        if listed:
+            vaults = len(listed)
+            total = int(sum(num(v.get("notes")) or 0 for v in listed))
+            facts = ["%s · %s" % (plural(vaults, "vault"), plural(total, "note"))]
+    except FetchError:
+        pass
     return result(state, d.get("version"), vk(d.get("vaultkit")), facts, d.get("error"),
-                  {"head": text(d.get("head"), 64), "synced_at": synced, "push": {
+                  {"head": text(d.get("head"), 64), "synced_at": synced, "notes": notes, "vaults": vaults,
+                   "total_notes": total, "push": {
                       "at": num(push.get("at")), "docs": num(push.get("docs")), "failed": num(push.get("failed")),
                       "error": text(push.get("error")), "complete": push.get("complete")} if push else None})
 
@@ -251,9 +261,20 @@ def konbini(base, now, timeout, headers):
     cards = num(d.get("cards"))
     err = text(sync.get("error")) or ("" if d.get("ok", True) else "not ok")
     state = "error" if err else "up"
-    return result(state, d.get("version"), vk(d.get("vaultkit")), [plural(int(cards), "card") if cards is not None else ""], err,
+    wip = None
+    boards = d.get("boards") if isinstance(d.get("boards"), dict) else None     # per-board counts, when Konbini has them
+    if boards is not None:
+        wip = num(boards.get("wip"))
+    else:
+        try:
+            wip = sum(1 for c in fetch_json(base + "/api/cards", headers, timeout).get("cards") or []
+                      if isinstance(c, dict) and c.get("board") == "wip")
+        except FetchError:
+            pass
+    facts = ["%s in WIP" % "{:,}".format(int(wip)) if wip is not None else "", plural(int(cards), "card") if cards is not None else ""]
+    return result(state, d.get("version"), vk(d.get("vaultkit")), facts, err,
                   {"head": text(d.get("head"), 64), "pending": num(sync.get("pending")), "ahead": num(sync.get("ahead")),
-                   "sync_error": text(sync.get("error")), "livesync": {
+                   "wip": wip, "sync_error": text(sync.get("error")), "livesync": {
                        "daemon": text(live.get("daemon"), 40), "last_cycle": num(live.get("last_cycle_ts")),
                        "errors": len(live.get("errors") or []) + len(live.get("conflicts") or [])} if live else None})
 
@@ -454,6 +475,32 @@ def feed_import(path, now):
     readers = [READERS_NAMES.get(k, k) for k in sorted(counts)]
     return result(state, d.get("version"), "", [", ".join(readers)], err if d.get("ok") is False else "",
                   {"last_success": last, "failures": fails, "error": err, "added_total": added, "running": bool(d.get("running"))})
+
+
+def compact(n):
+    """312 -> '312', 4210 -> '4,210', 51234 -> '51k', 1250000 -> '1.2M'."""
+    n = int(n)
+    if n >= 1_000_000:
+        return ("%.1fM" % (n / 1e6)).replace(".0M", "M")
+    if n >= 10_000:
+        return "%dk" % round(n / 1000)
+    return "{:,}".format(n)
+
+
+def search_counts(path):
+    """LANDING_SEARCH_COUNTS: web searches (every SearXNG /search, what would hit a paid engine) as counted by the
+    deployment: {"updated", "today", "yesterday", "month", "year", "by_day"}, UTC days, counts only. "" when the file
+    is missing or unreadable (quietly)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(d, dict):
+        return ""
+    bits = [("%s %s" % (compact(d[k]), w)) for k, w in (("today", "searches today"), ("month", "this month"), ("year", "this year"))
+            if num(d.get(k)) is not None]
+    return " · ".join(bits)
 
 
 READERS = {"kura": kura, "konbini": konbini, "niwa": niwa, "shiori": shiori, "hister": hister, "searxng": searxng,

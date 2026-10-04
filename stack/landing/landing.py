@@ -93,6 +93,7 @@ class Config:
         mirror = (env.get("LANDING_MIRROR_STATUS") or "").strip()
         if mirror:
             self.targets["vault-mirror"] = mirror
+        self.search_counts = (env.get("LANDING_SEARCH_COUNTS") or "").strip()   # web searches per day/month/year (a file)
         feeds = (env.get("LANDING_FEED_STATUS") or "").strip()          # feed-import's status.json (read-only mount)
         if feeds:
             self.targets["feed-import"] = feeds
@@ -168,6 +169,8 @@ class Landing:
             self.board_behind_since = self.board_behind_since or now
         else:
             self.board_behind_since = None
+        if c.search_counts and found["shiori"].get("state") not in ("absent", "down"):
+            found["shiori"]["more"] = probes.search_counts(c.search_counts)
         feeds = found["feed-import"].get("data") or {}
         if feeds.get("added_total") is not None:              # "N added in the last day", from the page's own samples
             feeds["added_day"], feeds["added_since"] = self.history.sample("feed-import.added", feeds["added_total"], now)

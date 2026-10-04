@@ -22,6 +22,7 @@ Every app is optional. The page polls only what has an address; anything else sh
 | `LANDING_PROBES` | none | a different address to poll than to link, per app (`hister=http://hister:4433`) |
 | `LANDING_MIRROR_STATUS` | none | vault-mirror's `status.json` (its volume, mounted read-only) |
 | `LANDING_FEED_STATUS` | none | feed-import's `status.json` (its data volume, mounted read-only): the feed-import row and Sync's Feeds read |
+| `LANDING_SEARCH_COUNTS` | none | a JSON file of web searches (`{"updated", "today", "yesterday", "month", "year", "by_day"}`, UTC days, counts only) written by the deployment; the Shiori card shows today / this month / this year. Missing: left out |
 | `LANDING_SEARCH_URL` | none | Shiori's search page, `https://search.example.ts.net/`: the launcher's Search everything pill GETs `<url>?q=…` (unset: no pill) |
 | `LANDING_HISTER_TOKEN_FILE` | none | the owner's Hister token (`X-Access-Token`, Hister only, re-read on change): the page count, the newest pages, Saved & Read and Hister's version once Hister has users |
 | `LANDING_AUTH` | `tailscale` | `tailscale`: only a `Tailscale-User-Login` in `LANDING_USERS` (`*` = anyone the tailnet lets through; empty = nobody); `open`: no check, localhost only; with the identity file also `header` (`LANDING_AUTH_HEADER`) |

@@ -111,10 +111,11 @@ def tile(key, name, what, a, href):
     """A room: its icon, name and what it is, the state, the version and a fact or two. The whole tile is the link."""
     facts = list(a.get("facts") or [])
     inner = ('<span class="thead">%s<span class="tname">%s</span><span class="twhat">%s</span></span>'
-             '<span class="tstate">%s</span>%s%s'
+             '<span class="tstate">%s</span>%s%s%s'
              % (mark(key), e(name), e(what), state_line(a),
                 ('<span class="tver">%s</span>' % version_line(a)) if version_line(a) else "",
-                ('<span class="tfacts">%s</span>' % e(" · ".join(facts))) if facts else ""))
+                ('<span class="tfacts">%s</span>' % e(" · ".join(facts))) if facts else "",
+                ('<span class="tfacts">%s</span>' % e(a["more"])) if a.get("more") else ""))
     if a["state"] == "absent" or not href:
         return '<div class="tile" data-app="%s" data-state="%s">%s</div>' % (e(key), e(a["state"]), inner)
     return '<a class="tile" data-app="%s" data-state="%s" href="%s/">%s</a>' % (e(key), e(a["state"]), e(href), inner)
@@ -326,9 +327,9 @@ def home_html(snap, links, targets, search, now, tz=None):
     hd = (apps.get("hister") or {}).get("data") or {}
     counts = {
         "shiori": plural_or(hd.get("docs"), "page", "search"),
-        "konbini": ("%s in WIP" % "{:,}".format(t["wip"])) if t.get("wip") is not None else fact(apps["konbini"], "cards"),
+        "konbini": ("%s in WIP" % "{:,}".format(t["wip"])) if t.get("wip") is not None else (fact(apps["konbini"], "WIP") or fact(apps["konbini"], "cards")),
         "niwa": fact(apps["niwa"], "published"),
-        "kura": fact(apps["kura"], "notes"),
+        "kura": plural_or(((apps["kura"].get("data") or {}).get("total_notes")), "note", fact(apps["kura"], "notes")),
     }
     tiles = [mini(k, n, apps[k], counts[k], link(k)) for k, n, g, _ in probes.APPS
              if g == "rooms" and apps[k]["state"] != "absent" and link(k)]
