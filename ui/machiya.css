@@ -350,6 +350,13 @@ header.top {
 .seal.icon[data-room="searxng"] { background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjN2FhMmY3IiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI5Ii8+PHBhdGggZD0iTTMgMTJoMThNMTIgM2MzIDMgMyAxNSAwIDE4TTEyIDNjLTMgMy0zIDE1IDAgMTgiLz48L3N2Zz4K"); }
 /* END ROOM ICONS */
 
+/* An installed app on iOS softens whatever sits in a band just under the status bar (the owner's iPhone: every room's logo
+   and title, pinned or not, while Shiori's icons a little lower stay sharp; a Safari tab is unaffected). There, the
+   header's contents start 24px lower (v0.16.8). -webkit-touch-callout limits it to iOS WebKit. */
+@supports (-webkit-touch-callout: none) {
+  @media (display-mode: standalone) { header.top { padding-top: calc(var(--sat) + 24px); } }
+}
+
 /* No search field in the header at any width (v0.16.4): search is the third tab on phones and a nav link on wide screens;
    a search page keeps its own field (main form.search), and "/" opens it. */
 .topbar form.search { display: none; }
@@ -366,9 +373,7 @@ body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
   .nav, .tools .rooms, .tools .gear { display: none; }
   /* a solid header on phones (v0.16.3): an installed app on iOS drew the sticky header's backdrop blur over its own logo and
      title; opaque, it looks the same at the top of a page and stays sharp */
-  header.top { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none;
-    position: relative; }   /* not pinned on phones (v0.16.7): the installed app on iOS softened a header pinned under the status bar, in
-                                every room and at any scroll; the tab bar carries the navigation, so the header scrolls away */
+  header.top { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
   .tabbar { display: flex; gap: 4px; position: fixed; z-index: 15;
     left: calc(8px + var(--sal)); right: calc(8px + var(--sar)); bottom: calc(10px + var(--sab));
     padding: 6px; border-radius: 999px; border: 1px solid var(--line2);
