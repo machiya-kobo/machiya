@@ -1,0 +1,162 @@
+{
+ "_comment": "The fake Forgejo's synthetic forge (dev seed and tests): a user `lantern` (the token's) and an org `workshop`. A README holds an invented token-shaped string (never a real one) so the secret scan has something to redact. Everything is invented.",
+ "login": "lantern",
+ "owners": {
+  "lantern": "user",
+  "workshop": "org"
+ },
+ "visibility": {
+  "workshop": "private"
+ },
+ "repos": [
+  {
+   "id": 11,
+   "owner": "lantern",
+   "name": "dotfiles",
+   "description": "Shell, editor and terminal settings for the workshop laptops",
+   "topics": [
+    "shell",
+    "dotfiles"
+   ],
+   "language": "Shell",
+   "default_branch": "main",
+   "created_at": "2026-03-01T09:00:00Z",
+   "updated_at": "2026-09-20T10:00:00Z",
+   "files": {
+    "README.md": "# dotfiles\n\nRun `./install.sh` to link the lantern-shaped prompt into place.\n\n## Fonts\n\nThe prompt uses the pixel font from pixel-font.\n",
+    "docs/setup.md": "# Setting up a new laptop\n\nInstall the paper-lantern theme first, then the dotfiles.\n",
+    "install.sh": "#!/bin/sh\nln -s \"$PWD/zshrc\" ~/.zshrc\n",
+    ".github/ISSUE_TEMPLATE/bug.md": "A hidden folder: never imported.\n",
+    "node_modules/left-pad/README.md": "Vendored: never imported.\n"
+   },
+   "issues": [
+    {
+     "number": 1,
+     "title": "The prompt flickers in tmux",
+     "body": "Seen with the lantern theme in a split pane.",
+     "state": "open",
+     "created_at": "2026-09-10T08:00:00Z",
+     "updated_at": "2026-09-12T08:00:00Z"
+    }
+   ],
+   "releases": [
+    {
+     "id": 101,
+     "tag_name": "v1.0",
+     "name": "First lantern release",
+     "body": "The prompt and the fonts.",
+     "published_at": "2026-09-01T12:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": 12,
+   "owner": "lantern",
+   "name": "garden-notes",
+   "description": "Planting notes for the courtyard garden",
+   "private": true,
+   "topics": [
+    "garden"
+   ],
+   "language": "Markdown",
+   "default_branch": "main",
+   "created_at": "2026-04-01T09:00:00Z",
+   "updated_at": "2026-09-25T10:00:00Z",
+   "files": {
+    "README.md": "# garden-notes\n\nMoss beds and stone lanterns.\n\nThe weather station posts with GARDEN_API_TOKEN=ghp_FAKEfakeFAKEfakeFAKEfakeFAKEfake0123 (invented).\n",
+    "docs/deploy.md": "# Deploying the weather station\n\nFlash the board, then mount it under the eaves.\n",
+    "notes/secrets.md": "A file named like a secret: refused before it is read.\n"
+   },
+   "issues": [
+    {
+     "number": 1,
+     "title": "Moss dries out in August",
+     "body": "Water twice a day in the hot weeks.",
+     "state": "closed",
+     "created_at": "2026-08-01T08:00:00Z",
+     "updated_at": "2026-08-20T08:00:00Z"
+    },
+    {
+     "number": 2,
+     "title": "Add the rain gauge",
+     "body": "Wires the gauge to the weather station.",
+     "state": "closed",
+     "pull": true,
+     "merged": true,
+     "created_at": "2026-09-01T08:00:00Z",
+     "updated_at": "2026-09-03T08:00:00Z"
+    },
+    {
+     "number": 3,
+     "title": "Draft: a frost alarm",
+     "body": "Not ready yet.",
+     "state": "open",
+     "pull": true,
+     "created_at": "2026-09-20T08:00:00Z",
+     "updated_at": "2026-09-21T08:00:00Z"
+    }
+   ],
+   "releases": []
+  },
+  {
+   "id": 13,
+   "owner": "lantern",
+   "name": "obsidian",
+   "description": "Left out by name (CODE_IMPORT_EXCLUDE)",
+   "private": true,
+   "updated_at": "2026-09-01T00:00:00Z",
+   "files": {
+    "README.md": "never imported"
+   }
+  },
+  {
+   "id": 14,
+   "owner": "lantern",
+   "name": "old-site",
+   "description": "An archived repo",
+   "archived": true,
+   "updated_at": "2025-01-01T00:00:00Z",
+   "files": {
+    "README.md": "never imported"
+   }
+  },
+  {
+   "id": 15,
+   "owner": "lantern",
+   "name": "keyboard-firmware",
+   "description": "A fork",
+   "fork": true,
+   "updated_at": "2026-02-01T00:00:00Z",
+   "files": {
+    "README.md": "never imported"
+   }
+  },
+  {
+   "id": 16,
+   "owner": "lantern",
+   "name": "empty-repo",
+   "description": "Created, never pushed",
+   "updated_at": "2026-09-30T00:00:00Z"
+  },
+  {
+   "id": 21,
+   "owner": "workshop",
+   "name": "lamp",
+   "description": "The lamp controller (Forgejo's copy: GitHub's is indexed)",
+   "private": true,
+   "default_branch": "github-main",
+   "updated_at": "2026-09-28T00:00:00Z",
+   "files": {
+    "README.md": "never imported: a twin"
+   },
+   "issues": [
+    {
+     "number": 1,
+     "title": "never imported",
+     "state": "open",
+     "updated_at": "2026-09-28T00:00:00Z"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,133 @@
+{
+ "_comment": "The fake GitHub's synthetic account (dev seed and tests): the user `lantern` and the org `workshop-kobo`, one fine-grained token for each. Everything is invented.",
+ "user": "lantern",
+ "owners": {
+  "lantern": "user",
+  "workshop-kobo": "org"
+ },
+ "repos": [
+  {
+   "id": 501,
+   "owner": "workshop-kobo",
+   "name": "lamp",
+   "description": "The lamp controller: dims the stone lanterns at dusk",
+   "private": true,
+   "topics": [
+    "lighting",
+    "controller"
+   ],
+   "language": "Python",
+   "default_branch": "main",
+   "created_at": "2026-10-01T09:00:00Z",
+   "pushed_at": "2026-10-03T10:00:00Z",
+   "files": {
+    "README.md": "# lamp\n\nDims the stone lanterns at dusk.\n\n```sh\npython3 lamp.py --dusk\n```\n",
+    "docs/api.md": "# The lamp API\n\n`GET /api/brightness` answers the current level.\n",
+    "lamp.py": "print('code bodies are phase 2')\n"
+   },
+   "issues": [
+    {
+     "number": 1,
+     "title": "Flicker at 10% brightness",
+     "body": "The PWM step is too coarse.",
+     "state": "open",
+     "created_at": "2026-10-02T08:00:00Z",
+     "updated_at": "2026-10-02T09:00:00Z"
+    },
+    {
+     "number": 2,
+     "title": "Finer PWM steps",
+     "body": "Fixes #1.",
+     "state": "closed",
+     "pull": true,
+     "merged": true,
+     "created_at": "2026-10-02T10:00:00Z",
+     "updated_at": "2026-10-03T08:00:00Z"
+    }
+   ],
+   "releases": [
+    {
+     "id": 9001,
+     "tag_name": "v0.1.0",
+     "name": "v0.1.0",
+     "body": "The first dimmer.",
+     "published_at": "2026-10-02T12:00:00Z"
+    },
+    {
+     "id": 9002,
+     "tag_name": "v0.2.0-rc1",
+     "name": "v0.2.0-rc1",
+     "body": "Finer steps, for testing.",
+     "prerelease": true,
+     "published_at": "2026-10-03T12:00:00Z"
+    },
+    {
+     "id": 9003,
+     "tag_name": "v0.3.0",
+     "name": "A draft",
+     "body": "never imported",
+     "draft": true,
+     "published_at": null
+    }
+   ]
+  },
+  {
+   "id": 502,
+   "owner": "workshop-kobo",
+   "name": "lantern-sdk",
+   "description": "A fork",
+   "fork": true,
+   "pushed_at": "2026-10-01T00:00:00Z",
+   "files": {
+    "README.md": "never imported"
+   }
+  },
+  {
+   "id": 601,
+   "owner": "lantern",
+   "name": "dotfiles",
+   "description": "GitHub's copy: Forgejo's is indexed",
+   "pushed_at": "2026-09-20T10:00:00Z",
+   "files": {
+    "README.md": "never imported: a twin"
+   }
+  },
+  {
+   "id": 602,
+   "owner": "lantern",
+   "name": "pixel-font",
+   "description": "A 5x7 pixel font for small displays",
+   "topics": [
+    "font"
+   ],
+   "language": "Python",
+   "default_branch": "main",
+   "created_at": "2026-05-01T00:00:00Z",
+   "pushed_at": "2026-09-15T00:00:00Z",
+   "files": {
+    "README.md": "# pixel-font\n\nA 5x7 font for the lamp's display.\n"
+   },
+   "issues": [
+    {
+     "number": 4,
+     "title": "Add the katakana block",
+     "body": "For the shop signs.",
+     "state": "open",
+     "created_at": "2026-09-14T00:00:00Z",
+     "updated_at": "2026-09-14T00:00:00Z"
+    }
+   ]
+  },
+  {
+   "id": 603,
+   "owner": "lantern",
+   "name": "backup",
+   "description": "Left out by name",
+   "private": true,
+   "pushed_at": "2026-09-01T00:00:00Z",
+   "files": {
+    "README.md": "never imported"
+   }
+  }
+ ]
+}

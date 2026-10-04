@@ -13,6 +13,7 @@ python3 -m venv .venv && .venv/bin/pip install 'markdown>=3.7' pyyaml
 ( cd stack/mcp && ../../.venv/bin/python -m unittest discover -s tests )
 ( cd stack/smallweb && ../../.venv/bin/python -m unittest discover -s tests )
 ( cd stack/landing && ../../.venv/bin/python -m unittest discover -s tests )
+( cd stack/code-import && ../../.venv/bin/python -m unittest discover -s tests )
 ```
 
 Add a test with every change. `tests.test_vaultkit` also checks that a vendored copy matches its manifest (it creates a throwaway git repository for that, so it needs `git`).
