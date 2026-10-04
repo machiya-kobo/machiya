@@ -132,7 +132,7 @@ class ReviewTest(Base):
         try:
             for method in ("GET", "PUT"):
                 status, _, out = signin.handle_prefs(prefs, token, method, headers(Content_Type="application/json"),
-                                                     b'{"prefs": {"a": "1"}}')
+                                                     b'{"prefs": {"theme": "day"}}')
                 self.assertEqual((status, json.loads(out)["error"]), (503, "preferences unavailable"), method)
         finally:
             hold.execute("ROLLBACK")
@@ -376,6 +376,10 @@ class PrefsTest(Base):
         status, hdrs, out = signin.handle_prefs(self.prefs, principal, method, headers(**kw), body)
         return status, json.loads(out)
 
+    def prefs_of(self, principal, method="PUT", data=None, **kw):
+        status, out = self.call(principal, method, data, **kw)
+        return status, out.get("prefs")
+
     def test_api_same_origin_for_cookies(self):
         session = idn.Principal("owner", "person", True, via="session")
         token = self.ident.resolve(headers(Authorization="Bearer mch_abcd12_" + SECRET)).principal
@@ -384,10 +388,10 @@ class PrefsTest(Base):
         self.assertEqual(self.call(session, Origin="https://evil.example")[0], 403)
         for via in ("tailscale", "proxy", "open", ""):                               # ambient logins are cookies too
             self.assertEqual(self.call(idn.Principal("owner", "person", True, via=via))[0], 403, msg=via)
-        self.assertEqual(self.call(session, Origin="https://" + HOST), (200, {"prefs": {"theme": "night"}}))
-        self.assertEqual(self.call(token, data={"prefs": {"x": "1"}}), (200, {"prefs": {"x": "1"}}))   # no Origin
-        self.assertEqual(self.call(session, "GET"), (200, {"prefs": {"theme": "night"}}))          # GET: no rule
-        self.assertEqual(self.call(token, "GET"), (200, {"prefs": {"x": "1"}}))                    # its own prefs
+        self.assertEqual(self.prefs_of(session, Origin="https://" + HOST), (200, {"theme": "night"}))
+        self.assertEqual(self.prefs_of(token, data={"prefs": {"kura.x": "1"}}), (200, {"kura.x": "1"}))   # no Origin
+        self.assertEqual(self.prefs_of(session, "GET"), (200, {"theme": "night"}))          # GET: no rule
+        self.assertEqual(self.prefs_of(token, "GET"), (200, {"kura.x": "1"}))                # its own prefs
         self.assertEqual(self.call(None, "GET")[0], 401)
         self.assertEqual(self.call(token, "DELETE")[0], 405)
 
@@ -395,8 +399,8 @@ class PrefsTest(Base):
         old = idn.Principal("guest", "person", via="token:aaaa11", uid="guestold00000001")
         self.assertEqual(self.call(old, data={"prefs": {"theme": "day"}})[0], 200)
         new = idn.Principal("guest", "person", via="token:bbbb22", uid="guestnew00000002")
-        self.assertEqual(self.call(new, "GET"), (200, {"prefs": {}}))                # keyed by id, not by name
-        self.assertEqual(self.call(old, "GET"), (200, {"prefs": {"theme": "day"}}))
+        self.assertEqual(self.prefs_of(new, "GET"), (200, {}))                       # keyed by id, not by name
+        self.assertEqual(self.prefs_of(old, "GET"), (200, {"theme": "day"}))
 
     def test_api_bad_bodies(self):
         token = idn.Principal("vm", "agent", via="token:abcd12")

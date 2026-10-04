@@ -1,20 +1,32 @@
 // machiya.js: shared behaviour for Machiya's web rooms (docs/ui.md). Loaded as a module on every page, before the
 // app's own script. It does these things:
-//  1. settings: every [data-set] control on /settings saves to localStorage under "<room>Settings" (per device, like
-//     Shiori); controls marked data-cookie also set a cookie of the same name, which the server reads for the first
-//     render (theme, textSize, …). Theme and text size apply at once.
-//     Shared settings (v0.6): with <body data-cookie-domain> (MACHIYA_COOKIE_DOMAIN), theme, textSize and the Apps
-//     show_* switches are written as machiya_<key> cookies on that domain, so one choice covers every room on this
-//     device (ts.net is on the Public Suffix List: <tailnet>.ts.net is the site, every room shares its cookies).
+//  1. settings: every [data-set] control on /settings saves to localStorage under "<room>Settings"; controls marked
+//     data-cookie also set a cookie of the same name, which the server reads for the first render (theme, textSize,
+//     …). Theme and text size apply at once.
+//     Shared settings (v0.6): with <body data-cookie-domain> (MACHIYA_COOKIE_DOMAIN), theme, palette, textSize, the
+//     device's own textSizeDevice and the Apps show_* switches are written as machiya_<key> cookies on that domain, so
+//     one choice covers every room on this device (ts.net is on the Public Suffix List: <tailnet>.ts.net is the site,
+//     every room shares its cookies). Without it they are the room's own cookies.
 //  2. the Apps setting: rooms and neighbours switched off are hidden from the switcher.
 //  3. the Rooms menu (<details class="rooms">) closes on Escape or a click outside.
 //  4. "/" focuses the search page's field, or opens the room's search page (form.search's action), unless you're typing.
 //  5. updates (v0.6): when a new service worker is waiting, a "New Version · Reload" toast; Reload tells it to take
 //     over (postMessage {type: "SKIP_WAITING"}) and reloads once it has. Checks for updates on return to the app.
-//  6. server preferences (v0.12): with <meta name="machiya-prefs" content="/api/prefs"> (shell.page(prefs_url=)),
-//     theme, palette and text size follow the person. On load the server's `theme` / `palette` / `text_size` replace
-//     the cookies when they differ (applied without a reload); a change on /settings is also PUT there. Cookies stay the fast path for the
-//     first paint and offline; any failure (offline, 401, 404) is silent. Only known values are ever applied.
+//  6. the settings that follow the person (v0.21, docs/contracts/prefs.md): with <meta name="machiya-prefs"
+//     content="/api/prefs"> (shell.page(prefs_url=)), the Shared settings (theme, palette, text_size, apps_hidden)
+//     and the room's own (<meta name="machiya-app-prefs">, shell.APP_PREFS) are kept in the account. The rules:
+//       - a change PUTs only the key that changed; one that can't be sent (offline, 5xx) waits in
+//         localStorage["machiyaPrefsPending"] and goes first at the next contact;
+//       - on load, and on return to the tab after 30 s or more (If-None-Match: 304 when nothing changed), the
+//         account's value wins, unless this browser changed the key since the account last said it (another room
+//         set the shared cookie): then this browser's value is newer and is sent. That is the fix for the revert
+//         (a room's stale copy undoing a theme picked in another room, 2026-10-05);
+//       - a value the account doesn't have yet is filled in from this browser (never overwriting one it has);
+//       - cookies stay the fast path for the first paint and offline; every failure is silent (the Shared section's
+//         state line says "Sign-in is unavailable" instead). Only known values are ever applied.
+//     Other tabs of the same room follow at once (BroadcastChannel "machiya-prefs"); other rooms in this browser on
+//     return to their tab (the shared cookies, re-read without the network). "Use This Device's Size"
+//     (textSizeDevice) is this device's own text size and never leaves it.
 //  7. sign-out (v0.13): a form posting to /signout first empties the service worker's offline copies (CLEAR_OFFLINE),
 //     so whoever uses this device next can't read what was kept; the server's answer also clears the HTTP cache.
 //  8. Hister sign-in (v0.18; inert unless the room opts in with <meta name="machiya-signin" content="/signout">,
@@ -26,10 +38,15 @@
 const room = document.body.dataset.room || "app";
 const storeKey = room + "Settings";
 const domain = document.body.dataset.cookieDomain || "";
-const shared = (key) => key === "theme" || key === "palette" || key === "textSize" || key.startsWith("show_");
+const shared = (key) => key === "theme" || key === "palette" || key === "textSize" || key === "textSizeDevice"
+  || key.startsWith("show_");
 // the themes (vaultkit/palettes.py PALETTES; a test checks the two lists match): body.palette-<key>, none = Tokyo Night
 const PALETTES = ["tokyo-night", "solarized", "nord", "dracula", "catppuccin", "gruvbox", "rose-pine", "kanagawa",
                   "everforest", "ayu"];
+const TEXT_SIZES = ["xsmall", "small", "standard", "large", "xlarge"];
+// the switcher's rows (vaultkit/prefs.py APPS; a test checks they match): apps_hidden <-> show_<app>
+const APPS = ["shiori", "konbini", "niwa", "kura", "hister", "searxng", "machiya"];
+const rawFetch = window.fetch ? window.fetch.bind(window) : null;   // 6. never takes the page to sign in (8.)
 
 function load() {
   try { return JSON.parse(localStorage.getItem(storeKey) || "{}"); } catch { return {}; }
@@ -53,6 +70,18 @@ function setCookie(key, value) {
     document.cookie = `${key}=${encodeURIComponent(value)}; ${year}`;
   }
 }
+function dropCookie(key) {
+  if (domain && shared(key)) document.cookie = `machiya_${key}=; domain=${domain}; path=/; max-age=0`;
+  document.cookie = `${key}=; path=/; max-age=0`;
+}
+// a shared key's value in this browser, as the server reads it (shell.prefs): the shared cookie first
+function cookieOf(key) {
+  return readCookie("machiya_" + key) ?? readCookie(key);
+}
+function deviceSize() {
+  const v = cookieOf("textSizeDevice");
+  return TEXT_SIZES.includes(v) ? v : "";
+}
 function apply(key, value) {
   const b = document.body;
   if (key === "theme") {
@@ -62,7 +91,9 @@ function apply(key, value) {
     for (const c of [...b.classList]) if (c.startsWith("palette-")) b.classList.remove(c);
     if (PALETTES.includes(value) && value !== PALETTES[0]) b.classList.add("palette-" + value);
   } else if (key === "textSize") {
-    b.dataset.text = value;
+    b.dataset.text = deviceSize() || value;                  // the device's own size, when it has one, wins here
+  } else if (key === "textSizeDevice") {
+    b.dataset.text = value || current("textSize");
   } else if (key.startsWith("show_")) {
     const which = key.slice(5);
     for (const a of document.querySelectorAll(`.rooms .menu [data-room="${which}"]`)) a.hidden = value === false;
@@ -78,54 +109,308 @@ function barColour() {
   metas.slice(1).forEach((m) => m.remove());
   if (metas[0]) { metas[0].removeAttribute("media"); metas[0].content = colour; }
 }
+function showControl(key, value) {
+  for (const el of document.querySelectorAll(`[data-set="${key}"]`)) {
+    if (el.type === "checkbox") el.checked = !!value; else el.value = value;
+  }
+}
 
 const settings = load();
-// shared show_* cookies (another room may have changed them) win over this room's localStorage copy
-if (domain) {
-  for (const part of document.cookie.split(";")) {
-    const name = part.split("=")[0].trim();
-    if (name.startsWith("machiya_show_")) settings[name.slice(8)] = readCookie(name) !== "false";
-  }
+const appliedNow = {};                                // what this page shows now, so a re-read applies only changes
+// the Apps switches: the show_* cookies (another room may have changed them) win over this room's localStorage copy
+for (const a of APPS) {
+  const c = cookieOf("show_" + a);
+  if (c !== null) settings["show_" + a] = c !== "false";
 }
 // hide rooms switched off on this device (every page)
 for (const [k, v] of Object.entries(settings)) if (k.startsWith("show_") && v === false) apply(k, v);
 
-// server preferences (6.): the values machiya.js itself writes, and their keys in /api/prefs
+// -- 6. the settings that follow the person -------------------------------------------------------------------------
 const prefsUrl = (document.querySelector('meta[name="machiya-prefs"]') || {}).content || "";
-const KNOWN = { theme: ["system", "night", "day"], palette: PALETTES,
-                textSize: ["xsmall", "small", "standard", "large", "xlarge"] };
-const SERVER_KEY = { theme: "theme", palette: "palette", textSize: "text_size" };
-let changedHere = false;                              // a choice made on this page wins over a late server answer
+const KNOWN = { theme: ["system", "night", "day"], palette: PALETTES, textSize: TEXT_SIZES };
+const DEFAULTS = { theme: "system", palette: PALETTES[0], textSize: "standard" };
+const SHARED_KEYS = { theme: "theme", palette: "palette", text_size: "textSize" };   // account key -> local key
 function current(key) {                               // as shell.prefs() reads it: the shared cookie first
-  let v = readCookie("machiya_" + key) ?? readCookie(key);
+  let v = cookieOf(key);
   if (v === "auto") v = "system";
-  return KNOWN[key].includes(v) ? v : { theme: "system", palette: PALETTES[0], textSize: "standard" }[key];
+  return KNOWN[key].includes(v) ? v : DEFAULTS[key];
 }
-function pushPrefs() {
-  if (!prefsUrl) return;
-  const body = JSON.stringify({ prefs: { theme: current("theme"), palette: current("palette"),
-                                         text_size: current("textSize") } });
-  fetch(prefsUrl, { method: "PUT", credentials: "same-origin", body,
-                    headers: { "Content-Type": "application/json", Accept: "application/json" } }).catch(() => {});
+let appSpec = {};                                     // the room's own synced settings: {localKey: {key, type, …}}
+try {
+  const m = document.querySelector('meta[name="machiya-app-prefs"]');
+  if (m && prefsUrl) appSpec = JSON.parse(m.content) || {};
+} catch { appSpec = {}; }
+const APP_LOCAL = {};                                 // account key -> local key
+for (const [local, spec] of Object.entries(appSpec)) {
+  if (spec && typeof spec.key === "string" && spec.key.startsWith(room + ".")) APP_LOCAL[spec.key] = local;
 }
-if (prefsUrl) {
-  fetch(prefsUrl, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } })
-    .then((r) => (r.ok ? r.json() : null))
-    .then((data) => {
-      const p = data && data.prefs;
-      if (!p || typeof p !== "object" || changedHere) return;
-      for (const key of Object.keys(KNOWN)) {
-        const value = p[SERVER_KEY[key]];
-        if (!KNOWN[key].includes(value) || value === current(key)) continue;   // unknown values are never applied
-        setCookie(key, value);
-        const all = load();
-        all[key] = value;
-        save(all);
-        for (const el of document.querySelectorAll(`[data-set="${key}"]`)) el.value = value;
-        apply(key, value);
+const accountKeys = () => [...Object.keys(SHARED_KEYS), "apps_hidden", ...Object.keys(APP_LOCAL)];
+const accountKeyOf = (local) => {
+  if (local === "textSize") return "text_size";
+  if (local === "theme" || local === "palette") return local;
+  if (local.startsWith("show_")) return "apps_hidden";
+  return Object.keys(APP_LOCAL).find((k) => APP_LOCAL[k] === local) || "";
+};
+
+function appsHidden() {                               // this browser's apps_hidden, or undefined when it never chose
+  let any = false;
+  const hidden = [];
+  for (const a of APPS) {
+    let v = cookieOf("show_" + a);
+    if (v === null && Object.hasOwn(settings, "show_" + a)) v = String(settings["show_" + a]);
+    if (v !== null) any = true;
+    if (v === "false") hidden.push(a);
+  }
+  return any ? hidden.join(",") : undefined;
+}
+// this browser's value of an account key, as the account would hold it; undefined when this browser has none
+function localOf(key) {
+  if (Object.hasOwn(SHARED_KEYS, key)) {
+    let v = cookieOf(SHARED_KEYS[key]);
+    if (v === "auto") v = "system";
+    return KNOWN[SHARED_KEYS[key]].includes(v) ? v : undefined;
+  }
+  if (key === "apps_hidden") return appsHidden();
+  const local = APP_LOCAL[key];
+  if (!local) return undefined;
+  const spec = appSpec[local];
+  let v = spec.cookie ? readCookie(local) : null;
+  if (v === null) {
+    const all = load();
+    if (!Object.hasOwn(all, local)) return undefined;
+    v = all[local];
+  }
+  if (spec.type === "bool") return v === true || v === "true" || v === "on" ? "on" : "off";
+  return String(v);
+}
+// a value the account holds that this page may apply (the room validates its own, the schema the shared ones)
+function valid(key, v) {
+  if (typeof v !== "string") return false;
+  if (Object.hasOwn(SHARED_KEYS, key)) return KNOWN[SHARED_KEYS[key]].includes(v === "auto" ? "system" : v);
+  if (key === "apps_hidden") return v.split(",").every((a) => a === "" || APPS.includes(a));
+  const spec = appSpec[APP_LOCAL[key]];
+  if (!spec) return false;
+  if (spec.type === "bool") return v === "on" || v === "off";
+  if (spec.type === "choice") return (spec.values || []).includes(v);
+  return v.length <= 1024;
+}
+// set this browser to the account's value (null: the default), as the settings page would
+function setLocal(key, v) {
+  const all = load();
+  if (Object.hasOwn(SHARED_KEYS, key)) {
+    const local = SHARED_KEYS[key];
+    const value = v === null ? DEFAULTS[local] : (v === "auto" ? "system" : v);
+    setCookie(local, value);
+    all[local] = value;
+    save(all);
+    appliedNow[local] = value;
+    showControl(local, value);
+    apply(local, value);
+  } else if (key === "apps_hidden") {
+    const hidden = new Set((v || "").split(",").filter(Boolean));
+    for (const a of APPS) {
+      const on = !hidden.has(a);
+      if (!on || cookieOf("show_" + a) !== null) setCookie("show_" + a, on);
+      all["show_" + a] = on;
+      settings["show_" + a] = on;
+      appliedNow["show_" + a] = on;
+      showControl("show_" + a, on);
+      apply("show_" + a, on);
+    }
+    save(all);
+  } else if (APP_LOCAL[key]) {
+    const local = APP_LOCAL[key];
+    const spec = appSpec[local];
+    if (v === null) {
+      delete all[local];
+      save(all);
+      if (spec.cookie) dropCookie(local);
+      document.dispatchEvent(new CustomEvent("machiya:setting", { detail: { key: local, value: null } }));
+      return;
+    }
+    const value = spec.type === "bool" ? v === "on" : v;
+    all[local] = value;
+    save(all);
+    if (spec.cookie) setCookie(local, value);
+    showControl(local, value);
+    apply(local, value);
+  }
+}
+
+function stored(name) {
+  try { return JSON.parse(localStorage.getItem(name) || "{}") || {}; } catch { return {}; }
+}
+function store(name, value) {
+  try { localStorage.setItem(name, JSON.stringify(value)); } catch { /* private mode: nothing kept */ }
+}
+const PENDING = "machiyaPrefsPending";                // changes not yet sent: {key: value or null}
+const SEEN = "machiyaPrefsSeen";                      // the account's last answer here: {rev, prefs, updated}
+
+// the Shared section's state line: "unavailable" while the account doesn't answer, back when it does
+const stateLine = document.querySelector(".prefs-state");
+const stateWas = stateLine ? [stateLine.dataset.prefsState, stateLine.innerHTML] : null;
+function reachable(ok) {
+  if (!stateLine || !stateWas || stateWas[0] !== "account") return;
+  stateLine.dataset.prefsState = ok ? stateWas[0] : "unavailable";
+  if (ok) stateLine.innerHTML = stateWas[1]; else stateLine.textContent = stateLine.dataset.unavailable || "";
+}
+
+async function call(method, body, etag) {
+  const headers = { Accept: "application/json" };
+  if (body) headers["Content-Type"] = "application/json";
+  if (etag) headers["If-None-Match"] = etag;
+  const r = await rawFetch(prefsUrl, { method, credentials: "same-origin", cache: "no-store", headers,
+                                       body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 304) return { status: 304, data: null };
+  let data = null;
+  try { data = await r.json(); } catch { data = null; }
+  return { status: r.status, data };
+}
+
+let running = null, again = false, lastSync = 0;
+function sync() {
+  if (!prefsUrl || !rawFetch) return Promise.resolve();
+  if (running) { again = true; return running; }
+  running = (async () => {
+    try {
+      for (let round = 0; round < 3; round++) {        // a fill-in or a newer local value may need one more PUT
+        again = false;
+        const pending = stored(PENDING);
+        let answer;
+        if (Object.keys(pending).length) {
+          const { status, data } = await call("PUT", { prefs: pending });
+          if (status >= 500 || status === 0) { reachable(false); return; }
+          const left = stored(PENDING);                  // drop what went (unless it changed again meanwhile)
+          for (const [k, v] of Object.entries(pending)) if (left[k] === v) delete left[k];
+          if (status === 400 || status === 413 || status === 415) {
+            store(PENDING, left);                        // the account refuses it: never sent again
+            continue;
+          }
+          if (status !== 200 || !data) return;           // 401, 403, 404: kept for later
+          store(PENDING, left);
+          answer = data;
+        } else {
+          const seen = stored(SEEN);
+          const { status, data } = await call("GET", null, Number.isInteger(seen.rev) ? `"${seen.rev}"` : "");
+          if (status >= 500) { reachable(false); return; }
+          if (status === 304) answer = seen;
+          else if (status === 200 && data) answer = data;
+          else return;                                   // 401, 403, 404: nothing here follows the person
+        }
+        lastSync = Date.now();
+        reachable(true);
+        if (!reconcile(answer) && !again) return;
       }
-    })
-    .catch(() => {});
+    } catch {
+      reachable(false);                                  // offline: the cookies carry on; pending waits
+    } finally {
+      running = null;
+      if (again) { again = false; sync(); }             // a change made while the last call was out
+    }
+  })();
+  return running;
+}
+// the account's answer against this browser: -> true when something must be sent (now pending)
+function reconcile(data) {
+  if (!data || typeof data.prefs !== "object" || !data.prefs) return false;
+  const seen = stored(SEEN);
+  const was = (seen.prefs && typeof seen.prefs === "object") ? seen.prefs : {};
+  const wasAt = (seen.updated && typeof seen.updated === "object") ? seen.updated : {};
+  const prefs = data.prefs, updated = (data.updated && typeof data.updated === "object") ? data.updated : {};
+  const pending = stored(PENDING), push = {};
+  for (const key of accountKeys()) {
+    if (Object.hasOwn(pending, key)) continue;            // a change waiting to go wins
+    const local = localOf(key);
+    if (!Object.hasOwn(prefs, key)) {
+      if (Object.hasOwn(was, key)) setLocal(key, null);   // the account removed it since: the default again
+      else if (local !== undefined) push[key] = local;    // fill the blank from this browser
+      continue;
+    }
+    const value = prefs[key];
+    if (!valid(key, value) || value === local) continue;  // unknown values are never applied
+    if (key === "apps_hidden" && local === undefined && value === "") continue;       // all shown either way
+    // the account still says what it said last time, and this browser now says something else: another room (or
+    // this one, offline) changed it here since, so this browser's value is the newer one
+    if (local !== undefined && was[key] === value && wasAt[key] === updated[key]) push[key] = local;
+    else setLocal(key, value);
+  }
+  store(SEEN, { rev: data.rev, prefs, updated });
+  if (!Object.keys(push).length) return false;
+  store(PENDING, Object.assign(stored(PENDING), push));
+  return true;
+}
+function changed(local) {                             // a choice made on this page: send that key only
+  const key = accountKeyOf(local);
+  if (!key || !prefsUrl) return;
+  const v = localOf(key);
+  if (v === undefined) return;
+  store(PENDING, Object.assign(stored(PENDING), { [key]: v }));
+  sync();
+}
+
+// the same browser: other tabs of this room at once, other rooms on return (the cookies, no network)
+const channel = "BroadcastChannel" in window ? new BroadcastChannel("machiya-prefs") : null;
+function refresh() {
+  for (const key of ["theme", "palette", "textSize"]) {
+    const v = current(key);
+    if (appliedNow[key] !== v) { appliedNow[key] = v; showControl(key, v); apply(key, v); }
+  }
+  const d = deviceSize();
+  if (appliedNow.textSizeDevice !== d) { appliedNow.textSizeDevice = d; apply("textSizeDevice", d); syncDeviceControls(); }
+  for (const a of APPS) {
+    const c = cookieOf("show_" + a);
+    if (c === null) continue;
+    const on = c !== "false";
+    if (appliedNow["show_" + a] !== on) {
+      appliedNow["show_" + a] = on;
+      settings["show_" + a] = on;
+      showControl("show_" + a, on);
+      apply("show_" + a, on);
+    }
+  }
+}
+for (const key of ["theme", "palette", "textSize"]) appliedNow[key] = current(key);
+appliedNow.textSizeDevice = deviceSize();
+if (deviceSize()) document.body.dataset.text = deviceSize();
+if (channel) channel.onmessage = () => refresh();
+const tell = () => { if (channel) channel.postMessage({ room }); };
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  refresh();
+  if (Date.now() - lastSync >= 30000) sync();
+});
+window.addEventListener("pageshow", (ev) => { if (ev.persisted) { refresh(); sync(); } });
+if (prefsUrl) sync();
+
+// "Use This Device's Size" (This Device): the device's own text size, a cookie the rooms share, never sent anywhere
+const deviceToggle = document.querySelector("[data-device-size]");
+const deviceSelect = document.querySelector("[data-device-size-value]");
+function syncDeviceControls() {
+  if (!deviceToggle) return;
+  const d = deviceSize();
+  deviceToggle.checked = !!d;
+  const row = deviceSelect && deviceSelect.closest(".item");
+  if (row) row.hidden = !d;
+  if (deviceSelect && d) deviceSelect.value = d;
+}
+if (deviceToggle) {
+  syncDeviceControls();
+  const set = () => {
+    if (deviceToggle.checked) {
+      const v = TEXT_SIZES.includes(deviceSelect && deviceSelect.value) ? deviceSelect.value : current("textSize");
+      setCookie("textSizeDevice", v);
+      appliedNow.textSizeDevice = v;
+      apply("textSizeDevice", v);
+    } else {
+      dropCookie("textSizeDevice");
+      appliedNow.textSizeDevice = "";
+      apply("textSizeDevice", "");
+    }
+    syncDeviceControls();
+    tell();
+  };
+  deviceToggle.addEventListener("change", set);
+  if (deviceSelect) deviceSelect.addEventListener("change", () => { if (deviceToggle.checked) set(); });
 }
 
 // the /settings page
@@ -140,9 +425,12 @@ for (const el of document.querySelectorAll("[data-set]")) {
     const all = load();
     all[key] = value;
     save(all);
-    if (cookie || (domain && shared(key))) setCookie(key, value);
+    if (key.startsWith("show_")) settings[key] = value;
+    if (cookie || shared(key) || (appSpec[key] && appSpec[key].cookie)) setCookie(key, value);
+    if (Object.hasOwn(appliedNow, key) || key.startsWith("show_")) appliedNow[key] = value;
     apply(key, value);
-    if (Object.hasOwn(KNOWN, key)) { changedHere = true; pushPrefs(); }
+    changed(key);
+    tell();
   });
 }
 

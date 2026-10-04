@@ -1,0 +1,81 @@
+{
+ "app_key": "(kura|niwa|konbini|shiori|machiya)\\.[a-z0-9_]{1,48}\\Z",
+ "apps": [
+  "kura",
+  "niwa",
+  "konbini",
+  "shiori",
+  "machiya"
+ ],
+ "local": {
+  "palette": "palette",
+  "text_size": "textSize",
+  "theme": "theme"
+ },
+ "max_app_value": 1024,
+ "max_keys": 100,
+ "reserved": [
+  "language",
+  "time_zone"
+ ],
+ "shared": {
+  "apps_hidden": {
+   "default": "",
+   "label": "Apps",
+   "list_of": [
+    "shiori",
+    "konbini",
+    "niwa",
+    "kura",
+    "hister",
+    "searxng",
+    "machiya"
+   ]
+  },
+  "palette": {
+   "default": "tokyo-night",
+   "label": "Theme",
+   "values": [
+    "tokyo-night",
+    "solarized",
+    "nord",
+    "dracula",
+    "catppuccin",
+    "gruvbox",
+    "rose-pine",
+    "kanagawa",
+    "everforest",
+    "ayu"
+   ]
+  },
+  "pills": {
+   "default": "",
+   "json": {
+    "hidden": "[pill id]",
+    "order": "[pill id]"
+   },
+   "label": "Pills"
+  },
+  "text_size": {
+   "default": "standard",
+   "label": "Text Size",
+   "values": [
+    "xsmall",
+    "small",
+    "standard",
+    "large",
+    "xlarge"
+   ]
+  },
+  "theme": {
+   "default": "system",
+   "label": "Appearance",
+   "values": [
+    "system",
+    "day",
+    "night"
+   ]
+  }
+ },
+ "v": 1
+}
