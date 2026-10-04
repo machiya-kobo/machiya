@@ -31,3 +31,7 @@ claude plugin install machiya@machiya
 ```
 
 Set `MACHIYA_MCP_URL` if the server isn't at `https://machiya-mcp.example.ts.net/mcp`, `HISTER_MCP_URL` if Hister's endpoint isn't at `https://hister.example.ts.net/mcp`, and `MACHIYA_AGENT` (for example `claude@laptop`) so the board's history says who acted. The client has to be on the tailnet. Suggested permissions (reads allowed, most writes ask): see the service doc, which names the tools `mcp__machiya__<tool>` (the server added with `claude mcp add machiya …`). Through this plugin the same tools are `mcp__plugin_machiya_machiya__<tool>`: use that prefix in the permission rules. Use one or the other on a machine, not both.
+
+## Hister's token
+
+Once Hister's user handling is on, its MCP needs the owner's Hister token. The plugin's `headersHelper` (`bin/hister-headers`) sends it as `X-Access-Token`, read at connect time from `$HISTER_TOKEN_FILE`, else from the pass entry `$HISTER_TOKEN_PASS` (default `hosts/server/stacks/hister/owner-token`) when this machine can decrypt it; with neither it sends no header (a Hister without users needs none). The token is never written into Claude Code's settings.

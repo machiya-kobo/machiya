@@ -1,0 +1,17 @@
+#!/bin/sh
+# The headers for Hister's MCP (the plugin's `headersHelper`): the owner's Hister token as X-Access-Token, so the token is
+# fetched when Claude Code connects (and again after a 401/403) instead of being written into any settings file.
+# Where it comes from, first found: $HISTER_TOKEN_FILE (a file holding the token), then the pass entry
+# $HISTER_TOKEN_PASS (default hosts/server/stacks/hister/owner-token) if this machine's pass can decrypt it.
+# Nothing found prints {}: no header, which is what a Hister without users expects. Never prints anything but the JSON.
+tok=""
+if [ -n "${HISTER_TOKEN_FILE:-}" ] && [ -r "$HISTER_TOKEN_FILE" ]; then
+    tok=$(head -n 1 "$HISTER_TOKEN_FILE" 2>/dev/null)
+elif command -v pass >/dev/null 2>&1; then
+    tok=$(pass show "${HISTER_TOKEN_PASS:-hosts/server/stacks/hister/owner-token}" 2>/dev/null | head -n 1)
+fi
+tok=$(printf '%s' "$tok" | tr -d '\r\n\t ')
+case "$tok" in
+    ""|*[!A-Za-z0-9._~+/=-]*) printf '{}\n' ;;                      # none, or not a token: send no header
+    *) printf '{"X-Access-Token": "%s"}\n' "$tok" ;;
+esac
