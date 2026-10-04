@@ -58,13 +58,14 @@ mkdir machiya-stack && cd machiya-stack
 for r in machiya kura niwa konbini; do git clone https://github.com/machiya-kobo/$r.git; done
 cd machiya/compose
 cp .env.example .env
+mkdir -p data/kura data/niwa data/konbini data/hister   # yours, not root's: Docker would create missing ones as root
 ```
 
 Edit `.env`:
 
 | Setting | Set it to |
 |---|---|
-| `VAULT_REPO_URL`, `VAULT_GIT`, `VAULT_SUBDIR` | your vault as a bare git repository Niwa and Konbini can push to (`file:///srv/machiya/vault.git`, and the same folder in `VAULT_GIT`), and the folder in it that holds the notes ([other URLs](#use-your-own-vault)) |
+| `VAULT_REPO_URL`, `VAULT_GIT`, `VAULT_SUBDIR` | your vault as a bare git repository Niwa and Konbini can push to (`git clone --bare <your vault> /srv/machiya/vault.git`, in a folder you own: `sudo mkdir -p /srv/machiya && sudo chown "$USER" /srv/machiya`): `file:///srv/machiya/vault.git`, the same folder in `VAULT_GIT` (uncomment it), and the folder in it that holds the notes ([other URLs](#use-your-own-vault)) |
 | `KONBINI_REPO` | a clone of the vault for the board to write to (`git clone <vault> /srv/machiya/konbini-repo`) |
 | `SEARXNG_SECRET` | `openssl rand -hex 32` |
 | `MACHIYA_UID`, `MACHIYA_GID` | `id -u`, `id -g` |
@@ -142,7 +143,7 @@ curl -s http://127.0.0.1:8083/api/status | grep -m1 -o '"notes": [0-9]*'
 curl -s http://127.0.0.1:8082/api/status | grep -m1 -o '"published": [0-9]*'
 curl -s http://127.0.0.1:8081/api/status | grep -m1 -o '"cards": [0-9]*'
 curl -s -o /dev/null -w 'hister %{http_code}\n' http://127.0.0.1:4433/
-curl -s http://127.0.0.1:8888/healthz
+curl -s http://127.0.0.1:8888/healthz; echo
 for port in 8083 8082 8081; do curl -s http://127.0.0.1:$port/ | grep -o '<title>[^<]*'; done
 ```
 
@@ -155,9 +156,9 @@ You should see:
 "cards": 10
 hister 200
 OK
-<title>kura
-<title>niwa
-<title>konbini
+<title>Kura
+<title>Niwa
+<title>Konbini
 ```
 
 Open them in a browser (the header's **Rooms** menu moves between them):
@@ -228,7 +229,7 @@ rm -rf data .env
 
 ### Use your own vault
 
-Copy `compose/.env.example` to a file called `.env` beside it (instead of running `demo-init`) and set `VAULT_REPO_URL` (an https, ssh or `file://` URL), `VAULT_SUBDIR` (the folder in the repository that holds the notes, if it is not the root), and Konbini's own clone in `KONBINI_REPO`. Niwa pushes the garden's fields back to the vault, so it needs write access (an ssh deploy key; Kura only reads). To reach the rooms from other devices, put a proxy that sets a `Tailscale-User-Login` header in front (a Tailscale sidecar does, and terminates TLS), switch `KURA_AUTH`, `NIWA_AUTH` and `KONBINI_AUTH` from `open` to `tailscale`, list your login in the `*_USERS`, and set the `*_BIND_BEHIND_PROXY=1` lines in `.env` (the rooms refuse a header mode on a non-loopback bind without them). Other ways in: people, agents, passwords or your own auth proxy (`*_AUTH=header`) from an identity file ([docs/identity.md](docs/identity.md)); the compose passes those settings through. Hister's users as the one sign-in (`*_AUTH=hister`, [hister-login](docs/services/hister-login.md)) needs the hister-login helper beside Hister, which this compose doesn't run yet; the [dev stack](docs/dev-stack.md) shows it wired up. The compose's header comments and the [service docs](docs/services/) cover the rest. Native installs (no containers): each room's own Quickstart (Debian or Ubuntu, other systems under its "More ways to run it"), and [docs/install/bsd.md](docs/install/bsd.md) for running them as services on FreeBSD, NetBSD and OpenBSD.
+Copy `compose/.env.example` to a file called `.env` beside it (instead of running `demo-init`), make the `data/` folders yourself as in the [Quickstart](#quickstart), and set `VAULT_REPO_URL` (an https, ssh or `file://` URL), `VAULT_SUBDIR` (the folder in the repository that holds the notes, if it is not the root), and Konbini's own clone in `KONBINI_REPO`. Niwa pushes the garden's fields back to the vault, so it needs write access (an ssh deploy key; Kura only reads). To reach the rooms from other devices, put a proxy that sets a `Tailscale-User-Login` header in front (a Tailscale sidecar does, and terminates TLS), switch `KURA_AUTH`, `NIWA_AUTH` and `KONBINI_AUTH` from `open` to `tailscale`, list your login in the `*_USERS`, and set the `*_BIND_BEHIND_PROXY=1` lines in `.env` (the rooms refuse a header mode on a non-loopback bind without them). Other ways in: people, agents, passwords or your own auth proxy (`*_AUTH=header`) from an identity file ([docs/identity.md](docs/identity.md)); the compose passes those settings through. Hister's users as the one sign-in (`*_AUTH=hister`, [hister-login](docs/services/hister-login.md)) needs the hister-login helper beside Hister, which this compose doesn't run yet; the [dev stack](docs/dev-stack.md) shows it wired up. The compose's header comments and the [service docs](docs/services/) cover the rest. Native installs (no containers): each room's own Quickstart (Debian or Ubuntu, other systems under its "More ways to run it"), and [docs/install/bsd.md](docs/install/bsd.md) for running them as services on FreeBSD, NetBSD and OpenBSD.
 
 ### The other half: Shiori
 
