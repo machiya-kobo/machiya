@@ -93,6 +93,14 @@ engines:
     disabled: false
   - name: yep
     disabled: false
+  - name: mojeek
+    disabled: false
+  - name: startpage
+    disabled: false
+  - name: google cse         # some home lines can't reach cse.google.com: server routes this ONE engine through a SOCKS5
+    disabled: false          # proxy with a per-engine `proxies: {all://: [socks5h://proxy:1080]}` (start the `proxy` profile)
+  - name: mwmbl              # an independent, open crawler index: answers where the big engines CAPTCHA a server
+    disabled: false
   - name: wiby               # small web: personal sites
     disabled: false
   - name: duckduckgo
