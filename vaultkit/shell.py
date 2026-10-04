@@ -119,6 +119,16 @@ def search_box(q="", action="/search", placeholder="Search", label="Search"):
             % (e(action), e(q), e(placeholder), e(label)))
 
 
+def search_bar(q="", action="/search", placeholder="Search", label="Search"):
+    """The room's search pill (v0.17): a second row of the pinned header at every width, as Shiori's field. Pass it to
+    header(search=...). machiya.js shows results as you type (it fetches the room's search page and swaps <main>), and
+    "/" focuses it."""
+    return ('<form class="search bar" role="search" action="%s"><div class="field"><input type="search" name="q" value="%s" '
+            'placeholder="%s" aria-label="%s" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">'
+            '<button type="button" class="clear" aria-label="Clear" title="Clear search">&times;</button></div></form>'
+            % (e(action), e(q), e(placeholder), e(label)))
+
+
 def handoff(q, links=None):
     """"Search everything in Shiori ›" for the end of a room's results (a room searches its own things first, then hands
     the query to Shiori). "" without a Shiori address or a query."""
@@ -290,9 +300,9 @@ def switcher(room, links, cls="rooms", settings=False, who=""):
             % (cls, GLYPH["rooms"], "".join(rows), "<hr>" if nb else "", "".join(nb), gear))
 
 
-def header(room, nav, current, links, subtitle="", tools="", settings=True, who=""):
-    """nav = [(href, key, label)]; tools = extra HTML before the switcher (e.g. a search box); who = the signed-in
-    name (v0.13): a person button before the gear, to the Account settings."""
+def header(room, nav, current, links, subtitle="", tools="", settings=True, who="", search=""):
+    """nav = [(href, key, label)]; tools = extra HTML before the switcher; who = the signed-in name (v0.13): a person
+    button before the gear, to the Account settings; search = search_bar(...) (v0.17): the pill under the top bar."""
     _, name, seal, _ = room_info(room)
     items = "".join(('<b class="here">%s</b>' % e(label)) if key == current else '<a href="%s">%s</a>' % (e(href), e(label))
                     for href, key, label in nav)
@@ -301,9 +311,9 @@ def header(room, nav, current, links, subtitle="", tools="", settings=True, who=
         gear = ('<a class="iconbtn who" href="/settings#account" title="Signed in as %s" aria-label="Signed in as %s">%s</a>'
                 % (e(who), e(who), GLYPH["person"])) + gear
     return ('<header class="top"><div class="topbar"><a class="brand" href="/">%s'
-            '<span class="word">%s</span></a>%s<nav class="nav">%s</nav><div class="tools">%s%s%s</div></div></header>\n'
+            '<span class="word">%s</span></a>%s<nav class="nav">%s</nav><div class="tools">%s%s%s</div></div>%s</header>\n'
             % (mark(room), e(name), ('<span class="subtitle">%s</span>' % e(subtitle)) if subtitle else "", items, tools,
-               switcher(room, links), gear))
+               switcher(room, links), gear, ('<div class="searchrow">%s</div>' % search) if search else ""))
 
 
 def tabbar(tabs, current, room, links, icons=None, who=""):

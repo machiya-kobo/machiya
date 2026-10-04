@@ -357,8 +357,7 @@ header.top {
   @media (display-mode: standalone) { header.top { padding-top: calc(var(--sat) + 24px); } }
 }
 
-/* No search field in the header at any width (v0.16.4): search is the third tab on phones and a nav link on wide screens;
-   a search page keeps its own field (main form.search), and "/" opens it. */
+/* The top bar never shows a search field (v0.16.4); since v0.17 the pill is the header's second row (.searchrow). */
 .topbar form.search { display: none; }
 
 /* ---- tab bar (phones and the installed app) ---------------------------------------------------------------- */
@@ -512,6 +511,24 @@ main form.search input { width: 100%; font-size: var(--fs-l); padding: 9px 12px;
   .topbar form.search input::-webkit-search-cancel-button { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .topbar form.search input { transition: none; } }
+/* the search pill (v0.17): the pinned header's second row, every width, as Shiori's field */
+.searchrow { padding: 2px 0 10px; }
+form.search.bar { display: block; max-width: 720px; }
+form.search.bar .field { position: relative; }
+form.search.bar input { width: 100%; max-width: none; height: auto; padding: 10px 44px 10px 16px; border-radius: 999px;
+  border: 1px solid var(--line2); background: var(--dark); color: var(--fg); font: inherit; font-size: var(--fs-l);
+  box-shadow: var(--shadow-1); transition: none; }
+form.search.bar input::placeholder { color: var(--muted); opacity: .9; }
+form.search.bar input:focus { outline: none; border-color: var(--room); }
+form.search.bar input:focus-visible { outline: 2px solid var(--room); outline-offset: 2px; }
+form.search.bar input::-webkit-search-cancel-button { display: none; }
+form.search.bar .clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 30px; height: 30px;
+  border: 0; border-radius: 50%; background: transparent; color: var(--muted); font-size: 22px; line-height: 1; cursor: pointer; }
+form.search.bar .clear::after { content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
+form.search.bar input:placeholder-shown ~ .clear { visibility: hidden; }
+@media (max-width: 760px) { form.search.bar input { font-size: 16px; } }   /* iOS zooms into fields under 16px */
+main.live-loading { opacity: .6; transition: opacity .15s .1s; }
+@media (prefers-reduced-motion: reduce) { main.live-loading { transition: none; } }
 .handoff { display: flex; align-items: center; gap: 10px; margin: var(--sp-4) 0; padding: 10px var(--sp-3);
   border: 1px solid var(--line2); border-radius: var(--r-m); color: var(--fg); font-weight: 500; }
 .handoff:hover { background: var(--hl); text-decoration: none; }

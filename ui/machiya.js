@@ -151,9 +151,9 @@ document.addEventListener("keydown", (ev) => {
   if (ev.key === "/" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
     const t = ev.target;
     if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
-    // the search page's own field when it's showing; otherwise open the room's search page (the header's field is hidden
-    // since v0.16.4: search is a tab on phones and a nav link on wide screens; its form still names the room's search URL)
-    const field = [...document.querySelectorAll("form.search input[type=search]")].find((f) => f.offsetParent !== null);
+    // the header's search pill (v0.17), else a search page's own field; otherwise open the room's search page
+    const field = document.querySelector("form.search.bar input[type=search]")
+      || [...document.querySelectorAll("form.search input[type=search]")].find((f) => f.offsetParent !== null);
     if (field) { ev.preventDefault(); field.focus(); field.select(); return; }
     const form = document.querySelector("form.search");
     if (form && form.action) { ev.preventDefault(); location.href = form.action; }
@@ -244,3 +244,60 @@ if ("serviceWorker" in navigator) {
     });
   }).catch(() => {});
 }
+
+// The header's search pill (v0.17): results as you type. It fetches the room's own search page (the form's action, ?q=)
+// and swaps this page's <main> for that page's, so each room keeps one search page and one renderer. Clearing the field
+// puts the page back. Enter still submits the form (a real search page load). Rooms whose results need script can
+// listen for "machiya:results" on document (detail: {q}) to bind them again.
+(() => {
+  const form = document.querySelector("form.search.bar");
+  const input = form && form.querySelector("input[type=search]");
+  const main = document.querySelector("main");
+  if (!input || !main || !window.fetch || !window.DOMParser) return;
+  const action = form.getAttribute("action") || "/search";
+  const startHTML = main.innerHTML, startURL = location.href, startTitle = document.title;
+  const onSearchPage = new URL(form.action, location.href).pathname === location.pathname;
+  let timer = 0, ctl = null, pushed = false;
+  const show = (html, title, url) => {
+    main.innerHTML = html;
+    for (const f of main.querySelectorAll("form.search")) f.remove();     // the search page's own field: the pill is the field
+    if (title) document.title = title;
+    if (url && url !== location.href) {
+      if (onSearchPage || pushed) history.replaceState({ live: true }, "", url);
+      else { history.pushState({ live: true }, "", url); pushed = true; }
+    }
+  };
+  const run = async (q) => {
+    if (ctl) ctl.abort();
+    if (!q.trim()) {
+      main.classList.remove("live-loading");
+      if (!onSearchPage) { show(startHTML, startTitle, startURL); }
+      return;
+    }
+    ctl = new AbortController();
+    const url = new URL(action, location.href);
+    url.searchParams.set("q", q);
+    main.classList.add("live-loading");
+    try {
+      const res = await fetch(url, { signal: ctl.signal, credentials: "same-origin", headers: { "X-Machiya-Live": "1" } });
+      if (!res.ok) return;
+      const doc = new DOMParser().parseFromString(await res.text(), "text/html");
+      const next = doc.querySelector("main");
+      if (!next || input.value !== q) return;
+      show(next.innerHTML, doc.title, url.href);
+      document.dispatchEvent(new CustomEvent("machiya:results", { detail: { q } }));
+    } catch (err) {
+      if (err.name !== "AbortError") console.warn("live search", err);
+    } finally {
+      if (input.value === q) main.classList.remove("live-loading");
+    }
+  };
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => run(input.value), 250); });
+  form.addEventListener("submit", () => { clearTimeout(timer); if (ctl) ctl.abort(); });
+  const clear = form.querySelector(".clear");
+  if (clear) clear.addEventListener("click", () => { input.value = ""; input.focus(); clearTimeout(timer); run(""); });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && input.value) { ev.preventDefault(); input.value = ""; clearTimeout(timer); run(""); }
+  });
+  window.addEventListener("popstate", () => { if (pushed) location.reload(); });
+})();

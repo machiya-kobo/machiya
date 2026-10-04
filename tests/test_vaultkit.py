@@ -666,6 +666,18 @@ class SharedUITest(unittest.TestCase):
         self.assertEqual(self.shell.handoff("x", {}), "")
         self.assertEqual(self.shell.handoff("", links), "")
 
+    def test_search_bar_is_the_headers_second_row(self):
+        bar = self.shell.search_bar("a <b>", "/v/work/search", "Search Notes", "Search every note")
+        self.assertIn('class="search bar"', bar)
+        self.assertIn('action="/v/work/search"', bar)
+        self.assertIn('value="a &lt;b&gt;"', bar)
+        self.assertIn('class="clear"', bar)
+        h = self.shell.header("kura", [("/", "home", "Home")], "home", {}, search=bar)
+        top, row = h.split('</div><div class="searchrow">', 1)       # after the top bar, inside the header
+        self.assertNotIn("form", top)
+        self.assertTrue(row.startswith(bar) and row.endswith("</div></header>\n"))
+        self.assertNotIn("searchrow", self.shell.header("kura", [("/", "home", "Home")], "home", {}))
+
     def test_service_worker_and_offline_row(self):
         js = self.shell.service_worker("abc123", ["/static/kura.css?v=1", "/offline"], notes={"match": "^/n/", "limit": 200},
                                        network=["^/search"], pins="/api/offline")
