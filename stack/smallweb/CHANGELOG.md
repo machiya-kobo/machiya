@@ -1,5 +1,9 @@
 # Changelog: smallweb
 
+## 0.2.1
+
+- `GET /api/changelog` serves this changelog (open, like `/api/status`) for the Machiya status page's recent deploys.
+
 ## 0.2.0
 
 - `POST /api/save` saves `http://` and `https://` pages too (Shiori's Add Page and share target): fetched once in the background, read into a title, text and cleaned HTML, and sent to Hister like a gemini save. `/page` stays gemini and gopher.

@@ -35,7 +35,7 @@ import smolnet   # noqa: E402
 import web       # noqa: E402
 from store import Store   # noqa: E402
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
