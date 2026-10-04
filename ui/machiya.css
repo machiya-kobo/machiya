@@ -35,6 +35,7 @@ body.theme-night, body.theme-system, body.theme-auto {
 body.theme-day {
   --bg: #e1e2e7; --dark: #d0d5e3; --hl: #eef0f6; --line: #c4c8da; --line2: #aab1cb;
   --fg: #3760bf; --fg2: #4c5a8f; --comment: #5a6391; --muted: #4c5a8f;
+  --menu-fg: #3258af;   /* the Rooms menu's text on --dark: #3760bf is 3.99:1 there, this is 4.54:1 (AA; Shiori's palettes match) */
   --blue: #155fc5; --orange: #9a5000; --red: #bd204c; --yellow: #7a5e36; --green: #506b34;
   --teal: #0d6e5c; --magenta: #802cee; --cyan: #006b8f; --slate: #4c5a8f;
   --shadow-1: 0 1px 2px rgba(55,96,191,.12); --shadow-2: 0 1px 2px rgba(55,96,191,.12), 0 6px 18px rgba(55,96,191,.12);
@@ -43,6 +44,7 @@ body.theme-day {
   body.theme-system, body.theme-auto {
     --bg: #e1e2e7; --dark: #d0d5e3; --hl: #eef0f6; --line: #c4c8da; --line2: #aab1cb;
     --fg: #3760bf; --fg2: #4c5a8f; --comment: #5a6391; --muted: #4c5a8f;
+  --menu-fg: #3258af;   /* the Rooms menu's text on --dark: #3760bf is 3.99:1 there, this is 4.54:1 (AA; Shiori's palettes match) */
     --blue: #155fc5; --orange: #9a5000; --red: #bd204c; --yellow: #7a5e36; --green: #506b34;
     --teal: #0d6e5c; --magenta: #802cee; --cyan: #006b8f; --slate: #4c5a8f;
     --shadow-1: 0 1px 2px rgba(55,96,191,.12); --shadow-2: 0 1px 2px rgba(55,96,191,.12), 0 6px 18px rgba(55,96,191,.12);
@@ -329,7 +331,7 @@ header.top {
 .rooms .menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 230px; padding: var(--sp-2);
   background: var(--dark); border: 1px solid var(--line2); border-radius: var(--r-m); box-shadow: var(--shadow-2); z-index: 20; }
 .rooms .menu a, .rooms .menu b { display: flex; align-items: center; gap: 10px; padding: 7px var(--sp-2); border-radius: 8px;
-  color: var(--fg); font-size: var(--fs-s); font-weight: 500; }
+  color: var(--menu-fg, var(--fg)); font-size: var(--fs-s); font-weight: 500; }
 .rooms .menu a:hover { background: var(--hl); text-decoration: none; }
 .rooms .menu b { background: var(--hl); }
 .rooms .menu small { color: var(--muted); font-weight: 400; margin-left: auto; }
