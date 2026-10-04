@@ -479,6 +479,37 @@ class Settings(Base):
         self.assertIn("default folder is Notes/", text)
 
 
+class NoNewFrontmatter(Base):
+    """Sweep MACH-M-2: an edit may change summary, status and tags in the frontmatter and nothing else, and never adds a
+    frontmatter block to a note that has none (it could say publish: true, and Niwa would publish the note)."""
+
+    def setUp(self):
+        super().setUp()
+        self.other_push("Inbox/Bare.md", "Just text.\n")
+        self.other_push("Inbox/Empty.md", "")
+        self.w.ready()
+
+    def test_replace_body_or_append_cannot_add_a_frontmatter_block(self):
+        block = "---\ntitle: x\npublish: true\n---\n\nNow public."
+        self.refused(lambda: self.update("Inbox/Bare.md", "replace_body", text=block, confirm=True), "frontmatter")
+        self.refused(lambda: self.update("Inbox/Empty.md", "append", text=block), "frontmatter")
+        self.assertEqual(self.read("Inbox/Bare.md"), "Just text.\n")
+        self.assertEqual(self.read("Inbox/Empty.md"), "")
+        self.update("Inbox/Bare.md", "append", text="More text.")                 # an ordinary edit still works
+        self.assertEqual(self.read("Inbox/Bare.md"), "Just text.\n\nMore text.\n")
+
+    def test_only_summary_status_and_tags_may_change(self):
+        cur = note(["type/reference", "area/tools"])
+        notes_writer.front_change(cur, cur.replace('summary: "s"', 'summary: "t"').replace("status: active", "status: draft"))
+        for new in (cur.replace("title: T", "title: U"), cur.replace("status: active", "status: active\npublish: true"),
+                    "Body only.\n"):
+            with self.assertRaises(ToolError):
+                notes_writer.front_change(cur, new)
+        with self.assertRaises(ToolError):
+            notes_writer.front_change("Body.\n", "---\npublish: true\n---\nBody.\n")
+        notes_writer.front_change("Body.\n", "Body.\n\nMore.\n")
+
+
 class Symlinks(Base):
     """Sweep MACH-M-3: a symlinked note writes through to its target (a protected template, say), and a failed commit
     left its edit in the clone for the next write to push as "notes: 1 change (sync)"."""

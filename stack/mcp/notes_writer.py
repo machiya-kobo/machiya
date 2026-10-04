@@ -114,6 +114,27 @@ def check_text(text, what="text", rules=None):
         raise ToolError("%s looks like it holds a secret (key, token or password): refer to it by name instead" % what)
 
 
+EDITABLE_FRONT = {"summary", "status", "tags"}
+
+
+def front_change(current, new):
+    """Refuse an edit that adds a frontmatter block to a note without one, or changes any frontmatter field but summary,
+    status and tags (sweep MACH-M-2: a block saying publish: true would put the note in the garden). The modes can't do
+    either today; this holds whatever a mode computes."""
+    had, has = FRONT_RE.match(current), FRONT_RE.match(new)
+    if not had:
+        if has:
+            raise ToolError("the edit would add a frontmatter block to a note that has none: that is the owner's to do", needs_owner=True)
+        return
+    old_fm, new_fm = note_front(current) or {}, note_front(new) or {}
+    if not has:
+        raise ToolError("the edit would remove the note's frontmatter")
+    changed = sorted(k for k in set(old_fm) | set(new_fm) if old_fm.get(k) != new_fm.get(k) and k not in EDITABLE_FRONT)
+    if changed:
+        raise ToolError("the edit would change %s in the frontmatter: only summary, status and tags are changed here"
+                        % ", ".join(str(k) for k in changed[:5]), needs_owner=True)
+
+
 def sections(lines):
     """[(index, level, title)] of the headings outside code fences."""
     out, fence = [], False
@@ -383,6 +404,7 @@ class NotesWriter:
                 raise ToolError("the edit would make the note too large or carry conflict markers")
             if note_front(new) is None and m:
                 raise ToolError("the edit would leave the frontmatter unreadable")
+            front_change(current, new)
             with open(self.path_of(rel), "w", encoding="utf-8") as f:
                 f.write(new)
             out = dict(self.commit(rel, "update", agent, new, previous=current), changed=True, mode=mode)
