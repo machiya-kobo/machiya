@@ -106,16 +106,14 @@ sudo tailscale serve status; sudo tailscale funnel status          # every line 
 
 ## Agents on the dev stack
 
-The [machiya plugin](../plugins/machiya/) reads three settings, saved in Claude Code's settings by its installer:
+The [machiya plugin](../plugins/machiya/) reads one setting, saved in Claude Code's settings by its installer:
 
 ```sh
 MACHIYA_MCP_URL=http://127.0.0.1:19226/mcp \
-HISTER_MCP_URL=http://127.0.0.1:19224/mcp \
-HISTER_TOKEN_FILE=$DEV_DATA/secrets/owner-token \
-  plugins/machiya/install.sh            # `install.sh check` tests the connections without changing anything
+  plugins/machiya/install.sh            # `install.sh check` tests the connection without changing anything
 ```
 
-From another machine on the tailnet, use `https://<machine>.<tailnet>.ts.net:19206/mcp` and `…:19204/mcp` instead, with a copy of the dummy token. The token file's path is saved, never the token; the plugin's `bin/hister-headers` reads it when Claude Code connects. To work against a real deployment (a release check), run the installer again with its URLs and token file.
+From another machine on the tailnet, use `https://<machine>.<tailnet>.ts.net:19206/mcp` instead. Saved pages come from machiya-mcp's `pages_search` and `pages_read`; since plugin 0.3.0 the plugin connects no Hister MCP and its installer denies Hister's MCP tools, so agents need no Hister token (vault notes and code documents stay out of AI context, on the dev stack too). To work against a real deployment (a release check), run the installer again with its URL.
 
 ## On a test VM
 
