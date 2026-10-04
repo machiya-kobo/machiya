@@ -95,7 +95,11 @@ r = json.load(sys.stdin)['result']['structuredContent']['rooms']
 bad = [k for k, v in r.items() if not v.get('ok')]
 print('rooms:', ', '.join('%s %s' % (k, 'ok' if v.get('ok') else 'DOWN') for k, v in r.items()))
 sys.exit(1 if bad else 0)"
-    curl -fsS -m 10 -X POST "$HISTER_MCP" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+    # the same headers Claude Code sends (bin/hister-headers: the owner's token once Hister has users), as a curl config
+    # on stdin so the token never shows in argv
+    python3 -c "import sys,json; [print('header = \"%s: %s\"' % kv) for kv in json.load(sys.stdin).items()]" \
+        < <("$REPO/plugins/machiya/bin/hister-headers") |
+    curl -fsS -m 10 -K - -X POST "$HISTER_MCP" -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
         -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' |
         python3 -c "import sys,json; print('hister tools:', ', '.join(t['name'] for t in json.load(sys.stdin)['result']['tools']), '(get_history denied)')" ;;
 uninstall)
