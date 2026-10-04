@@ -35,7 +35,7 @@ import smolnet   # noqa: E402
 import web       # noqa: E402
 from store import Store   # noqa: E402
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -396,6 +396,74 @@ def open_gopher(url, q):
 
 # -- Hister ----------------------------------------------------------------------------------------------------------
 
+TOKEN_RE = re.compile(r"[\x21-\x7e]{1,4096}")
+
+
+class SecretFile:
+    """SMALLWEB_HISTER_TOKEN_FILE: the owner's Hister token (docs/contracts/hister.md), the file's first line, re-read
+    when the file changes (inode, mtime, size), so a rotated token needs no restart; a file that vanishes or holds no
+    token keeps the last good value. Never logged, never in repr()."""
+
+    def __init__(self, path):
+        self.path, self.stamp, self.value, self.lock = path, None, "", threading.Lock()
+        self.get()
+
+    def get(self):
+        try:
+            st = os.stat(self.path)
+            stamp = (st.st_ino, st.st_mtime_ns, st.st_size)
+        except OSError:
+            return self.value
+        with self.lock:
+            if stamp != self.stamp:
+                try:
+                    with open(self.path, encoding="utf-8") as f:
+                        value = f.readline().strip()
+                except (OSError, UnicodeError):
+                    value = ""
+                if TOKEN_RE.fullmatch(value):
+                    self.value = value
+                self.stamp = stamp
+            return self.value
+
+    def __repr__(self):
+        return "SecretFile(%s)" % self.path
+
+
+def hister_token(path):
+    """None when unset (no token, as before: a Hister without users ignores it). Set but missing, empty or not a
+    token: refuse to start."""
+    path = (path or "").strip()
+    if not path:
+        return None
+    if not os.path.isfile(path):
+        raise SystemExit("smallweb: SMALLWEB_HISTER_TOKEN_FILE: no token in %s" % path)
+    secret = SecretFile(path)
+    if not secret.value:
+        raise SystemExit("smallweb: SMALLWEB_HISTER_TOKEN_FILE: %s doesn't hold a token on its first line" % path)
+    return secret
+
+
+HISTER_TOKEN = hister_token(os.environ.get("SMALLWEB_HISTER_TOKEN_FILE"))
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+HISTER_OPENER = urllib.request.build_opener(NoRedirect)     # a redirect would carry the token elsewhere: never followed
+
+
+def hister_headers():
+    """Every Hister call's headers: Origin: hister:// and, with SMALLWEB_HISTER_TOKEN_FILE, X-Access-Token."""
+    h = {"Content-Type": "application/json", "Origin": "hister://"}
+    token = HISTER_TOKEN.get() if HISTER_TOKEN is not None else ""
+    if token:
+        h["X-Access-Token"] = token
+    return h
+
+
 def save_to_hister(s):
     """POST the page to Hister (in the background): the canonical URL, no label (a visited page), html + text."""
     if not HISTER or store.saved_hash(s["url"]) == s["sha"]:
@@ -409,9 +477,9 @@ def save_to_hister(s):
                                     "</body></html>" % (render.e(s["title"]), s["body"]),
            "metadata": meta}
     req = urllib.request.Request(HISTER + "/api/add", data=json.dumps(doc).encode(), method="POST",
-                                 headers={"Content-Type": "application/json", "Origin": "hister://"})
+                                 headers=hister_headers())
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with HISTER_OPENER.open(req, timeout=15) as r:
             status = r.status
     except urllib.error.HTTPError as ex:
         status = ex.code                               # 406 skipped by a rule, 422 sensitive
@@ -515,7 +583,7 @@ def status():
     return {"ok": not errors, "ready": True, "error": "; ".join(errors) or None,
             "version": VERSION, "auth": AUTH, "socks": bool(SOCKS),
             "sources": {k: dict(v) for k, v in health.items()},
-            "hister": {"enabled": bool(HISTER), "saved": store.save_count(), "queued": save_state["pending"],
+            "hister": {"enabled": bool(HISTER), "token": HISTER_TOKEN is not None, "saved": store.save_count(), "queued": save_state["pending"],
                        "last_error": hister_state["last_error"]},
             "known_hosts": store.tofu_count()}
 

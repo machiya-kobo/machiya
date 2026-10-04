@@ -1,5 +1,9 @@
 # Changelog: smallweb
 
+## 0.2.2
+
+- **`SMALLWEB_HISTER_TOKEN_FILE`** (phase 1 of the Hister sign-in, docs/contracts/hister.md): the owner's Hister token, sent as `X-Access-Token` with every save to Hister (and by `selftest.py --hister`). Unset sends none, as before (a Hister without users ignores it). A set file that is missing, empty or not a token stops the start; the file is re-read when it changes (a file that vanishes keeps the last good value). Never logged or shown; `/api/status` says `hister.token: true|false`. Hister's redirects are no longer followed.
+
 ## 0.2.1
 
 - `GET /api/changelog` serves this changelog (open, like `/api/status`) for the Machiya status page's recent deploys.

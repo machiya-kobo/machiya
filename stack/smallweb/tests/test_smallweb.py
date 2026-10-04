@@ -9,6 +9,8 @@ deleted afterwards (nothing secret is committed; `old` is valid for one day, so 
 Run, from stack/smallweb (needs openssl): python3 -m unittest discover -s tests
 """
 import atexit
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -267,6 +269,7 @@ def fake_resolve(host, port, type=0, **kw):
 
 
 HISTER_DOCS = []
+HISTER_TOKENS = []                               # the X-Access-Token each save carried (None: none)
 
 
 class HisterFake(BaseHTTPRequestHandler):
@@ -276,6 +279,7 @@ class HisterFake(BaseHTTPRequestHandler):
     def do_POST(self):
         doc = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         HISTER_DOCS.append((self.headers.get("Origin"), doc))
+        HISTER_TOKENS.append(self.headers.get("X-Access-Token"))
         self.send_response(406 if "/skipme" in doc["url"] else 201)          # 406: one of Hister's skip rules
         self.send_header("Content-Length", "0")
         self.end_headers()
@@ -289,7 +293,10 @@ hister = ThreadingHTTPServer(("127.0.0.1", 0), HisterFake)
 threading.Thread(target=hister.serve_forever, daemon=True).start()
 
 DATA = tempfile.mkdtemp()
-os.environ.update(SMALLWEB_DATA=DATA, SMALLWEB_USERS="user@test", SMALLWEB_SOCKS="socks5h://127.0.0.1:%d" % SOCKS_PORT,
+TOKEN = "SmallwebHisterToken0123456789"
+with open(os.path.join(DATA, "hister.token"), "w") as _f:
+    _f.write(TOKEN + "\n")
+os.environ.update(SMALLWEB_HISTER_TOKEN_FILE=os.path.join(DATA, "hister.token"), SMALLWEB_DATA=DATA, SMALLWEB_USERS="user@test", SMALLWEB_SOCKS="socks5h://127.0.0.1:%d" % SOCKS_PORT,
                   SMALLWEB_HISTER_URL="http://127.0.0.1:%d" % hister.server_address[1], SMALLWEB_PER_HOUR="100",
                   SMALLWEB_PUBLIC_URL="https://smallweb.test", SMALLWEB_ORIGINS="https://shiori.test/",
                   SMALLWEB_FETCH_ALLOW="127.0.0.1/32")
@@ -857,6 +864,63 @@ class Gateway(unittest.TestCase):
             smallweb.socks_addr("http://proxy:1080")
         self.assertEqual(smallweb.socks_addr("socks5h://proxy:1080"), "proxy:1080")
 
+
+
+class HisterToken(unittest.TestCase):
+    """SMALLWEB_HISTER_TOKEN_FILE (docs/contracts/hister.md): every save carries X-Access-Token when it is set, none
+    when it isn't; the token is never logged, in /api/status or on argv; a set file that is bad stops the start."""
+
+    def save(self, n):
+        HISTER_DOCS.clear()
+        HISTER_TOKENS.clear()
+        smallweb.save_to_hister({"url": "gemini://tok.test/%s" % n, "title": "t", "text": "x", "body": "x",
+                                 "scheme": "gemini", "mime": "text/gemini", "cert": None, "sha": "sha-%s" % n})
+        self.assertTrue(wait_for(lambda: HISTER_TOKENS))
+        return HISTER_TOKENS[0], HISTER_DOCS[0][0]
+
+    def test_sent_when_set(self):
+        self.assertEqual(self.save(time.time()), (TOKEN, "hister://"))
+
+    def test_absent_when_unset(self):
+        old = smallweb.HISTER_TOKEN
+        smallweb.HISTER_TOKEN = None
+        try:
+            self.assertEqual(self.save(time.time()), (None, "hister://"))
+            self.assertNotIn("X-Access-Token", smallweb.hister_headers())
+        finally:
+            smallweb.HISTER_TOKEN = old
+
+    def test_never_logged_or_shown(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.save(time.time())
+            code, _, body = get("/api/status")
+        self.assertNotIn(TOKEN, err.getvalue())
+        self.assertNotIn(TOKEN, body if isinstance(body, str) else json.dumps(body))
+        self.assertNotIn(TOKEN, repr(smallweb.HISTER_TOKEN))
+        self.assertNotIn(TOKEN, " ".join(sys.argv))
+
+    def test_bad_file_refuses_to_start(self):
+        folder = tempfile.mkdtemp()
+        try:
+            empty = os.path.join(folder, "empty")
+            open(empty, "w").close()
+            for path in (empty, os.path.join(folder, "missing"), folder):
+                with self.assertRaises(SystemExit, msg=path):
+                    smallweb.hister_token(path)
+            self.assertIsNone(smallweb.hister_token(""))
+            rotating = os.path.join(folder, "t")
+            with open(rotating, "w") as f:
+                f.write("first-token\n")
+            secret = smallweb.hister_token(rotating)
+            with open(rotating + ".new", "w") as f:
+                f.write("second-token-longer\n")
+            os.replace(rotating + ".new", rotating)
+            self.assertEqual(secret.get(), "second-token-longer")
+            os.unlink(rotating)
+            self.assertEqual(secret.get(), "second-token-longer")
+        finally:
+            shutil.rmtree(folder)
 
 if __name__ == "__main__":
     unittest.main()

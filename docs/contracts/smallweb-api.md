@@ -123,7 +123,7 @@ The rest of the fetch:
 - **Politeness:** one connection at a time per host, at least 1.5 s apart.
 - **No `robots.txt`:** each save is one page its owner asked for, like a browser visit, not a crawl. smallweb never follows the page's links.
 
-What is saved: the same `POST <SMALLWEB_HISTER_URL>/api/add` with `Origin: hister://`, under the final URL (after redirects, canonical), with no `label`:
+What is saved: the same `POST <SMALLWEB_HISTER_URL>/api/add` with `Origin: hister://` (and, with `SMALLWEB_HISTER_TOKEN_FILE`, `X-Access-Token`: the owner's Hister token; a redirect is never followed), under the final URL (after redirects, canonical), with no `label`:
 
 ```json
 {"url": "https://example.com/notes/page", "title": "A Page",

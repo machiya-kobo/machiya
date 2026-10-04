@@ -85,9 +85,9 @@ def check_pages():
 
 def hister(path, obj=None, method="POST"):
     req = urllib.request.Request(HISTER + path, data=json.dumps(obj).encode() if obj is not None else None, method=method,
-                                 headers={"Content-Type": "application/json", "Origin": "hister://", "Accept": "application/json"})
+                                 headers=dict(smallweb.hister_headers(), Accept="application/json"))
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with smallweb.HISTER_OPENER.open(req, timeout=15) as r:
             return r.status, r.read()
     except urllib.error.HTTPError as ex:
         return ex.code, ex.read()
