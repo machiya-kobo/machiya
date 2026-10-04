@@ -1,6 +1,6 @@
 # Changelog: feed-import
 
-## 0.1.0 (unreleased: prototype, not deployed)
+## 0.1.0
 
 - The reader interface (`readers.py`) and the NewsBlur reader: GET only, with an OAuth token. It reads the stories you read one by one (the last 1,001, which is all NewsBlur keeps) and every starred story.
 - The original article is fetched with smallweb's checked fetcher and sent to Hister as HTML. When it can't be fetched, or is much shorter than the feed's text (a paywall teaser), the reader's copy is stored under the article's URL instead.
