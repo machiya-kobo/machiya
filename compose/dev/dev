@@ -307,7 +307,18 @@ def cmd_init(a):
         die("--url is a scheme and a host only (each service adds its port): http://localhost, "
             "https://claude.example.ts.net")
     engine = "native" if a.native else (a.engine or detect_engine())
+    remote = getattr(a, "remote_hister", None)
+    if remote and engine != "native":
+        die("--remote-hister is for --native (a host that can't run Hister, such as Haiku)")
     os.makedirs(data, exist_ok=True)
+    if remote:      # the other stack's dummy owner and OIDC secret, so its Hister (through a tunnel) knows us
+        os.makedirs(os.path.join(data, "secrets"), mode=0o700, exist_ok=True)
+        for name in ("owner-password", "owner-token", "oidc-client-secret", "hister.env"):
+            src, dst = os.path.join(remote, name), os.path.join(data, "secrets", name)
+            if not os.path.isfile(src):
+                die("--remote-hister %s has no %s (copy the Hister host's $DEV_DATA/secrets)" % (remote, name))
+            shutil.copyfile(src, dst)
+            os.chmod(dst, 0o600)
     for d in ("hister", "login", "kura", "niwa", "konbini", "mirror", "landing", "mcp", "smallweb", "feed-import",
               "logs"):
         os.makedirs(os.path.join(data, d), exist_ok=True)
@@ -328,7 +339,7 @@ def cmd_init(a):
         "KONBINI_SRC": os.path.join(siblings, "konbini"),
         "DEV_UID": str(os.getuid()), "DEV_GID": str(os.getgid()), "DEV_USERNS": userns,
         "DEV_COOKIE_DOMAIN": a.cookie_domain or "", "DEV_TAILNET_USERS": a.tailnet_users or "owner@dev",
-        "DEV_SSO_COOKIE": a.sso_cookie or "",
+        "DEV_SSO_COOKIE": a.sso_cookie or "", "DEV_REMOTE_HISTER": os.path.abspath(remote) if remote else "",
         "DEV_FRONT_SCHEME": "https" if tls else "http",
         "DEV_TLS_CERT": "/certs/tls.crt" if tls else "", "DEV_TLS_KEY": "/certs/tls.key" if tls else "",
     }
@@ -340,9 +351,11 @@ def cmd_init(a):
             f.write(data + "\n")
     if engine != "native":
         subprocess.run([engine, "pull", "-q", HISTER_IMAGE], capture_output=True)
-    elif not shutil.which(env.get("HISTER_BIN") or "hister"):
-        die("--native needs the hister binary: HISTER_BIN=/path/to/hister or `hister` on PATH (docs/dev-stack.md)")
-    make_owner(env, data)
+    elif not remote and not shutil.which(env.get("HISTER_BIN") or "hister"):
+        die("--native needs the hister binary: HISTER_BIN=/path/to/hister or `hister` on PATH, or --remote-hister "
+            "(docs/dev-stack.md)")
+    if not remote:
+        make_owner(env, data)
     with open(os.path.join(data, "dev.env"), "w") as f:            # last: its presence means "initialised"
         f.write("# Written by compose/dev/dev init. The dev stack's settings (no secrets here; those are in secrets/).\n")
         for k, v in env.items():
@@ -422,6 +435,9 @@ def native_up(env, data):
                 continue                                   # already running
             except (OSError, ValueError):
                 pass
+        if name == "hister" and env.get("DEV_REMOTE_HISTER"):
+            say("hister: remote (127.0.0.1:19224 is a tunnel to the Hister host's stack)")
+            continue
         if name == "hister" and not shutil.which(cmd[0]):
             say("hister: no binary (%s): skipped; the rooms answer 503 until a Hister runs on 127.0.0.1:19224" % cmd[0])
             continue
@@ -652,7 +668,8 @@ def cmd_reset(a):
                               behind_serve=env["DEV_URL"].startswith("https") and env.get("DEV_FRONT_SCHEME") == "http",
                               engine=env["DEV_ENGINE"] if env["DEV_ENGINE"] != "native" else None,
                               siblings=os.path.dirname(env["KURA_SRC"]), tailnet_users=env.get("DEV_TAILNET_USERS"),
-                              cookie_domain=env.get("DEV_COOKIE_DOMAIN"), sso_cookie=env.get("DEV_SSO_COOKIE"))
+                              cookie_domain=env.get("DEV_COOKIE_DOMAIN"), sso_cookie=env.get("DEV_SSO_COOKIE"),
+                              remote_hister=env.get("DEV_REMOTE_HISTER") or None)
     cmd_init(init)
     a.verbose = False
     cmd_up(a)
@@ -684,6 +701,9 @@ def main():
     p.add_argument("--siblings", help="where the kura, niwa and konbini checkouts are (default: next to machiya)")
     p.add_argument("--tailnet-users", help="Niwa's and Konbini's fallback login(s) (default owner@dev)")
     p.add_argument("--cookie-domain", help="MACHIYA_COOKIE_DOMAIN (default: none, host-only cookies)")
+    p.add_argument("--remote-hister", metavar="SECRETS_DIR",
+                   help="--native without a local Hister: use the Hister on 127.0.0.1:19224 (an ssh tunnel to another "
+                        "dev stack) with that stack's secrets, copied to SECRETS_DIR")
     p.add_argument("--sso-cookie", help="MACHIYA_SSO_COOKIE, the sign-in cookie's name (default machiya_sso; "
                                         "machiya_dev_sso where a production stack shares the cookie domain)")
     p.set_defaults(fn=cmd_init)

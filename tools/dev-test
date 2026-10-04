@@ -4,7 +4,8 @@
 """dev-test - run the dev stack (compose/dev) and its checks on another machine, such as a clean test VM: the same
 stack, the same synthetic seed, the same checks as on the dev host.
 
-    tools/dev-test HOST [--native] [--packages] [--hister-bin FILE] [--siblings DIR] [--dir DIR] [--keep] [--dry-run]
+    tools/dev-test HOST [--native] [--packages] [--hister-bin FILE | --hister-via HOST2] [--siblings DIR] [--dir DIR]
+                   [--keep] [--dry-run]
 
 It copies this working tree and the kura, niwa and konbini checkouts (their tracked and untracked, not ignored, files:
 what you are testing, committed or not) to HOST:DIR (default /var/tmp/machiya-dev-test, disk-backed) over ssh, then
@@ -22,6 +23,11 @@ before them fails).
   --native       no containers: every service as a process (the BSDs and Haiku have no Docker). Hister is a Go binary
                  with cgo: pass one built for that OS with --hister-bin (it is copied to DIR/hister). SearXNG is left out.
   --hister-bin   a hister binary for the remote OS (--native).
+  --hister-via   HOST2[:DATA] (--native) for an OS with no Hister (Haiku): use the Hister of a dev stack already running
+                 on HOST2 (e.g. `tools/dev-test HOST2 --keep`; DATA defaults to DIR/data there). Its dummy owner's
+                 secrets are copied over, and two ssh tunnels from here join them: HOST2's 127.0.0.1:19224 to this
+                 machine's 127.0.0.1:19324, and that to HOST's 127.0.0.1:19224. Both stacks must use the same public
+                 base (the default https://localhost) for Hister's documents to line up.
 
 The checks are the HTTP ones (no browser on a test VM). Nothing secret travels: the remote init makes its own dummy
 secrets. Standard library only; needs ssh and tar here.
@@ -33,6 +39,7 @@ import shlex
 import subprocess
 import sys
 import tarfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -79,6 +86,7 @@ def main():
     ap.add_argument("--native", action="store_true")
     ap.add_argument("--packages", action="store_true")
     ap.add_argument("--hister-bin")
+    ap.add_argument("--hister-via")
     ap.add_argument("--siblings", default=os.path.dirname(ROOT))
     ap.add_argument("--dir", default="/var/tmp/machiya-dev-test")
     ap.add_argument("--keep", action="store_true")
@@ -92,6 +100,10 @@ def main():
     d = a.dir.rstrip("/")
     dev = "%s/machiya/compose/dev/dev --data %s/data" % (d, d)
     init = dev + " init" + (" --native" if a.native else "")
+    if a.hister_via:
+        if not a.native:
+            sys.exit("dev-test: --hister-via is for --native")
+        init += " --remote-hister %s/hister-secrets" % d
     env = ("HISTER_BIN=%s/hister " % d) if a.hister_bin else ""
     steps = []
     if a.packages:
@@ -119,7 +131,31 @@ def main():
     if a.packages and ssh(a.host, "set -e\n" + steps[0]).returncode:
         print("dev-test: the package step failed")
         return 1
-    rc = ssh(a.host, wrap).returncode
+    tunnels = []
+    if a.hister_via:
+        via, _, via_data = a.hister_via.partition(":")
+        via_data = via_data or d + "/data"
+        names = "owner-password owner-token oidc-client-secret hister.env"
+        secrets = subprocess.run(["ssh", "-o", "BatchMode=yes", via, "tar -C %s/secrets -cf - %s" % (
+            shlex.quote(via_data), names)], capture_output=True).stdout
+        if not secrets or ssh(a.host, "umask 077; rm -rf %s/hister-secrets && mkdir -p %s/hister-secrets && "
+                                      "tar -xf - -C %s/hister-secrets" % (d, d, d), stdin=secrets).returncode:
+            print("dev-test: couldn't copy the Hister host's secrets (is a dev stack running on %s?)" % via)
+            return 1
+        for args in (["-L", "19324:127.0.0.1:19224", via], ["-R", "19224:127.0.0.1:19324", a.host]):
+            tunnels.append(subprocess.Popen(["ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes",
+                                             "-o", "ServerAliveInterval=15"] + args))
+        time.sleep(4)
+        if any(t.poll() is not None for t in tunnels):
+            print("dev-test: a tunnel failed to start")
+            for t in tunnels:
+                t.terminate()
+            return 1
+    try:
+        rc = ssh(a.host, wrap).returncode
+    finally:
+        for t in tunnels:
+            t.terminate()
     print("dev-test: %s on %s" % ("PASS" if rc == 0 else "FAIL (exit %d)" % rc, a.host))
     return rc
 
