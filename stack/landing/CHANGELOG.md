@@ -7,4 +7,4 @@
 - **Sync:** the vault's last pull (Kura, the mirror's `status.json`), the board's commit and LiveSync cycle (Konbini), the garden's unpushed writes (Niwa), the notes' last push into Hister (Kura) and Hister's newest page. Behind is a calm yellow dot; only broken is drawn as an alert.
 - **Recent deploys:** version changes the page saw itself, kept in `LANDING_STATE`, with what each version brought from the app's own `GET /api/changelog` (its `CHANGELOG.md`; `LANDING_CHANGELOGS` overrides an address). An app that doesn't serve one shows its versions only.
 - Owner-only: `LANDING_AUTH=tailscale` with `LANDING_USERS`, or `open` on localhost with a Host allow-list; with `MACHIYA_IDENTITY_FILE`, the `landing` `read` grant.
-- `GET /api/changelog`: this page's own changelog. vaultkit at 9624e4c (the house row and footer link, the `landing` room, `vaultkit.changelog`); re-vendor at the release tag.
+- `GET /api/changelog`: this page's own changelog. vaultkit after v0.17.2, untagged (the house row and footer link, the `landing` room, `vaultkit.changelog`); re-vendor at the release tag.
