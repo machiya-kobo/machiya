@@ -4,6 +4,7 @@
 
 - **URL:** `https://hister.example.ts.net` (for example a Tailscale Service on its own sidecar), owner-only, **no token**. The tailnet grant is the gate, because it holds browsing history.
 - **Image:** `ghcr.io/asciimoo/hister`, pinned (tested with v0.20.0). It's pre-1.0 and releases break things. When bumping it, bump Konbini's `HISTER_VERSION` too (it ships the `hister` CLI for link rot).
+- **MCP:** Hister's own `POST /mcp` (`search`, `get_preview`; `get_history` denied on every client) is how AI clients search and read saved pages; the machiya plugin connects it beside machiya-mcp. Rules: [contracts/hister.md](../contracts/hister.md#histers-mcp). It needs no token while the tailnet grant is the gate; with user handling on, a client sends the owner's Hister token.
 - **Deployment:** its own stack. A deployment can also run Shiori's hosted pages and optional helpers in that stack; none of them is needed to run Hister.
 
 ## Configuration that matters
