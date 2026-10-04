@@ -234,6 +234,40 @@ class CredentialTest(unittest.TestCase):
         self.assertEqual(c(Headers(("Cookie", "machiya_sso=junk"))), ("bad", "", True))
 
 
+class CookieNameTest(unittest.TestCase):
+    """MACHIYA_SSO_COOKIE: a second stack on the same cookie domain (a dev stack) reads, clears and guards with its
+    own names, and never reads the default machiya_sso (another stack's)."""
+
+    def test_default_and_setting(self):
+        self.assertEqual(ha.sso_cookie_name({}), "machiya_sso")
+        self.assertEqual(ha.sso_cookie_name({"MACHIYA_SSO_COOKIE": " machiya_dev_sso "}), "machiya_dev_sso")
+        for bad in ("a b", "x;y", "a=b", "é", "x" * 61):
+            with self.assertRaises(ha.IdentityError):
+                ha.sso_cookie_name({"MACHIYA_SSO_COOKIE": bad})
+        a = ha.load_for("niwa", dict(LoadForTest.BASE, MACHIYA_SSO_COOKIE="machiya_dev_sso"))
+        self.assertEqual((a.sso_cookie, a.try_cookie), ("machiya_dev_sso", "machiya_dev_sso_try"))
+        self.assertEqual(ha.load_for("niwa", dict(LoadForTest.BASE)).sso_cookie, "machiya_sso")
+
+    def test_own_name_only(self):
+        helper, clock = FakeHelper(), Clock()
+        a = ha.HisterAuth("niwa", SIGNIN, ("owner",), "https://niwa.example.ts.net", "http://hl:8081", "tailscale",
+                          ("me@passkey",), "example.ts.net", True, fetch=helper, clock=clock,
+                          sso_cookie="machiya_dev_sso")
+        helper.ok(SID)
+        other = "mhs_" + "B" * 43
+        self.assertEqual(a.credential(Headers(("Cookie", "machiya_sso=%s; machiya_dev_sso=%s" % (other, SID)))),
+                         ("sid", SID, True))
+        self.assertEqual(a.credential(Headers(("Cookie", "machiya_sso=" + other))), (None, "", False))
+        self.assertEqual(a.resolve(Headers(("Cookie", "machiya_sso=%s; machiya_dev_sso=%s" % (other, SID)))).status,
+                         200)
+        r = a.resolve(Headers(("Cookie", "machiya_dev_sso=" + other)), path="/")      # signed out: its own cleared
+        self.assertTrue(any(c.startswith("machiya_dev_sso=;") and "Max-Age=0" in c for c in r.cookies))
+        self.assertTrue(any(c.startswith("machiya_dev_sso_try=1;") for c in r.cookies))
+        self.assertFalse(any(c.startswith(("machiya_sso=", "machiya_sso_try=")) for c in r.cookies))
+        with self.assertRaises(ha.IdentityError):
+            ha.HisterAuth("niwa", SIGNIN, ("owner",), "https://n.example", "http://hl:8081", sso_cookie="bad name")
+
+
 class ResolveTest(unittest.TestCase):
     def cookie(self, sid=SID):
         return Headers(("Cookie", "machiya_sso=" + sid))

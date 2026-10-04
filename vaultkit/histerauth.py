@@ -36,7 +36,8 @@ from urllib.parse import quote, urlencode, urlsplit
 from .identity import Identity, IdentityError, Principal, check_bind, tailscale_uid
 
 SSO_COOKIE = "machiya_sso"              # Domain=MACHIYA_COOKIE_DOMAIN; set only by the helper, cleared by rooms
-TRY_COOKIE = "machiya_sso_try"          # host-only: the loop guard
+TRY_COOKIE = "machiya_sso_try"          # host-only: the loop guard (always <the sign-in cookie's name>_try)
+COOKIE_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,60}\Z")
 SID_PREFIX = "mhs_"
 SID_RE = re.compile(r"mhs_[A-Za-z0-9_-]{43}\Z")       # 32 random bytes, unpadded base64url
 TOKEN_RE = re.compile(r"[\x21-\x7e]{1,4096}\Z")        # printable ASCII, no spaces: anything else is unreadable
@@ -208,11 +209,22 @@ def _http_fetch(base):
     return fetch
 
 
+def sso_cookie_name(env=None):
+    """MACHIYA_SSO_COOKIE: the sign-in cookie's name, `machiya_sso` unless set (a second stack under the same cookie
+    domain, such as a dev stack on the same tailnet, sets its own so the two never read each other's cookie). The
+    rooms, landing and the helper must agree. IdentityError for anything but letters, digits, _ and -."""
+    env = os.environ if env is None else env
+    name = (env.get("MACHIYA_SSO_COOKIE") or "").strip() or SSO_COOKIE
+    if not COOKIE_NAME_RE.match(name):
+        raise IdentityError("MACHIYA_SSO_COOKIE must be a cookie name (letters, digits, _ and -), not %r" % name)
+    return name
+
+
 class HisterAuth:
     """One room's AUTH=hister settings and its check cache. Build it with load_for(); `fetch` is for tests."""
 
     def __init__(self, room, signin, users, public_url, auth_url="", fallback="tailscale", fallback_users=(),
-                 cookie_domain="", secure=True, fetch=None, clock=time.monotonic):
+                 cookie_domain="", secure=True, fetch=None, clock=time.monotonic, sso_cookie=SSO_COOKIE):
         if fallback not in ("tailscale", "none"):
             raise IdentityError("%s: the fallback must be tailscale or none, not %r" % (room, fallback))
         if not signin:
@@ -229,7 +241,10 @@ class HisterAuth:
         self.users = frozenset(users)
         self.auth_url, self.fallback = auth_url, fallback
         self.fallback_users = frozenset(u.strip().lower() for u in fallback_users if u.strip())
+        if not COOKIE_NAME_RE.match(sso_cookie or ""):
+            raise IdentityError("MACHIYA_SSO_COOKIE must be a cookie name, not %r" % sso_cookie)
         self.cookie_domain, self.secure = cookie_domain, secure
+        self.sso_cookie, self.try_cookie = sso_cookie, sso_cookie + "_try"
         self.fetch = fetch or (_http_fetch(auth_url) if auth_url else None)
         self.clock = clock
         self.cache = collections.OrderedDict()      # key -> (expires, outcome): least recently used first
@@ -266,10 +281,11 @@ class HisterAuth:
         return "; ".join(attrs)
 
     def clear_cookies(self):
-        """Set-Cookie values that drop machiya_sso: on the shared domain (and host-only, for a stray copy)."""
-        out = [self._cookie(SSO_COOKIE, "", 0)]
+        """Set-Cookie values that drop the sign-in cookie (machiya_sso): on the shared domain (and host-only, for a
+        stray copy)."""
+        out = [self._cookie(self.sso_cookie, "", 0)]
         if self.cookie_domain:
-            out.append(self._cookie(SSO_COOKIE, "", 0, domain=False))
+            out.append(self._cookie(self.sso_cookie, "", 0, domain=False))
         return out
 
     # -- reading the request
@@ -303,10 +319,10 @@ class HisterAuth:
             if value.startswith(IDENTITY_PREFIXES):
                 return "bad", "", False             # the identity file's tokens aren't combined with hister mode yet
             return "token", value, False
-        for value in self.cookie_values(headers.get("Cookie"), SSO_COOKIE)[:4]:
+        for value in self.cookie_values(headers.get("Cookie"), self.sso_cookie)[:4]:
             if SID_RE.match(value):
                 return "sid", value, True
-        if self.cookie_values(headers.get("Cookie"), SSO_COOKIE):
+        if self.cookie_values(headers.get("Cookie"), self.sso_cookie):
             return "bad", "", True                  # a machiya_sso that can't be one of ours: cleared, then sign-in
         return None, "", False
 
@@ -412,7 +428,7 @@ class HisterAuth:
         if self.standalone:
             return self._fallback(headers, banner=False)
         kind, value, from_cookie = self.credential(headers)
-        guard_set = bool(self.cookie_values(headers.get("Cookie"), TRY_COOKIE))
+        guard_set = bool(self.cookie_values(headers.get("Cookie"), self.try_cookie))
         if kind == "bad":
             return self._signed_out(is_page, path, guard_set, from_cookie)
         if kind is None:
@@ -423,7 +439,7 @@ class HisterAuth:
         if outcome[0] == "ok":
             username = outcome[1]
             via = "token" if kind == "token" else ("hister" if from_cookie else "app")
-            cookies = [self._cookie(TRY_COOKIE, "", 0, domain=False)] if guard_set else []
+            cookies = [self._cookie(self.try_cookie, "", 0, domain=False)] if guard_set else []
             if username not in self.users:
                 return Result(None, 403, NOT_ALLOWED, cookies, actor="%s:%s" % (via, username))
             p = Principal(username, "person", owner=True, via=via, uid=self.uid_for(username))
@@ -440,7 +456,7 @@ class HisterAuth:
             return Result(None, 401, SIGNED_OUT, cookies, signin=where)
         if guard_set:                   # the last trip to the helper didn't stick: a page with a link, not a loop
             return Result(None, 401, SIGNED_OUT, cookies, None, signin=where)
-        cookies.append(self._cookie(TRY_COOKIE, "1", LOOP_WINDOW, domain=False))
+        cookies.append(self._cookie(self.try_cookie, "1", LOOP_WINDOW, domain=False))
         return Result(None, 401, SIGNED_OUT, cookies, where, signin=where)
 
     def _unavailable(self, headers, reason):
@@ -471,7 +487,7 @@ class HisterAuth:
         every id on it; this drops the cached answer. -> (ended, cookies): `ended` False when the helper couldn't be
         reached (the room still clears its cookie, and says other rooms may follow only when sign-in is back)."""
         kind, value, _ = self.credential(headers)
-        cookies = self.clear_cookies() + [self._cookie(TRY_COOKIE, "", 0, domain=False)]
+        cookies = self.clear_cookies() + [self._cookie(self.try_cookie, "", 0, domain=False)]
         if kind != "sid":
             return True, cookies
         self.forget(kind, value)
@@ -547,6 +563,7 @@ def load_for(room, env=None, bind="0.0.0.0", secure=True, fetch=None):
         <P>_USERS             (konbini: KANBAN_TAILNET_USERS) the Tailscale logins admitted in the fallback; never *
         <P>_PUBLIC_URL        (konbini: KANBAN_BOARD_URL) this room's address, for return=; required
         MACHIYA_COOKIE_DOMAIN the shared cookie's domain, for clearing machiya_sso
+        MACHIYA_SSO_COOKIE    the sign-in cookie's name (default machiya_sso; the helper must use the same)
 
     IdentityError (the room must not start) for: no sign-in address, no usernames, a *, an unknown fallback, no
     helper address with fallback none, no public URL, or an identity file at the same time (not combined yet). No
@@ -587,4 +604,5 @@ def load_for(room, env=None, bind="0.0.0.0", secure=True, fetch=None):
     if not auth_url:
         print("%s: hister mode, but no sign-in service: Tailscale identity only" % room, file=sys.stderr, flush=True)
     return HisterAuth(room, signin, users, public_url, auth_url, fallback, fallback_users,
-                      (env.get("MACHIYA_COOKIE_DOMAIN") or "").strip().lstrip("."), secure, fetch)
+                      (env.get("MACHIYA_COOKIE_DOMAIN") or "").strip().lstrip("."), secure, fetch,
+                      sso_cookie=sso_cookie_name(env))

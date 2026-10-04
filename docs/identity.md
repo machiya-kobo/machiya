@@ -195,10 +195,11 @@ A room mode **without the identity file**: the room asks [hister-login](services
 | Tailscale logins admitted in the fallback only (never `*`) | `KURA_USERS` | `NIWA_USERS` | `KANBAN_TAILNET_USERS` |
 | its address, for the way back (required) | `KURA_PUBLIC_URL` | `NIWA_PUBLIC_URL` | `KANBAN_BOARD_URL` |
 | the shared cookie's domain | `MACHIYA_COOKIE_DOMAIN` | same | same |
+| the sign-in cookie's name (default `machiya_sso`; the helper's must match) | `MACHIYA_SSO_COOKIE` | same | same |
 
 - **Refused at start:** no sign-in address or usernames, a `*`, `none` without the helper's address, no public address, or an identity file at the same time (not combined yet). No helper address with the `tailscale` fallback runs on the Tailscale identity alone, with a warning, so a room still stands alone.
 - **Signed out never falls back.** Only "nobody answered" does: the helper or Hister unreachable, a 5xx, or Hister's user handling off. Then a room with `tailscale` admits the owner's Tailscale login with a banner ("Signed in through the tailnet: sign-in is unavailable"), caches nothing and counts it (`fallback_total`); a room with `none` answers 503. A Hister account outside `*_HISTER_USERS` is 403, never a fallback (OAuth creates accounts on its own).
-- **The cookie** (`machiya_sso=mhs_…`, `Domain=MACHIYA_COOKIE_DOMAIN`, Secure, HttpOnly, Lax) is an opaque id; Hister's own session never leaves Hister's host. It still reaches every site under that domain, so the same advice as below holds: a domain only Machiya's rooms serve. A leaked id is revoked on the helper's sessions page.
+- **The cookie** (`machiya_sso=mhs_…`, `Domain=MACHIYA_COOKIE_DOMAIN`, Secure, HttpOnly, Lax) is an opaque id; Hister's own session never leaves Hister's host. It still reaches every site under that domain, so the same advice as below holds: a domain only Machiya's rooms serve. A leaked id is revoked on the helper's sessions page. A second stack under the same domain (a [dev stack](dev-stack.md) on the same tailnet) sets its own `MACHIYA_SSO_COOKIE` in the helper, the rooms and landing, so neither stack reads the other's cookie.
 - **Preferences** stay keyed by the Tailscale login when the room has exactly one fallback login (so the fallback sees the same settings); otherwise by a hash of the Hister username.
 - `/api/status` (Konbini: `/api/health`) stays open for the probes.
 
