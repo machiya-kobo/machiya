@@ -1,14 +1,19 @@
 #!/bin/sh
 # The headers for Hister's MCP (the plugin's `headersHelper`): the owner's Hister token as X-Access-Token, so the token is
 # fetched when Claude Code connects (and again after a 401/403) instead of being written into any settings file.
-# Where it comes from, first found: $HISTER_TOKEN_FILE (a file holding the token), then the pass entry
-# $HISTER_TOKEN_PASS (default hosts/server/stacks/hister/owner-token) if this machine's pass can decrypt it.
-# Nothing found prints {}: no header, which is what a Hister without users expects. Never prints anything but the JSON.
+# Where it comes from, first found: $HISTER_TOKEN_FILE (a file holding the token); then, with `hpass` (pass with this
+# machine's host key: never the owner's YubiKey, so nothing prompts), $HISTER_TOKEN_PASS, else this machine's own copy
+# hosts/<host>/hister-owner-token, else hosts/server/stacks/hister/owner-token.
+# Nothing found prints {}: no header (a Hister without users needs none). Never prints anything but the JSON.
 tok=""
 if [ -n "${HISTER_TOKEN_FILE:-}" ] && [ -r "$HISTER_TOKEN_FILE" ]; then
     tok=$(head -n 1 "$HISTER_TOKEN_FILE" 2>/dev/null)
-elif command -v pass >/dev/null 2>&1; then
-    tok=$(pass show "${HISTER_TOKEN_PASS:-hosts/server/stacks/hister/owner-token}" 2>/dev/null | head -n 1)
+elif command -v hpass >/dev/null 2>&1; then
+    host=$(hostname -s 2>/dev/null | tr 'A-Z' 'a-z')
+    for p in ${HISTER_TOKEN_PASS:-} "hosts/$host/hister-owner-token" hosts/server/stacks/hister/owner-token; do
+        tok=$(hpass show "$p" 2>/dev/null | head -n 1)
+        [ -n "$tok" ] && break
+    done
 fi
 tok=$(printf '%s' "$tok" | tr -d '\r\n\t ')
 case "$tok" in

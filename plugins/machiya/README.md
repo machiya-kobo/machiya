@@ -34,4 +34,4 @@ Set `MACHIYA_MCP_URL` if the server isn't at `https://machiya-mcp.example.ts.net
 
 ## Hister's token
 
-Once Hister's user handling is on, its MCP needs the owner's Hister token. The plugin's `headersHelper` (`bin/hister-headers`) sends it as `X-Access-Token`, read at connect time from `$HISTER_TOKEN_FILE`, else from the pass entry `$HISTER_TOKEN_PASS` (default `hosts/server/stacks/hister/owner-token`) when this machine can decrypt it; with neither it sends no header (a Hister without users needs none). The token is never written into Claude Code's settings.
+Once Hister's user handling is on, its MCP needs the owner's Hister token. The plugin's `headersHelper` (`bin/hister-headers`) sends it as `X-Access-Token`, read at connect time from `$HISTER_TOKEN_FILE`, else with `hpass` (this machine's host key, never a YubiKey prompt) from `$HISTER_TOKEN_PASS`, this machine's own copy `hosts/<host>/hister-owner-token`, or `hosts/server/stacks/hister/owner-token`; with neither it sends no header (a Hister without users needs none). The token is never written into Claude Code's settings.
