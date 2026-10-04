@@ -13,12 +13,22 @@ off). The order of checks, first match decides:
 2. a session id, from Bearer mhs_… or the machiya_sso cookie;
 3. no credential: a page is sent to the helper's sign-in (at most once per 30 s per browser: the loop guard), an API
    call gets 401 JSON {"error": "sign in", "signin": …}; unless sign-in is known to be unavailable, then 4.;
+   with MACHIYA_SIGNIN_PROVIDER (v0.21, e.g. `oidc`: Tailscale's tsidp, which knows the device) the address carries
+   provider=<it>&auto=1, so the helper goes straight through that provider with no page and no tap (an installed web app
+   has its own cookie jar and would otherwise ask once per app); the helper shows its page instead after a
+   deliberate sign-out (the `<sign-in cookie>_out` marker, which signout() sets) or a failed round trip, and the
+   loop guard's page links to the plain sign-in page;
 4. unavailable (the helper or Hister unreachable, a 5xx, or user handling off): with `<P>_AUTH_FALLBACK=tailscale` a
    Tailscale-User-Login in `<P>_USERS` is admitted as the owner, with a banner and nothing cached; with `none` (Kura)
    the answer is 503.
 
 "Signed out" (the helper's 401) never falls back: only "nobody answered" does. A Hister username outside
 `<P>_HISTER_USERS` is a 403 (OAuth creates other accounts on its own), never a fallback and never a redirect.
+
+Preferences (v0.21, docs/contracts/prefs.md): in this mode a room's `/api/prefs` is the account's. The room calls
+`forward_prefs`, which passes the request to the helper's `GET`/`PUT /v1/prefs` with the CALLER's own credential
+(never a user id), so a container on the internal network can't read or write anyone else's settings. The check's
+answer also carries the account's shared preferences (`Result.prefs`) for a fresh browser's first render.
 
 Standard library only; nothing here is specific to one room. The helper shares `safe_return` and `hister_headers`.
 """
@@ -33,21 +43,27 @@ import threading
 import time
 from urllib.parse import quote, urlencode, urlsplit
 
+from . import prefs as vprefs
 from .identity import Identity, IdentityError, Principal, check_bind, tailscale_uid
 
 SSO_COOKIE = "machiya_sso"              # Domain=MACHIYA_COOKIE_DOMAIN; set only by the helper, cleared by rooms
-TRY_COOKIE = "machiya_sso_try"          # host-only: the loop guard
+TRY_COOKIE = "machiya_sso_try"          # host-only: the loop guard (always <the sign-in cookie's name>_try)
+COOKIE_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,60}\Z")
 SID_PREFIX = "mhs_"
 SID_RE = re.compile(r"mhs_[A-Za-z0-9_-]{43}\Z")       # 32 random bytes, unpadded base64url
 TOKEN_RE = re.compile(r"[\x21-\x7e]{1,4096}\Z")        # printable ASCII, no spaces: anything else is unreadable
 IDENTITY_PREFIXES = ("mch_", "mcd_")                   # the identity file's Bearer tokens, never a Hister token
 
 CHECK_TIMEOUT = 2.0                     # /v1/check
+PREFS_TIMEOUT = 2.0                     # /v1/prefs
+MAX_ANSWER = 1 << 20                    # the most of an answer read from the helper
 HEALTH_TIMEOUT = 1.0                    # /healthz
 SIGNOUT_TIMEOUT = 3.0
 TTL_OK, TTL_OUT, TTL_OFF, TTL_DOWN = 30, 5, 10, 5   # the room's cache, by the helper's answer (§3.5)
 HEALTH_TTL = 10                         # a request with no credential re-asks /healthz when the flag is older
 LOOP_WINDOW = 30                        # one redirect to the helper per browser per this many seconds
+OUT_MAX_AGE = 30 * 86400                # the signed-out marker: no automatic sign-in until the next sign-in
+PROVIDER_RE = re.compile(r"[a-z0-9_-]{1,32}\Z")
 CACHE_MAX = 1024
 MAX_RETURN = 2048
 
@@ -163,13 +179,17 @@ class Result:
     location: for a page, where to redirect (302) now; None when the loop guard says show a page instead.
     signin: the helper's sign-in address for this page (for the API's 401 JSON and the "Sign in" link).
     banner: show the fallback banner (BANNER_TEXT).
-    actor: for the log: hister:<u>, app:<u>, token:<u> or fallback:<login>."""
+    actor: for the log: hister:<u>, app:<u>, token:<u> or fallback:<login>.
+    prefs: the account's shared preferences ({"theme", "palette", "text_size", "apps_hidden"}, as the helper's check
+        said, up to 30 s old), for a first render without cookies (shell.prefs(cookies, account=result.prefs)); {}
+        when there is no account (the fallback, Tailscale only) or the helper didn't say."""
 
     def __init__(self, principal=None, status=200, reason=OK, cookies=(), location=None, signin="", banner=False,
-                 actor="", error=""):
+                 actor="", error="", prefs=None):
         self.principal, self.status, self.reason = principal, status, reason
         self.cookies, self.location, self.signin = list(cookies), location, signin
         self.banner, self.actor, self.error = banner, actor, error
+        self.prefs = dict(prefs or {})
 
     def __bool__(self):
         return self.principal is not None
@@ -195,12 +215,12 @@ def _http_fetch(base):
     prefix = u.path.rstrip("/")
     cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
 
-    def fetch(method, path, headers, timeout):
+    def fetch(method, path, headers, timeout, body=None):
         conn = cls(u.hostname, u.port, timeout=timeout)
         try:
-            conn.request(method, prefix + path, headers=dict(headers or {}))
+            conn.request(method, prefix + path, body=body, headers=dict(headers or {}))
             resp = conn.getresponse()
-            return resp.status, resp.read(65536)
+            return resp.status, resp.read(MAX_ANSWER)
         except (http.client.HTTPException, ValueError) as e:
             raise OSError(str(e))
         finally:
@@ -208,11 +228,22 @@ def _http_fetch(base):
     return fetch
 
 
+def sso_cookie_name(env=None):
+    """MACHIYA_SSO_COOKIE: the sign-in cookie's name, `machiya_sso` unless set (a second stack under the same cookie
+    domain, such as a dev stack on the same tailnet, sets its own so the two never read each other's cookie). The
+    rooms, landing and the helper must agree. IdentityError for anything but letters, digits, _ and -."""
+    env = os.environ if env is None else env
+    name = (env.get("MACHIYA_SSO_COOKIE") or "").strip() or SSO_COOKIE
+    if not COOKIE_NAME_RE.match(name):
+        raise IdentityError("MACHIYA_SSO_COOKIE must be a cookie name (letters, digits, _ and -), not %r" % name)
+    return name
+
+
 class HisterAuth:
     """One room's AUTH=hister settings and its check cache. Build it with load_for(); `fetch` is for tests."""
 
     def __init__(self, room, signin, users, public_url, auth_url="", fallback="tailscale", fallback_users=(),
-                 cookie_domain="", secure=True, fetch=None, clock=time.monotonic):
+                 cookie_domain="", secure=True, fetch=None, clock=time.monotonic, sso_cookie=SSO_COOKIE, provider=""):
         if fallback not in ("tailscale", "none"):
             raise IdentityError("%s: the fallback must be tailscale or none, not %r" % (room, fallback))
         if not signin:
@@ -229,7 +260,14 @@ class HisterAuth:
         self.users = frozenset(users)
         self.auth_url, self.fallback = auth_url, fallback
         self.fallback_users = frozenset(u.strip().lower() for u in fallback_users if u.strip())
+        if not COOKIE_NAME_RE.match(sso_cookie or ""):
+            raise IdentityError("MACHIYA_SSO_COOKIE must be a cookie name, not %r" % sso_cookie)
         self.cookie_domain, self.secure = cookie_domain, secure
+        self.sso_cookie, self.try_cookie = sso_cookie, sso_cookie + "_try"
+        self.out_cookie = sso_cookie + "_out"       # a deliberate sign-out: the helper shows its page, no auto sign-in
+        if provider and not PROVIDER_RE.match(provider):
+            raise IdentityError("MACHIYA_SIGNIN_PROVIDER must be a provider's name (a-z, 0-9, _, -), not %r" % provider)
+        self.provider = provider
         self.fetch = fetch or (_http_fetch(auth_url) if auth_url else None)
         self.clock = clock
         self.cache = collections.OrderedDict()      # key -> (expires, outcome): least recently used first
@@ -249,13 +287,17 @@ class HisterAuth:
             return tailscale_uid(self.prefs_login)
         return "hi:" + hashlib.sha256(username.encode("utf-8")).hexdigest()[:32]
 
-    def signin_location(self, path="/"):
+    def signin_location(self, path="/", auto=True):
         """The 302 target for a page at `path` (a local path, query included): the helper's sign-in with return=
-        this room's public address + path. Never built from Host."""
+        this room's public address + path, and provider=<MACHIYA_SIGNIN_PROVIDER> when set and `auto` (the
+        automatic sign-in). Never built from Host."""
         if not isinstance(path, str) or not path.startswith("/") or path[1:2] in ("/", "\\") \
                 or any(ord(c) < 33 or ord(c) == 127 for c in path) or len(path) > MAX_RETURN - 200:
             path = "/"
-        return signin_url(self.signin, self.public_url + quote(path, safe="/?&=%:@!$'()*+,;~-._"))
+        url = signin_url(self.signin, self.public_url + quote(path, safe="/?&=%:@!$'()*+,;~-._"))
+        if auto and self.provider:
+            url += ("&" if "?" in url else "?") + urlencode({"provider": self.provider, "auto": "1"})
+        return url
 
     def _cookie(self, name, value, max_age, domain=True):
         attrs = ["%s=%s" % (name, value), "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=%d" % max_age]
@@ -266,10 +308,11 @@ class HisterAuth:
         return "; ".join(attrs)
 
     def clear_cookies(self):
-        """Set-Cookie values that drop machiya_sso: on the shared domain (and host-only, for a stray copy)."""
-        out = [self._cookie(SSO_COOKIE, "", 0)]
+        """Set-Cookie values that drop the sign-in cookie (machiya_sso): on the shared domain (and host-only, for a
+        stray copy)."""
+        out = [self._cookie(self.sso_cookie, "", 0)]
         if self.cookie_domain:
-            out.append(self._cookie(SSO_COOKIE, "", 0, domain=False))
+            out.append(self._cookie(self.sso_cookie, "", 0, domain=False))
         return out
 
     # -- reading the request
@@ -303,10 +346,10 @@ class HisterAuth:
             if value.startswith(IDENTITY_PREFIXES):
                 return "bad", "", False             # the identity file's tokens aren't combined with hister mode yet
             return "token", value, False
-        for value in self.cookie_values(headers.get("Cookie"), SSO_COOKIE)[:4]:
+        for value in self.cookie_values(headers.get("Cookie"), self.sso_cookie)[:4]:
             if SID_RE.match(value):
                 return "sid", value, True
-        if self.cookie_values(headers.get("Cookie"), SSO_COOKIE):
+        if self.cookie_values(headers.get("Cookie"), self.sso_cookie):
             return "bad", "", True                  # a machiya_sso that can't be one of ours: cleared, then sign-in
         return None, "", False
 
@@ -349,7 +392,7 @@ class HisterAuth:
     # -- asking the helper
 
     def check(self, kind, value):
-        """-> ("ok", username, user_id) | ("out",) | ("off",) | ("down",), cached."""
+        """-> ("ok", username, user_id, shared prefs) | ("out",) | ("off",) | ("down",), cached."""
         key = self._key(kind, value)
         hit = self._cached(key)
         if hit is not None:
@@ -367,7 +410,7 @@ class HisterAuth:
         except ValueError:
             data = None
         if status == 200 and isinstance(data, dict) and isinstance(data.get("username"), str) and data["username"]:
-            outcome, ttl = ("ok", data["username"], data.get("user_id")), TTL_OK
+            outcome, ttl = ("ok", data["username"], data.get("user_id"), vprefs.shared_only(data.get("prefs"))), TTL_OK
         elif status in (400, 401, 403):
             outcome, ttl = ("out",), TTL_OUT
         elif status == 503 and isinstance(data, dict) and data.get("reason") == "user-handling-off":
@@ -412,7 +455,7 @@ class HisterAuth:
         if self.standalone:
             return self._fallback(headers, banner=False)
         kind, value, from_cookie = self.credential(headers)
-        guard_set = bool(self.cookie_values(headers.get("Cookie"), TRY_COOKIE))
+        guard_set = bool(self.cookie_values(headers.get("Cookie"), self.try_cookie))
         if kind == "bad":
             return self._signed_out(is_page, path, guard_set, from_cookie)
         if kind is None:
@@ -423,11 +466,12 @@ class HisterAuth:
         if outcome[0] == "ok":
             username = outcome[1]
             via = "token" if kind == "token" else ("hister" if from_cookie else "app")
-            cookies = [self._cookie(TRY_COOKIE, "", 0, domain=False)] if guard_set else []
+            cookies = [self._cookie(self.try_cookie, "", 0, domain=False)] if guard_set else []
             if username not in self.users:
                 return Result(None, 403, NOT_ALLOWED, cookies, actor="%s:%s" % (via, username))
             p = Principal(username, "person", owner=True, via=via, uid=self.uid_for(username))
-            return Result(p, 200, OK, cookies, actor="%s:%s" % (via, username))
+            return Result(p, 200, OK, cookies, actor="%s:%s" % (via, username),
+                          prefs=outcome[3] if len(outcome) > 3 else None)
         if outcome[0] == "out":
             return self._signed_out(is_page, path, guard_set, from_cookie)
         return self._unavailable(headers, UNAVAILABLE)
@@ -438,9 +482,10 @@ class HisterAuth:
         where = self.signin_location(path)
         if not is_page:
             return Result(None, 401, SIGNED_OUT, cookies, signin=where)
-        if guard_set:                   # the last trip to the helper didn't stick: a page with a link, not a loop
-            return Result(None, 401, SIGNED_OUT, cookies, None, signin=where)
-        cookies.append(self._cookie(TRY_COOKIE, "1", LOOP_WINDOW, domain=False))
+        if guard_set:                   # the last trip to the helper didn't stick: a page with a link, not a loop;
+            return Result(None, 401, SIGNED_OUT, cookies, None,             # the link is the page, not another
+                          signin=self.signin_location(path, auto=False))    # automatic round trip
+        cookies.append(self._cookie(self.try_cookie, "1", LOOP_WINDOW, domain=False))
         return Result(None, 401, SIGNED_OUT, cookies, where, signin=where)
 
     def _unavailable(self, headers, reason):
@@ -471,7 +516,8 @@ class HisterAuth:
         every id on it; this drops the cached answer. -> (ended, cookies): `ended` False when the helper couldn't be
         reached (the room still clears its cookie, and says other rooms may follow only when sign-in is back)."""
         kind, value, _ = self.credential(headers)
-        cookies = self.clear_cookies() + [self._cookie(TRY_COOKIE, "", 0, domain=False)]
+        cookies = self.clear_cookies() + [self._cookie(self.try_cookie, "", 0, domain=False),
+                                          self._cookie(self.out_cookie, "1", OUT_MAX_AGE)]   # no automatic way back
         if kind != "sid":
             return True, cookies
         self.forget(kind, value)
@@ -484,6 +530,87 @@ class HisterAuth:
             status = None
         self._store(self._key(kind, value), ("out",), TTL_OUT)
         return status in (200, 204), cookies
+
+    # -- preferences (docs/contracts/prefs.md)
+
+    def prefs_state(self, result):
+        """The Shared section's state for this request (shell.shared_section): "account" when the caller's settings
+        are the account's, "unavailable" in the fallback (no account while sign-in is down), "standalone" when this
+        room runs without the helper (its own store)."""
+        if self.standalone:
+            return "standalone"
+        if result is None or result.principal is None or result.reason == FALLBACK:
+            return "unavailable"
+        return "account"
+
+    def forward_prefs(self, result, method, headers, body=b"", origins=(), secure=None):
+        """A room's GET/PUT /api/prefs in this mode, after its gate admitted `result`: the account's preferences, from
+        the helper's /v1/prefs, asked with the caller's own credential. -> (status, [(header, value)], body), or None
+        when this room has no helper (the Tailscale identity only): then it keeps its own store (signin.handle_prefs).
+          - the fallback (sign-in unavailable): 503, nothing kept here; machiya.js keeps the change and sends it later;
+          - a PUT carried by the sign-in cookie must be same-origin (`origins`: the room's public address), else 403;
+            one with Bearer or X-Access-Token is a client's, as for every API;
+          - If-None-Match goes along (304), the answer comes back as it is (the contract's JSON, ETag "<rev>");
+          - the helper unreachable or failing: 503 {"error": "preferences unavailable"}; signed out there: 401 with
+            the sign-in address. The body never reaches a log."""
+        from . import signin as vsignin             # signin imports shell; histerauth stays importable on its own
+        if self.standalone:
+            return None
+        if result is None or result.principal is None:
+            return vsignin._json(401, {"error": "sign in", "signin": self.signin_location("/")})
+        if result.reason == FALLBACK or getattr(result.principal, "via", "") in ("fallback", "tailscale"):
+            return vsignin._json(503, {"error": "preferences are unavailable while sign-in is down",
+                                       "reason": "fallback"})
+        if method not in ("GET", "PUT"):
+            return vsignin._json(405, {"error": "GET or PUT"}, [("Allow", "GET, PUT")])
+        kind, value, from_cookie = self.credential(headers)
+        if kind not in ("sid", "token"):
+            return vsignin._json(401, {"error": "sign in", "signin": self.signin_location("/")})
+        out = {"X-Machiya-Session" if kind == "sid" else "X-Access-Token": value, "Accept": "application/json"}
+        data = None
+        if method == "PUT":
+            if from_cookie and not vsignin.same_origin(headers, self.secure if secure is None else secure, origins):
+                return vsignin._json(403, {"error": "cross-site write refused"})
+            if body is None or len(body) > vprefs.MAX_BODY:
+                return vsignin._json(413, {"error": "request body too large"})
+            if vsignin._media(headers) != "application/json":
+                return vsignin._json(415, {"error": "send JSON"})
+            out["Content-Type"] = "application/json"
+            out["Content-Length"] = str(len(body))
+            data = body
+        else:
+            tags = Identity.header_values(headers, "If-None-Match")
+            if len(tags) == 1 and isinstance(tags[0], str) and re.fullmatch(r'(W/)?"[0-9]{1,18}"', tags[0].strip()):
+                out["If-None-Match"] = tags[0].strip()
+        try:
+            status, answer = self.fetch(method, "/v1/prefs", out, PREFS_TIMEOUT, data) if data is not None \
+                else self.fetch(method, "/v1/prefs", out, PREFS_TIMEOUT)
+        except (OSError, http.client.HTTPException):
+            status, answer = None, b""
+        if status == 304:
+            return 304, [("Cache-Control", "no-store"), ("ETag", out["If-None-Match"])], b""
+        try:
+            parsed = json.loads(answer) if answer else None
+        except ValueError:
+            parsed = None
+        if status == 200 and isinstance(parsed, dict) and isinstance(parsed.get("prefs"), dict) \
+                and isinstance(parsed.get("rev"), int):
+            if method == "PUT":                     # the first render's copy follows at once on this room
+                self._new_prefs(kind, value, parsed["prefs"])
+            return vsignin.prefs_answer(200, parsed["rev"], parsed["prefs"], parsed.get("updated") or {})
+        if status in (400, 413, 415) and isinstance(parsed, dict):
+            return vsignin._json(status, {"error": str(parsed.get("error") or "refused")[:300]})
+        if status in (401, 403):
+            self.forget(kind, value)
+            return vsignin._json(401, {"error": "sign in", "signin": self.signin_location("/")})
+        return vsignin._json(503, {"error": "preferences unavailable"})
+
+    def _new_prefs(self, kind, value, prefs):
+        key = self._key(kind, value)
+        with self.lock:
+            hit = self.cache.get(key)
+            if hit and hit[1][0] == "ok":
+                self.cache[key] = (hit[0], hit[1][:3] + (vprefs.shared_only(prefs),))
 
     # -- default answers (a room may use its own pages instead)
 
@@ -547,6 +674,9 @@ def load_for(room, env=None, bind="0.0.0.0", secure=True, fetch=None):
         <P>_USERS             (konbini: KANBAN_TAILNET_USERS) the Tailscale logins admitted in the fallback; never *
         <P>_PUBLIC_URL        (konbini: KANBAN_BOARD_URL) this room's address, for return=; required
         MACHIYA_COOKIE_DOMAIN the shared cookie's domain, for clearing machiya_sso
+        MACHIYA_SSO_COOKIE    the sign-in cookie's name (default machiya_sso; the helper must use the same)
+        MACHIYA_SIGNIN_PROVIDER  sign in automatically through that provider of the helper's (`oidc`: tsidp);
+                              empty (the default): the helper's page
 
     IdentityError (the room must not start) for: no sign-in address, no usernames, a *, an unknown fallback, no
     helper address with fallback none, no public URL, or an identity file at the same time (not combined yet). No
@@ -587,4 +717,6 @@ def load_for(room, env=None, bind="0.0.0.0", secure=True, fetch=None):
     if not auth_url:
         print("%s: hister mode, but no sign-in service: Tailscale identity only" % room, file=sys.stderr, flush=True)
     return HisterAuth(room, signin, users, public_url, auth_url, fallback, fallback_users,
-                      (env.get("MACHIYA_COOKIE_DOMAIN") or "").strip().lstrip("."), secure, fetch)
+                      (env.get("MACHIYA_COOKIE_DOMAIN") or "").strip().lstrip("."), secure, fetch,
+                      sso_cookie=sso_cookie_name(env),
+                      provider=(env.get("MACHIYA_SIGNIN_PROVIDER") or "").strip().lower())

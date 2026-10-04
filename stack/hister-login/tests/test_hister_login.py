@@ -201,7 +201,8 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(status, 400)
 
     def test_tokens(self):
-        self.assertEqual(self.check(token="tok-owner"), (200, {"username": "owner", "user_id": 1, "via": "token"}))
+        self.assertEqual(self.check(token="tok-owner"), (200, {"username": "owner", "user_id": 1, "via": "token",
+                                                              "prefs": {}}))
         self.assertEqual(self.check(token="tok-other")[1]["username"], "other")
         self.assertEqual(self.check(token="nope"), (401, {"reason": "signed-out"}))
         n = self.fake.calls["/api/profile"]
@@ -364,6 +365,61 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(self.check(frag["sid"])[1]["kind"], "app")
         self.assertIn(frag["hister"], self.fake.sessions)
         self.assertIsNone(cookie_value(headers, "machiya_sso"))          # the app holds the id, not a cookie
+
+    # -- the automatic sign-in (MACHIYA_SIGNIN_PROVIDER in the rooms: provider=oidc&auto=1)
+
+    def test_auto_signin_goes_through_the_provider(self):
+        q = urlencode({"return": KURA, "provider": "oidc", "auto": "1"})
+        status, headers, _ = self.public("GET", "/machiya/signin?" + q)
+        self.assertEqual((status, dict(headers)["Location"]), (303, "/api/oauth?provider=oidc"))
+        self.assertTrue(cookie_value(headers, "machiya_return"))
+
+    def test_auto_signin_after_a_deliberate_signout_shows_the_page(self):
+        session, sid, _ = self.sign_in()
+        status, headers, _ = self.public("POST", "/machiya/signout", {
+            "Cookie": "hister=%s; machiya_sso=%s" % (session, sid), "Origin": PUBLIC, "Content-Length": "0"})
+        marker = [c for c in cookies_of(headers) if c.startswith("machiya_sso_out=1")]
+        self.assertEqual(len(marker), 1)
+        self.assertIn("Domain=example.test", marker[0])                     # the rooms' sign-outs set the same one
+        q = urlencode({"return": KURA, "provider": "oidc", "auto": "1"})
+        status, headers, body = self.public("GET", "/machiya/signin?" + q, {"Cookie": "machiya_sso_out=1"})
+        self.assertEqual(status, 200)                                       # the page, not straight back in
+        self.assertIn(b'id="hister-signin"', body)
+        self.assertIn(b'href="/api/oauth?provider=oidc"', body)            # one tap still works
+        # a tap (provider= without auto, Shiori's button) is a choice: it goes through
+        q = urlencode({"return": KURA, "provider": "oidc"})
+        self.assertEqual(self.public("GET", "/machiya/signin?" + q, {"Cookie": "machiya_sso_out=1"})[0], 303)
+        # signing in again clears the marker, so the next time is automatic again
+        session = self.fake.signed_in()
+        status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": KURA}),
+                                         {"Cookie": "hister=%s; machiya_sso_out=1" % session})
+        self.assertEqual(status, 303)
+        cleared = [c for c in cookies_of(headers) if c.startswith("machiya_sso_out=;")]
+        self.assertTrue(cleared and all("Max-Age=0" in c for c in cleared))
+
+    def test_sessions_page_signout_sets_the_marker(self):
+        session, sid, _ = self.sign_in()
+        status, headers, _ = self.public("POST", "/machiya/sessions", {
+            "Cookie": "machiya_sso=" + sid, "Origin": PUBLIC, "Content-Type": "application/x-www-form-urlencoded",
+            "Content-Length": "6"}, b"do=all")
+        self.assertEqual(status, 303)
+        self.assertTrue(any(c.startswith("machiya_sso_out=1") for c in cookies_of(headers)))
+
+    def test_failed_round_trip_lands_on_the_page_once(self):
+        """The provider's round trip didn't finish (a bad state, Hister refusing): the page with a message and a short
+        marker, so the next automatic try shows the page instead of looping."""
+        ret = hl.b64e(json.dumps({"r": KURA, "a": 0}).encode())
+        status, headers, body = self.public("GET", "/api/oauth/callback?provider=oidc&code=c&state=bad",
+                                            {"Cookie": "machiya_return=" + ret})
+        self.assertEqual(status, 401)
+        self.assertIn(b"didn&#x27;t work", body)
+        self.assertIn(b'id="hister-signin"', body)
+        failed = [c for c in cookies_of(headers) if c.startswith("machiya_sso_out=failed")]
+        self.assertTrue(failed and "Max-Age=600" in failed[0] and "Domain" not in failed[0])
+        self.assertTrue(any(c.startswith("machiya_return=;") for c in cookies_of(headers)))
+        self.assertIsNone(cookie_value(headers, "machiya_sso"))
+        q = urlencode({"return": KURA, "provider": "oidc", "auto": "1"})
+        self.assertEqual(self.public("GET", "/machiya/signin?" + q, {"Cookie": "machiya_sso_out=failed"})[0], 200)
 
     def test_signin_straight_to_a_provider(self):
         """Shiori's "Sign In with Tailscale" (0.1.3): ?provider=oidc sets the return cookie and goes to Hister's OAuth."""
@@ -563,6 +619,211 @@ class HelperTest(unittest.TestCase):
         got = self.one_connection(self.int, [("POST", "/v1/signout", {"X-Machiya-Session": "x"}, b"{}"),
                                              ("GET", "/v1/check", {"X-Machiya-Session": sid})])
         self.assertEqual([g[0] for g in got], [204, 200])
+
+
+class PrefsTest(unittest.TestCase):
+    """0.2.0: the account's settings (docs/contracts/prefs.md), one store keyed by the Hister user: the rooms' /v1/prefs
+    with the caller's own credential, the apps' and hosted pages' /machiya/api/prefs."""
+    setUp, tearDown, req, public, internal, check, sign_in = (
+        HelperTest.setUp, HelperTest.tearDown, HelperTest.req, HelperTest.public, HelperTest.internal,
+        HelperTest.check, HelperTest.sign_in)
+    one_connection, raw, age = HelperTest.one_connection, HelperTest.raw, HelperTest.age
+
+    def put(self, port, path, prefs, headers):
+        body = json.dumps({"prefs": prefs}).encode()
+        h = dict(headers, **{"Content-Type": "application/json", "Content-Length": str(len(body))})
+        status, hdrs, out = self.req(port, "PUT", path, h, body)
+        return status, dict(hdrs), json.loads(out or b"null")
+
+    def get(self, port, path, headers):
+        status, hdrs, out = self.req(port, "GET", path, headers)
+        return status, dict(hdrs), json.loads(out) if out else None
+
+    def test_one_store_every_credential(self):
+        _, sid, _ = self.sign_in()
+        status, hdrs, data = self.put(self.int, "/v1/prefs", {"theme": "auto", "palette": "nord"},
+                                      {"X-Machiya-Session": sid})
+        self.assertEqual((status, data["v"], data["rev"], data["prefs"]), (200, 1, 1, {"palette": "nord",
+                                                                                      "theme": "system"}))
+        self.assertEqual(hdrs["ETag"], '"1"')
+        self.assertEqual(hdrs["Cache-Control"], "no-store")
+        # the owner's Hister token (a room's /api/prefs for an agent, or an extension) sees the same account
+        status, _, data = self.get(self.int, "/v1/prefs", {"X-Access-Token": "tok-owner"})
+        self.assertEqual(data["prefs"], {"palette": "nord", "theme": "system"})
+        # an app: Bearer mhs_ on the public port; a 304 when nothing changed
+        status, hdrs, data = self.get(self.pub, "/machiya/api/prefs", {"Authorization": "Bearer " + sid,
+                                                                     "If-None-Match": '"1"'})
+        self.assertEqual((status, data, hdrs["ETag"]), (304, None, '"1"'))
+        status, _, data = self.put(self.pub, "/machiya/api/prefs", {"text_size": "large"},
+                                   {"Authorization": "Bearer tok-owner"})
+        self.assertEqual((status, data["rev"], sorted(data["updated"])), (200, 2, ["palette", "text_size", "theme"]))
+        # another user's account is another key: never the owner's
+        status, _, data = self.get(self.pub, "/machiya/api/prefs", {"X-Access-Token": "tok-other"})
+        self.assertEqual((status, data["prefs"], data["rev"]), (200, {}, 0))
+        rows = self.login.prefs.principals()
+        self.assertEqual(rows, [hl.user_key("owner")])
+        self.assertTrue(rows[0].startswith("hi:") and len(rows[0]) == 35)
+        # the check carries the shared ones, for a fresh browser's first render
+        self.assertEqual(self.check(sid)[1]["prefs"], {"palette": "nord", "text_size": "large", "theme": "system"})
+        self.assertEqual(os.stat(self.settings.prefs_db).st_mode & 0o777, 0o600)
+        self.assertEqual(os.path.dirname(self.settings.prefs_db), os.path.dirname(self.settings.db))
+
+    def test_refusals(self):
+        _, sid, _ = self.sign_in()
+        sess = {"X-Machiya-Session": sid}
+        self.assertEqual(self.put(self.int, "/v1/prefs", {"theme": "sepia"}, sess)[0], 400)
+        self.assertEqual(self.put(self.int, "/v1/prefs", {"x": "1"}, sess)[0], 400)
+        self.assertEqual(self.put(self.int, "/v1/prefs", {"theme": "day"}, {})[0], 400)            # no credential
+        self.assertEqual(self.put(self.int, "/v1/prefs", {"theme": "day"},
+                                  dict(sess, **{"X-Access-Token": "tok-owner"}))[0], 400)      # two
+        self.assertEqual(self.get(self.int, "/v1/prefs", {"X-Machiya-Session": "mhs_" + "x" * 43})[0], 401)
+        self.assertEqual(self.get(self.int, "/v1/prefs", {"X-Access-Token": "nope"})[0], 401)
+        status, _, data = self.get(self.pub, "/machiya/api/prefs", {})
+        self.assertEqual((status, data["signin"]), (401, PUBLIC + "/machiya/signin"))
+        status, _, out = self.req(self.int, "PUT", "/v1/prefs", dict(sess, **{"Content-Type": "text/plain",
+                                                                              "Content-Length": "2"}), b"{}")
+        self.assertEqual(status, 415)
+        self.fake.fail = True                                                # Hister down: no account to ask
+        self.age()
+        status, _, data = self.get(self.int, "/v1/prefs", sess)
+        self.assertEqual((status, data["error"]), (503, "preferences unavailable"))
+
+    def test_cookie_put_needs_an_origin_of_the_house(self):
+        """The hosted pages reach /machiya/api/prefs through their own nginx with the sign-in cookie: a GET is fine,
+        a PUT only from a return host's page (or the helper's own)."""
+        _, sid, _ = self.sign_in()
+        cookie = {"Cookie": "machiya_sso=" + sid}
+        self.assertEqual(self.get(self.pub, "/machiya/api/prefs", cookie)[0], 200)
+        self.assertEqual(self.put(self.pub, "/machiya/api/prefs", {"theme": "day"}, cookie)[0], 403)
+        self.assertEqual(self.put(self.pub, "/machiya/api/prefs", {"theme": "day"},
+                                  dict(cookie, Origin="https://evil.example"))[0], 403)
+        status, _, data = self.put(self.pub, "/machiya/api/prefs", {"theme": "day"},
+                                   dict(cookie, Origin="https://kura.example.test"))
+        self.assertEqual((status, data["prefs"]), (200, {"theme": "day"}))
+        status, hdrs, _ = self.req(self.pub, "OPTIONS", "/machiya/api/prefs", {"Origin": "https://evil.example"})
+        self.assertFalse(any(k.lower().startswith("access-control-") for k, _ in hdrs))     # no CORS
+
+    def test_keep_alive_prefs_answer_each_request_alone(self):
+        """Different people's prefs requests down one connection (as Tailscale Serve sends them): each is answered
+        for its own credential only."""
+        _, sid, _ = self.sign_in()
+        _, other, _ = self.sign_in(session=self.fake.signed_in("other"))
+        body = json.dumps({"prefs": {"palette": "ayu"}}).encode()
+        put = lambda h: ("PUT", "/v1/prefs", dict(h, **{"Content-Type": "application/json",     # noqa: E731
+                                                         "Content-Length": str(len(body))}), body)
+        got = self.one_connection(self.int, [
+            put({"X-Machiya-Session": sid}),                      # the owner writes
+            ("GET", "/v1/prefs", {"X-Machiya-Session": other}),   # another person: their own, empty
+            ("GET", "/v1/prefs", {}),                             # nobody: 400
+            ("GET", "/v1/prefs", {"X-Access-Token": "tok-owner"}),
+            ("GET", "/v1/prefs", {"X-Access-Token": "nope"}),
+        ])
+        self.assertEqual([g[0] for g in got], [200, 200, 400, 200, 401])
+        self.assertEqual(json.loads(got[1][2])["prefs"], {})
+        self.assertEqual(json.loads(got[3][2])["prefs"], {"palette": "ayu"})
+        got = self.one_connection(self.pub, [
+            ("GET", "/machiya/api/prefs", {"Authorization": "Bearer " + other}),
+            ("GET", "/machiya/api/prefs", {"Cookie": "machiya_sso=" + sid}),
+            ("GET", "/machiya/api/prefs", {}),
+        ])
+        self.assertEqual([g[0] for g in got], [200, 200, 401])
+        self.assertEqual([json.loads(g[2]).get("prefs") for g in got[:2]], [{}, {"palette": "ayu"}])
+
+    def test_keep_alive_unread_prefs_body_never_becomes_a_request(self):
+        _, sid, _ = self.sign_in()
+        smuggled = b"GET /v1/nginx HTTP/1.1\r\nHost: x\r\nX-Machiya-Session: %s\r\n\r\n" % sid.encode()
+        for port, head in ((self.int, b"PUT /v1/prefs HTTP/1.1\r\nHost: x\r\n"),            # no credential: 400
+                           (self.int, b"PUT /v1/nope HTTP/1.1\r\nHost: x\r\n"),
+                           (self.int, b"GET /v1/prefs HTTP/1.1\r\nHost: x\r\nX-Access-Token: nope\r\n"),
+                           (self.pub, b"PUT /machiya/api/prefs HTTP/1.1\r\nHost: x\r\nAuthorization: Basic x\r\n"),
+                           (self.pub, b"PUT /machiya/nope HTTP/1.1\r\nHost: x\r\n"),
+                           (self.pub, b"GET /machiya/api/prefs HTTP/1.1\r\nHost: x\r\n")):
+            out, closed = self.raw(port, head + b"Content-Length: %d\r\n\r\n" % len(smuggled) + smuggled)
+            self.assertEqual(out.count(b"HTTP/1.1 "), 1, head)
+            self.assertTrue(closed, head)
+            self.assertNotIn(b"X-Hister-Cookie", out)
+        # a PUT whose body was read keeps the connection
+        body = b'{"prefs": {"theme": "night"}}'
+        got = self.one_connection(self.int, [
+            ("PUT", "/v1/prefs", {"X-Machiya-Session": sid, "Content-Type": "application/json",
+                                  "Content-Length": str(len(body))}, body),
+            ("GET", "/v1/check", {"X-Machiya-Session": sid})])
+        self.assertEqual([g[0] for g in got], [200, 200])
+        self.assertEqual(json.loads(got[1][2])["prefs"], {"theme": "night"})
+
+    def test_values_never_logged(self):
+        _, sid, _ = self.sign_in()
+        self.put(self.int, "/v1/prefs", {"kura.secretish": "LANTERN-VALUE"}, {"X-Machiya-Session": sid})
+        self.assertNotIn("LANTERN-VALUE", self.err.getvalue())
+
+
+class PrefsCliTest(unittest.TestCase):
+    """`hister_login.py prefs import|show|delete`: the migration rule (the newest across the rooms' files wins, the
+    account's own newer values kept, a second run changes nothing)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.env = {"HISTER_LOGIN_DB": os.path.join(self.tmp, "hister-login.sqlite3")}
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def room(self, name, rows):
+        path = os.path.join(self.tmp, name + ".sqlite3")
+        db = sqlite3.connect(path)
+        db.execute("CREATE TABLE prefs (principal TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, "
+                   "updated INTEGER NOT NULL, PRIMARY KEY (principal, key))")
+        db.executemany("INSERT INTO prefs VALUES (?,?,?,?)", rows)
+        db.commit()
+        db.close()
+        return path
+
+    def run_cli(self, *argv):
+        out = io.StringIO()
+        code = hl.prefs_cli(list(argv), self.env, out)
+        return code, out.getvalue()
+
+    def test_import_newest_wins(self):
+        from vaultkit.identity import tailscale_uid
+        owner = hl.user_key("owner")
+        ts = tailscale_uid("me@example.com")
+        kura = self.room("kura", [(owner, "theme", "day", 300), (owner, "palette", "nord", 100)])
+        konbini = self.room("konbini", [(ts, "theme", "night", 200), (ts, "palette", "dracula", 400),
+                                        ("ts:someoneelse", "theme", "day", 999)])
+        niwa = self.room("niwa", [("ts:onlyone", "text_size", "large", 50), ("ts:onlyone", "bogus", "x", 1)])
+        code, out = self.run_cli("import", "--user", "owner", "--tailscale", "me@example.com", kura, konbini, niwa)
+        self.assertEqual(code, 0, out)
+        store = hl.vprefs.Store(hl.prefs_path(self.env))
+        rev, values, updated = store.snapshot(owner)
+        self.assertEqual(values, {"theme": "day", "palette": "dracula", "text_size": "large"})
+        self.assertEqual(updated, {"theme": 300, "palette": 400, "text_size": 50})
+        self.assertIn("one principal (ts:onlyone), taken as owner", out)
+        self.assertIn("skipped (not in the schema)", out)
+        self.assertNotIn("someoneelse", out.split("principal")[0])
+        # again: nothing changes
+        self.assertEqual(self.run_cli("import", "--user", "owner", "--tailscale", "me@example.com", kura, konbini,
+                                      niwa)[0], 0)
+        self.assertEqual(store.snapshot(owner)[0], rev)
+        # a value the account set later is kept
+        store.write(owner, {"theme": "night"})
+        self.run_cli("import", "--user", "owner", kura)
+        self.assertEqual(store.snapshot(owner)[1]["theme"], "night")
+        code, out = self.run_cli("show", "--user", "owner")
+        self.assertIn("palette", out)
+        code, out = self.run_cli("delete", "--user", "owner")
+        self.assertEqual(store.snapshot(owner)[1], {})
+
+    def test_ambiguous_file_refused_and_dry_run(self):
+        two = self.room("two", [("ts:a", "theme", "day", 1), ("ts:b", "theme", "night", 2)])
+        code, out = self.run_cli("import", "--user", "owner", two)
+        self.assertEqual(code, 1)
+        self.assertIn("name one with --principal", out)
+        code, out = self.run_cli("import", "--user", "owner", "--principal", "ts:b", "--dry-run", two)
+        self.assertEqual(code, 0)
+        self.assertIn("dry run", out)
+        self.assertFalse(os.path.exists(hl.prefs_path(self.env)) and
+                         hl.vprefs.Store(hl.prefs_path(self.env)).snapshot(hl.user_key("owner"))[1])
+        self.assertEqual(self.run_cli("import", "--user", "owner", os.path.join(self.tmp, "missing"))[0], 1)
 
 
 class CookieNameTest(unittest.TestCase):

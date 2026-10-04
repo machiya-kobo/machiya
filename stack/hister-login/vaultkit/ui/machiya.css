@@ -453,6 +453,12 @@ li.task > input[type=checkbox], li.task > p > input[type=checkbox] { margin: 0 .
   background: var(--hl); color: var(--fg2); cursor: pointer; }
 .settings .item button:disabled { opacity: .6; cursor: default; }
 .settings .footnote { margin: 6px 6px 0; font-size: var(--fs-xs); color: var(--comment); line-height: 1.5; }
+.settings .item[hidden] { display: none; }
+.settings .item.subhead { padding-top: 9px; padding-bottom: 7px; font-size: var(--fs-s); font-weight: 600; color: var(--muted); }
+/* the Shared section's state line (shell.shared_section): where the choices are kept right now */
+.settings .footnote.prefs-state { margin-top: 2px; color: var(--muted); }
+.settings .footnote.prefs-state[data-prefs-state="unavailable"] { color: var(--yellow); }
+.settings .footnote.prefs-state a { color: var(--blue); font-weight: 600; }
 .settings select, .settings input[type="text"], .settings input[type="url"] {
   font: inherit; font-size: var(--fs-s); color: var(--fg); background: var(--hl); border: 1px solid var(--line2);
   border-radius: 8px; padding: 5px 8px; max-width: 60%; }

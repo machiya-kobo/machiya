@@ -10,14 +10,23 @@ Two ports:
   public   (HISTER_LOGIN_PORT, 8080): GET /machiya/signin, GET /api/oauth/callback (a pass-through shim),
            POST /machiya/signout, GET/POST /machiya/sessions, POST /machiya/api/app-session, GET /machiya/healthz
            (the probe's: 200 while the helper and its state work, with Hister's state as "hister"; 503 only when the
-           helper's own state fails),
-           /machiya/static/…
+           helper's own state fails), GET/PUT /machiya/api/prefs (0.2.0: the account's settings, for Shiori's apps,
+           extensions and hosted pages), /machiya/static/…
   internal (HISTER_LOGIN_INTERNAL_PORT, 8081; never routed by Serve): GET /v1/check, POST /v1/signout,
-           GET /v1/nginx (nginx auth_request), GET /healthz (the rooms': 503 unless the helper AND Hister are fine)
+           GET /v1/nginx (nginx auth_request), GET /healthz (the rooms': 503 unless the helper AND Hister are fine),
+           GET/PUT /v1/prefs (0.2.0: a room's /api/prefs, forwarded with the caller's own credential)
 
 State: one SQLite file (HISTER_LOGIN_DB). An id is stored only as its SHA-256; the Hister session it maps to is
-stored raw (the helper must present it to Hister). Standard library only, plus the vendored vaultkit.
+stored raw (the helper must present it to Hister). The settings that follow each Hister user are a second file
+(HISTER_LOGIN_PREFS_DB, prefs.sqlite3 beside it; docs/contracts/prefs.md), keyed by hi:<sha256(username)>, so the
+sessions file stays as small and as sensitive as it is. Standard library only, plus the vendored vaultkit.
+
+    python3 hister_login.py                                   serve
+    python3 hister_login.py prefs import --user NAME FILE…    seed NAME's settings from the rooms' old prefs files
+    python3 hister_login.py prefs show --user NAME            what NAME's account holds
+    python3 hister_login.py prefs delete --user NAME          forget NAME's settings (an account removed)
 """
+import argparse
 import base64
 import hashlib
 import html
@@ -37,9 +46,9 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from vaultkit import histerauth, shell, signin as vsignin   # noqa: E402
+from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.1.3"
+VERSION = "0.2.0"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -48,6 +57,8 @@ COOKIE_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,60}\Z")
 VERIFY_TTL = 30                 # an id checked with Hister this recently is answered from the row
 TOKEN_TTL_OK, TOKEN_TTL_OUT = 30, 5
 SESSION_DAYS, CAP_DAYS = 30, 180
+OUT_MAX_AGE = histerauth.OUT_MAX_AGE    # the signed-out marker (<sign-in cookie>_out): until the next sign-in
+FAILED_MAX_AGE = 600                    # after a failed automatic round trip: the page, not another try
 HEALTH_TTL = 10
 HISTER_TIMEOUT = 2.0
 MAX_BODY = 4096
@@ -86,6 +97,7 @@ class Settings:
         self.sso = (env.get("MACHIYA_SSO_COOKIE") or "").strip() or SSO
         if not COOKIE_NAME_RE.match(self.sso):
             raise SystemExit("hister-login: MACHIYA_SSO_COOKIE must be a cookie name (letters, digits, _ and -)")
+        self.out = self.sso + "_out"            # the signed-out marker: no automatic sign-in (histerauth sets it too)
         u = urlsplit(self.public_url)
         own = u.hostname + ("" if u.port in (None, 443) else ":%d" % u.port)
         hosts = env.get("HISTER_LOGIN_RETURN_HOSTS")
@@ -104,12 +116,26 @@ class Settings:
         if not self.cookie_domain:
             LOG("hister-login: MACHIYA_COOKIE_DOMAIN is unset: machiya_sso stays on this host, so no room sees it")
         self.db = (env.get("HISTER_LOGIN_DB") or "/data/hister-login.sqlite3").strip()
+        self.prefs_db = prefs_path(env)
         self.bind = (env.get("HISTER_LOGIN_BIND") or "0.0.0.0").strip()
         self.port = int(env.get("HISTER_LOGIN_PORT") or 8080)
         self.internal_port = int(env.get("HISTER_LOGIN_INTERNAL_PORT") or 8081)
         self.providers = [p.strip().lower() for p in (env.get("HISTER_LOGIN_PROVIDERS") or "").split(",")
                           if p.strip()]
         self.oidc_label = (env.get("HISTER_LOGIN_OIDC_LABEL") or "Tailscale").strip()
+
+
+def prefs_path(env):
+    """HISTER_LOGIN_PREFS_DB, else prefs.sqlite3 beside HISTER_LOGIN_DB."""
+    db = (env.get("HISTER_LOGIN_DB") or "/data/hister-login.sqlite3").strip()
+    return (env.get("HISTER_LOGIN_PREFS_DB") or "").strip() or os.path.join(os.path.dirname(os.path.abspath(db)),
+                                                                            "prefs.sqlite3")
+
+
+def user_key(username):
+    """The account's key in the prefs file: hi:<sha256(Hister username)[:32]>, the rooms' own form (histerauth's
+    uid_for without a fallback login), so Kura's old rows carry over as they are."""
+    return "hi:" + hashlib.sha256(username.encode("utf-8")).hexdigest()[:32]
 
 
 # -- Hister ----------------------------------------------------------------------------------------------------------
@@ -306,12 +332,28 @@ class Store:
 # -- the core --------------------------------------------------------------------------------------------------------
 
 class Login:
-    def __init__(self, settings, store=None, hister=None):
+    def __init__(self, settings, store=None, hister=None, prefs=None):
         self.s = settings
         self.store = store or Store(settings.db)
         self.hister = hister or Hister(settings.hister_url)
+        self.prefs = prefs or vprefs.Store(settings.prefs_db)
         self.tokens = {}                # sha(token) -> (expires, outcome)
         self.tokens_lock = threading.Lock()
+
+    def who(self, kind, value):
+        """A credential -> ("ok", username) | ("out",) | ("off",) | ("down",): the same checks as /v1/check."""
+        if kind == "sid":
+            outcome, row = self.check_sid(value)
+            return ("ok", row["username"]) if outcome == "ok" else (outcome,)
+        answer = self.check_token(value)
+        return ("ok", answer[1]) if answer[0] == "ok" else (answer[0],)
+
+    def shared_prefs(self, username):
+        """The account's Shared settings for /v1/check (a fresh browser's first render); {} when the file fails."""
+        try:
+            return vprefs.shared_only(self.prefs.snapshot(user_key(username))[1])
+        except (sqlite3.Error, OSError, vprefs.PrefsError):
+            return {}
 
     # checks
 
@@ -385,6 +427,21 @@ class Login:
             out.append(self.cookie(self.s.sso, "", 0))
         return out
 
+    def signed_out(self):
+        """A deliberate sign-out: the marker that stops the automatic sign-in (?provider=) until the next sign-in, on
+        the shared domain so the rooms' own sign-outs set the same one."""
+        return [self.cookie(self.s.out, "1", OUT_MAX_AGE, domain=True)]
+
+    def marker_clear(self):
+        out = [self.cookie(self.s.out, "", 0, domain=True)]
+        if self.s.cookie_domain:
+            out.append(self.cookie(self.s.out, "", 0))
+        return out
+
+    def marked(self, headers):
+        """The browser signed out on purpose, or the last automatic round trip failed: show the page."""
+        return bool(histerauth.HisterAuth.cookie_values(headers.get("Cookie"), self.s.out))
+
     def return_cookie(self, ret, app):
         value = b64e(json.dumps({"r": ret, "a": 1 if app else 0}, separators=(",", ":")).encode())
         return self.cookie(RETURN_COOKIE, value, RETURN_MAX_AGE)
@@ -422,6 +479,8 @@ class Login:
         else:
             sid = self.store.create(hister_session, username, user_id, "browser", device_label(headers))
             cookies.append(self.sso_cookie(sid))
+        if self.marked(headers):                # signed in again: the automatic sign-in is back
+            cookies += self.marker_clear()
         return ret or self.s.public_url + "/", cookies
 
 
@@ -602,12 +661,76 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except OSError:
                 pass
 
+    def reply(self, answer):
+        status, headers, body = answer
+        self.send(status, headers, body)
+
+    def prefs_for(self, kind, value, cookie=False):
+        """GET/PUT of the account's settings (docs/contracts/prefs.md) for one credential: the key is only ever the
+        user that credential proves. A PUT carried by the sign-in cookie must come from one of the return hosts' pages
+        (the hosted pages, through their nginx). Values are never logged."""
+        lg = self.login
+        if self.command == "PUT":
+            body = vsignin.read_body(self.headers, self.rfile, vprefs.MAX_BODY)
+            if body is None:
+                self.close_connection = True
+                return self.json(413, {"error": "request body too large"})
+            self._body_read = True
+        elif self.command not in ("GET", "HEAD"):
+            return self.json(405, {"error": "GET or PUT"}, [("Allow", "GET, PUT")])
+        who = lg.who(kind, value)
+        if who[0] == "out":
+            return self.json(401, {"error": "sign in", "signin": lg.s.public_url + "/machiya/signin"})
+        if who[0] != "ok":
+            return self.json(503, {"error": "preferences unavailable",
+                                   "reason": "user-handling-off" if who[0] == "off" else "hister-unavailable"})
+        key = user_key(who[1])
+        try:
+            if self.command != "PUT":
+                rev, values, updated = lg.prefs.snapshot(key)
+                if vprefs.matches(self.headers.get("If-None-Match"), rev):
+                    return self.reply(vsignin.not_modified(rev))
+                return self.reply(vsignin.prefs_answer(200, rev, values, updated))
+            if cookie and not vsignin.same_origin(self.headers, lg.s.secure, self.prefs_origins()):
+                return self.json(403, {"error": "cross-site write refused"})
+            changes, refused = vsignin.parse_put(self.headers, body)
+            if refused:
+                return self.reply(refused)
+            try:
+                return self.reply(vsignin.prefs_answer(200, *lg.prefs.write(key, changes)))
+            except vprefs.PrefsError as ex:
+                return self.json(400, {"error": str(ex)})
+        except (sqlite3.Error, OSError) as ex:
+            LOG("hister-login: the prefs file failed: %s" % type(ex).__name__)
+            return self.json(503, {"error": "preferences unavailable"})
+
+    def prefs_origins(self):
+        s = self.login.s
+        return [s.public_url] + ["https://" + h for h in s.return_hosts]
+
 
 class Internal(Handler):
     """:8081, the rooms and nginx only."""
 
     def do_GET(self):
         self.guard(self._get)
+
+    def do_PUT(self):
+        self.guard(self._put)
+
+    def _put(self):
+        if urlsplit(self.path).path != "/v1/prefs":
+            return self.json(404, {"error": "not found"})
+        self.internal_prefs()
+
+    def internal_prefs(self):
+        """GET/PUT /v1/prefs: a room's /api/prefs, with the caller's own credential (exactly one, as /v1/check)."""
+        sid = self.headers.get("X-Machiya-Session")
+        token = self.headers.get("X-Access-Token")
+        if (sid is None) == (token is None) or len(self.headers.get_all("X-Machiya-Session") or []) > 1 \
+                or len(self.headers.get_all("X-Access-Token") or []) > 1:
+            return self.json(400, {"reason": "one credential"})
+        return self.prefs_for("sid" if sid is not None else "token", (sid if sid is not None else token).strip())
 
     def do_POST(self):
         self.guard(self._post)
@@ -629,12 +752,13 @@ class Internal(Handler):
                 outcome, row = lg.check_sid(sid.strip())
                 if outcome == "ok":
                     return self.json(200, {"username": row["username"], "user_id": row["user_id"], "via": "session",
-                                           "kind": row["kind"]})
+                                           "kind": row["kind"], "prefs": lg.shared_prefs(row["username"])})
             else:
                 answer = lg.check_token(token.strip())
                 outcome = answer[0]
                 if outcome == "ok":
-                    return self.json(200, {"username": answer[1], "user_id": answer[2], "via": "token"})
+                    return self.json(200, {"username": answer[1], "user_id": answer[2], "via": "token",
+                                           "prefs": lg.shared_prefs(answer[1])})
             if outcome == "out":
                 return self.json(401, {"reason": "signed-out"})
             return self.json(503, {"reason": "user-handling-off" if outcome == "off" else "hister-unavailable"})
@@ -645,6 +769,8 @@ class Internal(Handler):
                 return self.send(200, [("X-Hister-Cookie", "%s=%s" % (HISTER_COOKIE, row["hister_session"])),
                                        ("X-Hister-User", row["username"]), ("Cache-Control", "no-store")])
             return self.send(401 if outcome == "out" else 503, [("Cache-Control", "no-store")])
+        if path == "/v1/prefs":
+            return self.internal_prefs()
         self.json(404, {"error": "not found"})
 
     def _post(self):
@@ -668,6 +794,42 @@ class Public(Handler):
 
     def do_POST(self):
         self.guard(self._post)
+
+    def do_PUT(self):
+        self.guard(self._put)
+
+    def _put(self):
+        if urlsplit(self.path).path != "/machiya/api/prefs":
+            return self.json(404, {"error": "not found"})
+        self.public_prefs()
+
+    def public_prefs(self):
+        """GET/PUT /machiya/api/prefs: Shiori's apps (Authorization: Bearer mhs_…), extensions and scripts (a Hister
+        token: X-Access-Token or Bearer), the hosted pages through their nginx (the sign-in cookie; a PUT then needs
+        an Origin among the return hosts). No CORS: no other site's page may read or write it."""
+        auth = self.headers.get_all("Authorization") or []
+        tok = self.headers.get_all("X-Access-Token") or []
+        if len(auth) > 1 or len(tok) > 1 or (auth and tok):
+            return self.json(400, {"error": "one credential"})
+        if tok:
+            value = tok[0].strip()
+            if not histerauth.TOKEN_RE.match(value):
+                return self.json(401, {"error": "sign in", "signin": self.login.s.public_url + "/machiya/signin"})
+            return self.prefs_for("token", value)
+        if auth:
+            scheme, _, value = auth[0].strip().partition(" ")
+            value = value.strip()
+            if scheme.lower() != "bearer" or not histerauth.TOKEN_RE.match(value or " "):
+                return self.json(401, {"error": "sign in", "signin": self.login.s.public_url + "/machiya/signin"})
+            if value.startswith(SID_PREFIX):
+                return self.prefs_for("sid", value)
+            return self.prefs_for("token", value)
+        sid = sso_value(self.headers, self.login.s.sso)
+        if not sid:
+            if self.command == "PUT":
+                self.body()
+            return self.json(401, {"error": "sign in", "signin": self.login.s.public_url + "/machiya/signin"})
+        return self.prefs_for("sid", sid, cookie=True)
 
     def same_origin(self):
         return vsignin.same_origin(self.headers, self.login.s.secure, (self.login.s.public_url,))
@@ -693,6 +855,8 @@ class Public(Handler):
             return self.callback()
         if path == "/machiya/sessions":
             return self.sessions()
+        if path == "/machiya/api/prefs":
+            return self.public_prefs()
         if path == "/machiya/signed-out":
             return self.page(200, message_page(self.headers, "Signed Out", "You're signed out of Hister and every "
                                                "Machiya room on this device.", [("/machiya/signin", "Sign In Again")]))
@@ -734,8 +898,11 @@ class Public(Handler):
             return self.unavailable(lg.hister.health_state)
         cookies = [lg.return_cookie(ret, app)] if ret else [lg.cookie(RETURN_COOKIE, "", 0)]
         provider = (q.get("provider") or "").strip().lower()
-        if provider and provider in lg.s.providers:     # straight to that sign-in (Shiori's "Sign In with Tailscale"):
-            return self.redirect("/api/oauth?provider=" + provider, cookies)   # the return cookie set as for the page
+        # straight to that sign-in, the return cookie set as for the page: a tap on Shiori's "Sign In with Tailscale"
+        # (provider=) always; a room's automatic sign-in (provider=…&auto=1, MACHIYA_SIGNIN_PROVIDER) unless the
+        # browser signed out on purpose or the last round trip failed (the marker): then the page, never a loop
+        if provider and provider in lg.s.providers and not (q.get("auto") == "1" and lg.marked(self.headers)):
+            return self.redirect("/api/oauth?provider=" + provider, cookies)
         self.page(200, signin_page(lg.s, self.headers, ret, app), [("Set-Cookie", c) for c in cookies])
 
     def unavailable(self, state):
@@ -775,6 +942,15 @@ class Public(Handler):
                     location = dict((k.lower(), v) for k, v in out).get("location", location)
                 out = [(k, v) for k, v in out if k.lower() != "location"] + [("Location", location)]
                 out += [("Set-Cookie", c) for c in cookies + [lg.cookie(RETURN_COOKIE, "", 0)]]
+                return self.send(status, out, body)
+        ret, app = lg.read_return(self.headers.get("Cookie"))
+        if ret:     # a sign-in this helper started (a room's automatic one, a tap) that didn't finish: the page, with
+            LOG("hister-login: a sign-in through the provider didn't finish (Hister answered %s)" % status)
+            cookies = [v for k, v in out if k.lower() == "set-cookie"]          # Hister's own, for its host
+            cookies += [lg.cookie(RETURN_COOKIE, "", 0), lg.cookie(lg.s.out, "failed", FAILED_MAX_AGE)]
+            return self.page(401, signin_page(lg.s, self.headers, ret, app, error="Sign in with %s didn't work. Try "
+                                              "again, or sign in with your password." % lg.s.oidc_label),
+                             [("Set-Cookie", c) for c in cookies])
         self.send(status, out, body)
 
     def sessions(self):
@@ -823,7 +999,7 @@ class Public(Handler):
             cookies += lg.end_hister(own)
         cookies = [c for c in cookies if c.split("=", 1)[0].strip() == HISTER_COOKIE][:1] \
             or [lg.cookie(HISTER_COOKIE, "", 0)]
-        self.redirect("/machiya/signed-out", lg.sso_clear() + cookies)
+        self.redirect("/machiya/signed-out", lg.sso_clear() + lg.signed_out() + cookies)
 
     def revoke(self):
         lg = self.login
@@ -845,7 +1021,8 @@ class Public(Handler):
                 if r["hister_hash"] not in seen:
                     seen.add(r["hister_hash"])
                     lg.end_hister(r["hister_session"])
-            return self.redirect("/machiya/signed-out", lg.sso_clear() + [lg.cookie(HISTER_COOKIE, "", 0)])
+            return self.redirect("/machiya/signed-out", lg.sso_clear() + lg.signed_out()
+                                 + [lg.cookie(HISTER_COOKIE, "", 0)])
         try:
             target = lg.store.by_rowid(int(form.get("id", "")), me["user_id"])
         except ValueError:
@@ -853,7 +1030,8 @@ class Public(Handler):
         if target:
             lg.end_hister(target["hister_session"])
             if target["hister_hash"] == me["hister_hash"]:
-                return self.redirect("/machiya/signed-out", lg.sso_clear() + [lg.cookie(HISTER_COOKIE, "", 0)])
+                return self.redirect("/machiya/signed-out", lg.sso_clear() + lg.signed_out()
+                                     + [lg.cookie(HISTER_COOKIE, "", 0)])
         self.redirect("/machiya/sessions?done=one")
 
     def app_session(self):
@@ -911,7 +1089,81 @@ def serve(login, bind, port, internal_port):
     return servers
 
 
+# -- the prefs command (docs/contracts/prefs.md, "Migration") ---------------------------------------------------------
+
+def prefs_cli(argv, env=None, out=sys.stdout):
+    """`prefs import|show|delete --user NAME`: run on the helper's host (in its container), against its prefs file.
+    import: the rooms' old prefs.sqlite3 files (Kura's, Niwa's, Konbini's, landing's), read-only; for each key the value
+    with the newest `updated` across them wins, and only when it is newer than what the account already holds (so a
+    second run changes nothing). A file's rows are the user's when their principal is hi:<sha256(NAME)>, the
+    tailscale_uid of a --tailscale login, or a --principal given; a file with one principal and none of those is taken
+    as that one (said so). -> exit code."""
+    env = os.environ if env is None else env
+    ap = argparse.ArgumentParser(prog="hister_login.py prefs")
+    sub = ap.add_subparsers(dest="what", required=True)
+    imp = sub.add_parser("import", help="seed an account from the rooms' old prefs files")
+    imp.add_argument("--user", required=True, help="the Hister username")
+    imp.add_argument("--tailscale", action="append", default=[], help="a Tailscale login the rooms keyed it by")
+    imp.add_argument("--principal", action="append", default=[], help="a principal key to take as the user's")
+    imp.add_argument("--dry-run", action="store_true")
+    imp.add_argument("files", nargs="+")
+    for name, text in (("show", "what the account holds"), ("delete", "forget the account's settings")):
+        p = sub.add_parser(name, help=text)
+        p.add_argument("--user", required=True)
+    a = ap.parse_args(argv)
+    path = prefs_path(env)
+    key = user_key(a.user)
+    store = vprefs.Store(path)
+    say = lambda *x: print(*x, file=out)                    # noqa: E731
+    if a.what == "show":
+        rev, values, updated = store.snapshot(key)
+        say("%s (%s), rev %d, %d key(s), in %s" % (a.user, key, rev, len(values), path))
+        for k in sorted(values):
+            say("  %-24s %-20s %s UTC" % (k, values[k][:60], time.strftime("%Y-%m-%d %H:%M", time.gmtime(updated[k]))))
+        return 0
+    if a.what == "delete":
+        say("%s: %d key(s) deleted from %s" % (a.user, store.delete(key), path))
+        return 0
+    from vaultkit.identity import tailscale_uid
+    mine = {key} | {tailscale_uid(t) for t in a.tailscale} | set(a.principal)
+    sources = []
+    for f in a.files:
+        try:
+            rows = vprefs.read_rows(f)
+        except sqlite3.Error as ex:
+            say("%s: not a prefs file (%s)" % (f, ex))
+            return 1
+        found = sorted({r[0] for r in rows})
+        take = [r for r in rows if r[0] in mine]
+        if not take and len(found) == 1:
+            say("%s: one principal (%s), taken as %s" % (f, found[0], a.user))
+            take = rows
+        elif not take and found:
+            say("%s: %d principals (%s), none of them %s: name one with --principal or --tailscale"
+                % (f, len(found), ", ".join(found), a.user))
+            return 1
+        sources.append((f, [(r[1], r[2], r[3]) for r in take]))
+    values, stamps, source, refused = vprefs.merge(sources)
+    have = store.snapshot(key)
+    for k in sorted(values):
+        older = k in have[2] and have[2][k] >= stamps[k]
+        say("  %-24s %-20s from %s (%s UTC)%s" % (k, values[k][:60], source[k],
+                                                time.strftime("%Y-%m-%d %H:%M", time.gmtime(stamps[k])),
+                                                "; the account's is newer: kept" if older else ""))
+    for r in refused:
+        say("  skipped (not in the schema): %s" % r)
+    if a.dry_run:
+        say("dry run: nothing written")
+        return 0
+    rev, after, _ = store.write(key, values, stamps=stamps, only_newer=True)
+    say("%s (%s): rev %d, %d key(s) in %s" % (a.user, key, rev, len(after), path))
+    return 0
+
+
 def main():
+    if sys.argv[1:2] == ["prefs"]:
+        os.umask(0o077)
+        sys.exit(prefs_cli(sys.argv[2:]))
     os.umask(0o077)
     s = Settings()
     login = Login(s)
