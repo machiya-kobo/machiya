@@ -58,7 +58,7 @@ Kura pushes every note in the default vault (`personal/`), and only there; other
 
 ## Code documents (`metadata.source:code`)
 
-Approved by the lead, 2026-10-04 (the owner's decisions of 2026-10-05). Background: [services/code-import.md](../services/code-import.md).
+Background: [services/code-import.md](../services/code-import.md).
 
 [code-import](../services/code-import.md) puts the owner's Forgejo and GitHub repos into Hister: repo cards, READMEs and docs, issues, PRs and releases. Each one is a document at its real forge URL:
 
@@ -87,7 +87,7 @@ Approved by the lead, 2026-10-04 (the owner's decisions of 2026-10-05). Backgrou
 - **Aliases:** `@code` and `@pages` as in [Aliases](#aliases).
 - **Ownership.** code-import replaces or deletes a document only when Hister says its `metadata.source` is `code`. A URL the owner browsed first stays the owner's page. Other writers keep the existing rule: never re-index a URL Hister already holds.
 - **Secrets.** Code documents are always sent with `html`, because Hister's sensitive-content check reads only `html` for a web document. They go through code-import's own scan first. `skip_sensitive_check` is never set.
-- **AI: on-device only, like notes** (the owner, 2026-10-05):
+- **AI: on-device only, like notes:**
   - Shiori's AI treats a code result as a note;
   - `shiori-ai` refuses `metadata.source:code`, as it refuses `vault`;
   - Hister's MCP returns code to any client with the owner's token, so for AI clients it is the model's rule, written in the skills: page queries start with `@pages`, and code results are never pulled into an AI's context.

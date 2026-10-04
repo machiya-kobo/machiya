@@ -7,7 +7,7 @@ Puts what you read in a feed reader into [Hister](../../docs/services/hister.md)
 
 The readers are NewsBlur, Miniflux, FreshRSS and Feedbin, all through one interface (`readers.py`). Each one only reads: none marks, stars or changes anything. It is stdlib Python with one sqlite file, and it listens on nothing.
 
-**Status: prototype (0.1.0, unreleased).** The design and the open questions are in the vault card "Hister feed reader import (NewsBlur first)".
+**Status: 0.1.x, early.** NewsBlur is the reader in daily use; Miniflux, FreshRSS and Feedbin are built and tested against fakes.
 
 ## What a run does
 
@@ -105,7 +105,7 @@ Inoreader is left out: its API needs a Pro plan, OAuth refresh tokens, and 100 r
 python3 feedimport.py --dry-run --limit 10            # print what would be sent: at most 10 per stream per reader
                                                        # (10 starred + 10 read); no state, no Hister writes
 python3 feedimport.py --dry-run --no-fetch --stream read
-python3 feedimport.py --import-legacy state.json       # once: take over server's newsblur-import.py state
+python3 feedimport.py --import-legacy state.json       # once: take over an older newsblur-import.py script's state
 python3 feedimport.py --once                           # one run
 python3 feedimport.py                                  # the service
 podman build -f stack/feed-import/Dockerfile -t feed-import:dev .     # from the repo root

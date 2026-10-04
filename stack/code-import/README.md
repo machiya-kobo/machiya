@@ -2,9 +2,9 @@
 
 Puts the owner's repos on **Forgejo** and **GitHub** into [Hister](../../docs/services/hister.md), so Shiori can search them as a **Code** area: the repos themselves (name, description, topics), their READMEs and markdown docs, their issues and pull requests (title, body, state), and their releases. Each one is a Hister document at its **real forge URL**, so a result opens the forge's page.
 
-It is stdlib Python with one sqlite file, it listens on nothing, and it only ever reads from the forges (GET). The design is the vault's research note "Code search in Shiori (Forgejo + GitHub)" (architecture (b), the start of (d)); the service page is [docs/services/code-import.md](../../docs/services/code-import.md).
+It is stdlib Python with one sqlite file, it listens on nothing, and it only ever reads from the forges (GET). The service page is [docs/services/code-import.md](../../docs/services/code-import.md).
 
-**Status: phase 1 (0.1.1; 0.1.0 is in production).** No code bodies yet: those are phase 2.
+**Status: phase 1 (0.1.1).** No code bodies yet: those are phase 2.
 
 ## What a run does
 
@@ -12,8 +12,8 @@ Runs happen every `CODE_IMPORT_INTERVAL` seconds (15 minutes by default).
 
 1. **Every forge lists every repo of its owners.** These are left out:
    - forks, archived repos and mirrors (Forgejo's `mirror`, GitHub's `mirror_url`);
-   - the names in `CODE_IMPORT_EXCLUDE` (`obsidian`, `pass-store`, `backup` by default; `name` or `owner/name`);
-   - **twins**: a repo that is on both forges is indexed once (`CODE_IMPORT_TWINS`). For the owner that is GitHub for `machiya-kobo` (GitHub's `main` is the source of truth) and Forgejo for `owner`. The indexed one carries the other's link (`code_twin_url`).
+   - the names in `CODE_IMPORT_EXCLUDE` (`name` or `owner/name`; see its default in [Settings](#settings));
+   - **twins**: a repo that is on both forges is indexed once (`CODE_IMPORT_TWINS`), on the forge you name as its source of truth. The indexed one carries the other's link (`code_twin_url`).
 2. **Per repo:**
    - a **card**: name, description, topics, language, homepage;
    - when the repo has changed (its push stamp), on its first run, and on every full run: the **README** and the **markdown docs** of the default branch, and the **releases** (drafts skipped).
@@ -39,7 +39,7 @@ Runs happen every `CODE_IMPORT_INTERVAL` seconds (15 minutes by default).
 
 **Retries.** Every forge call that fails transiently is tried again after 2, 8 and 30 s (`CODE_IMPORT_RETRY_DELAYS`). That covers a TLS, connect or read timeout, a reset connection, a 5xx, a 429 and a secondary rate limit. A `Retry-After` longer than the delay is honoured, up to 120 s; a longer one fails the call. 401, 403 and 404 are never tried again.
 
-**Sources, each on its own.** A source is an owner on a forge: `forgejo:owner`, `forgejo:machiya`, `github:owner`, `github:machiya-kobo`. A source that still fails after the retries is recorded in `status.json`, and the run goes on with the others, whose documents land.
+**Sources, each on its own.** A source is an owner on a forge: `forgejo:you`, `forgejo:your-org`, `github:you`, `github:your-org`. A source that still fails after the retries is recorded in `status.json`, and the run goes on with the others, whose documents land.
 
 **Fail closed, per source:**
 - A source that fails withdraws nothing. Its withdrawals, repo stamps and full-run mark wait until the whole source has completed; a source that fails part way drops them, and the next good run finds the same work again.
@@ -72,7 +72,7 @@ Runs happen every `CODE_IMPORT_INTERVAL` seconds (15 minutes by default).
 | `code_number`, `code_path`, `code_tag`, `code_prerelease`, `code_topics`, `code_language`, `code_twin_url`, `code_redacted` | | display |
 
 - No label: Code is its own area, not a topic.
-- `ignore_skip_rules: true`, as Kura's notes have: server's skip rules refuse every `*.example.ts.net` URL, which would refuse every Forgejo document.
+- `ignore_skip_rules: true`, as Kura's notes have: skip rules that refuse your own `*.<tailnet>.ts.net` URLs (as the [reference rules](../../config/hister/skip-rules.txt) do) would refuse every document of a Forgejo on the tailnet.
 
 ### The repo filter: why `owner__repo` (tested 2026-10-04)
 
@@ -83,7 +83,7 @@ This was tested on a throwaway Hister v0.20.0 (rootless podman, dummy data). His
 | `machiya-kobo/kura` | no match (quoted, escaped: no match either) | `/` and `-` split it into `machiya`, `kobo`, `kura`. `metadata.code_repo:kura` then matches it, along with every other repo with a `kura` word, so it is useless as a filter |
 | `machiya-kobo--kura`, `machiya-kobo.kura`, `machiya-kobo:kura` | no match | split the same way |
 | **`machiya_kobo__kura`** | **match** | `_` joins words in Unicode word segmentation, so it stays one token |
-| `owner__owner_com`, `owner__2048_game` | match | |
+| `you__you_example_com`, `you__2048_game` (from `you/you.example.com`, `you/2048-game`) | match | |
 | `Machiya_Kobo__Kura` stored, queried lowercase | match | lowercased when indexed (a query must be lowercase) |
 | `code_private: true` (JSON boolean) | `metadata.code_private:true` doesn't match | a boolean is indexed as a bool field, so it is sent as the string `"true"` |
 | `code_kind:issue`, `code_state:merged`, `code_host:forgejo` | match | single words; nothing is stemmed |
@@ -103,10 +103,10 @@ Also verified on that Hister:
 |---|---|---|
 | `CODE_IMPORT_FORGEJO_URL` | — | the Forgejo (or Gitea) server, e.g. `https://forgejo.example.ts.net`; unset: no Forgejo |
 | `CODE_IMPORT_FORGEJO_TOKEN_FILE` | — | a file holding a Forgejo token of the **owner's** account (only it sees every private repo), scopes `read:repository`, `read:issue`, `read:user`, `read:organization` (required with the URL) |
-| `CODE_IMPORT_FORGEJO_OWNERS` | — | comma list: the token's own login and/or orgs, e.g. `owner,machiya` (required with the URL) |
-| `CODE_IMPORT_GITHUB_TOKEN_FILES` | — | `owner=/path/to/token,…`: one **fine-grained, read-only** token per resource owner (Metadata, Contents, Issues, Pull requests: read), e.g. `owner=/secrets/github-owner-token,machiya-kobo=/secrets/github-machiya-kobo-token`; unset: no GitHub. Never a classic token: its `repo` scope can write |
+| `CODE_IMPORT_FORGEJO_OWNERS` | — | comma list: the token's own login and/or orgs, e.g. `you,your-org` (required with the URL) |
+| `CODE_IMPORT_GITHUB_TOKEN_FILES` | — | `owner=/path/to/token,…`: one **fine-grained, read-only** token per resource owner (Metadata, Contents, Issues, Pull requests: read), e.g. `you=/secrets/github-you-token,your-org=/secrets/github-your-org-token`; unset: no GitHub. Never a classic token: its `repo` scope can write |
 | `CODE_IMPORT_GITHUB_API` | `https://api.github.com` | |
-| `CODE_IMPORT_TWINS` | — | `github:machiya-kobo=forgejo:machiya,forgejo:owner=github:owner`: a right-hand repo whose name matches a left-hand one is the same repo, indexed once, on the left |
+| `CODE_IMPORT_TWINS` | — | `github:your-org=forgejo:your-org,forgejo:you=github:you`: a right-hand repo whose name matches a left-hand one is the same repo, indexed once, on the left |
 | `CODE_IMPORT_EXCLUDE` | `obsidian,pass-store,backup` | repo names (`name` or `owner/name`) never imported |
 | `CODE_IMPORT_HISTER_URL` | — | `http://hister:4433` (required, except for `--dry-run`) |
 | `CODE_IMPORT_HISTER_TOKEN_FILE` | — | the owner's Hister token, sent as `X-Access-Token` on every Hister call ([contracts/hister.md](../../docs/contracts/hister.md)) |
@@ -117,7 +117,7 @@ Also verified on that Hister:
 | `CODE_IMPORT_MAX_DOCS` | `200` | markdown docs per repo |
 | `CODE_IMPORT_MAX_DOC_BYTES` | `262144` | a bigger doc is skipped |
 | `CODE_IMPORT_DOC_SKIP` | — | more path globs to skip, comma-separated (`drafts/*`), on top of the defaults above |
-| `CODE_IMPORT_GAP` | `0.5` Forgejo, `0.25` GitHub | seconds between two calls to a forge (Forgejo runs on a small Pi VM) |
+| `CODE_IMPORT_GAP` | `0.5` Forgejo, `0.25` GitHub | seconds between two calls to a forge (gentle on a small self-hosted Forgejo) |
 | `CODE_IMPORT_RETRY_DELAYS` | `2,8,30` | seconds before each new try of a call that failed transiently (so 4 tries) |
 | `CODE_IMPORT_TIMEOUT` | `60` | seconds per forge call |
 | `CODE_IMPORT_DATA` | `/data` | `code-import.sqlite3` (the state, cursors and ETags) and `status.json` |
@@ -130,7 +130,7 @@ Also verified on that Hister:
 **`status.json`** holds:
 - `ok`, `running`, `last_success` (the last run where every source succeeded), `failures_in_a_row` and `error` (the failed sources and why);
 - `sources`: per source, `ok`, `error`, `repos`, `last_success` and `last_full`;
-- `caps`: every repo over `CODE_IMPORT_MAX_DOCS`, named (`{"repo": "github:owner/foo", "docs": 3052, "max": 200}`), so the owner can decide;
+- `caps`: every repo over `CODE_IMPORT_MAX_DOCS`, named (`{"repo": "github:you/foo", "docs": 3052, "max": 200}`), so the owner can decide;
 - `last_run`: the run's counts, and its calls and retries per forge;
 - `counts`: documents per host, kind and status.
 

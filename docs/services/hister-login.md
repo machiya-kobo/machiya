@@ -19,7 +19,7 @@ flowchart LR
 ```
 
 - **Where it runs:** beside Hister, on Hister's own host name. The proxy in front (Tailscale Serve, say) sends `/machiya/…` and the single path `/api/oauth/callback` to the helper's public port and everything else to Hister. Its internal port is reachable only from the rooms' network and is never routed by the proxy.
-  With Tailscale Serve, a Proxy handler **strips its mount path** before forwarding, so the targets carry it back: `/machiya/` → `http://hister-login:8080/machiya/` and `/api/oauth/callback` → `http://hister-login:8080/api/oauth/callback` (found deploying on server, 2026-10-05: without it the helper got `/healthz` and answered 404).
+  With Tailscale Serve, a Proxy handler **strips its mount path** before forwarding, so the targets carry it back: `/machiya/` → `http://hister-login:8080/machiya/` and `/api/oauth/callback` → `http://hister-login:8080/api/oauth/callback`: without that the helper gets `/healthz` instead of `/machiya/healthz` and answers 404.
 - **The cookie:** `machiya_sso=mhs_<32 random bytes>` on the shared domain (`MACHIYA_COOKIE_DOMAIN`, the same one the shared preferences use), `Secure; HttpOnly; SameSite=Lax`, at most 180 days. It is opaque: the helper keeps the mapping from it to the browser's Hister session. Hister's own `hister` cookie stays on Hister's host. `MACHIYA_SSO_COOKIE` renames it (letters, digits, `_`, `-`; the rooms and landing read the same setting, and the loop guard is `<name>_try`): a second stack under the same domain, such as a dev stack, uses its own name.
 - **Sign-in:** a room without a session sends a page to `https://hister.example.ts.net/machiya/signin?return=<the page>`. If the browser is already signed in to Hister, the helper issues an id and sends it straight back. Otherwise its sign-in page offers Hister's password login (the page posts to Hister's own `/api/login`; the helper never sees the password) and, when configured, "Sign in with …" for Hister's OIDC provider. Hister has no "return to" of its own, so the helper's callback shim passes Hister's OAuth callback through unchanged and then sends the browser back where it started.
 - **Checks:** a room asks `GET /v1/check` about an id or a Hister token; the helper asks Hister's `GET /api/profile` (at most once per credential every 30 s) and answers: signed in (`200 {username, user_id, via, kind}`), signed out (`401`; every id on that Hister session is dropped), or unavailable (`503 {"reason": "hister-unavailable" | "user-handling-off"}`).
@@ -30,7 +30,7 @@ flowchart LR
 
 ## When something is down
 
-| | Rooms with the Tailscale fallback (Niwa, Konbini) | A room with `none` (Kura) |
+| | A room with `<ROOM>_AUTH_FALLBACK=tailscale` | A room with `<ROOM>_AUTH_FALLBACK=none` |
 |---|---|---|
 | signed in, everything up | admitted | admitted |
 | signed out (the helper or Hister said so) | sent to sign in; an API call gets 401 `{"error", "signin"}`; **never** the fallback | the same |

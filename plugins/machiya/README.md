@@ -34,7 +34,7 @@ Set `MACHIYA_MCP_URL` if the server isn't at `https://machiya-mcp.example.ts.net
 
 ## Hister's token
 
-Once Hister's user handling is on, its MCP needs the owner's Hister token. The plugin's `headersHelper` (`bin/hister-headers`) sends it as `X-Access-Token`, read at connect time from `$HISTER_TOKEN_FILE`, else with `hpass` (this machine's host key, never a YubiKey prompt) from `$HISTER_TOKEN_PASS`, this machine's own copy `hosts/<host>/hister-owner-token`, or `hosts/server/stacks/hister/owner-token`; with neither it sends no header (a Hister without users needs none). The token is never written into Claude Code's settings; `install.sh` saves only the file's path (`HISTER_TOKEN_FILE`, when it is set) in the settings' env, where the helper finds it.
+Once Hister's user handling is on, its MCP needs the owner's Hister token. The plugin's `headersHelper` (`bin/hister-headers`) sends it as `X-Access-Token`, read at connect time from `$HISTER_TOKEN_FILE`, else, where an `hpass` command (a non-interactive `pass` wrapper) is installed, from the pass entry `$HISTER_TOKEN_PASS` or a per-host default entry; with neither it sends no header (a Hister without users needs none). The token is never written into Claude Code's settings; `install.sh` saves only the file's path (`HISTER_TOKEN_FILE`, when it is set) in the settings' env, where the helper finds it.
 
 ## The dev stack
 
