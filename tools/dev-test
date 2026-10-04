@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Micheal Waltz and Machiya contributors
+"""dev-test - run the dev stack (compose/dev) and its checks on another machine, such as a clean test VM: the same
+stack, the same synthetic seed, the same checks as on the dev host.
+
+    tools/dev-test HOST [--native] [--packages] [--hister-bin FILE] [--siblings DIR] [--dir DIR] [--keep] [--dry-run]
+
+It copies this working tree and the kura, niwa and konbini checkouts (their tracked and untracked, not ignored, files:
+what you are testing, committed or not) to HOST:DIR (default /var/tmp/machiya-dev-test, disk-backed) over ssh, then
+runs there, in one shell:
+
+    compose/dev/dev --data DIR/data init [--native] && compose/dev/dev up && compose/dev/dev check
+
+and always `compose/dev/dev down` afterwards (unless --keep). Each run starts from a fresh DIR/data. The exit code is the remote checks' (or 1 when a step
+before them fails).
+
+  --packages     first install what the stack needs with the host's package manager (sudo or doas, no password):
+                 Debian/Ubuntu: Docker from Debian's packages (the stack runs in containers);
+                 FreeBSD, OpenBSD, NetBSD (always --native): Python with markdown and pyyaml, git, curl, as in
+                 docs/install/bsd.md; Haiku (--native): python3.14 + pip's markdown and pyyaml (docs/dev-stack.md).
+  --native       no containers: every service as a process (the BSDs and Haiku have no Docker). Hister is a Go binary
+                 with cgo: pass one built for that OS with --hister-bin (it is copied to DIR/hister). SearXNG is left out.
+  --hister-bin   a hister binary for the remote OS (--native).
+
+The checks are the HTTP ones (no browser on a test VM). Nothing secret travels: the remote init makes its own dummy
+secrets. Standard library only; needs ssh and tar here.
+"""
+import argparse
+import io
+import os
+import shlex
+import subprocess
+import sys
+import tarfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+
+PACKAGES = {
+    # os-release ID / uname -s -> the commands (run with sh -e on the host)
+    "debian": "sudo apt-get update -q && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q git curl openssl "
+              "python3 python3-yaml python3-markdown docker.io docker-compose && sudo usermod -aG docker \"$USER\"",
+    "FreeBSD": "sudo pkg install -y python312 py312-sqlite3 py312-markdown py312-pyyaml git-lite curl && "
+               "sudo ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3",
+    "OpenBSD": "doas pkg_add python%3 py3-markdown py3-yaml git curl",
+    "NetBSD": "sudo env PKG_PATH=\"https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -p)/"
+              "$(uname -r | cut -d_ -f1)/All\" pkg_add python313 py313-markdown py313-yaml git-base curl && "
+              "sudo ln -sf /usr/pkg/bin/python3.13 /usr/pkg/bin/python3",
+    "Haiku": "pkgman install -y python3.14 git openssl3 && python3 -m ensurepip --altinstall && "
+             "python3 -m pip install markdown pyyaml",
+}
+
+
+def files(repo):
+    out = subprocess.run(["git", "-C", repo, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                         capture_output=True, check=True).stdout.split(b"\0")
+    return [f.decode() for f in out if f and os.path.isfile(os.path.join(repo, f.decode()))]
+
+
+def bundle(repos, hister_bin):
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for name, path in repos.items():
+            for f in files(path):
+                tar.add(os.path.join(path, f), arcname="%s/%s" % (name, f), recursive=False)
+        if hister_bin:
+            tar.add(hister_bin, arcname="hister")
+    return buf.getvalue()
+
+
+def ssh(host, script, stdin=None):
+    return subprocess.run(["ssh", "-o", "BatchMode=yes", host, "sh -c " + shlex.quote(script)], input=stdin)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("host")
+    ap.add_argument("--native", action="store_true")
+    ap.add_argument("--packages", action="store_true")
+    ap.add_argument("--hister-bin")
+    ap.add_argument("--siblings", default=os.path.dirname(ROOT))
+    ap.add_argument("--dir", default="/var/tmp/machiya-dev-test")
+    ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+    repos = {"machiya": ROOT}
+    for r in ("kura", "niwa", "konbini"):
+        repos[r] = os.path.join(a.siblings, r)
+        if not os.path.isdir(os.path.join(repos[r], ".git")):
+            sys.exit("dev-test: no %s checkout in %s (--siblings)" % (r, a.siblings))
+    d = a.dir.rstrip("/")
+    dev = "%s/machiya/compose/dev/dev --data %s/data" % (d, d)
+    init = dev + " init" + (" --native" if a.native else "")
+    env = ("HISTER_BIN=%s/hister " % d) if a.hister_bin else ""
+    steps = []
+    if a.packages:
+        steps.append('os=$(uname -s); [ "$os" = Linux ] && os=$(. /etc/os-release; echo "${ID_LIKE:-$ID}" | '
+                     'cut -d" " -f1)\ncase "$os" in\n%s\n*) echo "dev-test: no package recipe for $os" >&2; exit 1;;\n'
+                     'esac' % "\n".join("%s) %s ;;" % (k, v) for k, v in PACKAGES.items()))
+    run = "set -e; %s%s; %s%s up; %s check" % (env, init, env, dev, dev)
+    wrap = run if a.native else "if id -nG | grep -qw docker || ! command -v docker >/dev/null; then sh -c %s; " \
+                                "else sg docker -c %s; fi" % (shlex.quote(run), shlex.quote(run))
+    down = "%s down >/dev/null 2>&1 || true" % dev
+    if not a.keep:
+        wrap = "%s; rc=$?; %s; exit $rc" % (wrap, down)
+    print("dev-test: %s -> %s:%s (%s)" % (", ".join(repos), a.host, d, "native" if a.native else "containers"))
+    for s in steps + [wrap]:
+        print("  $ " + s.replace("\n", "\n    "))
+    if a.dry_run:
+        return 0
+    data = bundle(repos, a.hister_bin)
+    print("dev-test: copying %.1f MB" % (len(data) / 1e6), flush=True)
+    r = ssh(a.host, "rm -rf %s/machiya %s/kura %s/niwa %s/konbini %s/data && mkdir -p %s && tar -xzf - -C %s%s" % (
+        d, d, d, d, d, d, d, " && chmod +x %s/hister" % d if a.hister_bin else ""), stdin=data)
+    if r.returncode:
+        print("dev-test: copy failed")
+        return 1
+    if a.packages and ssh(a.host, "set -e\n" + steps[0]).returncode:
+        print("dev-test: the package step failed")
+        return 1
+    rc = ssh(a.host, wrap).returncode
+    print("dev-test: %s on %s" % ("PASS" if rc == 0 else "FAIL (exit %d)" % rc, a.host))
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())
