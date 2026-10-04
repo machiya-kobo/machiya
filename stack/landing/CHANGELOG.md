@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.2.2
+
+- The image carries `today.py`: 0.2.1's Dockerfile listed the modules by name and missed it, so the container crashed at start. It now copies every module, and a test checks the Dockerfile against the files.
+
 ## 0.2.1
 
 - **More stats on `/status`** (the owner, through shiori): Konbini shows **N in WIP** beside its card count (from Konbini's per-board counts in `/api/health` when it has them, else counted from `/api/cards`); Kura shows **N vaults · N notes** across every vault from `GET /api/vaults` (counts only: a private vault's name never leaves the probe), and the launcher's Kura tile counts all of them too; Shiori shows **web searches** today, this month and this year ("312 searches today · 4,210 this month · 51k this year") from a counts file the deployment writes (`LANDING_SEARCH_COUNTS`; every SearXNG search; left out quietly when the file is missing). Shiori's `status.json` `hister` field (the Hister it was built against) isn't shown: Hister's own row shows the running one.
