@@ -1,22 +1,89 @@
-#!/bin/sh
-# The headers for Hister's MCP (the plugin's `headersHelper`): the owner's Hister token as X-Access-Token, so the token is
-# fetched when Claude Code connects (and again after a 401/403) instead of being written into any settings file.
-# Where it comes from, first found: $HISTER_TOKEN_FILE (a file holding the token); then, with `hpass` (pass with this
-# machine's host key: never the owner's YubiKey, so nothing prompts), $HISTER_TOKEN_PASS, else this machine's own copy
-# hosts/<host>/hister-owner-token, else hosts/server/stacks/hister/owner-token.
-# Nothing found prints {}: no header (a Hister without users needs none). Never prints anything but the JSON.
-tok=""
-if [ -n "${HISTER_TOKEN_FILE:-}" ] && [ -r "$HISTER_TOKEN_FILE" ]; then
-    tok=$(head -n 1 "$HISTER_TOKEN_FILE" 2>/dev/null)
-elif command -v hpass >/dev/null 2>&1; then
-    host=$(hostname -s 2>/dev/null | tr 'A-Z' 'a-z')
-    for p in ${HISTER_TOKEN_PASS:-} "hosts/$host/hister-owner-token" hosts/server/stacks/hister/owner-token; do
-        tok=$(hpass show "$p" 2>/dev/null | head -n 1)
-        [ -n "$tok" ] && break
-    done
-fi
-tok=$(printf '%s' "$tok" | tr -d '\r\n\t ')
-case "$tok" in
-    ""|*[!A-Za-z0-9._~+/=-]*) printf '{}\n' ;;                      # none, or not a token: send no header
-    *) printf '{"X-Access-Token": "%s"}\n' "$tok" ;;
-esac
+#!/usr/bin/env python3
+"""The headers for Hister's MCP: the owner's Hister token as X-Access-Token, printed as JSON for a Claude Code
+`headersHelper`. Since plugin 0.3.0 the plugin itself connects no Hister MCP (it is denied for AI clients); this stays
+for a person who adds Hister's MCP by hand for their own use.
+
+A production token must never reach anything else (sweep MACH-M-1). Where the token may come from and go:
+- the address is the one Claude Code connects to ($CLAUDE_CODE_MCP_SERVER_URL), else $HISTER_MCP_URL; with neither
+  known, no header;
+- $HISTER_TOKEN_FILE set: that file's first line, and nothing else, ever (missing or unreadable: no header, never a
+  fallback). It goes to an https address, or over plain http to loopback only (the dev stack's token file);
+- otherwise, with `hpass` (pass with this machine's host key, so nothing prompts): $HISTER_TOKEN_PASS, else this
+  machine's own copy hosts/<host>/hister-owner-token, else hosts/server/stacks/hister/owner-token. Only for an https
+  address that is not loopback and not on a dev-stack port (19200-19226).
+Anything else prints {}: no header. Never prints anything but the JSON, and never why (no token in any log).
+"""
+import ipaddress
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+from urllib.parse import urlsplit
+
+DEV_PORTS = range(19200, 19227)
+TOKEN = re.compile(r"^[A-Za-z0-9._~+/=-]{1,4096}$")
+
+
+def target(url):
+    """(scheme, loopback?, port) of the address, or None when it isn't a plain http(s) URL."""
+    try:
+        u = urlsplit((url or "").strip())
+        host, port = (u.hostname or "").lower().rstrip("."), u.port
+    except ValueError:
+        return None
+    if u.scheme not in ("http", "https") or not host or u.username is not None or u.password is not None:
+        return None
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host == "localhost" or host.endswith(".localhost")
+    return u.scheme, loopback, port or (443 if u.scheme == "https" else 80)
+
+
+def first_line(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.readline().strip()
+    except (OSError, UnicodeError):
+        return ""
+
+
+def from_pass(env):
+    host = socket.gethostname().split(".")[0].lower()
+    for entry in (env.get("HISTER_TOKEN_PASS") or "", "hosts/%s/hister-owner-token" % host,
+                  "hosts/server/stacks/hister/owner-token"):
+        if not entry:
+            continue
+        try:
+            r = subprocess.run(["hpass", "show", entry], capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        line = (r.stdout.splitlines() or [""])[0].strip() if r.returncode == 0 else ""
+        if line:
+            return line
+    return ""
+
+
+def token(env):
+    where = target(env.get("CLAUDE_CODE_MCP_SERVER_URL") or env.get("HISTER_MCP_URL") or "")
+    if where is None:
+        return ""
+    scheme, loopback, port = where
+    if env.get("HISTER_TOKEN_FILE"):
+        if scheme == "http" and not loopback:
+            return ""
+        return first_line(env["HISTER_TOKEN_FILE"])
+    if scheme != "https" or loopback or port in DEV_PORTS:
+        return ""
+    return from_pass(env)
+
+
+def main():
+    tok = re.sub(r"[\r\n\t ]", "", token(os.environ))
+    sys.stdout.write((json.dumps({"X-Access-Token": tok}) if TOKEN.match(tok) else "{}") + "\n")
+
+
+if __name__ == "__main__":
+    main()
