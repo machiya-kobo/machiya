@@ -1,4 +1,4 @@
-# vaultkit v0.20.0-23-g2f9745d - vendored by vendor.sh; don't edit these files
+# vaultkit v0.20.0-25-g754409f - vendored by vendor.sh; don't edit these files
 f1fd40bb17a311a40d19441a3e661515d499b24587ccc4737bb67a2db0d4ffe3  changelog.py
 5b563e708c9318bba58a413b101d62b037906b1dcd11d38b0aabe3c8e951c488  envfile.py
 30e34ef6bf3fe072759b0f33fafddc6ecf650341eeaf5fe835a94527e21146d5  frontmatter.py
@@ -16,6 +16,6 @@ f6fabf7e26ecfe98055f5e13be3fe1d987cf816c57f28a28016c0f1a0c2c3c6d  prefs.py
 b016bf5c69dc6d5582941713ce999f0c9fb6e0a0aee7cf253c1153309f024e67  signin.py
 d48f389646b7f457e02c3ab58139e12e302982d3458e08c1e9eb6409c2f53044  vault.py
 fd59de4fa69ddd02fcbb412fccd7edbc17e6f2dc0a222303e4cdd16db729f18a  verify.py
-94773eb83a2afed0f4fe317a80599c74f7d626e48170af7cf54ff7412d741b86  ui/machiya.css
+35b98c2a2badef480139fc9d306c8925e65e14cf3b8b6e3702175e5dd3b0e461  ui/machiya.css
 66b5dadaabc317a91635f21f7276021bde272a41dc55c956d55f57a1365bd676  ui/machiya.js
 375bfa95cfaf453b06367d7f397efe972914d0992c29d17350caa5042307392e  ui/machiya-sw.js
