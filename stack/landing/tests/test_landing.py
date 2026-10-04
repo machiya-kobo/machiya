@@ -140,12 +140,13 @@ class Readers(Stack):
         self.assertEqual(a["smallweb"]["facts"], ["12 saved"])
         self.assertEqual(snap["overall"], {"state": "up", "text": "Everything is up"})
 
-    def test_hister_gets_its_origin_and_vault_notes_are_left_out(self):
+    def test_hister_gets_its_origin_and_vault_notes_and_code_are_left_out(self):
         self.landing().poll()
         seen = [s for s in self.fakes["hister"].seen if s["method"] == "GET"]      # the MCP POST needs no Origin
         self.assertTrue(seen and all(s["headers"].get("origin") == "hister://" for s in seen))
         search = [s for s in seen if s["path"] == "/search"][0]
         self.assertIn("-label%3Avault", search["query"])
+        self.assertIn("-metadata.source%3Acode", search["query"])           # code-import's documents aren't pages
 
     def test_only_gets(self):
         # every fake only answers GET; anything else would have failed the poll

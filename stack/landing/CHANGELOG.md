@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.3.3
+
+- **Code documents stay out of the pages** (docs/contracts/hister.md, the code documents section): Hister's newest-page search, which feeds Saved & Read and Hister's newest page, now ends ` -label:vault -metadata.source:vault -metadata.source:code`, so code-import's repos, issues and PRs never show up as saved or read pages. Hister's page count (`/api/stats`) is Hister's own total and still includes them.
+
 ## 0.3.2
 
 - **Fixed (security): a body the page didn't read became the next request.** On a kept-alive connection, a request body landing never read (a refused `PUT /api/prefs`, a `POST` it answers 405, any `GET`'s) was parsed as the next request: one smuggled past Tailscale Serve, with a `Tailscale-User-Login` Serve never saw, so anyone who could reach the page could be served as the owner (and the answer could reach the next person on that connection). Such a request now ends with `Connection: close`. Tests send several people's requests down one kept-alive connection in tailscale mode too.

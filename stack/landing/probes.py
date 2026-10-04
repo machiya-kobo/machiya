@@ -416,7 +416,7 @@ def hister(base, now, timeout, headers, token=None):
     note = ""
     try:
         docs = num(fetch_json(base + "/api/stats", h, timeout).get("doc_count"))
-        s = fetch_json(base + "/search?format=json&sort=date&q=" + quote("* -label:vault -metadata.source:vault"), h, timeout)
+        s = fetch_json(base + "/search?format=json&sort=date&q=" + quote("* -label:vault -metadata.source:vault -metadata.source:code"), h, timeout)
         found = [d for d in (s.get("documents") or []) if isinstance(d, dict)]
         if found:
             newest = num(found[0].get("updated")) or num(found[0].get("added"))

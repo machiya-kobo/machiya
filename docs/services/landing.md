@@ -12,7 +12,7 @@ The whole stack's front door, in two pages (0.2.0; the owner's "Launcher + Today
 | **Working On** | Konbini `GET /api/cards`: WIP cards in its order (rank, priority), then the most recently updated, with each next step; top 5, "Now ›" links Konbini's `/now` |
 | **Due Soon** | the same cards: a `due` date in the next 14 days or past, not done or archived |
 | **Notes Changed** | Kura `GET /api/recent?limit=5` |
-| **Saved & Read** | Hister's newest pages (vault notes left out), a feed reader's reads and stars marked ("Read in NewsBlur"); the owner's token once Hister has users |
+| **Saved & Read** | Hister's newest pages (vault notes and code documents left out), a feed reader's reads and stars marked ("Read in NewsBlur"); the owner's token once Hister has users |
 | **Garden** | Niwa `GET /feed.xml`: published notes tended in the last 30 days |
 
 Each Today section is left out when its room is missing, down or refuses; nothing on the launcher is an error. `GET /api/today` is the same data as JSON.
