@@ -1,5 +1,13 @@
 # Changelog: machiya-landing
 
+## 0.4.0
+
+- **The Shared settings follow you** (the owner, 2026-10-05; [docs/contracts/prefs.md](../../docs/contracts/prefs.md)): in `LANDING_AUTH=hister` mode with the helper, `/api/prefs` is the account's. It is forwarded to hister-login's `/v1/prefs` with the caller's own credential and never kept here, so a theme picked in Kura shows here on the next load, and on every other device. In the Tailscale fallback it answers 503 (no account while sign-in is down) and the page keeps its cookies. Without the helper, `LANDING_PREFS` as before.
+- **Settings starts with Shared**: Theme, Appearance, Text Size and Apps, "Follows you on every Machiya app when signed in." and where they are kept now ("Signed in as … Saved to your account.", or "Sign-in is unavailable…"). Then **This Device** (Use This Device's Size), Account and About.
+- **Automatic sign-in** with `MACHIYA_SIGNIN_PROVIDER=oidc`, as the rooms: a page that needs a sign-in goes through tsidp with no taps. Sign Out sets the marker that makes the helper show its page instead until the next sign-in.
+- A fresh browser's first page is drawn in the account's theme (the sign-in check carries it).
+- vaultkit re-vendored (v0.21 for the settings, untagged).
+
 ## 0.3.4
 
 - **Repos you can search** (the owner): Hister's card shows **N repos**, the total of `metadata.source:code metadata.code_kind:repo` (code-import's repo cards; with the owner's token, polled with the page count), hidden when 0 or unavailable.

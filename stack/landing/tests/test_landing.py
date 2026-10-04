@@ -1,6 +1,7 @@
 """machiya-landing tests: the readers against fake apps on local ports (no network beyond 127.0.0.1), freshness,
 the deploy history and changelogs, and the HTTP gate. Run from stack/landing: python3 -m unittest discover -s tests"""
 import json
+import re
 import os
 import sys
 import tempfile
@@ -37,12 +38,15 @@ class Fake:
             def do_POST(self):
                 self.do_GET("POST")
 
+            def do_PUT(self):
+                self.do_GET("PUT")
+
             def do_GET(self, method="GET"):
                 u = urlsplit(self.path)
-                raw = self.rfile.read(int(self.headers.get("Content-Length") or 0)) if method == "POST" else b""
+                raw = self.rfile.read(int(self.headers.get("Content-Length") or 0)) if method in ("POST", "PUT") else b""
                 fake.seen.append({"method": method, "path": u.path, "query": u.query, "body": raw,
                                   "headers": {k.lower(): v for k, v in self.headers.items()}})
-                r = fake.routes.get(u.path if method == "GET" else "POST " + u.path)
+                r = fake.routes.get(u.path if method == "GET" else method + " " + u.path)
                 r = r() if callable(r) else r
                 if r is None:
                     r = (404, b"not found", "text/plain")
@@ -1133,8 +1137,23 @@ class HisterSignIn(Server):
                             if self.helper.seen[-1]["headers"].get("x-machiya-session") == SID
                             or self.helper.seen[-1]["headers"].get("x-access-token") == "owner-hister-token"
                             else (401, "{}", "application/json"),
-                            "POST /v1/signout": (204, "", "text/plain")})
+                            "POST /v1/signout": (204, "", "text/plain"),
+                            "/v1/prefs": self.account_prefs, "PUT /v1/prefs": self.account_prefs})
+        self.account = {"rev": 0, "prefs": {}}
         self.addCleanup(self.helper.close)
+
+    def account_prefs(self):
+        """The helper's /v1/prefs (0.4.0): the account's settings, for the caller's own credential only."""
+        seen = self.helper.seen[-1]
+        if seen["headers"].get("x-machiya-session") != SID:
+            return (401, '{"reason":"signed-out"}', "application/json")
+        if seen["method"] == "PUT":
+            self.account["prefs"].update(json.loads(seen["body"])["prefs"])
+            self.account["rev"] += 1
+        elif seen["headers"].get("if-none-match") == '"%d"' % self.account["rev"]:
+            return (304, b"", "application/json")
+        return {"v": 1, "rev": self.account["rev"], "prefs": dict(self.account["prefs"]),
+                "updated": {k: 1 for k in self.account["prefs"]}}
 
     def hister_env(self, **kw):
         return dict({"LANDING_AUTH": "hister", "LANDING_AUTH_URL": self.helper.url, "LANDING_BIND": "127.0.0.1",
@@ -1259,17 +1278,111 @@ class HisterSignIn(Server):
         with self.assertRaises(SystemExit):
             landing.Config(self.hister_env(LANDING_HISTER_USERS="*"))
 
+    def put_prefs(self, base, prefs, headers):
+        import http.client
+        body = json.dumps({"prefs": prefs}).encode()
+        conn = http.client.HTTPConnection(urlsplit(base).netloc, timeout=10)
+        conn.request("PUT", "/api/prefs", body=body, headers=dict(headers, **{"Content-Type": "application/json"}))
+        r = conn.getresponse()
+        out = r.read()
+        conn.close()
+        return r.status, json.loads(out or b"null")
+
     def test_prefs_follow_the_person(self):
+        """0.4.0: in hister mode /api/prefs is the account's, forwarded to the helper's /v1/prefs with the caller's
+        own credential (no local file involved)."""
         base = self.serve(**self.hister_env())
         cookie = {"Cookie": "machiya_sso=" + SID}
         code, _, body = self.get(base + "/api/prefs", cookie)
-        self.assertEqual((code, json.loads(body)), (200, {"prefs": {}}))
-        req = urllib.request.Request(base + "/api/prefs", data=json.dumps({"prefs": {"theme": "night"}}).encode(), method="PUT",
-                                     headers=dict(cookie, **{"Content-Type": "application/json", "Origin": "https://machiya.example.ts.net"}))
-        with urllib.request.urlopen(req, timeout=10) as r:
-            self.assertEqual(json.loads(r.read())["prefs"]["theme"], "night")
+        self.assertEqual((code, json.loads(body)["prefs"], json.loads(body)["rev"]), (200, {}, 0))
+        status, data = self.put_prefs(base, {"theme": "night"}, dict(cookie, Origin="https://machiya.example.ts.net"))
+        self.assertEqual((status, data["prefs"]["theme"], data["rev"]), (200, "night", 1))
+        self.assertEqual(self.helper.seen[-1]["path"], "/v1/prefs")
+        self.assertEqual(self.helper.seen[-1]["headers"]["x-machiya-session"], SID)          # the caller's own
+        self.assertEqual(self.put_prefs(base, {"theme": "day"}, dict(cookie, Origin="https://evil.example"))[0], 403)
         code, _, body = self.get(base + "/", dict(cookie, Accept="text/html"))
         self.assertIn('<meta name="machiya-prefs" content="/api/prefs">', body)
+
+    def test_keep_alive_prefs_answer_each_request_alone(self):
+        """0.4.0: prefs requests from different people down one kept-alive connection (as Serve sends them): each is
+        forwarded with its own credential or refused; a refused PUT's unread body never becomes a request."""
+        import http.client
+        import socket
+        base = self.serve(**self.hister_env())
+        conn = http.client.HTTPConnection(urlsplit(base).netloc, timeout=10)
+        body = json.dumps({"prefs": {"palette": "ayu"}}).encode()
+        got = []
+        for method, headers, data in (
+                ("PUT", {"Cookie": "machiya_sso=" + SID, "Origin": "https://machiya.example.ts.net",
+                         "Content-Type": "application/json"}, body),
+                ("GET", {}, None),                                            # nobody: 401, not the owner's
+                ("GET", {"Cookie": "machiya_sso=" + "mhs_" + "z" * 43}, None),  # signed out
+                ("GET", {"Cookie": "machiya_sso=" + SID}, None),
+                ("PUT", {"Cookie": "machiya_sso=" + SID, "Content-Type": "application/json"}, body)):  # no Origin
+            conn.request(method, "/api/prefs", body=data, headers=headers)
+            r = conn.getresponse()
+            got.append((r.status, r.read()))
+        conn.close()
+        self.assertEqual([g[0] for g in got], [200, 401, 401, 200, 403])
+        self.assertEqual(json.loads(got[3][1])["prefs"], {"palette": "ayu"})
+        self.assertNotIn(b"ayu", got[1][1] + got[2][1])
+        host, port = urlsplit(base).netloc.split(":")
+        smuggled = b"GET /api/prefs HTTP/1.1\r\nHost: x\r\nCookie: machiya_sso=%s\r\n\r\n" % SID.encode()
+        s = socket.create_connection((host, int(port)), timeout=2)
+        s.sendall(b"PUT /api/prefs HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n" % len(smuggled) + smuggled)
+        out, closed = b"", False
+        try:
+            while True:
+                chunk = s.recv(65536)
+                if not chunk:
+                    closed = True
+                    break
+                out += chunk
+        except socket.timeout:
+            pass
+        s.close()
+        self.assertEqual(out.count(b"HTTP/1.1 "), 1)
+        self.assertTrue(closed)
+        self.assertNotIn(b"ayu", out)
+
+    def test_settings_shared_section_first(self):
+        base = self.serve(**self.hister_env())
+        cookie = {"Cookie": "machiya_sso=" + SID, "Accept": "text/html"}
+        code, _, body = self.get(base + "/settings", cookie)
+        heads = re.findall(r'<h2 id="([a-z-]+)">', body)
+        self.assertEqual(heads, ["shared", "this-device", "account", "about"])
+        self.assertIn("Follows you on every Machiya app when signed in.", body)
+        self.assertIn('data-prefs-state="account"', body)
+        self.assertIn("Signed in as owner. Saved to your account.", body)
+        self.assertIn("Use This Device&#x27;s Size", body)
+
+    def test_fallback_has_no_account_prefs(self):
+        self.helper.close()
+        self.helper = Fake({})
+        base = self.serve(**self.hister_env(LANDING_AUTH_URL="http://127.0.0.1:9"))
+        who = {"Tailscale-User-Login": "owner@example.com"}
+        code, _, body = self.get(base + "/api/prefs", who)
+        self.assertEqual(code, 503)
+        code, _, body = self.get(base + "/settings", dict(who, Accept="text/html"))
+        self.assertIn('data-prefs-state="unavailable"', body)
+        self.assertIn("Sign-in is unavailable: kept here", body)
+
+    def test_signout_stops_the_automatic_signin(self):
+        """MACHIYA_SIGNIN_PROVIDER: signed out, a page goes through the provider; a deliberate sign-out sets the marker
+        the helper reads (so Sign Out doesn't bounce straight back in)."""
+        base = self.serve(**self.hister_env(MACHIYA_SIGNIN_PROVIDER="oidc"))
+        import http.client
+        conn = http.client.HTTPConnection(urlsplit(base).netloc, timeout=10)
+        conn.request("GET", "/status", headers={"Accept": "text/html"})
+        r = conn.getresponse()
+        r.read()
+        self.assertIn("provider=oidc&auto=1", r.getheader("Location"))
+        conn.request("POST", "/signout", body=b"", headers={"Cookie": "machiya_sso=" + SID, "Content-Length": "0",
+                                                           "Origin": "https://machiya.example.ts.net"})
+        r = conn.getresponse()
+        r.read()
+        conn.close()
+        self.assertIn("machiya_sso_out=1", " ".join(v for k, v in r.getheaders() if k == "Set-Cookie"))
 
 
 class Setup(unittest.TestCase):

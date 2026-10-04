@@ -31,8 +31,9 @@ Every app is optional. The page polls only what has an address; anything else sh
 | `LANDING_HISTER_USERS` | none | `hister`: the Hister usernames admitted (the owner's); required, never `*` |
 | `LANDING_AUTH_URL` | none | `hister`: the helper's internal address (`http://hister-login:8081`); unset: the Tailscale identity only |
 | `LANDING_AUTH_FALLBACK` | `tailscale` | `hister`: when sign-in is unavailable, a `LANDING_USERS` login is let in with a banner (`none` refuses everyone: not advised for a status page) |
+| `MACHIYA_SIGNIN_PROVIDER` | none | `hister`: sign a page in automatically through that provider of the helper's (`oidc`: tsidp), as the rooms do (0.4.0); empty: the helper's page. A deliberate sign-out shows the page until the next sign-in |
 | `LANDING_PUBLIC_URL` | none | this page's address (`https://machiya.example.ts.net`): the way back after sign-in, and the origin a sign-out or prefs write must come from; required with `hister` |
-| `LANDING_PREFS` | `prefs.sqlite3` beside `LANDING_STATE` | per-person theme and text size (`/api/prefs`) |
+| `LANDING_PREFS` | `prefs.sqlite3` beside `LANDING_STATE` | the page's own preferences store (`/api/prefs`) when there is no account: not used in `hister` mode with the helper (0.4.0), which keeps them |
 | `LANDING_USERS` | none | the Tailscale logins allowed in |
 | `LANDING_BIND`, `LANDING_PORT` | `0.0.0.0`, `8080` | the listener; `tailscale` mode refuses a non-loopback bind unless `LANDING_BIND_BEHIND_PROXY=1` (the proxy is the only way in) |
 | `LANDING_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | `open` mode answers only these `Host` names |
@@ -56,7 +57,7 @@ Every app is optional. The page polls only what has an address; anything else sh
 - `GET /api/today`: Today as JSON (owner-only).
 - `GET /api/status`: the status page as JSON (`overall`, `apps`, `sync`, `deploys`); owner-only, since it names every app's version.
 - `GET /api/changelog`: this page's own `CHANGELOG.md` (`vaultkit.changelog`), open like every app's.
-- `GET`/`PUT /api/prefs`: the signed-in person's theme and text size (owner-only; a PUT same-origin).
+- `GET`/`PUT /api/prefs`: the signed-in person's settings ([contracts/prefs.md](../../docs/contracts/prefs.md); owner-only; a PUT with the cookie same-origin). In `hister` mode with the helper it is the account's, forwarded to the helper's `/v1/prefs` with the caller's own credential; 503 in the Tailscale fallback.
 - `POST /signout` (`hister` mode): ends the Hister session (same-origin only), then `/`.
 - `GET /healthz`: `{"ok": true, "version": …}` for the container's health check and the monitoring probe; no identity, no data.
 - `/settings`, `/theme`, `/manifest.webmanifest`, `/static/…`: as in the rooms.

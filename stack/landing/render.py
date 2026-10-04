@@ -272,10 +272,13 @@ def account_section(account):
 
 
 def settings(ctx, links, version):
+    """Settings (0.4.0): Shared first (Theme, Appearance, Text Size, Apps: the same rows as every room, and where they
+    are kept), then This Device ("Use This Device's Size"), Account, About. The page has no settings of its own."""
     _, rows, _ = house.about_section(ROOM, version, "", vaultkit_version())
     about = ("About", rows, "Machiya's front door and status page. Install it from the browser's menu (Add to Home Screen).")
-    sections = [house.appearance_section(ctx, synced=bool(getattr(ctx, "prefs_url", ""))),
-                account_section(getattr(ctx, "account", None)), house.apps_section(ROOM, links, {}), about]
+    sections = [house.shared_section(ctx, ROOM, links, getattr(ctx, "prefs_state", "standalone"),
+                                     getattr(ctx, "who", "")),
+                house.device_section(ctx), account_section(getattr(ctx, "account", None)), about]
     return shell_page(ctx, house.title(ROOM, "Settings"), "", links, house.settings_page(sections, ROOM), scripts=False)
 
 

@@ -390,18 +390,41 @@ def make_handler(landing):
                 return self.send(code, body, ctype, [(k, v) for k, v in headers if k != "Content-Type"])
             return self.send(status, "%s\n" % reason, "text/plain; charset=utf-8", [("Cache-Control", "no-store")])
 
+        def forwards(self):
+            """In hister mode with the helper, /api/prefs is the account's (0.4.0): forwarded to the helper."""
+            return config.hister_auth is not None and not config.hister_auth.standalone
+
         def context(self, principal):
-            """Theme, text size and palette (cookies), plus: who is signed in (the header's person button and
-            Settings' Account), the fallback banner, and /api/prefs when there is somewhere to keep preferences."""
-            ctx = house.prefs(self.headers.get("Cookie"))
+            """Theme, text size and palette (cookies; the account's for a browser that has none yet), plus: who is
+            signed in (the header's person button and Settings' Account), the fallback banner, /api/prefs when there
+            is somewhere to keep preferences, and where Settings' Shared section says they are kept."""
+            res = self._hres if config.hister_auth is not None else None
+            ctx = house.prefs(self.headers.get("Cookie"), account=res.prefs if res is not None else None)
             ctx.signin = config.hister_auth is not None
             ctx.banner = config.hister_auth is not None and self._hres is not None and self._hres.banner
             via = getattr(principal, "via", "") if principal is not None else ""
             ctx.who = principal.name if principal is not None and via not in ("open", "") else ""
             ctx.account = {"name": ctx.who, "via": via,
                            "signout": config.hister_auth is not None and via in ("hister", "app", "token")} if ctx.who else None
-            ctx.prefs_url = "/api/prefs" if principal is not None and config.prefs_path else ""
+            ctx.prefs_url = "/api/prefs" if principal is not None and (self.forwards() or config.prefs_path) else ""
+            if self.forwards():
+                ctx.prefs_state = config.hister_auth.prefs_state(res)
+            else:
+                ctx.prefs_state = "room" if ctx.prefs_url else "standalone"
             return ctx
+
+        def prefs(self, principal, body=b""):
+            """GET/PUT /api/prefs: the account's (forwarded with the caller's own credential) in hister mode with the
+            helper, else this page's own store (LANDING_PREFS), else 404."""
+            if config.hister_auth is not None:
+                out = config.hister_auth.forward_prefs(self.hres(), self.command, self.headers, body, self.origins(),
+                                                       config.secure)
+                if out is not None:
+                    return self.reply(*out)
+            if not config.prefs_path:
+                return self.send_json(404, {"error": "not found"})
+            return self.reply(*signin.handle_prefs(prefs_store(config.prefs_path), principal, self.command,
+                                                   self.headers, body, config.secure, self.origins()))
 
         def origins(self):
             """Where a cookie-borne prefs PUT or sign-out may come from: LANDING_PUBLIC_URL; else, in open mode, this
@@ -444,10 +467,7 @@ def make_handler(landing):
             ctx = self.context(principal)
             cookies = [("Set-Cookie", c) for c in (self._hres.cookies if self._hres is not None else [])]
             if path == "/api/prefs":
-                if not config.prefs_path:
-                    return self.send_json(404, {"error": "not found"})
-                return self.reply(*signin.handle_prefs(prefs_store(config.prefs_path), principal, "GET", self.headers,
-                                                       b"", config.secure, self.origins()))
+                return self.prefs(principal)
             if path == "/api/status":
                 return self.send_json(200, landing.public(landing.current()))
             if path == "/manifest.webmanifest":
@@ -496,13 +516,12 @@ def make_handler(landing):
             principal, status, reason = self.gate()
             if principal is None:
                 return self.refuse(status, reason)
-            if path != "/api/prefs" or not config.prefs_path:
+            if path != "/api/prefs" or not (self.forwards() or config.prefs_path):
                 return self.send_json(404, {"error": "not found"})
             body = self.body(signin.MAX_PREFS)
             if body is None:
                 return self.send_json(413, {"error": "request body too large"})
-            return self.reply(*signin.handle_prefs(prefs_store(config.prefs_path), principal, "PUT", self.headers,
-                                                   body, config.secure, self.origins()))
+            return self.prefs(principal, body)
 
         def static(self, name, query):
             if name in STATIC_TYPES:
