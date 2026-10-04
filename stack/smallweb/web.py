@@ -317,7 +317,9 @@ _META_CHARSET = re.compile(rb"""<meta[^>]+charset\s*=\s*["']?\s*([A-Za-z0-9._:-]
 
 
 def decode(body, header_charset="", mime="text/html"):
-    """By the header's charset, else (HTML) the <meta charset>, else UTF-8 with replacement."""
+    """By the header's charset, else (HTML) the <meta charset>, else UTF-8 with replacement. Only a text encoding is
+    used: a page naming base64, hex, zlib, rot13 or another bytes codec as its charset gets UTF-8 (str.decode would
+    raise LookupError for those, and that stopped feed-import for good: the 2026-10 sweep, MACH-F-3)."""
     names = [header_charset]
     if mime != "text/plain":
         m = _META_CHARSET.search(body[:4096])
@@ -326,10 +328,15 @@ def decode(body, header_charset="", mime="text/html"):
         if not name:
             continue
         try:
-            codecs.lookup(name)
+            info = codecs.lookup(name)
         except LookupError:
             continue
-        return body.decode(name, "replace")
+        if not getattr(info, "_is_text_encoding", True):
+            continue
+        try:
+            return body.decode(info.name, "replace")
+        except LookupError:
+            continue
     return body.decode("utf-8", "replace")
 
 

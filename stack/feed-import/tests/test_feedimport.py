@@ -55,6 +55,13 @@ class Web(BaseHTTPRequestHandler):
         elif path == "/paywall":
             self.page(200, "<html><head><title>Paywalled</title></head><body><p>The first lines.</p>"
                            "<p>Subscribe to read more.</p></body></html>")
+        elif path == "/base64":                         # a charset naming a bytes codec (sweep MACH-F-3)
+            data = ("<html><head><title>Odd Charset</title></head><body><p>%s</p></body></html>" % LONG).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=base64")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
         elif path == "/flaky":
             self.page(503, "busy")
         elif path == "/pdf":
@@ -479,6 +486,21 @@ class Pipeline(Base):
         self.assertIsNone(histermod.Hister(url).document("https://x.test/a"))  # without a token, as before (404)
         self.assertEqual(len(elsewhere), 1)
         self.assertNotIn("X-Access-Token", elsewhere[0])
+
+    def test_a_bytes_codec_charset_is_read_as_utf8(self):
+        """0.1.2 (sweep MACH-F-3): charset=base64 (or hex, zlib, rot13) named a codec that isn't text, and
+        web.decode raised LookupError; only text encodings are used now, else UTF-8."""
+        import web
+        for name in ("base64", "hex", "zlib", "rot13", "uu", "bz2", "quopri"):
+            self.assertEqual(web.decode(b"<p>caf\xc3\xa9</p>", name), "<p>caf\u00e9</p>", name)
+            self.assertEqual(web.decode(b'<meta charset="%s"><p>x</p>' % name.encode(), ""), '<meta charset="%s"><p>x</p>'
+                             % name, name)
+        self.assertEqual(web.decode("caf\u00e9".encode("latin-1"), "iso-8859-1"), "caf\u00e9")
+        NB.read = [story("r1", "/base64", "Odd")]
+        self.importer().run()
+        self.assertEqual([d["title"] for d in adds()], ["Odd Charset"])
+        self.assertEqual(self.store.get("newsblur", "r1")["status"], "added")
+
 
     def test_dry_run_writes_nothing(self):
         H.docs[WEB + "/article/known"] = {"url": WEB + "/article/known", "label": ""}
