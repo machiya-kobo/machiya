@@ -58,6 +58,16 @@ calling instead of `KURA_USERS`. Without the file nothing here applies and the A
 - `/api/status` stays open; its full view (repo URL, folder, error texts) is the owner's only.
 - `default`, `shared` and `v` are never vault names.
 
+## Hister sign-in
+
+With `KURA_AUTH=hister` ([identity.md](../identity.md#hister-sign-in-authhister), [hister-login](../services/hister-login.md)) Kura asks the sign-in helper who is calling, and never falls back to the Tailscale identity (`KURA_AUTH_FALLBACK=none`). Clients should handle these answers now; Kura gives them once a deployment switches the mode.
+
+- **Credentials**, the first present decides: the owner's Hister token (`X-Access-Token`, or `Authorization: Bearer <token>`), `Authorization: Bearer mhs_…` (Shiori's apps), or the `machiya_sso` cookie (browsers). A present but invalid one is a **401**. `Bearer mch_…`/`mcd_…` (the identity file's) are a 401 in this mode: the file isn't combined with it yet.
+- **401** `{"error": "sign in", "signin": "<the helper's sign-in address, with return=>"}` for an API call without a valid credential, never a redirect; a page gets a 302 to that address instead. A page that receives the 401 from a `fetch` navigates to `signin` with `return=` set to itself (vaultkit's `machiya.js` does this).
+- **403** `{"error": …}`: a Hister account that isn't the owner's.
+- **503** `{"error": "sign-in is unavailable", "reason": …}`: the helper or Hister can't answer, or Hister's user handling is off. Kura has no fallback and no grace period: pages and API are closed until sign-in is back.
+- `/api/status` stays open for the probes.
+
 ## A note in a list
 
 ```json

@@ -20,6 +20,8 @@ Machiya's rooms (Kura, Niwa, Konbini) and machiya-mcp can share one **identity f
 
 Turning it on changes nothing until you set `MACHIYA_IDENTITY_FILE` in a room, room by room. Without the file a room behaves exactly as before.
 
+**Or let Hister's users be the sign-in** (`*_AUTH=hister`, [below](#hister-sign-in-authhister)): one owner, one sign-in for Hister and every room, real sign-out, without the identity file.
+
 ## Turn it on
 
 One command writes the file and the session key, adds you as the owner and prints the settings each room needs:
@@ -172,6 +174,33 @@ python3 -m vaultkit.identity --file /srv/machiya/identity/identity.toml setup --
 ```
 
 then start Kura as [its README](https://github.com/machiya-kobo/kura#quickstart) says, with the directory mounted read-only and the printed lines (`MACHIYA_IDENTITY_FILE`, `KURA_SIGNIN=1`; over plain http also `KURA_PUBLIC_URL=http://<its address>`). The same file can serve more rooms later.
+
+## Hister sign-in (`AUTH=hister`)
+
+A room mode **without the identity file**: the room asks [hister-login](services/hister-login.md) whether the caller is signed in to Hister, so one sign-in (password, or Hister's OIDC provider such as tsidp) covers Hister and every room, and a sign-out anywhere ends it everywhere within 30 seconds. One owner: everyone admitted is the owner, as with the Tailscale gate.
+
+**Ways in**, the first present decides (a present but invalid one is **401**, never passed over):
+
+1. **The owner's Hister token**: `X-Access-Token`, or `Authorization: Bearer <token>` (scripts, pm, the MCP);
+2. **A Hister sign-in**: the `machiya_sso` cookie (browsers), or `Authorization: Bearer mhs_…` (Shiori's apps);
+3. **Nothing**: a page is sent to the helper's sign-in and comes back; an API call gets `401 {"error": "sign in", "signin": "<address>"}` (vaultkit's `machiya.js` takes the page there when the room opts in).
+
+| | Kura | Niwa | Konbini |
+|---|---|---|---|
+| the mode | `KURA_AUTH=hister` | `NIWA_AUTH=hister` | `KANBAN_AUTH=hister` |
+| the helper, internal (`http://hister-login:8081`) | `KURA_AUTH_URL` | `NIWA_AUTH_URL` | `KANBAN_AUTH_URL` |
+| the helper's sign-in page (required) | `KURA_AUTH_SIGNIN_URL` | `NIWA_AUTH_SIGNIN_URL` | `KANBAN_AUTH_SIGNIN_URL` |
+| Hister usernames admitted (required; never `*`) | `KURA_HISTER_USERS` | `NIWA_HISTER_USERS` | `KANBAN_HISTER_USERS` |
+| when sign-in is unavailable: `tailscale` or `none` | `KURA_AUTH_FALLBACK` | `NIWA_AUTH_FALLBACK` | `KANBAN_AUTH_FALLBACK` |
+| Tailscale logins admitted in the fallback only (never `*`) | `KURA_USERS` | `NIWA_USERS` | `KANBAN_TAILNET_USERS` |
+| its address, for the way back (required) | `KURA_PUBLIC_URL` | `NIWA_PUBLIC_URL` | `KANBAN_BOARD_URL` |
+| the shared cookie's domain | `MACHIYA_COOKIE_DOMAIN` | same | same |
+
+- **Refused at start:** no sign-in address or usernames, a `*`, `none` without the helper's address, no public address, or an identity file at the same time (not combined yet). No helper address with the `tailscale` fallback runs on the Tailscale identity alone, with a warning, so a room still stands alone.
+- **Signed out never falls back.** Only "nobody answered" does: the helper or Hister unreachable, a 5xx, or Hister's user handling off. Then a room with `tailscale` admits the owner's Tailscale login with a banner ("Signed in through the tailnet: sign-in is unavailable"), caches nothing and counts it (`fallback_total`); a room with `none` answers 503. A Hister account outside `*_HISTER_USERS` is 403, never a fallback (OAuth creates accounts on its own).
+- **The cookie** (`machiya_sso=mhs_…`, `Domain=MACHIYA_COOKIE_DOMAIN`, Secure, HttpOnly, Lax) is an opaque id; Hister's own session never leaves Hister's host. It still reaches every site under that domain, so the same advice as below holds: a domain only Machiya's rooms serve. A leaked id is revoked on the helper's sessions page.
+- **Preferences** stay keyed by the Tailscale login when the room has exactly one fallback login (so the fallback sees the same settings); otherwise by a hash of the Hister username.
+- `/api/status` (Konbini: `/api/health`) stays open for the probes.
 
 ## Security notes
 

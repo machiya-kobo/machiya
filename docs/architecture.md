@@ -102,6 +102,16 @@ flowchart LR
     room -->|"principal + grant?"| ok{{"200 / 401 / 403"}}
 ```
 
+**Or Hister's users** ([hister-login](services/hister-login.md), `*_AUTH=hister`): a room asks the helper beside Hister whether the caller is signed in to Hister, so one sign-in covers Hister and every room and a sign-out ends it everywhere.
+
+```mermaid
+flowchart LR
+    who["browser · Shiori"] -->|"machiya_sso cookie or Bearer mhs_…"| room["room"]
+    room -->|"GET /v1/check (internal)"| hl["hister-login"]
+    hl -->|"GET /api/profile"| h[("Hister")]
+    room -->|"signed in / 401 / unavailable: Tailscale fallback or 503"| ok{{"200 / 401 / 503"}}
+```
+
 - Every name is a **Tailscale Service** served by a tagged sidecar, one Service per room. Tailscale terminates TLS and adds `Tailscale-User-Login`.
 - The **tailnet policy** grants these services to the owner only. Other users (for example a household) can be granted SearXNG only, and nothing else in Machiya.
 - A service checks the header against its allow-list. Server-to-server calls in the example deployment either stay on a Docker network (Kura to Hister over a shared network, with no identity involved) or go out through the host's own tailscaled. The web server that hosts Shiori's pages works that way, so the call arrives as the owner's machine.
@@ -154,3 +164,4 @@ The shared Hister network is an external Docker network created by the Hister st
 | Konbini | the board only; card pages link notes to Kura |
 | Shiori | notes from Kura; pages from Hister with ` -label:vault` on every query |
 | vaultkit | vendored into Kura, Niwa and Konbini |
+| hister-login | optional, beside Hister: Hister's users as the one sign-in for the rooms (`*_AUTH=hister`) |
