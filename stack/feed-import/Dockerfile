@@ -7,6 +7,7 @@ RUN apk add --no-cache tzdata && adduser -D -u 1000 -h /data -s /sbin/nologin fe
 WORKDIR /app
 COPY stack/smallweb/web.py stack/smallweb/smolnet.py /app/
 COPY stack/feed-import/feedimport.py stack/feed-import/readers.py stack/feed-import/newsblur.py \
+     stack/feed-import/miniflux.py stack/feed-import/freshrss.py stack/feed-import/feedbin.py \
      stack/feed-import/hister.py stack/feed-import/store.py /app/
 ENV FEED_IMPORT_DATA=/data PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER 1000:1000

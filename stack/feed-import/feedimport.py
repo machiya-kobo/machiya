@@ -1,6 +1,6 @@
 """feed-import: what its owner reads in a feed reader lands in Hister (Machiya, stack/feed-import).
 
-Every FEED_IMPORT_INTERVAL seconds, for each reader (NewsBlur today; the interface is readers.Reader):
+Every FEED_IMPORT_INTERVAL seconds, for each reader (NewsBlur, Miniflux, FreshRSS, Feedbin; readers.Reader):
   1. starred entries first, then read entries, newest first, until a page holds nothing new (the whole history on the
      first run: the backfill);
   2. an entry's URL that Hister already has is left alone (never re-indexed); a starred one there without a label
@@ -12,14 +12,16 @@ Every FEED_IMPORT_INTERVAL seconds, for each reader (NewsBlur today; the interfa
      instead, under the article's URL, marked `<reader>_content: copy`.
 A read entry is a visited page: no label, `added` = when it was read (or the story's date in a backfill). A starred
 entry is a saved page: the first of its reader tags that names a Hister topic label, else FEED_IMPORT_STARRED_LABEL
-(default: the reader's name), Hister's skip rules ignored (a deliberate save), `added` = the star time.
+(default `starred`), Hister's skip rules ignored (a deliberate save), `added` = the star time (when first seen if the
+reader keeps none; the story's date in a backfill).
 
   python3 feedimport.py               the service: a run every FEED_IMPORT_INTERVAL seconds, status in status.json
   python3 feedimport.py --once        one run, then exit (non-zero if it failed)
   python3 feedimport.py --import-legacy state.json
                                       take over server's newsblur-import.py state (once, before the first run)
   python3 feedimport.py --dry-run [--limit N] [--no-fetch] [--stream read|starred]
-                                      print what would be sent; writes nothing anywhere (no state, no Hister writes;
+                                      print what would be sent, at most N entries PER STREAM per reader (default 10:
+                                      up to 10 starred + 10 read); writes nothing anywhere (no state, no Hister writes;
                                       Hister is only asked which URLs it has, and only if FEED_IMPORT_HISTER_URL is set)
 """
 import argparse
@@ -40,8 +42,11 @@ if not os.path.exists(os.path.join(HERE, "web.py")):          # a checkout: smal
 import hister as histermod                                     # noqa: E402
 import smolnet                                                 # noqa: E402
 import web                                                     # noqa: E402
+from feedbin import Feedbin                                    # noqa: E402
+from freshrss import FreshRSS                                  # noqa: E402
+from miniflux import Miniflux                                  # noqa: E402
 from newsblur import NewsBlur                                  # noqa: E402
-from readers import Entry, ReaderError                         # noqa: E402
+from readers import Entry, ReaderError, secret_file            # noqa: E402
 from store import Store                                        # noqa: E402
 
 VERSION = "0.1.0"
@@ -180,7 +185,7 @@ class Importer:
             for tag in entry.tags:
                 if tag.strip().lower() in self._labels:
                     return self._labels[tag.strip().lower()]
-        return self.starred_label or reader.name
+        return self.starred_label or "starred"
 
     def label_existing(self, reader, entry, url, doc):
         """A starred entry whose page Hister already has: label it if it has no label; never touch anything else."""
@@ -212,8 +217,11 @@ class Importer:
                 self.put(r, e.id, starred=1, label=label)
             return
         tries = (rec["tries"] if rec else 0) + 1
-        if not starred and e.read_at is None:          # fixed when first seen: a retry keeps it
-            e.read_at = e.published if backfill and e.published else int(self.clock())
+        first = e.published if backfill and e.published else int(self.clock())   # fixed when first seen: a retry
+        if starred and e.starred_at is None:                                       # keeps it
+            e.starred_at = first
+        if not starred and e.read_at is None:
+            e.read_at = first
         url = histermod.norm(e.url)
         if not url.lower().startswith(("http://", "https://")):
             self.put(r, e.id, status="skipped", url=e.url, error="no http(s) URL", starred=int(starred))
@@ -364,12 +372,34 @@ def build(env, dry_run=False, fetch=True):
     names = [x.strip() for x in env.get("FEED_IMPORT_READERS", "newsblur").split(",") if x.strip()]
     for name in names:
         if name == "newsblur":
-            token = read_secret(env.get("FEED_IMPORT_NEWSBLUR_TOKEN_FILE", ""))
-            if not token:
-                raise SystemExit("feed-import: FEED_IMPORT_NEWSBLUR_TOKEN_FILE names no readable token")
-            readers.append(NewsBlur(env.get("FEED_IMPORT_NEWSBLUR_URL", "https://newsblur.com"), token))
+            if not env.get("FEED_IMPORT_NEWSBLUR_URL"):
+                raise SystemExit("feed-import: FEED_IMPORT_NEWSBLUR_URL is required for newsblur: the server the token "
+                                 "belongs to (https://newsblur.com, or a self-hosted NewsBlur's address)")
+            readers.append(NewsBlur(env["FEED_IMPORT_NEWSBLUR_URL"],
+                                    secret_file(env.get("FEED_IMPORT_NEWSBLUR_TOKEN_FILE"), "FEED_IMPORT_NEWSBLUR_TOKEN_FILE")))
+        elif name == "miniflux":
+            if not env.get("FEED_IMPORT_MINIFLUX_URL"):
+                raise SystemExit("feed-import: FEED_IMPORT_MINIFLUX_URL is required for miniflux")
+            readers.append(Miniflux(env["FEED_IMPORT_MINIFLUX_URL"],
+                                    secret_file(env.get("FEED_IMPORT_MINIFLUX_TOKEN_FILE"), "FEED_IMPORT_MINIFLUX_TOKEN_FILE")))
+        elif name == "freshrss":
+            if not env.get("FEED_IMPORT_FRESHRSS_URL") or not env.get("FEED_IMPORT_FRESHRSS_USER"):
+                raise SystemExit("feed-import: FEED_IMPORT_FRESHRSS_URL and FEED_IMPORT_FRESHRSS_USER are required for freshrss")
+            readers.append(FreshRSS(env["FEED_IMPORT_FRESHRSS_URL"], env["FEED_IMPORT_FRESHRSS_USER"],
+                                    secret_file(env.get("FEED_IMPORT_FRESHRSS_PASSWORD_FILE"),
+                                                "FEED_IMPORT_FRESHRSS_PASSWORD_FILE")))
+        elif name == "feedbin":
+            if not env.get("FEED_IMPORT_FEEDBIN_USER"):
+                raise SystemExit("feed-import: FEED_IMPORT_FEEDBIN_USER is required for feedbin")
+            readers.append(Feedbin(env.get("FEED_IMPORT_FEEDBIN_URL", "https://api.feedbin.com"),
+                                   env["FEED_IMPORT_FEEDBIN_USER"],
+                                   secret_file(env.get("FEED_IMPORT_FEEDBIN_PASSWORD_FILE"),
+                                               "FEED_IMPORT_FEEDBIN_PASSWORD_FILE"),
+                                   lookback_days=int(env.get("FEED_IMPORT_FEEDBIN_LOOKBACK", "14"))))
         else:
-            raise SystemExit("feed-import: unknown reader %r (known: newsblur)" % name)
+            raise SystemExit("feed-import: unknown reader %r (known: newsblur, miniflux, freshrss, feedbin)" % name)
+    if len(set(names)) != len(names):
+        raise SystemExit("feed-import: a reader is named twice in FEED_IMPORT_READERS")
     hister_url = env.get("FEED_IMPORT_HISTER_URL", "")
     if not hister_url and not dry_run:
         raise SystemExit("feed-import: FEED_IMPORT_HISTER_URL is required (unset is allowed only with --dry-run)")
@@ -436,7 +466,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--once", action="store_true", help="one run, then exit")
     ap.add_argument("--dry-run", action="store_true", help="print what would be sent; write nothing")
-    ap.add_argument("--limit", type=int, default=None, help="dry run: stop after N entries per stream (default 10)")
+    ap.add_argument("--limit", type=int, default=None, help="dry run: at most N entries per stream per reader (default 10, so up to 10 starred + 10 read)")
     ap.add_argument("--no-fetch", action="store_true", help="dry run: don't fetch the originals")
     ap.add_argument("--stream", choices=("read", "starred"), help="dry run: only this stream")
     ap.add_argument("--import-legacy", metavar="STATE_JSON", help="take over newsblur-import.py's state.json, then exit")

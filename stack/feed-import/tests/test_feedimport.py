@@ -220,6 +220,7 @@ class Base(unittest.TestCase):
         Web.hits = []
         self.tmp = tempfile.mkdtemp(prefix="feed-import-test-")
         self.store = Store(os.path.join(self.tmp, "state.sqlite3"))
+        self.addCleanup(self.store.db.close)
         self.lines = []
 
     def importer(self, dry_run=False, token="", hister=True, fetch=True, **kw):
@@ -340,9 +341,9 @@ class Pipeline(Base):
                          ("copy", "HTTP 404"))
         s1, s2 = sent[WEB + "/article/s1"], sent[WEB + "/article/s2"]
         self.assertEqual((s1["label"], s1["added"]), ("books", 1750000001))    # the matching Hister label's spelling
-        self.assertEqual((s2["label"], s2["added"]), ("newsblur", 1750000002))
+        self.assertEqual((s2["label"], s2["added"]), ("starred", 1750000002))
         self.assertTrue(s1["metadata"]["ignore_skip_rules"] and s1["metadata"]["newsblur_starred"])
-        self.assertEqual(labels_set(), [{"url": WEB + "/article/visited", "label": "newsblur"}])
+        self.assertEqual(labels_set(), [{"url": WEB + "/article/visited", "label": "starred"}])
         self.assertEqual(H.docs[WEB + "/article/labelled"]["label"], "essays")   # never relabelled
         self.assertEqual(self.store.get("newsblur", "r4")["status"], "known")
         self.assertEqual(self.store.get("newsblur", "r5")["status"], "pending")
@@ -424,7 +425,7 @@ class Pipeline(Base):
         self.assertEqual(self.store.counts(), {})
         printed = [json.loads(x) for x in self.lines if x.startswith("{")]
         self.assertEqual(len([p for p in printed if "would_add" in p]), 10)
-        self.assertIn({"already_in_hister": WEB + "/article/known", "label": "newsblur", "stream": "starred"}, printed)
+        self.assertIn({"already_in_hister": WEB + "/article/known", "label": "starred", "stream": "starred"}, printed)
         self.assertTrue(any("would label" in x for x in self.lines))
 
     def test_dry_run_cli_without_hister(self):
@@ -449,6 +450,9 @@ class Pipeline(Base):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "data")))
         with self.assertRaises(SystemExit):
             feedimport.build(env)                                            # a real run needs Hister
+        with self.assertRaises(SystemExit) as cm:                            # no default NewsBlur server
+            feedimport.build({k: v for k, v in env.items() if k != "FEED_IMPORT_NEWSBLUR_URL"}, dry_run=True)
+        self.assertIn("FEED_IMPORT_NEWSBLUR_URL", str(cm.exception))
 
 
 if __name__ == "__main__":

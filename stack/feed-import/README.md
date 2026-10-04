@@ -5,7 +5,7 @@ Puts what you read in a feed reader into [Hister](../../docs/services/hister.md)
 - **Stories you read** go in as visited pages: no label.
 - **Stories you star** go in as saved pages, with a label.
 
-NewsBlur is the first reader. Miniflux, FreshRSS and Feedbin can follow through the same interface (`readers.py`). It is stdlib Python with one sqlite file, and it listens on nothing.
+The readers are NewsBlur, Miniflux, FreshRSS and Feedbin, all through one interface (`readers.py`). Each one only reads: none marks, stars or changes anything. It is stdlib Python with one sqlite file, and it listens on nothing.
 
 **Status: prototype (0.1.0, unreleased).** The design and the open questions are in the vault card "Hister feed reader import (NewsBlur first)".
 
@@ -29,8 +29,8 @@ Runs happen every `FEED_IMPORT_INTERVAL` seconds. For each reader:
 
 | | A read story | A starred story |
 |---|---|---|
-| `label` | none | the first of its reader tags that names a Hister topic label (from the aliases in `/api/rules`), else `FEED_IMPORT_STARRED_LABEL` (default: the reader's name, `newsblur`) |
-| `added` | when it was first seen read. In a backfill, the story's own date, because NewsBlur keeps no read time | the star time |
+| `label` | none | the first of its reader tags that names a Hister topic label (from the aliases in `/api/rules`), else `FEED_IMPORT_STARRED_LABEL` (default `starred`). Only NewsBlur and FreshRSS have the owner's own tags on an entry |
+| `added` | the read time if the reader has one (Miniflux: `changed_at`). Otherwise when it was first seen read, or in a backfill the story's own date | the star time if the reader has one (NewsBlur; Miniflux: `changed_at`). Otherwise when first seen, or the story's date in a backfill |
 | skip rules | apply (406 means skipped) | ignored (`metadata.ignore_skip_rules`): a save is deliberate |
 | `metadata` | `source`, `via` = the reader, `client: feed-import`, and the reader's own keys (`newsblur_story_hash`, `_feed_id`, `_feed`, `_folder`, `_tags`, `_stream`, `_content`, `_copy_reason`, `_permalink`, `_starred`) | the same |
 
@@ -54,18 +54,42 @@ Limits of NewsBlur's API, read from its source:
 - **"Mark all as read" is not in that list.**
 - Calls are spaced 2 s apart.
 
+## Miniflux, FreshRSS, Feedbin
+
+| Reader | Calls | What to set up |
+|---|---|---|
+| **Miniflux** | `GET /v1/entries?status=read` and `?starred=true`, `order=changed_at&direction=desc`, 100 a page. Paging stops at a page with nothing new | the server's URL, and an API key (Settings → API Keys) in a file |
+| **FreshRSS** | Google Reader API at `<url>/api/greader.php`. `POST /accounts/ClientLogin` once per run, then the read and starred id lists (`stream/items/ids`, 1,000 a page), diffed against the state, and `POST stream/items/contents` for the new ones. Both POSTs only read | the server's URL, the user name, and the **API password** (Profile → API management; API access enabled in Authentication) in a file |
+| **Feedbin** | `GET /v2/entries.json?read=true&since=<look-back>` (all pages), `/v2/recently_read_entries.json`, `/v2/starred_entries.json` then `entries.json?ids=` (100 a call), `/v2/subscriptions.json`, `/v2/taggings.json` | the account's e-mail, and its password in a file (Feedbin has no API tokens) |
+
+What they don't keep, and so what the importer can't know:
+- **Miniflux** keeps no separate read or star time: `changed_at` is the last change of either. It deletes read entries after `CLEANUP_ARCHIVE_READ_DAYS`, 60 days by default; starred entries are kept.
+- **FreshRSS** keeps no read or star time, and lists entries in the order it got them, not the order you read them. So every run walks the whole read id list (cheap: ids only). It purges read entries after about 3 months by default (`keep_period`).
+- **Feedbin** keeps no read or star time. `since` filters on when Feedbin got an entry, so a run covers entries from the last `FEED_IMPORT_FEEDBIN_LOOKBACK` days (14). It also covers older entries that Feedbin's recently-read list names; that list only records posts kept open 10 s in Feedbin's web app.
+
+Inoreader is left out: its API needs a Pro plan, OAuth refresh tokens, and 100 requests a day.
+
 ## Settings
 
 | Env | Default | |
 |---|---|---|
-| `FEED_IMPORT_READERS` | `newsblur` | comma list |
-| `FEED_IMPORT_NEWSBLUR_URL` | `https://newsblur.com` | a self-hosted NewsBlur's address |
-| `FEED_IMPORT_NEWSBLUR_TOKEN_FILE` | — | a file holding a NewsBlur OAuth access token (required) |
+| `FEED_IMPORT_READERS` | `newsblur` | comma list of `newsblur`, `miniflux`, `freshrss`, `feedbin` |
+| `FEED_IMPORT_NEWSBLUR_URL` | — | the server the token belongs to: `https://newsblur.com` or a self-hosted NewsBlur's address (required for newsblur; a token from another server gets `authenticated: false`) |
+| `FEED_IMPORT_NEWSBLUR_TOKEN_FILE` | — | a file holding a NewsBlur OAuth access token (required for newsblur) |
+| `FEED_IMPORT_MINIFLUX_URL` | — | the Miniflux server, e.g. `https://miniflux.example` (required for miniflux) |
+| `FEED_IMPORT_MINIFLUX_TOKEN_FILE` | — | a file holding a Miniflux API key (required for miniflux) |
+| `FEED_IMPORT_FRESHRSS_URL` | — | the FreshRSS server, e.g. `https://freshrss.example` (`/api/greader.php` is added) (required for freshrss) |
+| `FEED_IMPORT_FRESHRSS_USER` | — | the FreshRSS user name (required for freshrss) |
+| `FEED_IMPORT_FRESHRSS_PASSWORD_FILE` | — | a file holding that user's API password (required for freshrss) |
+| `FEED_IMPORT_FEEDBIN_URL` | `https://api.feedbin.com` | |
+| `FEED_IMPORT_FEEDBIN_USER` | — | the Feedbin account's e-mail (required for feedbin) |
+| `FEED_IMPORT_FEEDBIN_PASSWORD_FILE` | — | a file holding its password (required for feedbin) |
+| `FEED_IMPORT_FEEDBIN_LOOKBACK` | `14` | days of read entries each run walks |
 | `FEED_IMPORT_HISTER_URL` | — | `http://hister:4433` (required, except for `--dry-run`) |
 | `FEED_IMPORT_HISTER_TOKEN_FILE` | — | the owner's Hister token, sent as `X-Access-Token`, once Hister's user handling is on. Unset means no token is sent |
 | `FEED_IMPORT_INTERVAL` | `600` | seconds between runs (at least 60) |
 | `FEED_IMPORT_PAUSE` | — | `Sun 02:20-02:50`: no runs in that weekly slot (Hister's backup), in `FEED_IMPORT_TZ` (default `UTC`) |
-| `FEED_IMPORT_STARRED_LABEL` | the reader's name | label for a starred page that no tag matches |
+| `FEED_IMPORT_STARRED_LABEL` | `starred` | label for a starred page that no tag matches |
 | `FEED_IMPORT_TAG_LABELS` | `1` | `0`: never take a label from the reader's tags |
 | `FEED_IMPORT_MAX_TRIES` | `3` | runs that may retry a timeout, 429 or 5xx before the copy is stored |
 | `FEED_IMPORT_COPY_RATIO` | `1.5` | the paywall rule above |
@@ -78,7 +102,8 @@ Limits of NewsBlur's API, read from its source:
 ## Running
 
 ```sh
-python3 feedimport.py --dry-run --limit 10            # print what would be sent: no state, no Hister writes
+python3 feedimport.py --dry-run --limit 10            # print what would be sent: at most 10 per stream per reader
+                                                       # (10 starred + 10 read); no state, no Hister writes
 python3 feedimport.py --dry-run --no-fetch --stream read
 python3 feedimport.py --import-legacy state.json       # once: take over server's newsblur-import.py state
 python3 feedimport.py --once                           # one run
@@ -95,14 +120,14 @@ podman build -f stack/feed-import/Dockerfile -t feed-import:dev .     # from the
 cd stack/feed-import && python3 -m unittest discover -s tests
 ```
 
-The tests need no network. They run against local fakes of NewsBlur, Hister and article servers, with smallweb's fetcher allowed to reach `127.0.0.1`.
+The tests need no network. They run against local fakes of NewsBlur, Miniflux, FreshRSS, Feedbin, Hister and the article servers, with smallweb's fetcher allowed to reach `127.0.0.1`. Every fake records its requests, and a test fails if a reader sends anything that could change state.
 
 ## Layout
 
 | File | |
 |---|---|
 | `feedimport.py` | the pipeline, the dry run, the service loop and `status.json` |
-| `readers.py` | the interface (`Entry`, `Reader`) |
-| `newsblur.py` | the NewsBlur reader |
+| `readers.py` | the interface (`Entry`, `Reader`) and the readers' shared HTTP client |
+| `newsblur.py`, `miniflux.py`, `freshrss.py`, `feedbin.py` | the readers |
 | `hister.py` | the four Hister calls and Hister's URL normalisation |
 | `store.py` | the state |

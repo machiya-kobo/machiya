@@ -8,3 +8,8 @@
 - Read pages get no label and keep Hister's skip rules. Starred pages get the matching topic label or the reader's name, and skip rules are ignored for them.
 - The state is one sqlite file. Pending retries are kept there. `--import-legacy` takes over server's `newsblur-import.py` state.
 - `--dry-run` writes nothing. `status.json` feeds the healthcheck. `FEED_IMPORT_PAUSE` skips runs during Hister's backup.
+- Three more readers through the same interface, each tested against a fake of its API:
+  - **Miniflux**: an API key; `changed_at` paging;
+  - **FreshRSS**: Google Reader API, user plus API password; the read and starred id lists are diffed;
+  - **Feedbin**: e-mail plus password; read entries over a look-back window plus recently read; starred ids.
+- A starred page that no tag matches gets the label `starred`, as the owner decided 2026-10-04 (it was the reader's name). A star without a time gets the time it was first seen, or the story's date in a backfill.
