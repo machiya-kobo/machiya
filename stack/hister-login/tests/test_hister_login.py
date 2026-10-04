@@ -445,6 +445,19 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(status, 303)
         self.assertTrue(dict(headers)["Location"].startswith("shiori://signed-in#sid=mhs_"))
 
+    def test_try_again_link_is_this_path(self):
+        """0.2.1 (sweep LEAD-6): routing reads the path of the target, so GET //evil.example/machiya/signin reaches the
+        sign-in; while Hister is down its Try Again link was //evil.example/…, another site."""
+        # http.server on Python 3.12+ already folds a leading // (so the server answers 404 there); the link is built
+        # from the path alone anyway, whatever the server hands over
+        for target, want in (("//evil.example/machiya/signin?return=x", "/machiya/signin?return=x"),
+                             ("/\\evil.example/x", "/machiya/signin"), ("/machiya/signin", "/machiya/signin")):
+            self.assertEqual(hl.Public.again(type("R", (), {"path": target})()), want, target)
+        self.fake.fail = True
+        status, _, body = self.public("GET", "/machiya/signin?return=x")
+        self.assertEqual(status, 503)
+        self.assertIn(b'href="/machiya/signin?return=x"', body)
+
     # -- app sessions
 
     def test_app_session(self):

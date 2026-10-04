@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.2.1
+
+- **Try Again links to this path only** (the 2026-10 sweep, LEAD-6): the link on the "Sign-In Is Unavailable" page is the request's path and query, never its raw target, which could be `//other.host/…` (routing reads only the path). Python 3.12+'s http.server already folds a leading `//`; this no longer depends on it.
+
 ## 0.2.0
 
 - **The settings that follow a person** (the owner, 2026-10-05; [docs/contracts/prefs.md](../../docs/contracts/prefs.md)): the helper keeps one store of each Hister user's settings, in its own file `prefs.sqlite3` beside the sessions file (`HISTER_LOGIN_PREFS_DB`, 0600), keyed by `hi:<sha256(username)[:32]>`, which is derived only from the credential the helper resolves itself (no endpoint takes a user id).

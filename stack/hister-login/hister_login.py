@@ -48,7 +48,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -908,7 +908,14 @@ class Public(Handler):
     def unavailable(self, state):
         text = ("Hister's user accounts are switched off, so nobody can sign in." if state == "user-handling-off"
                 else "Hister can't be reached right now. Try again in a minute.")
-        self.page(503, message_page(self.headers, "Sign-In Is Unavailable", text, [(self.path, "Try Again")]))
+        self.page(503, message_page(self.headers, "Sign-In Is Unavailable", text, [(self.again(), "Try Again")]))
+
+    def again(self):
+        """This request's own path and query, for a Try Again link (0.2.1, sweep LEAD-6): never the raw target, which
+        may be `//other.host/…` (routing reads only its path), and never a `//` or `/\\` path another site would be."""
+        u = urlsplit(self.path)
+        path = u.path if u.path.startswith("/") and u.path[1:2] not in ("/", "\\") else "/machiya/signin"
+        return path + ("?" + u.query if u.query else "")
 
     def callback(self):
         """The OAuth callback shim: Hister's own callback, unchanged, then an id for the new session and the way back
