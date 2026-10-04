@@ -183,6 +183,77 @@ class Inbound(WithFile):
         self.assertEqual(self.post(base, PING, self.bearer("reader"))[0], 403)
 
 
+class KeepAlive(WithFile):
+    """0.7.3: Tailscale Serve sends different people's requests down one kept-alive connection; each is answered
+    alone, and a body the server didn't read never becomes the next request."""
+
+    def one_connection(self, base, requests):
+        import http.client
+        conn = http.client.HTTPConnection(base.split("//")[1], timeout=10)
+        out = []
+        try:
+            for headers in requests:
+                conn.request("POST", "/mcp", body=json.dumps(tool("board_review")).encode(),
+                             headers={"Content-Type": "application/json", **headers})
+                r = conn.getresponse()
+                out.append((r.status, json.loads(r.read() or b"null")))
+        finally:
+            conn.close()
+        return out
+
+    @staticmethod
+    def raw(base, data):
+        import socket
+        host, port = base.split("//")[1].split(":")
+        s = socket.create_connection((host, int(port)), timeout=2)
+        s.sendall(data)
+        out, closed = b"", False
+        try:
+            while True:
+                chunk = s.recv(65536)
+                if not chunk:
+                    closed = True
+                    break
+                out += chunk
+        except socket.timeout:
+            pass
+        s.close()
+        return out, closed
+
+    def test_each_request_is_answered_alone(self):
+        server, base = self.serve()
+        got = self.one_connection(base, [
+            {},                                                     # nobody: 401
+            {"Tailscale-User-Login": "owner@test"},                 # the owner
+            {},                                                     # nobody again
+            {"Authorization": "Bearer mch_nope_secret"},            # a bad token
+            self.bearer("claude-vm"),                               # an agent with the grant
+            self.bearer("reader"),                                  # an agent without it: 403
+            {"Tailscale-User-Login": "stranger@test"},              # a login with no access: 403
+            {"Tailscale-User-Login": "partner@test"},               # another person
+            {},
+        ])
+        self.assertEqual([g[0] for g in got], [401, 200, 401, 401, 200, 403, 403, 200, 401])
+        self.assertEqual([r["principal"] for r in self.audit(server)], ["owner", "claude-vm", "partner"])
+
+    def test_an_unread_body_never_becomes_a_request(self):
+        server, base = self.serve()
+        inner = json.dumps(tool("board_review")).encode()
+        smuggled = (b"POST /mcp HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+                    b"Tailscale-User-Login: owner@test\r\nContent-Length: %d\r\n\r\n" % len(inner)) + inner
+        for head in (b"POST /mcp HTTP/1.1\r\nHost: x\r\n",                                   # nobody: 401
+                     b"POST /mcp HTTP/1.1\r\nHost: x\r\nTailscale-User-Login: stranger@test\r\n",   # 403
+                     b"POST /mcp HTTP/1.1\r\nHost: x\r\nOrigin: https://evil.example\r\n",   # a browser: 403
+                     b"POST /nope HTTP/1.1\r\nHost: x\r\n",                                  # 404
+                     b"GET /api/status HTTP/1.1\r\nHost: x\r\n"):                            # open, body unread
+            out, closed = self.raw(base, head + b"Content-Length: %d\r\n\r\n" % len(smuggled) + smuggled)
+            self.assertEqual(out.count(b"HTTP/1.1 "), 1, head)
+            self.assertTrue(closed, head)
+            self.assertIn(b"\r\nConnection: close\r\n", out)
+        self.assertEqual(self.fakes["konbini"].seen, [])
+        self.assertFalse(os.path.exists(server.log_path) and self.audit(server))
+
+
 class Startup(WithFile):
     def config(self, **env):
         return mcp.Config(dict({"MACHIYA_IDENTITY_FILE": self.file, "MCP_LOG": os.devnull}, **env))

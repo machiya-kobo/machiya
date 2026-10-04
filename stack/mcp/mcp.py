@@ -31,7 +31,7 @@ import envelope                                   # noqa: E402
 from backend import HISTER_ORIGIN, Backend, BackendError, SecretFile   # noqa: E402
 from rooms import ToolError, cross, hister, hister_write, konbini, kura, niwa, prompts, vault  # noqa: E402
 
-VERSION = "0.7.2"
+VERSION = "0.7.3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHANGELOG = os.path.join(HERE, "CHANGELOG.md")    # /app/CHANGELOG.md in the image; GET /api/changelog serves it
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26")
@@ -576,6 +576,30 @@ def make_handler(server):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "machiya-mcp"
+        _body_read = False                  # this request's body was read in full (reset per request)
+
+        def handle_one_request(self):
+            """Every request starts afresh (0.7.3). HTTP/1.1 keeps a connection, and one handler, for many requests,
+            and Tailscale Serve sends different people's requests down the same connection: nothing from the last
+            request may decide this one. A body this request didn't read (a refused caller's, a GET's) would be parsed
+            as the NEXT request on the connection: one smuggled past Serve, with a Tailscale-User-Login Serve never
+            saw. So the connection closes instead."""
+            self._body_read = False
+            super().handle_one_request()
+            if not self.close_connection and self.unread_body():
+                self.close_connection = True
+
+        def unread_body(self):
+            headers = getattr(self, "headers", None)
+            if headers is None or self._body_read:
+                return False
+            lengths = headers.get_all("Content-Length") or []
+            return headers.get("Transfer-Encoding") is not None or any(v.strip() != "0" for v in lengths)
+
+        def end_headers(self):
+            if not self.close_connection and self.unread_body():
+                self.send_header("Connection", "close")     # sets close_connection: the unread bytes go with it
+            super().end_headers()
 
         def log_message(self, *a):
             pass
@@ -636,8 +660,10 @@ def make_handler(server):
             if not 0 < length <= MAX_BODY:
                 self.close_connection = True          # the body is not read, so the connection can't be reused
                 return self.json(413 if length > MAX_BODY else 400, {"error": "bad body"})
+            raw = self.rfile.read(length)
+            self._body_read = len(raw) == length
             try:
-                msg = json.loads(self.rfile.read(length).decode("utf-8"))
+                msg = json.loads(raw.decode("utf-8"))
             except (ValueError, UnicodeDecodeError):
                 return self.json(400, rpc_error(None, -32700, "Parse error"))
             agent = (self.headers.get("X-Agent") or "client").strip()[:76] or "client"

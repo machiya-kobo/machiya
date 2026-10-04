@@ -1,5 +1,13 @@
 # Changelog: machiya-mcp
 
+## 0.7.3
+
+- **Keep-alive (security):** a request body the server didn't read (a refused caller's 401/403, a browser Origin's
+  403, a 404, a GET's) stayed on the connection and was parsed as the next request: one smuggled past Tailscale Serve,
+  with a `Tailscale-User-Login` Serve never saw, so anyone who could reach the server could make tool calls as the
+  owner. Such a request now ends with `Connection: close`, and every request starts with no state from the one before
+  (`handle_one_request`). Tests send several callers' requests down one kept-alive connection, as Serve does.
+
 ## 0.7.2
 
 - **`HISTER_TOKEN_FILE`** (phase 1 of the Hister sign-in, docs/contracts/hister.md): the owner's Hister token, sent as `X-Access-Token` on every Hister call and to nothing else. Unset sends none, as before (a Hister without users ignores it). A set file that is missing, empty or not a token stops the server at start; the file is re-read when it changes, so a rotated token needs no restart (a file that vanishes keeps the last good value). Never logged, never in a repr or an error; redirects from Hister are not followed while it is set. `/api/status` says `hister_token: true|false`.
