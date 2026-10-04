@@ -1,5 +1,15 @@
 # Changelog: feed-import
 
+## 0.1.2
+
+- **One bad story no longer stops the import** (the 2026-10 sweep, MACH-F-3). An entry whose handling raised (a malformed permalink's `ValueError`, an odd charset's `LookupError`) crashed every run at the same entry, and a restart rewrote `status.json` as ok. Now:
+  - each entry's exception is caught and recorded with its error (`pending`, then `failed` after `FEED_IMPORT_MAX_TRIES` runs), and the run goes on;
+  - a run that crashes is a failed run and the loop carries on;
+  - a run in which every entry raised counts as failed;
+  - a restart that finds the last run unfinished counts it as failed instead of resetting `ok`;
+  - `entry_errors` in `status.json` counts the entries that raised.
+- smallweb's `web.decode` (copied in) uses only text encodings: a `charset=base64` page is read as UTF-8.
+
 ## 0.1.1
 
 - **`FEED_IMPORT_HISTER_TOKEN_FILE` done properly** (phase 1 of the Hister sign-in, docs/contracts/hister.md): a set file that is missing, empty or not a token now stops the start (it used to send no token, or crash on a missing file); the file is re-read when it changes, so a rotated token needs no restart (a file that vanishes keeps the last good value); and while a token is set a redirect from Hister is never followed (urllib would have carried `X-Access-Token` to wherever it pointed): the run stops as if Hister were down. The token is never logged or in a repr. Every Hister call (`/api/document`, `/api/add`, `/api/label`, `/api/rules`) still carries it.

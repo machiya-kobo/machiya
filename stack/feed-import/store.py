@@ -9,6 +9,8 @@ entries.status:
 - known     Hister already had the URL: left alone (a starred one may have been labelled)
 - skipped   not sent: no http(s) URL, no content at all, or Hister's skip rules (406)
 - rejected  Hister refused it (422 sensitive content, another 4xx): final
+- failed    handling it raised (a malformed permalink, a bug) on MAX_TRIES runs: final, with the error (0.1.2); until
+            then it is `pending` and tried again
 entries.starred is 1 once the starred stream has been handled for it (labelled, or found already labelled).
 """
 import os

@@ -97,7 +97,16 @@ Inoreader is left out: its API needs a Pro plan, OAuth refresh tokens, and 100 r
 | `FEED_IMPORT_FETCH_ALLOW` | — | private hosts or CIDRs an original may be fetched from (smallweb's `SMALLWEB_FETCH_ALLOW`) |
 | `FEED_IMPORT_DATA` | `/data` | `feed-import.sqlite3` (the state and cursor) and `status.json` |
 
-`status.json` holds `ok`, `running`, `last_success`, `failures_in_a_row`, `error` and the counts per status. `ok` turns false after a failed run once no run has succeeded for three intervals. The image's healthcheck reads it. Alert on it only: counts are information.
+`status.json` holds `ok`, `running`, `last_success`, `failures_in_a_row`, `error`, `entry_errors` (entries that raised in the last run) and the counts per status. `ok` turns false after a failed run once no run has succeeded for three intervals. The image's healthcheck reads it. Alert on it only: counts are information.
+
+A failed run (0.1.2) is any of these:
+
+- a reader or Hister failing;
+- a run that crashed (the loop logs the traceback and carries on);
+- a run in which every entry raised;
+- a run that never finished: the status a restart finds still says `running`.
+
+One entry that raises (a malformed permalink, say) is recorded with its error and tried again on the next runs, `FEED_IMPORT_MAX_TRIES` in all, then kept as `failed`. The other entries go on.
 
 ## Running
 

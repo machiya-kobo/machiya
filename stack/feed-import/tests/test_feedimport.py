@@ -487,6 +487,27 @@ class Pipeline(Base):
         self.assertEqual(len(elsewhere), 1)
         self.assertNotIn("X-Access-Token", elsewhere[0])
 
+    def test_one_bad_story_never_stops_the_import(self):
+        """0.1.2 (sweep MACH-F-3): an entry that raises anything (a malformed permalink's ValueError here) is recorded
+        and the run goes on; it is tried again on the next runs, FEED_IMPORT_MAX_TRIES in all, then `failed` for good,
+        so a restart never meets it again forever."""
+        NB.read = [story("r1", "/article/1", "One"), story("bad", "http://[::1/x", "Malformed"),
+                   story("r3", "/article/3", "Three")]
+        stats = self.importer().run()
+        self.assertEqual(sorted(d["url"] for d in adds()), [WEB + "/article/1", WEB + "/article/3"])
+        bad = self.store.get("newsblur", "bad")
+        self.assertEqual((bad["status"], bad["tries"]), ("pending", 1))
+        self.assertIn("ValueError", bad["error"])
+        self.assertEqual(stats["newsblur"]["errors"], 1)
+        self.importer().run()
+        self.importer().run()
+        bad = self.store.get("newsblur", "bad")
+        self.assertEqual((bad["status"], bad["tries"]), ("failed", 3))
+        stats = self.importer().run()                       # final: never handled again
+        self.assertEqual(self.store.get("newsblur", "bad")["tries"], 3)
+        self.assertNotIn("errors", stats.get("newsblur", {}))
+        self.assertTrue(any("ValueError" in x for x in self.lines))
+
     def test_a_bytes_codec_charset_is_read_as_utf8(self):
         """0.1.2 (sweep MACH-F-3): charset=base64 (or hex, zlib, rot13) named a codec that isn't text, and
         web.decode raised LookupError; only text encodings are used now, else UTF-8."""
@@ -540,6 +561,68 @@ class Pipeline(Base):
         with self.assertRaises(SystemExit) as cm:                            # no default NewsBlur server
             feedimport.build({k: v for k, v in env.items() if k != "FEED_IMPORT_NEWSBLUR_URL"}, dry_run=True)
         self.assertIn("FEED_IMPORT_NEWSBLUR_URL", str(cm.exception))
+
+
+class Health(Base):
+    """0.1.2 (sweep MACH-F-3): status.json's `ok` is honest: a run that crashed is a failed run (the loop keeps going),
+    a run whose entries all fail is one too, and a start after a run that never finished doesn't reset to ok."""
+
+    def serve_once(self, imp):
+        data = os.path.join(self.tmp, "data")
+        os.makedirs(data, exist_ok=True)
+        old = feedimport.build
+        feedimport.build = lambda env, **kw: (imp, data)
+        try:
+            rc = feedimport.serve({"FEED_IMPORT_INTERVAL": "600"}, once=True)
+        finally:
+            feedimport.build = old
+        with open(os.path.join(data, "status.json")) as f:
+            return rc, json.load(f)
+
+    def test_a_crash_is_a_failed_run(self):
+        imp = self.importer()
+
+        def boom(*a, **k):
+            raise LookupError("'base64' is not a text encoding")
+        imp.run = boom
+        rc, status = self.serve_once(imp)
+        self.assertEqual(rc, 1)
+        self.assertFalse(status["ok"])
+        self.assertEqual(status["failures_in_a_row"], 1)
+        self.assertIn("LookupError", status["error"])
+
+    def test_every_entry_failing_is_a_failed_run(self):
+        NB.read = [story("b%d" % i, "http://[::%d/x" % i, "Bad") for i in range(3)]
+        rc, status = self.serve_once(self.importer())
+        self.assertEqual(rc, 1)
+        self.assertFalse(status["ok"])
+        self.assertIn("3 entries failed", status["error"])
+
+    def test_one_failing_entry_among_good_ones_is_ok(self):
+        NB.read = [story("r1", "/article/1", "One"), story("bad", "http://[::1/x", "Bad")]
+        rc, status = self.serve_once(self.importer())
+        self.assertEqual(rc, 0)
+        self.assertTrue(status["ok"])
+        self.assertEqual(status["entry_errors"], 1)
+
+    def test_a_run_that_never_finished_is_not_reset_to_ok(self):
+        data = os.path.join(self.tmp, "data")
+        os.makedirs(data)
+        feedimport.write_status(data, version="x", ok=True, running=True, started=1, last_success=None,
+                                failures_in_a_row=2, error=None, counts={})
+        imp = self.importer()
+        seen = []
+
+        def run(*a, **k):                                    # the status written before the run starts
+            with open(os.path.join(data, "status.json")) as f:
+                seen.append(json.load(f))
+            return {}
+        imp.run = run
+        rc, status = self.serve_once(imp)
+        self.assertFalse(seen[0]["ok"])
+        self.assertEqual(seen[0]["failures_in_a_row"], 3)
+        self.assertIn("didn't finish", seen[0]["error"])
+        self.assertTrue(status["ok"])                        # a good run clears it
 
 
 if __name__ == "__main__":

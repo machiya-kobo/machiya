@@ -31,6 +31,7 @@ import os
 import re
 import sys
 import time
+import traceback
 from dataclasses import asdict
 from datetime import datetime
 
@@ -49,7 +50,7 @@ from newsblur import NewsBlur                                  # noqa: E402
 from readers import Entry, ReaderError, secret_file            # noqa: E402
 from store import Store                                        # noqa: E402
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 USER_AGENT = "Mozilla/5.0 (compatible; machiya-feed-import/%s; opens what its owner read in a feed reader)" % VERSION
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 WINDOW_RE = re.compile(r"^(%s)[a-z]*\s+([01]?\d|2[0-3]):([0-5]\d)\s*-\s*([01]?\d|2[0-3]):([0-5]\d)$" % "|".join(DAYS), re.I)
@@ -81,6 +82,10 @@ def in_window(window, tz, now=None):
 
 
 # -- fetching the original --------------------------------------------------------------------------------------------
+
+class RunFailed(Exception):
+    """A run whose every entry failed: reported like a reader or Hister failure."""
+
 
 class Transient(Exception):
     """Worth another try on a later run (a timeout, 429, 5xx)."""
@@ -153,7 +158,7 @@ class Importer:
         self.dry_run, self.starred_label, self.tag_labels = dry_run, starred_label, tag_labels
         self.max_tries, self.copy_ratio, self.out, self.clock = max_tries, copy_ratio, out, clock
         self._labels = None
-        self.stats = {}
+        self.stats, self.errors = {}, []
 
     # -- helpers ------------------------------------------------------------------------------------------------------
 
@@ -200,7 +205,8 @@ class Importer:
         r = reader.name
         starred = stream == "starred"
         rec = self.store.get(r, e.id)
-        final = ("added", "known", "rejected") if starred else ("added", "known", "rejected", "skipped")
+        final = ("added", "known", "rejected", "failed") if starred else ("added", "known", "rejected", "skipped",
+                                                                           "failed")
         if rec and rec["status"] in final:
             if starred and not rec["starred"]:
                 label = rec["label"] or ""
@@ -310,18 +316,45 @@ class Importer:
         if self.dry_run:
             self.out(json.dumps({"already_in_hister": url, "label": label or "", "stream": "starred" if starred else "read"}))
 
+    def handle_safely(self, reader, e, stream, backfill):
+        """handle(), with anything it raises besides HisterDown and ReaderError (which stop the run) kept to this entry
+        (0.1.2, the 2026-10 sweep, MACH-F-3): the error is recorded, the entry tried again on the next runs, max_tries
+        runs in all, then `failed` for good. Before, one malformed permalink or odd charset stopped every run."""
+        try:
+            self.handle(reader, e, stream, backfill)
+        except (histermod.HisterDown, ReaderError):
+            raise
+        except Exception as x:                         # one bad entry never stops the import
+            r = reader.name
+            error = ("%s: %s" % (type(x).__name__, x))[:300]
+            self.note(r, "errors")
+            self.errors.append(error)
+            rec = self.store.get(r, e.id)
+            tries = (rec["tries"] if rec else 0) + 1
+            try:
+                entry = json.dumps(asdict(e))
+            except (TypeError, ValueError):
+                entry, tries = None, max(tries, self.max_tries)
+            final = tries >= self.max_tries
+            self.log("  %s %s: %s" % ("failed for good" if final else "failed (%d/%d), retry later" % (tries, self.max_tries),
+                                      (e.url or e.id)[:200], error))
+            if not self.dry_run:
+                self.store.put(r, e.id, status="failed" if final else "pending", tries=tries, url=(e.url or "")[:2000],
+                               error=error, starred=int(stream == "starred"), stream=stream,
+                               entry=None if final else entry)
+
     # -- a run ----------------------------------------------------------------------------------------------------------
 
     def run(self, streams=("starred", "read"), limit=None):
         """One pass over every reader. Raises HisterDown or ReaderError (nothing half-recorded: the state is written
         per entry)."""
-        self.stats = {}
+        self.stats, self.errors = {}, []
         for reader in self.readers:
             r = reader.name
             backfill = self.store.count(r) == 0 or self.store.meta("backfill_done:" + r) is None
             for rec in self.store.pending(r):            # retries come from the state, not from the reader's paging
                 if rec["stream"] in streams:
-                    self.handle(reader, Entry(**json.loads(rec["entry"])), rec["stream"], backfill)
+                    self.handle_safely(reader, Entry(**json.loads(rec["entry"])), rec["stream"], backfill)
             for stream in streams:
                 n = 0
                 if stream == "starred":
@@ -334,7 +367,7 @@ class Importer:
                     if limit is not None and n >= limit:
                         break
                     n += 1
-                    self.handle(reader, e, stream, backfill)
+                    self.handle_safely(reader, e, stream, backfill)
             if not self.dry_run and limit is None:
                 self.store.meta("backfill_done:" + r, int(self.clock()))
         return self.stats
@@ -423,7 +456,17 @@ def serve(env, once=False):
     imp.log("feed-import %s: readers %s, Hister %s, every %d s%s, egress %s" % (
         VERSION, ",".join(r.name for r in imp.readers), env.get("FEED_IMPORT_HISTER_URL"), interval,
         (", paused " + env.get("FEED_IMPORT_PAUSE")) if window else "", env.get("FEED_IMPORT_SOCKS") or "direct"))
-    last_ok, fails = None, 0
+    last_ok, fails, carried = None, 0, None
+    try:                                     # a run that never finished (a crash, a kill) isn't forgotten on restart
+        with open(os.path.join(data, "status.json")) as f:
+            before = json.load(f)
+        if before.get("running"):
+            fails = int(before.get("failures_in_a_row") or 0) + 1
+            last_ok = before.get("last_success")
+            carried = "the last run didn't finish (the service stopped or crashed during it)"
+            imp.log("feed-import: " + carried)
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
 
     def healthy():
         """A probe alerts on ok=false (broken), never on counts: false after a failed run, or when no run has
@@ -436,21 +479,32 @@ def serve(env, once=False):
         started = int(time.time())
         error = None
         write_status(data, version=VERSION, ok=healthy(), running=True, started=started, last_success=last_ok,
-                     failures_in_a_row=fails, error=None, counts=imp.store.counts())
+                     failures_in_a_row=fails, error=carried, counts=imp.store.counts())
+        carried = None
+        entry_errors = 0
         if in_window(window, tz):
             imp.log("in the pause window: no run")
         else:
             try:
                 stats = imp.run()
+                entry_errors = len(imp.errors)
+                done = sum(n for r in stats.values() for k, n in r.items() if k != "errors")
+                if entry_errors and not done:          # every entry failed: something is broken, not one story
+                    raise RunFailed("%d entries failed, none imported; the last: %s" % (entry_errors, imp.errors[-1]))
                 last_ok, fails = int(time.time()), 0
                 if any(stats.values()):
                     imp.log("run: %s" % json.dumps(stats, sort_keys=True))
-            except (histermod.HisterDown, ReaderError) as e:
+            except (histermod.HisterDown, ReaderError, RunFailed) as e:
                 fails += 1
                 error = str(e)
                 imp.log("run failed (%d in a row): %s" % (fails, e))
+            except Exception as e:                     # a bug: a failed run, visible in the status; the loop goes on
+                fails += 1
+                error = ("crashed: %s: %s" % (type(e).__name__, e))[:500]
+                imp.log("run %s (%d in a row)" % (error, fails))
+                traceback.print_exc()
         write_status(data, version=VERSION, ok=healthy(), running=False, started=started, last_success=last_ok,
-                     failures_in_a_row=fails, error=error, counts=imp.store.counts())
+                     failures_in_a_row=fails, error=error, entry_errors=entry_errors, counts=imp.store.counts())
         if once:
             return 0 if error is None else 1
         time.sleep(interval)
