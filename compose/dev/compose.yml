@@ -299,6 +299,7 @@ services:
       LANDING_PROBES: "hister=http://hister:4433,kura=http://kura:8080,niwa=http://niwa:8080,konbini=http://konbini:8081,searxng=http://searxng:8080,machiya-mcp=http://machiya-mcp:8080,smallweb=http://smallweb:8080"
       LANDING_MIRROR_STATUS: /mirror/status.json        # vault-mirror's
       LANDING_FEED_STATUS: /feed/status.json
+      LANDING_CODE_STATUS: /code/status.json         # code-import's (landing 0.3.4: its row and Sync's Repos indexed)
       LANDING_HISTER_TOKEN_FILE: /secrets/owner-token
       LANDING_STATE: /data/landing.json
       LANDING_POLL: "20"
@@ -306,12 +307,13 @@ services:
       - ${DEV_DATA}/landing:/data
       - ${DEV_DATA}/mirror:/mirror:ro
       - ${DEV_DATA}/feed-import:/feed:ro
+      - ${DEV_DATA}/code-import:/code:ro
       - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
     x-native:
       cmd: ["python3", "-u", "landing.py"]
       cwd: "${MACHIYA_SRC}/stack/landing"
       paths: {/data: "${DEV_DATA}/landing", /mirror: "${DEV_DATA}/mirror", /feed: "${DEV_DATA}/feed-import",
-              /secrets: "${DEV_DATA}/secrets"}
+              /code: "${DEV_DATA}/code-import", /secrets: "${DEV_DATA}/secrets"}
       env: {LANDING_BIND: "127.0.0.1", LANDING_PORT: "19230"}
 
   machiya-mcp:
