@@ -130,7 +130,7 @@ tools/dev-test tv-debian --keep && \
 
 `--packages` installs what the stack needs with the machine's package manager (Debian's Docker; on the BSDs the packages of [install/bsd.md](install/bsd.md); on Haiku the line below). The checks are the HTTP ones. The vault's commit hash comes out the same on every machine.
 
-Proven (2026-10-04): `tv-debian` with Docker 16/16 and natively (a Linux Hister binary) 15/15; `tv-freebsd` natively with `--hister-via tv-debian` 15/15 (every Python service on FreeBSD 15.1, Hister on Debian through the tunnels). SearXNG is left out natively.
+Proven (2026-10-04/05, the counts have since grown to 17 Docker and 16 native checks): `tv-debian` with Docker 17/17; `tv-arm64` (Debian 13 aarch64) with Docker 17/17 and natively with upstream's linux_arm64 Hister binary 16/16; `tv-freebsd` natively with `--hister-via tv-debian` 15/15 (every Python service on FreeBSD 15.1, Hister on Debian through the tunnels). SearXNG is left out natively.
 
 ### A Hister borrowed from another machine (`--hister-via`)
 
@@ -171,7 +171,7 @@ These are upstream's Dockerfile steps without its Linux-only static linking (`-l
 | Service | Natively |
 |---|---|
 | the rooms, landing, hister-login, machiya-mcp, smallweb, feed-import, code-import, vault-mirror, the stub OIDC provider, the fixtures, the fake NewsBlur, Forgejo and GitHub, the front | Python 3.11+ with `markdown` and `pyyaml`, plus `git` and `openssl` |
-| Hister | a `hister` binary for the OS (`HISTER_BIN=…` at init, or on `PATH`). It is Go with cgo (SQLite, sqlite-vec): build it with Go 1.26 and a C compiler. Upstream ships Linux, macOS and Windows binaries only |
+| Hister | a `hister` binary for the OS (`HISTER_BIN=…` at init, or on `PATH`). It is Go with cgo (SQLite, sqlite-vec): build it with Go 1.26 and a C compiler. Upstream ships Linux (amd64, arm64), macOS and Windows binaries; the Linux ones work for `--hister-bin` (tested on arm64) |
 | SearXNG | left out; run it yourself from a checkout with `SEARXNG_SETTINGS_PATH=compose/dev/config/searxng.yml` on `127.0.0.1:19237` if you need it |
 
 Natively the fixture sites' `*.example` names don't resolve, so feed-import stores the reader's copy of a story instead of fetching the original (`FEED_IMPORT_MAX_TRIES=1`). Everything else, including the sign-in in a browser, behaves as in containers (tested on Linux).

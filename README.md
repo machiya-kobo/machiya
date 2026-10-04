@@ -88,7 +88,7 @@ docker compose --profile engines --profile kura --profile niwa --profile konbini
 
 The whole stack with a small invented vault (a paper-lantern workshop and a trip to Kyoto), in about ten minutes. Every block below marked `quickstart:` is run by [`tools/quickstart-test`](tools/quickstart-test) on a fresh clone, so these are exactly the commands that were tested.
 
-**You need:** `git`, `curl`, and a container engine with Compose: **Docker Engine 24+ with Compose 2.20+**, or rootless **Podman 4.9+** with the `docker-compose` plugin and its API socket on (`systemctl --user enable --now podman.socket`; then use `podman compose` wherever the commands say `docker compose`). About 2 GB of disk for the images, and these ports free on `127.0.0.1`: 8081, 8082, 8083, 4433, 8888, 1965 and 7070 (the compose can move any of them: [`compose/.env.example`](compose/.env.example)).
+**You need:** `git`, `curl`, and a container engine with Compose: **Docker Engine 24+ with Compose 2.20+**, or rootless **Podman 4.9+** with the `docker-compose` plugin and its API socket on (`systemctl --user enable --now podman.socket`; then use `podman compose` wherever the commands say `docker compose`). It runs on amd64 and arm64 (every image, the rooms' builds included, is native on both; tested on Debian 13 arm64). About 2 GB of disk for the images, and these ports free on `127.0.0.1`: 8081, 8082, 8083, 4433, 8888, 1965 and 7070 (the compose can move any of them: [`compose/.env.example`](compose/.env.example)).
 
 **Debian and Ubuntu** (a clean machine has none of these): install them, then log out and back in so that your user is in the `docker` group (or run `newgrp docker`):
 

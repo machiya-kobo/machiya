@@ -105,12 +105,21 @@ def expect_ok(lines, output):
     return True, ""
 
 
+SG = False     # --with-packages: this process started before the docker group was added, so engine calls go through sg
+
+
+def engine(cmd, **kw):
+    """Run an engine command (a shell string), in the docker group when the package block just added it."""
+    if SG:
+        cmd = "sg docker -c " + shlex.quote(cmd)
+    return subprocess.run(cmd, shell=True, capture_output=True, stdin=subprocess.DEVNULL, **kw)
+
+
 def images_present(compose):
     eng = compose.split()[0]
-    try:
-        return {i for i in IMAGES if subprocess.run([eng, "image", "inspect", i], capture_output=True).returncode == 0}
-    except FileNotFoundError:                    # the engine is not installed yet (--with-packages installs it)
+    if not SG and not shutil.which(eng):             # the engine is not installed yet (--with-packages installs it)
         return set()
+    return {i for i in IMAGES if engine("%s image inspect %s" % (eng, i)).returncode == 0}
 
 
 def main():
@@ -123,6 +132,7 @@ def main():
     ap.add_argument("--keep", action="store_true", help="keep the temporary directory")
     ap.add_argument("--dry-run", action="store_true", help="list the steps and exit")
     a = ap.parse_args()
+    global SG
 
     blocks, expects = parse(os.path.join(ROOT, "README.md"))
     chosen = [n for n in SCENARIOS if a.only in ("all", n)]
@@ -175,6 +185,7 @@ def main():
                     failed.append("%s/packages-debian: exit %d" % (name, pk.returncode))
                     continue
                 packages_done = True
+                SG = bool(shutil.which("sg"))
             fresh_copy(ROOT, os.path.join(work, "machiya"), a.worktree)
             for repo in ("kura", "niwa", "konbini"):
                 fresh_copy(os.path.join(a.siblings, repo), os.path.join(work, repo), False)
@@ -212,7 +223,7 @@ def main():
         finally:
             comp_dir = os.path.join(work, "machiya", "compose")
             if os.path.isdir(comp_dir):
-                subprocess.run("%s down -v >/dev/null 2>&1; true" % compose, shell=True, cwd=comp_dir)
+                engine("%s down -v >/dev/null 2>&1; true" % compose, cwd=comp_dir)
             if not a.keep:
                 shutil.rmtree(work, ignore_errors=True)
             if any(f.startswith(name) for f in failed):
@@ -223,7 +234,7 @@ def main():
                 time.sleep(1)
     eng = compose.split()[0]
     for image in images_present(compose) - before:                      # the images this run built
-        subprocess.run([eng, "rmi", "-f", image], capture_output=True)
+        engine("%s rmi -f %s" % (eng, image))
     print()
     if failed:
         print("FAILED:\n  " + "\n  ".join(failed))
