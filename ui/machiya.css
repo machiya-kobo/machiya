@@ -351,25 +351,34 @@ header.top {
 /* END ROOM ICONS */
 
 /* ---- tab bar (phones and the installed app) ---------------------------------------------------------------- */
-.tabbar { display: none; }
+/* A floating pill like Shiori's (v0.16): it spans the screen minus a margin, so five tabs never run off the edge; the
+   bar and the current tab follow the variant: dark = the bar on --dark, the current tab on --hl; light = the reverse. */
+.tabbar { display: none; --tab-bg: var(--dark); --tab-on: var(--hl); }
+body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
+@media (prefers-color-scheme: light) { body.theme-system .tabbar, body.theme-auto .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); } }
 @media (max-width: 760px) {
   :root { --gutter: 14px; }
-  body { padding-bottom: calc(72px + var(--sab)); }
+  body { padding-bottom: calc(84px + var(--sab)); }
   .nav, .tools .rooms, .tools .gear { display: none; }
-  .tabbar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
-    padding: 6px calc(8px + var(--sal)) calc(6px + var(--sab)) calc(8px + var(--sar));
-    background: color-mix(in srgb, var(--dark) 92%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-    border-top: 1px solid var(--line); }
-  .tabbar > a, .tabbar > details > summary { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
-    padding: 4px 0; color: var(--muted); font-size: 10.5px; font-weight: 500; list-style: none; cursor: pointer; }
-  .tabbar > details { flex: 1; position: relative; }
+  .tabbar { display: flex; gap: 4px; position: fixed; z-index: 15;
+    left: calc(8px + var(--sal)); right: calc(8px + var(--sar)); bottom: calc(10px + var(--sab));
+    padding: 6px; border-radius: 999px; border: 1px solid var(--line2);
+    background: color-mix(in srgb, var(--tab-bg) 88%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.25); }
+  .tabbar > a, .tabbar > details > summary { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center;
+    gap: 2px; padding: 6px 2px; border-radius: 999px; color: var(--fg); font-size: 11px; font-weight: 500; white-space: nowrap;
+    list-style: none; cursor: pointer; }
+  .tabbar > a > span, .tabbar > details > summary > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .tabbar svg { width: 22px; height: 22px; }
+  .tabbar > details { flex: 1 1 0; min-width: 0; position: relative; display: flex; }
   .tabbar > details > summary::-webkit-details-marker { display: none; }
   /* the Rooms tab is also a .rooms: undo the header button's 32px box and hover fill */
-  .tabbar > details > summary { width: auto; height: auto; border-radius: 0; }
-  .tabbar > details > summary:hover, .tabbar > details[open] > summary { background: none; color: var(--fg); }
-  .tabbar > a.here, .tabbar > a[aria-current="page"] { color: var(--room); }
+  .tabbar > details > summary { width: auto; height: auto; }
+  .tabbar > details > summary:hover { background: none; }
+  .tabbar > details[open] > summary { background: var(--tab-on); color: var(--fg); }
+  .tabbar > a.here, .tabbar > a[aria-current="page"] { background: var(--tab-on); color: var(--room); }
   .tabbar > a:hover { text-decoration: none; }
-  .tabbar .rooms .menu { top: auto; bottom: calc(100% + 10px); right: 0; }
+  .tabbar .rooms .menu { top: auto; bottom: calc(100% + 14px); right: 0; }
 }
 
 /* ---- chips and tags: filled for state, outlined for tags --------------------------------------------------- */
@@ -500,4 +509,4 @@ main form.search input { width: 100%; font-size: var(--fs-l); padding: 9px 12px;
   background: var(--dark); border: 1px solid var(--line2); box-shadow: var(--shadow-2); color: var(--fg); font-size: var(--fs-s); }
 .update-toast button { border: 0; border-radius: 999px; padding: 6px 12px; background: var(--house); color: var(--bg);
   font: inherit; font-weight: 600; cursor: pointer; }
-@media (max-width: 760px) { .update-toast { bottom: calc(72px + env(safe-area-inset-bottom)); } }
+@media (max-width: 760px) { .update-toast { bottom: calc(84px + env(safe-area-inset-bottom)); } }
