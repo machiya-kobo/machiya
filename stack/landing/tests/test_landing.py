@@ -1,0 +1,470 @@
+"""machiya-landing tests: the readers against fake apps on local ports (no network beyond 127.0.0.1), freshness,
+the deploy history and changelogs, and the HTTP gate. Run from stack/landing: python3 -m unittest discover -s tests"""
+import json
+import os
+import sys
+import tempfile
+import threading
+import time
+import unittest
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, ".."))
+import deploys    # noqa: E402
+import landing    # noqa: E402
+import probes     # noqa: E402
+import render     # noqa: E402
+from vaultkit import verify   # noqa: E402
+
+NOW = 1767225600
+
+
+class Fake:
+    """An app on a local port. routes: {"/path": JSON object | (status, body, ctype) | callable() -> either}."""
+
+    def __init__(self, routes):
+        self.routes, self.seen = routes, []
+        fake = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                u = urlsplit(self.path)
+                fake.seen.append({"path": u.path, "query": u.query, "headers": {k.lower(): v for k, v in self.headers.items()}})
+                r = fake.routes.get(u.path)
+                r = r() if callable(r) else r
+                if r is None:
+                    r = (404, b"not found", "text/plain")
+                if isinstance(r, dict):
+                    r = (200, json.dumps(r).encode(), "application/json")
+                code, body, ctype = r
+                body = body.encode() if isinstance(body, str) else body
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                if code in (301, 302):
+                    self.send_header("Location", "http://127.0.0.1:9/elsewhere")
+                self.end_headers()
+                try:
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass                        # the client gave up (the timeout test)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = "http://127.0.0.1:%d" % self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+KURA = {"head": "4ca69a1865fc8e95518139d059e79208b701635a", "synced_at": NOW - 30, "notes": 314, "ready": True,
+        "version": "0.6.8", "vaultkit": "v0.17.2", "error": None, "vaults": {"personal": {"error": None}},
+        "push": {"pushed": 0, "failed": 0, "at": NOW - 120, "docs": 314, "complete": True, "error": None}, "auth": "tailscale"}
+KONBINI = {"ok": True, "version": "0.11.6", "head": KURA["head"], "cards": 78,
+           "sync": {"pending": 1, "ahead": 0, "error": ""},
+           "livesync": {"status": {"daemon": "running", "errors": [], "conflicts": [], "last_cycle_ts": NOW - 60}}}
+NIWA = {"version": "0.4.8", "vaultkit": "v0.17.2", "head": "a6857ce8c2", "notes": 314, "published": 1,
+        "sync": {"pending": 0, "ahead": 0, "error": None}, "ready": True, "error": None}
+SHIORI = (200, '<link rel="stylesheet" href="/_shiori/app.css?v=7598f33efebd">', "text/html")
+HISTER = {"/api/stats": {"doc_count": 1968, "alias_count": 14},
+          "/search": {"total": 1968, "documents": [{"url": "https://example.com/", "added": NOW - 9000, "updated": NOW - 600}]}}
+SEARXNG = {"/healthz": (200, "OK", "text/plain"), "/config": {"version": "2026.9.25+12f8b6515"}}
+MCP = {"ok": True, "version": "0.7.0", "auth": "tailscale", "rooms": ["hister", "konbini", "kura", "niwa"], "tools": 36}
+SMALLWEB = {"ok": True, "ready": True, "error": None, "version": "0.2.0", "hister": {"enabled": True, "saved": 12}}
+
+
+class Stack(unittest.TestCase):
+    """A whole fake stack."""
+
+    def setUp(self):
+        self.fakes = {
+            "kura": Fake({"/api/status": lambda: dict(KURA)}),
+            "konbini": Fake({"/api/health": lambda: dict(KONBINI)}),
+            "niwa": Fake({"/api/status": lambda: dict(NIWA)}),
+            "shiori": Fake({"/": SHIORI}),
+            "hister": Fake(HISTER),
+            "searxng": Fake(SEARXNG),
+            "machiya-mcp": Fake({"/api/status": MCP}),
+            "smallweb": Fake({"/api/status": SMALLWEB}),
+        }
+        self.tmp = tempfile.mkdtemp(prefix="landing-test-")
+
+    def tearDown(self):
+        for f in self.fakes.values():
+            f.close()
+
+    def env(self, **kw):
+        rooms = ",".join("%s=%s" % (k, self.fakes[k].url) for k in ("shiori", "konbini", "niwa", "kura", "hister", "searxng"))
+        env = {"LANDING_AUTH": "open", "LANDING_BIND": "127.0.0.1", "MACHIYA_ROOMS": rooms,
+               "LANDING_APPS": "machiya-mcp=%s,smallweb=%s" % (self.fakes["machiya-mcp"].url, self.fakes["smallweb"].url),
+               "LANDING_STATE": os.path.join(self.tmp, "landing.json")}
+        env.update(kw)
+        return env
+
+    def landing(self, now=NOW, **kw):
+        return landing.Landing(landing.Config(self.env(**kw)), now=lambda: now)
+
+
+class Readers(Stack):
+    def test_every_app_up(self):
+        snap = self.landing().poll()
+        a = snap["apps"]
+        self.assertEqual({k: v["state"] for k, v in a.items()},
+                         {"shiori": "up", "konbini": "up", "niwa": "up", "kura": "up", "hister": "up", "searxng": "up",
+                          "machiya-mcp": "up", "smallweb": "up", "vault-mirror": "absent"})
+        self.assertEqual((a["kura"]["version"], a["kura"]["vaultkit"]), ("0.6.8", "0.17.2"))
+        self.assertEqual(a["kura"]["facts"], ["314 notes"])
+        self.assertEqual(a["konbini"]["facts"], ["78 cards"])
+        self.assertEqual(a["niwa"]["facts"], ["1 published", "314 notes"])
+        self.assertEqual(a["shiori"]["version"], "build 7598f33")
+        self.assertEqual(a["hister"]["facts"], ["1,968 pages"])
+        self.assertEqual(a["hister"]["data"]["newest"], NOW - 600)
+        self.assertEqual(a["searxng"]["version"], "2026.9.25")
+        self.assertEqual(a["machiya-mcp"]["facts"], ["36 tools", "4 rooms"])
+        self.assertEqual(a["smallweb"]["facts"], ["12 saved"])
+        self.assertEqual(snap["overall"], {"state": "up", "text": "Everything is up"})
+
+    def test_hister_gets_its_origin_and_vault_notes_are_left_out(self):
+        self.landing().poll()
+        seen = self.fakes["hister"].seen
+        self.assertTrue(seen and all(s["headers"].get("origin") == "hister://" for s in seen))
+        search = [s for s in seen if s["path"] == "/search"][0]
+        self.assertIn("-label%3Avault", search["query"])
+
+    def test_only_gets(self):
+        # every fake only answers GET; anything else would have failed the poll
+        self.landing().poll()
+        self.assertTrue(all(f.seen for k, f in self.fakes.items()))
+
+    def test_absent_down_and_error(self):
+        self.fakes["kura"].routes["/api/status"] = dict(KURA, error="sync failed")
+        self.fakes["searxng"].close()
+        env = self.env(LANDING_APPS="")
+        snap = landing.Landing(landing.Config(env), now=lambda: NOW).poll()
+        a = snap["apps"]
+        self.assertEqual(a["kura"]["state"], "error")
+        self.assertEqual(a["kura"]["error"], "sync failed")
+        self.assertEqual(a["searxng"]["state"], "down")
+        self.assertIn(a["searxng"]["error"], ("connection refused", "connection failed", "unreachable"))
+        self.assertEqual(a["machiya-mcp"]["state"], "absent")
+        self.assertEqual(snap["overall"]["state"], "error")
+        self.assertTrue(snap["overall"]["text"].startswith("2 need a look"))
+        self.fakes["searxng"] = Fake(SEARXNG)          # tearDown closes it
+
+    def test_timeout_redirect_and_garbage(self):
+        def slow():
+            time.sleep(1.5)
+            return MCP
+        self.fakes["machiya-mcp"].routes["/api/status"] = slow
+        self.fakes["smallweb"].routes["/api/status"] = (302, b"", "text/plain")
+        self.fakes["niwa"].routes["/api/status"] = (200, b"<html>not json", "text/html")
+        a = self.landing(LANDING_TIMEOUT="0.5").poll()["apps"]
+        self.assertEqual((a["machiya-mcp"]["state"], a["machiya-mcp"]["error"]), ("down", "timed out"))
+        self.assertEqual((a["smallweb"]["state"], a["smallweb"]["error"]), ("down", "HTTP 302"))
+        self.assertEqual((a["niwa"]["state"], a["niwa"]["error"]), ("down", "not JSON"))
+
+    def test_konbini_refusal_is_down_with_the_status(self):
+        self.fakes["konbini"].routes["/api/health"] = (403, b"forbidden", "text/plain")
+        a = self.landing().poll()["apps"]
+        self.assertEqual((a["konbini"]["state"], a["konbini"]["error"]), ("down", "HTTP 403"))
+
+    def test_token_only_for_rooms_over_https(self):
+        self.assertEqual(probes.auth_headers("kura", "https://kura.example.ts.net", "mch_x"), {"Authorization": "Bearer mch_x"})
+        self.assertEqual(probes.auth_headers("kura", "http://kura:8080", "mch_x"), {})
+        self.assertEqual(probes.auth_headers("hister", "https://hister.example.ts.net", "mch_x"), {})
+        self.assertEqual(probes.auth_headers("machiya-mcp", "https://mcp.example.ts.net", "mch_x"), {})
+        self.assertEqual(probes.auth_headers("kura", "https://kura.example.ts.net", ""), {})
+        path = os.path.join(self.tmp, "token")
+        with open(path, "w") as f:
+            f.write("mch_abcd_secret\n")
+        self.landing(LANDING_TOKEN_FILE=path).poll()
+        self.assertTrue(all("authorization" not in s["headers"] for f in self.fakes.values() for s in f.seen))  # http fakes
+
+    def test_vault_mirror_file(self):
+        path = os.path.join(self.tmp, "status.json")
+        a = self.landing(LANDING_MIRROR_STATUS=path).poll()["apps"]["vault-mirror"]
+        self.assertEqual((a["state"], a["error"]), ("down", "no status file yet"))
+        with open(path, "w") as f:
+            json.dump({"head": "4ca69a1865fc", "synced_at": NOW - 20, "error": None}, f)
+        a = self.landing(LANDING_MIRROR_STATUS=path).poll()["apps"]["vault-mirror"]
+        self.assertEqual((a["state"], a["facts"]), ("up", ["at 4ca69a1"]))
+        with open(path, "w") as f:
+            json.dump({"head": "4ca69a1865fc", "synced_at": NOW - 7 * 3600, "error": None}, f)
+        self.assertEqual(self.landing(LANDING_MIRROR_STATUS=path).poll()["apps"]["vault-mirror"]["state"], "error")
+
+
+class Freshness(Stack):
+    def rows(self, snap):
+        return {r["key"]: r for r in snap["sync"]}
+
+    def test_rows(self):
+        rows = self.rows(self.landing().poll())
+        self.assertEqual(list(rows), ["pull", "board", "garden", "push", "pages"])
+        self.assertEqual(rows["pull"]["text"], "at 4ca69a1")
+        self.assertEqual(rows["board"]["text"], "at 4ca69a1 (the vault's head) · 1 waiting")
+        self.assertEqual(rows["garden"]["text"], "at a6857ce · all pushed")
+        self.assertEqual(rows["push"]["text"], "314 notes in Hister")
+        self.assertTrue(all(r["state"] == "up" for r in rows.values()))
+
+    def test_behind_and_broken_by_age(self):
+        self.fakes["kura"].routes["/api/status"] = dict(KURA, synced_at=NOW - 20 * 60)
+        snap = self.landing().poll()
+        self.assertEqual(self.rows(snap)["pull"]["state"], "behind")
+        self.assertEqual(snap["apps"]["kura"]["state"], "behind")
+        self.assertEqual(snap["overall"]["state"], "behind")
+        self.fakes["kura"].routes["/api/status"] = dict(KURA, synced_at=NOW - 7 * 3600)
+        self.assertEqual(self.rows(self.landing().poll())["pull"]["state"], "error")
+
+    def test_board_behind_only_after_a_while(self):
+        self.fakes["konbini"].routes["/api/health"] = dict(KONBINI, head="0000000aaaa")
+        clock = [NOW]
+        l = landing.Landing(landing.Config(self.env()), now=lambda: clock[0])
+        self.assertEqual(self.rows(l.poll())["board"]["state"], "up")
+        clock[0] += 16 * 60
+        self.fakes["kura"].routes["/api/status"] = dict(KURA, synced_at=clock[0] - 30, push=dict(KURA["push"], at=clock[0]))
+        self.fakes["konbini"].routes["/api/health"] = dict(KONBINI, head="0000000aaaa", livesync={
+            "status": {"daemon": "running", "last_cycle_ts": clock[0] - 30}})
+        self.assertEqual(self.rows(l.poll())["board"]["state"], "behind")
+
+    def test_livesync_stopped_is_broken(self):
+        self.fakes["konbini"].routes["/api/health"] = dict(KONBINI, livesync={"status": {"daemon": "stopped", "last_cycle_ts": NOW}})
+        row = self.rows(self.landing().poll())["board"]
+        self.assertEqual(row["state"], "error")
+        self.assertIn("LiveSync stopped", row["text"])
+
+    def test_writer_not_pushed_is_behind(self):
+        self.fakes["niwa"].routes["/api/status"] = dict(NIWA, sync={"pending": 0, "ahead": 2, "error": None})
+        row = self.rows(self.landing().poll())["garden"]
+        self.assertEqual((row["state"], row["text"]), ("behind", "at a6857ce · 2 not pushed"))
+
+    def test_rows_of_absent_apps_are_left_out(self):
+        env = self.env(MACHIYA_ROOMS="kura=%s" % self.fakes["kura"].url, LANDING_APPS="")
+        snap = landing.Landing(landing.Config(env), now=lambda: NOW).poll()
+        self.assertEqual([r["key"] for r in snap["sync"]], ["pull", "push"])
+
+    def test_nothing_configured(self):
+        snap = landing.Landing(landing.Config({"LANDING_AUTH": "open", "LANDING_BIND": "127.0.0.1"}), now=lambda: NOW).poll()
+        self.assertTrue(all(a["state"] == "absent" for a in snap["apps"].values()))
+        self.assertEqual(snap["overall"]["text"], "No apps are configured yet")
+
+
+CHANGELOG = """# Changelog
+
+Intro text.
+
+## 0.6.8
+
+- A **search pill** under the header (vaultkit 0.17.2),
+  on every page.
+- See [the docs](https://example.com/x) and `KURA_X`.
+
+## 0.6.7
+
+The header sits lower.
+
+### Notes
+
+- nested
+  - deeper
+
+## v0.6.5
+
+- Old.
+
+## Unreleased notes
+
+- not a version
+"""
+
+
+class History(unittest.TestCase):
+    def test_parse(self):
+        s = deploys.parse(CHANGELOG)
+        self.assertEqual(list(s), ["0.6.8", "0.6.7", "0.6.5"])
+        self.assertEqual(s["0.6.8"], ["A search pill under the header (vaultkit 0.17.2), on every page.", "See the docs and KURA_X."])
+        self.assertEqual(s["0.6.7"], ["The header sits lower.", "nested - deeper"])
+        self.assertEqual(s["0.6.5"], ["Old."])
+
+    def test_between(self):
+        s = deploys.parse(CHANGELOG)
+        self.assertEqual([v for v, _ in deploys.between(s, "0.6.5", "0.6.8")], ["0.6.8", "0.6.7"])
+        self.assertEqual([v for v, _ in deploys.between(s, None, "0.6.8")], ["0.6.8"])
+        self.assertEqual([v for v, _ in deploys.between(s, "0.6.8", "0.6.5")], ["0.6.5"])     # a rollback: just its own
+        self.assertEqual(deploys.between(s, "0.6.8", "0.7.0"), [])
+        self.assertEqual(deploys.between(s, "build a", "build b"), [])
+
+    def test_observe_and_persist(self):
+        path = os.path.join(tempfile.mkdtemp(prefix="landing-test-"), "h.json")
+        h = deploys.History(path)
+        apps = {"kura": {"state": "up", "version": "0.6.7", "vaultkit": "0.17.1"}, "hister": {"state": "up", "version": ""},
+                "niwa": {"state": "down", "version": ""}}
+        self.assertTrue(h.observe(apps, NOW))
+        self.assertEqual(h.events, [])                                   # first sight is not a deploy
+        self.assertFalse(h.observe(apps, NOW + 60))
+        apps["kura"] = {"state": "up", "version": "0.6.8", "vaultkit": "0.17.2"}
+        self.assertTrue(h.observe(apps, NOW + 120))
+        h2 = deploys.History(path)
+        self.assertEqual(h2.since, NOW)
+        self.assertEqual(h2.events, [{"app": "kura", "from": "0.6.7", "to": "0.6.8", "vaultkit_from": "0.17.1",
+                                      "vaultkit_to": "0.17.2", "at": NOW + 120}])
+        self.assertEqual(h2.recent(NOW + 200), h2.events)
+        self.assertEqual(h2.recent(NOW + 120 + 31 * 86400), [])
+        apps["kura"] = {"state": "down", "version": ""}                  # an app that's down is not a deploy
+        self.assertFalse(h2.observe(apps, NOW + 300))
+
+    def test_bad_or_unwritable_file(self):
+        d = tempfile.mkdtemp(prefix="landing-test-")
+        bad = os.path.join(d, "bad.json")
+        with open(bad, "w") as f:
+            f.write("{nope")
+        h = deploys.History(bad)
+        self.assertIn("unreadable", h.error)
+        h = deploys.History(os.path.join(d, "missing-dir", "h.json"))
+        h.observe({"kura": {"state": "up", "version": "1.0.0"}}, NOW)
+        self.assertIn("not saved", h.error)
+        self.assertEqual(deploys.History("").observe({"kura": {"state": "up", "version": "1.0.0"}}, NOW), True)
+
+
+class Page(Stack):
+    def test_page_escapes_what_apps_say(self):
+        self.fakes["kura"].routes["/api/status"] = dict(KURA, version="<script>x</script>", error="<b>bad</b>")
+        l = self.landing()
+        snap = l.poll()
+        html = render.page(landing.house.prefs(""), snap, l.history, l.logs, l.config.links, l.config.targets, NOW)
+        self.assertNotIn("<script>x", html)
+        self.assertIn("&lt;script&gt;x&lt;/script&gt;", html)
+        self.assertNotIn("<b>bad</b>", html)
+
+    def test_deploy_with_changelog(self):
+        cl = os.path.join(self.tmp, "kura.md")
+        with open(cl, "w") as f:
+            f.write(CHANGELOG)
+        clfake = Fake({"/kura.md": (200, CHANGELOG, "text/markdown")})
+        try:
+            clock = [NOW]
+            self.fakes["kura"].routes["/api/status"] = dict(KURA, version="0.6.5", vaultkit="v0.17.1")
+            l = landing.Landing(landing.Config(self.env(LANDING_CHANGELOGS="kura=%s/kura.md" % clfake.url)), now=lambda: clock[0])
+            l.poll()
+            clock[0] += 60
+            self.fakes["kura"].routes["/api/status"] = dict(KURA, synced_at=clock[0])
+            snap = l.poll()
+            html = render.main_html(snap, l.history, l.logs, l.config.links, l.config.targets, clock[0])
+            self.assertIn("0.6.5 → 0.6.8", html)
+            self.assertIn("vaultkit 0.17.1 → 0.17.2", html)
+            self.assertIn("<b>0.6.8</b> A search pill under the header", html)
+            self.assertIn("<b>0.6.7</b> The header sits lower.", html)
+            self.assertIn('+1 more', html)
+        finally:
+            clfake.close()
+
+    def test_absent_is_calm(self):
+        env = self.env(MACHIYA_ROOMS="kura=%s" % self.fakes["kura"].url)
+        l = landing.Landing(landing.Config(env), now=lambda: NOW)
+        html = render.main_html(l.poll(), l.history, l.logs, l.config.links, l.config.targets, NOW)
+        self.assertIn('data-app="niwa" data-state="absent"', html)
+        self.assertIn("Not in this stack", html)
+        self.assertNotIn('data-state="down"', html)
+        self.assertNotIn('data-state="error"', html)
+
+
+class Server(Stack):
+    def serve(self, **env):
+        l = landing.Landing(landing.Config(self.env(**env)), now=lambda: NOW)
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), landing.make_handler(l))
+        threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        return "http://127.0.0.1:%d" % srv.server_address[1]
+
+    def get(self, url, headers=None, method="GET"):
+        req = urllib.request.Request(url, headers=headers or {}, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, r.headers, r.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers, e.read().decode()
+
+    def test_tailscale_gate(self):
+        base = self.serve(LANDING_AUTH="tailscale", LANDING_USERS="Owner@example.com")
+        self.assertEqual(self.get(base + "/")[0], 403)
+        self.assertEqual(self.get(base + "/", {"Tailscale-User-Login": "someone@example.com"})[0], 403)
+        self.assertEqual(self.get(base + "/api/status", {"Tailscale-User-Login": "someone@example.com"})[0], 403)
+        self.assertEqual(self.get(base + "/healthz")[0], 200)              # the container's check: no data
+        code, headers, body = self.get(base + "/", {"Tailscale-User-Login": "owner@example.com"})
+        self.assertEqual(code, 200)
+        self.assertIn("default-src 'self'", headers["Content-Security-Policy"])
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertIn("Everything is up", body)
+        self.assertIn('class="tabbar"', body)
+        self.assertIn('class="rooms"', body)                                 # the Rooms menu, from MACHIYA_ROOMS
+
+    def test_star_and_empty_users(self):
+        base = self.serve(LANDING_AUTH="tailscale", LANDING_USERS="*")
+        self.assertEqual(self.get(base + "/", {"Tailscale-User-Login": "anyone@example.com"})[0], 200)
+        base = self.serve(LANDING_AUTH="tailscale")
+        self.assertEqual(self.get(base + "/", {"Tailscale-User-Login": "anyone@example.com"})[0], 403)
+
+    def test_open_mode_host_check(self):
+        base = self.serve()
+        self.assertEqual(self.get(base + "/")[0], 200)                       # Host: 127.0.0.1:<port>
+        self.assertEqual(self.get(base + "/", {"Host": "evil.example"})[0], 403)
+
+    def test_routes(self):
+        base = self.serve()
+        code, headers, body = self.get(base + "/api/status")
+        data = json.loads(body)
+        self.assertEqual((code, data["version"], data["apps"]["kura"]["version"]), (200, landing.VERSION, "0.6.8"))
+        self.assertNotIn("data", data["apps"]["kura"])
+        self.assertEqual(self.get(base + "/settings")[0], 200)
+        self.assertEqual(self.get(base + "/static/landing.css?v=1")[0], 200)
+        self.assertEqual(self.get(base + "/static/machiya.css")[0], 200)
+        self.assertEqual(self.get(base + "/static/icons/machiya.svg")[0], 200)
+        self.assertEqual(self.get(base + "/static/../landing.py")[0], 404)
+        self.assertEqual(self.get(base + "/nope")[0], 404)
+        self.assertEqual(self.get(base + "/", method="POST")[0], 405)
+        code, headers, body = self.get(base + "/manifest.webmanifest")
+        self.assertEqual(json.loads(body)["name"], "Machiya")
+        import http.client
+        conn = http.client.HTTPConnection(urlsplit(base).netloc, timeout=10)
+        conn.request("GET", "/theme?set=night")
+        r = conn.getresponse()
+        self.assertEqual((r.status, r.getheader("Location")), (302, "/settings"))
+        self.assertIn("theme=night", r.getheader("Set-Cookie"))
+        conn.close()
+
+
+class Setup(unittest.TestCase):
+    def test_header_mode_needs_loopback_or_proxy(self):
+        with self.assertRaises(SystemExit):
+            landing.Config({"LANDING_AUTH": "tailscale", "LANDING_BIND": "0.0.0.0"})
+        landing.Config({"LANDING_AUTH": "tailscale", "LANDING_BIND": "0.0.0.0", "LANDING_BIND_BEHIND_PROXY": "1"})
+        landing.Config({"LANDING_AUTH": "tailscale", "LANDING_BIND": "127.0.0.1"})
+
+    def test_unknown_mode_and_identity_file(self):
+        with self.assertRaises(SystemExit):
+            landing.Config({"LANDING_AUTH": "header", "LANDING_BIND": "127.0.0.1"})
+        with self.assertRaises(SystemExit) as cm:
+            landing.Config({"LANDING_AUTH": "open", "LANDING_BIND": "127.0.0.1", "MACHIYA_IDENTITY_FILE": "/x/identity.toml"})
+        self.assertIn("landing", str(cm.exception))
+
+    def test_token_file(self):
+        d = tempfile.mkdtemp(prefix="landing-test-")
+        empty = os.path.join(d, "empty")
+        open(empty, "w").close()
+        with self.assertRaises(SystemExit):
+            landing.Config({"LANDING_AUTH": "open", "LANDING_BIND": "127.0.0.1", "LANDING_TOKEN_FILE": empty})
+
+    def test_vendored_vaultkit_is_untouched(self):
+        self.assertEqual(verify.check(os.path.join(HERE, "..", "vaultkit")), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
