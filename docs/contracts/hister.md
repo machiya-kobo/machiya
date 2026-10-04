@@ -52,6 +52,43 @@ Kura pushes every note in the default vault (`personal/`), and only there; other
 
 `@pages` = `* -label:vault -metadata.source:vault` and `@notes` = `label:vault` (created in Hister's alias settings), so Hister's own UI, extension, TUI and MCP split pages and notes the way Shiori does. They sit beside your own topic aliases. **Shiori hides any alias whose expansion names the vault** (`label:vault` or `metadata.source:vault`) from its collections and reserves the collection names "notes" and "pages", so vault aliases never appear as Shiori collections.
 
+## Code documents (`metadata.source:code`): PROPOSED
+
+> **Proposed, 2026-10-04, for the lead to approve.** Nothing below is in force until the lead approves it. Then this note goes, and the endpoint table, the aliases and Hister's MCP rules above take the changes. Background: [services/code-import.md](../services/code-import.md).
+
+[code-import](../services/code-import.md) puts the owner's Forgejo and GitHub repos into Hister: repo cards, READMEs and docs, issues, PRs and releases. Each one is a document at its real forge URL:
+
+```json
+{"url": "https://github.com/machiya-kobo/kura/pull/3", "title": "Fix the tag page · machiya-kobo/kura#3",
+ "html": "<rendered, escaped>", "text": "…", "added": 1791021600,
+ "metadata": {"source": "code", "client": "code-import", "ignore_skip_rules": true, "code_host": "github",
+              "code_repo": "machiya_kobo__kura", "code_repo_name": "machiya-kobo/kura", "code_kind": "pr",
+              "code_state": "merged", "code_private": "true", "code_updated": 1791021600}}
+```
+
+- **The keys:**
+  - `code_host`: `forgejo|github`;
+  - `code_repo`: `owner__repo`, lowercase, every character other than a-z and 0-9 turned into `_`;
+  - `code_kind`: `repo|readme|doc|issue|pr|release`;
+  - `code_state`: `open|closed|merged`;
+  - `code_private`: `"true"|"false"`;
+  - for display only: `code_repo_name`, `code_number`, `code_path`, `code_tag`, `code_twin_url`, `code_redacted`.
+  - No label.
+- **Metadata values a query matches must be one lowercase token** (tested on v0.20.0). Hister tokenizes a metadata value when it indexes it, but queries it with one unanalyzed term. So a value may hold only letters, digits and `_`: `machiya-kobo/kura` never matches, `machiya_kobo__kura` does. A boolean must be sent as a string: a JSON `true` isn't matched by `metadata.x:true`. This holds for every service's metadata keys, not only code's.
+- **Every other Hister query adds ` -metadata.source:code`**, next to ` -label:vault -metadata.source:vault`:
+  - Shiori's Pages, All, counts and collections;
+  - machiya-mcp's suffix and the machiya plugin's skills;
+  - landing's newest pages;
+  - Konbini's reading line.
+  Only the Code area asks for `metadata.source:code`.
+- **Aliases:** `@code` = `metadata.source:code`. `@pages` becomes `* -label:vault -metadata.source:vault -metadata.source:code`. Shiori reserves the collection name "code", and hides any alias whose expansion names `metadata.source:code`, as it does for the vault's.
+- **Ownership.** code-import replaces or deletes a document only when Hister says its `metadata.source` is `code`. A URL the owner browsed first stays the owner's page. Other writers keep the existing rule: never re-index a URL Hister already holds.
+- **Secrets.** Code documents are always sent with `html`, because Hister's sensitive-content check reads only `html` for a web document. They go through code-import's own scan first. `skip_sensitive_check` is never set.
+- **AI: on-device only, like notes** (the owner, 2026-10-05):
+  - Shiori's AI treats a code result as a note;
+  - `shiori-ai` refuses `metadata.source:code`, as it refuses `vault`;
+  - Hister's MCP returns code to any client with the owner's token, so for AI clients it is the model's rule, written in the skills: page queries start with `@pages`, and code results are never pulled into an AI's context.
+
 ## Hister's MCP
 
 Hister has its own MCP endpoint, and it is how AI clients search and read saved pages; machiya-mcp has no page reads of its own (since 0.7.0), only the label and collection tools Hister's MCP lacks. Tested with v0.20.0.
