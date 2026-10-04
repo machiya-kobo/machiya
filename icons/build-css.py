@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Write the room icons (icons/<room>.svg, the apps' own home-screen icons) and the marks of the two engines the
-Rooms menu also shows (icons/hister.* and icons/searxng.svg) into ui/machiya.css as data URIs, between the ROOM ICONS
+"""Write the room icons (icons/<room>.svg, the apps' own home-screen icons), the marks of the two engines the
+Rooms menu also shows (icons/hister.* and icons/searxng.svg) and the house's (icons/machiya.svg, the landing page) into ui/machiya.css as data URIs, between the ROOM ICONS
 markers, so every room shows them from the stylesheet it already loads (no files to serve).
 Run after changing an icon: python3 icons/build-css.py"""
 import base64
@@ -12,7 +12,8 @@ css_path = os.path.join(here, "..", "ui", "machiya.css")
 rules = []
 for room, name, mime in (("shiori", "shiori.svg", "image/svg+xml"), ("konbini", "konbini.svg", "image/svg+xml"),
                          ("niwa", "niwa.svg", "image/svg+xml"), ("kura", "kura.svg", "image/svg+xml"),
-                         ("hister", "hister.svg", "image/svg+xml"), ("searxng", "searxng.svg", "image/svg+xml")):
+                         ("hister", "hister.svg", "image/svg+xml"), ("searxng", "searxng.svg", "image/svg+xml"),
+                         ("machiya", "machiya.svg", "image/svg+xml")):     # the house (stack/landing), v0.18
     with open(os.path.join(here, name), "rb") as f:
         data = base64.b64encode(f.read()).decode()
     rules.append('.seal.icon[data-room="%s"] { background-image: url("data:%s;base64,%s"); }' % (room, mime, data))

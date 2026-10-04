@@ -22,6 +22,10 @@ ROOMS = [   # (key, name, seal, what it is) front to back through the house, the
     ("kura", "Kura", "蔵", "notes"),
 ]
 NEIGHBOURS = [("hister", "Hister", "pages"), ("searxng", "SearXNG", "the web")]
+# The house itself: the stack's front door and status page (stack/landing). Not a room in the order above: with
+# MACHIYA_ROOMS naming `machiya=<url>`, every Rooms menu ends with a "Machiya · status" row and the footer's
+# "Part of Machiya" links there; without it, nothing changes.
+HOUSE = ("machiya", "Machiya", "町", "status")
 THEMES = [("system", "System"), ("day", "Light"), ("night", "Dark")]     # the appearance (setting `theme`)
 PALETTES = palettes.CHOICES                                              # the theme (setting `palette`, v0.15)
 TEXT_SIZES = [("xsmall", "Extra Small"), ("small", "Small"), ("standard", "Standard"), ("large", "Large"),
@@ -66,8 +70,8 @@ def source_url(env=None):
 # -- configuration ----------------------------------------------------------------------------------------------
 
 def rooms(env=None):
-    """{key: url} from MACHIYA_ROOMS="shiori=https://…,konbini=https://…,niwa=…,kura=…,hister=…,searxng=…"
-    (no trailing slashes). Unset or empty = no links; a key may be left out."""
+    """{key: url} from MACHIYA_ROOMS="shiori=https://…,konbini=https://…,niwa=…,kura=…,hister=…,searxng=…,machiya=…"
+    (no trailing slashes). Unset or empty = no links; a key may be left out. `machiya` is the house (HOUSE)."""
     raw = (env if env is not None else os.environ).get("MACHIYA_ROOMS", "")
     out = {}
     for part in raw.split(","):
@@ -269,7 +273,7 @@ def offline_row():
 
 
 def room_info(key):
-    return next((r for r in ROOMS if r[0] == key), (key, key.title(), "", ""))
+    return next((r for r in ROOMS + [HOUSE] if r[0] == key), (key, key.title(), "", ""))
 
 
 def mark(room):
@@ -292,14 +296,20 @@ def switcher(room, links, cls="rooms", settings=False, who=""):
                         % (e(links[key]), key, mark(key), e(name), e(what)))
     nb = ['<a href="%s/" data-room="%s"><span class="seal icon neighbour-icon" data-room="%s" aria-hidden="true"></span>%s<small>%s</small></a>'
           % (e(links[k]), k, k, e(n), e(w)) for k, n, w in NEIGHBOURS if k in links]      # their own logos (machiya.css)
+    key, name, _, what = HOUSE
+    home = ""
+    if room == key:
+        home = '<b data-room="%s">%s%s<small>here</small></b>' % (key, mark(key), e(name))
+    elif key in links:
+        home = '<a href="%s/" data-room="%s">%s%s<small>%s</small></a>' % (e(links[key]), key, mark(key), e(name), e(what))
     gear = ('<hr><a href="/settings"><span class="neighbour">%s</span>Settings</a>' % GLYPH["gear"]) if settings else ""
     if settings and who:
         gear = ('<hr><a href="/settings#account" class="who"><span class="neighbour">%s</span>%s<small>signed in</small></a>'
                 % (GLYPH["person"], e(who))) + gear[4:]
-    if len(rows) <= 1 and not nb and not settings:
+    if len(rows) <= 1 and not nb and not settings and not (home and room != key):
         return ""
-    return ('<details class="%s"><summary title="Rooms" aria-label="Rooms">%s</summary><nav class="menu" aria-label="Rooms">%s%s%s%s</nav></details>'
-            % (cls, GLYPH["rooms"], "".join(rows), "<hr>" if nb else "", "".join(nb), gear))
+    return ('<details class="%s"><summary title="Rooms" aria-label="Rooms">%s</summary><nav class="menu" aria-label="Rooms">%s%s%s%s%s</nav></details>'
+            % (cls, GLYPH["rooms"], "".join(rows), "<hr>" if nb else "", "".join(nb), ("<hr>" + home) if home else "", gear))
 
 
 def header(room, nav, current, links, subtitle="", tools="", settings=True, who="", search=""):
@@ -331,8 +341,9 @@ def tabbar(tabs, current, room, links, icons=None, who=""):
     return '<nav class="tabbar" aria-label="Sections">%s</nav>' % "".join(out)
 
 
-def footer(room, status=None, links=()):
-    """status: {"text": "synced abc1234 3 min ago · 812 notes", "state": "ok|stale|down"}; links: [(href, label)]."""
+def footer(room, status=None, links=(), house=None):
+    """status: {"text": "synced abc1234 3 min ago · 812 notes", "state": "ok|stale|down"}; links: [(href, label)].
+    house: the rooms' addresses (default: MACHIYA_ROOMS); with a `machiya` one, "Part of Machiya" links there."""
     _, name, _, _ = room_info(room)
     parts = []
     if status:
@@ -342,7 +353,11 @@ def footer(room, status=None, links=()):
     src = source_url()
     if src:
         parts.append('<a href="%s" rel="noopener">Source code</a>' % e(src))
-    parts.append('<span>Part of Machiya</span>')
+    home = (house if house is not None else rooms()).get(HOUSE[0])
+    if home and room != HOUSE[0]:
+        parts.append('<a href="%s/" class="house">Part of Machiya</a>' % e(home))
+    else:
+        parts.append('<span>Part of Machiya</span>')
     return '<footer class="foot">%s</footer>' % "".join(parts)
 
 
@@ -436,6 +451,8 @@ def apps_section(room, links, shown):
     """Which rooms and neighbours appear on this device; addresses stay on the server (MACHIYA_ROOMS)."""
     items = [toggle(name, "show_" + key, shown.get(key, True)) for key, name, _, _ in ROOMS if key != room and key in links]
     items += [toggle(name, "show_" + key, shown.get(key, True)) for key, name, _ in NEIGHBOURS if key in links]
+    if HOUSE[0] in links and room != HOUSE[0]:
+        items.append(toggle(HOUSE[1], "show_" + HOUSE[0], shown.get(HOUSE[0], True)))
     if not items:
         return None
     return ("Apps", items, "Which rooms appear in the switcher on this device. Their addresses are set on the server.")

@@ -56,6 +56,7 @@ ACTIONS = {
     "konbini": {"read", "write", "areas"},
     "mcp": {"use"},
     "smallweb": {"read", "save"},
+    "landing": {"read"},                # the stack's front door and status page (stack/landing)
 }
 DEFAULT_VAULTS = ("default", "shared")  # what a non-owner may read in Kura when its grant names no vaults
 SESSION_COOKIE = "machiya_session"

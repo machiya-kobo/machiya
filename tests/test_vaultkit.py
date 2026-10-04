@@ -415,13 +415,43 @@ class ShellTest(unittest.TestCase):
         menu = shell.switcher("kura", links)
         self.assertIn('<b data-room="kura"><span class="seal icon" data-room="kura" title="Kura (蔵)" aria-hidden="true">蔵</span>Kura', menu)   # here, not a link
         css = open(os.path.join(ROOT, "ui", "machiya.css"), encoding="utf-8").read()
-        for room in ("shiori", "konbini", "niwa", "kura", "hister", "searxng"):         # every icon is drawn
+        for room in ("shiori", "konbini", "niwa", "kura", "hister", "searxng", "machiya"):   # every icon is drawn
             self.assertIn('.seal.icon[data-room="%s"] { background-image: url("data:image/' % room, css)
         self.assertLess(menu.index("Shiori"), menu.index("Konbini"))                          # front to back
         self.assertLess(menu.index("Niwa"), menu.index("Hister"))                             # neighbours last
         self.assertIn('href="https://searxng.t/" data-room="searxng"', menu)
         self.assertEqual(shell.switcher("kura", {}), "")                                       # standalone: none
         self.assertEqual(shell.rooms({}), {})
+
+    def test_house_row_and_footer_link(self):
+        """v0.18: with `machiya=<url>` in MACHIYA_ROOMS every Rooms menu ends with "Machiya · status" (before Settings)
+        and the footer's "Part of Machiya" links there; without it, the menu and footer are as before."""
+        from vaultkit import shell
+        plain = shell.rooms(self.ENV)
+        links = shell.rooms(dict(self.ENV, MACHIYA_ROOMS=self.ENV["MACHIYA_ROOMS"] + ",machiya=https://machiya.t/"))
+        self.assertEqual(links["machiya"], "https://machiya.t")
+        self.assertEqual(shell.room_info("machiya"), ("machiya", "Machiya", "町", "status"))
+        menu = shell.switcher("kura", links, settings=True)
+        row = ('<hr><a href="https://machiya.t/" data-room="machiya"><span class="seal icon" data-room="machiya" '
+               'title="Machiya (町)" aria-hidden="true">町</span>Machiya<small>status</small></a>')
+        self.assertIn(row, menu)
+        self.assertLess(menu.index("SearXNG"), menu.index(row))                                # after the engines
+        self.assertLess(menu.index(row), menu.index("Settings"))                               # before Settings
+        self.assertNotIn("machiya", shell.switcher("kura", plain, settings=True))              # no key: as before
+        self.assertIn('<b data-room="machiya">', shell.switcher("machiya", links))             # the house itself: here
+        self.assertIn("Machiya", shell.switcher("kura", {"machiya": "https://machiya.t"}))     # the only link still shows
+        self.assertEqual(shell.switcher("machiya", {"machiya": "https://machiya.t"}), "")     # ... but not to itself
+        self.assertTrue(shell.footer("kura", None, house=links).endswith(
+            '<a href="https://machiya.t/" class="house">Part of Machiya</a></footer>'))
+        self.assertTrue(shell.footer("kura", None, house=plain).endswith('<span>Part of Machiya</span></footer>'))
+        self.assertTrue(shell.footer("machiya", None, house=links).endswith('<span>Part of Machiya</span></footer>'))
+        self.assertIn('data-set="show_machiya"', "".join(shell.apps_section("kura", links, {})[1]))
+        self.assertNotIn("show_machiya", "".join(shell.apps_section("kura", plain, {})[1]))
+        self.assertNotIn("show_machiya", "".join(shell.apps_section("machiya", links, {})[1]))
+        header = shell.header("machiya", [], "", links)
+        self.assertIn('title="Machiya (町)"', header)
+        css = open(os.path.join(ROOT, "ui", "machiya.css"), encoding="utf-8").read()
+        self.assertIn('.seal.icon[data-room="machiya"] { background-image: url("data:image/svg+xml;base64,', css)
 
     def test_page_header_tabs_footer(self):
         from vaultkit import shell
@@ -581,6 +611,48 @@ class SourceLinkTest(unittest.TestCase):
         self.assertEqual(shell.source_url({"MACHIYA_SOURCE_URL": "https://x.example/r"}), "https://x.example/r")
         self.assertEqual(shell.source_url({}), "")
 
+
+
+class ChangelogTest(unittest.TestCase):
+    """v0.18: GET /api/changelog, an app's own CHANGELOG.md for the landing page."""
+
+    def setUp(self):
+        from vaultkit import changelog
+        self.c = changelog
+        self.dir = tempfile.mkdtemp(prefix="vaultkit-changelog-")
+        self.path = os.path.join(self.dir, "CHANGELOG.md")
+        self.addCleanup(shutil.rmtree, self.dir)
+
+    def write(self, text):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def test_serves_the_file_with_an_etag(self):
+        self.write("# Changelog\n\n## 0.2.0\n\n- Ünïcode.\n")
+        status, body, headers = self.c.handle(self.path, {})
+        h = dict(headers)
+        self.assertEqual((status, body.decode()), (200, "# Changelog\n\n## 0.2.0\n\n- Ünïcode.\n"))
+        self.assertEqual(h["Content-Type"], "text/markdown; charset=utf-8")
+        self.assertEqual(h["X-Content-Type-Options"], "nosniff")
+        self.assertRegex(h["ETag"], r'^"[0-9a-f]{20}"$')
+        self.assertEqual(self.c.handle(self.path, {"If-None-Match": h["ETag"]})[:2], (304, b""))
+        self.assertEqual(self.c.handle(self.path, {"If-None-Match": '"x", ' + h["ETag"]})[0], 304)
+        self.assertEqual(self.c.handle(self.path, {"If-None-Match": '"other"'})[0], 200)
+        self.write("# Changelog\n\n## 0.3.0\n")
+        self.assertEqual(self.c.handle(self.path, {"If-None-Match": h["ETag"]})[0], 200)      # changed: a new tag
+
+    def test_bounded_at_a_whole_line(self):
+        self.write("## 1.0.0\n" + "".join("- line %05d\n" % i for i in range(20000)))
+        status, body, _ = self.c.handle(self.path, None)
+        self.assertEqual(status, 200)
+        self.assertLessEqual(len(body), self.c.LIMIT)
+        self.assertTrue(body.endswith(b"\n") and body.startswith(b"## 1.0.0\n"))
+        self.assertEqual(self.c.load(self.path, limit=12), b"## 1.0.0\n")
+
+    def test_missing_is_a_404(self):
+        status, body, headers = self.c.handle(os.path.join(self.dir, "nope.md"))
+        self.assertEqual((status, dict(headers)["Content-Type"]), (404, "text/plain; charset=utf-8"))
+        self.assertIsNone(self.c.load(self.dir))                                              # a directory
 
 
 class PalettesTest(unittest.TestCase):

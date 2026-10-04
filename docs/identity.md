@@ -92,6 +92,7 @@ A principal is a `person`, an `agent` or a `service`. `owner = true` (a person) 
 | `konbini` | `areas` | new `area/*` lanes and new tags |
 | `mcp` | `use` | call machiya-mcp, with the principal's `limits` ([mcp.md](services/mcp.md)) |
 | `smallweb` | `read`, `save` | reserved: smallweb doesn't read the file yet |
+| `landing` | `read` | the [landing page](services/landing.md) and its `/api/status` |
 
 Grant each action you mean: `write` doesn't include `read`.
 

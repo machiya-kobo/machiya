@@ -147,6 +147,15 @@ class FileTest(Base):
 
 
 class GrantsTest(Base):
+    def test_landing_room(self):
+        """v0.18: the landing page is a room in the file (`landing` `read`), so it runs with MACHIYA_IDENTITY_FILE."""
+        self.assertEqual(idn.ACTIONS["landing"], {"read"})
+        room = idn.load_for("landing", {"MACHIYA_IDENTITY_FILE": self.path, "LANDING_AUTH": "tailscale"}, bind="127.0.0.1")
+        self.assertEqual((room.room, room.auth), ("landing", "tailscale"))
+        config, _ = idn.read_file(self.path)
+        self.assertTrue(config.principals["owner"].can("landing", "read"))
+        self.assertFalse(config.principals["mcp"].can("landing", "read"))
+
     def test_grants(self):
         config, _ = idn.read_file(self.path)
         owner, partner, mcp, vm, newbie = (config.principals[n] for n in ("owner", "partner", "mcp", "vm", "newbie"))

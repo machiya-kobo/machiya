@@ -8,6 +8,7 @@ This is how the web rooms (Kura, Niwa, Konbini) put the [design language](design
 2. **Rooms**: set `MACHIYA_ROOMS` in the stack's compose (deployment config, not app code), for example:
    `MACHIYA_ROOMS=shiori=https://shiori.example.ts.net,konbini=https://konbini.example.ts.net,niwa=https://niwa.example.ts.net,kura=https://kura.example.ts.net,hister=https://hister.example.ts.net,searxng=https://searxng.example.ts.net`
    `shell.rooms()` reads it. Unset, there's no switcher (standalone). Your own `*_NIWA_URL` / `*_KONBINI_URL` settings can stay for in-page links.
+   Add `machiya=https://machiya.example.ts.net` when the stack runs the [landing page](services/landing.md) (v0.18): every Rooms menu then ends with a **Machiya · status** row before Settings, the footer's "Part of Machiya" links there, and Apps gets a Machiya switch. Without the key nothing changes.
 3. **Pages**: build every page with `shell.page(ctx, room, title, body, tabs, current, stylesheets=["/static/<app>.css?v=…"], scripts=["/static/<app>.js?v=…"], icons={…})`, with `shell.header(room, nav, current, links, subtitle, tools)` at the top of `body` and `shell.footer(room, status, links)` at the end.
    - `ctx = shell.prefs(self.headers.get("Cookie"))` gives `.theme` (the appearance: system/night/day; `auto` is read as system), `.palette` (the theme, v0.15: a `vaultkit.palettes` key, `tokyo-night` when unset or unknown) and `.text` (text size).
    - `room` is `kura`, `niwa` or `konbini`: it sets the seal, the wordmark and `--room`.
@@ -120,3 +121,17 @@ All rooms get Display (Theme: the ten palettes; Appearance: System / Light / Dar
 ## The source link (AGPL section 13)
 
 The rooms are AGPL software, and people who use one over a network must be offered its source. vaultkit's shell does it: set **`MACHIYA_SOURCE_URL`** to the address of the room's source repository (a plain `http://` or `https://` URL), and the page footer gets a **Source code** link and Settings, About gets **Source code** and **Licence** rows. Unset (the default), nothing is shown and every page is byte-identical to one built without the setting. Anything that isn't a plain http(s) address is ignored. Each room sets its own repository's URL in its compose or env file; a fork must point it at its own source.
+
+## The changelog endpoint (`vaultkit.changelog`, v0.18)
+
+Every app serves its own `CHANGELOG.md` at **`GET /api/changelog`**, for the [landing page](services/landing.md)'s Recent Deploys:
+
+```python
+from vaultkit import changelog
+status, body, headers = changelog.handle(os.path.join(APP_DIR, "CHANGELOG.md"), self.headers)
+```
+
+- Put it behind the same gate as your `/api/status` (open where that is open). Answer HEAD like GET without the body.
+- `COPY CHANGELOG.md` into the image next to the app.
+- The answer: the file's first 64 KiB (cut at a whole line), `text/markdown; charset=utf-8`, an `ETag` (`If-None-Match` gets a 304), `Cache-Control: no-cache`. No file: 404.
+- Keep the file's shape: `## X.Y.Z` per version, newest first, bullets under it. The landing page shows each version's first bullet.
