@@ -3,6 +3,7 @@
 ## 0.3.3
 
 - **Code documents stay out of the pages** (docs/contracts/hister.md, the code documents section): Hister's newest-page search, which feeds Saved & Read and Hister's newest page, now ends ` -label:vault -metadata.source:vault -metadata.source:code`, so code-import's repos, issues and PRs never show up as saved or read pages. Hister's page count (`/api/stats`) is Hister's own total and still includes them.
+- **vaultkit v0.20.0**: `MACHIYA_SSO_COOKIE` names the sign-in cookie the page reads and clears (default `machiya_sso`), as the helper and the rooms do, so a dev stack's own cookie (`machiya_dev_sso`) and production's no longer collide.
 
 ## 0.3.2
 
