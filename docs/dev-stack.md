@@ -37,7 +37,17 @@ cd machiya/compose/dev
 | `./dev down` | stops it; the data stays |
 | `./dev reset --yes` | down, delete the data, init with the same settings, up: back to the seed |
 
-`$DEV_DATA` is `compose/dev/data` unless `--data DIR` or `MACHIYA_DEV_DATA` says otherwise; the first stack made outside the default is remembered in `compose/dev/.data-dir`. Use a disk-backed folder (`/var/tmp/<you>/…`), never `/tmp`. The project is always `machiya-dev`. A podman API socket is used for compose (`DOCKER_HOST`, the user's `podman.socket`, or one started under `$DEV_DATA`). After a reboot, `./dev up` again.
+`$DEV_DATA` is `compose/dev/data` unless `--data DIR` or `MACHIYA_DEV_DATA` says otherwise; the first stack made outside the default is remembered in `compose/dev/.data-dir`. Use a disk-backed folder (`/var/tmp/<you>/…`), never `/tmp`. The compose project is `machiya-dev` unless `--project` says otherwise (below). A podman API socket is used for compose (`DOCKER_HOST`, the user's `podman.socket`, or one started under `$DEV_DATA`). After a reboot, `./dev up` again.
+
+**A second stack beside a standing one** (an agent testing a branch while the shared stack keeps running): give it its own project, another loopback address and that address as its base, and its own checkouts:
+
+```sh
+./dev --data /var/tmp/<you>/dev-data init --project machiya-dev-<you> --bind 127.0.0.2 --url https://127.0.0.2 \
+      --siblings /var/tmp/<you>
+./dev --data /var/tmp/<you>/dev-data up && ./dev --data /var/tmp/<you>/dev-data check --browser
+```
+
+The ports are the same numbers on 127.0.0.2, and the checks and `status` use that address. The containers, images and network are the project's own, so the standing stack is never touched.
 
 ## Ports
 
@@ -63,7 +73,17 @@ Everything is on `127.0.0.1` (`--bind` changes it). The public ports go through 
 
 Sign in as `owner` with the password in `$DEV_DATA/secrets/owner-password`. One sign-in covers every room; sign-out on the helper's sessions page ends it everywhere within 30 s.
 
+**Automatic sign-in.** A stack made since hister-login 0.2.0 sets `MACHIYA_SIGNIN_PROVIDER=oidc` (`--signin-provider oidc`, the default; `--signin-provider ''` for the page), as production does. A room or landing that needs a sign-in then goes through the stub OIDC provider, which plays tsidp and signs the owner in at once: no page and no click. After a Sign Out (a room's, or the helper's) the helper's page shows until the next sign-in. An older `dev.env` has no `DEV_SIGNIN_PROVIDER` and keeps the page.
+
 **How it differs from a deployment.** All rooms share one host name, so cookies (Hister's own `hister` cookie too) are shared by port rather than by a cookie domain, and `MACHIYA_COOKIE_DOMAIN` is empty. landing signs in like the rooms (`AUTH=hister`, fallback `tailscale`); machiya-mcp and smallweb run `AUTH=open`, so the network decides who reaches them: the ports bind to `127.0.0.1`, and on the tailnet only owner-only grants should reach them. Niwa and Konbini call each other and Kura with the owner's Hister token; Hister's MCP and every service's Hister calls use it too.
+
+**The settings checks** (`check --browser`, [contracts/prefs.md](contracts/prefs.md)):
+- screenshots of landing's Shared section (desktop and phone, light and dark);
+- Theme and Appearance changed in Kura's Settings send one key each, and show in Konbini, Niwa and landing on the next load, and in a second browser (another device);
+- Use This Device's Size stays in its browser;
+- with hister-login stopped (the checks stop and start the `<project>-hister-login-1` container), Niwa, Konbini and landing keep working on their cookies through the Tailscale fallback, and a change made meanwhile waits and lands in the account when the helper is back.
+
+They need rooms that vendor vaultkit 0.21 and forward `/api/prefs` (`histerauth.forward_prefs`). Older rooms fail the cross-device checks.
 
 ## On the tailnet
 

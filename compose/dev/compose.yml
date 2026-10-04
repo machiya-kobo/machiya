@@ -48,6 +48,7 @@ x-rooms-env: &rooms-env
   MACHIYA_ROOMS: "konbini=${DEV_URL}:19203,niwa=${DEV_URL}:19202,kura=${DEV_URL}:19201,hister=${DEV_URL}:19204,searxng=${DEV_URL}:19205,machiya=${DEV_URL}:19200"
   MACHIYA_COOKIE_DOMAIN: ${DEV_COOKIE_DOMAIN:-}
   MACHIYA_SSO_COOKIE: ${DEV_SSO_COOKIE:-}               # the sign-in cookie's name: machiya_dev_sso on a shared tailnet
+  MACHIYA_SIGNIN_PROVIDER: ${DEV_SIGNIN_PROVIDER:-}     # oidc: a page signs itself in through the stub OIDC provider
   TZ: UTC
 
 services:

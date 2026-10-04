@@ -206,5 +206,23 @@ class SyntheticOnly(unittest.TestCase):
                     self.assertTrue(url.endswith(".example") or url == "localhost", url)
 
 
+class SecondStack(unittest.TestCase):
+    """A second stack beside a standing one: its own compose project and loopback address."""
+
+    def test_project_and_address(self):
+        dev = load("devscript", os.path.join(DEV, "dev"))
+        self.assertEqual(dev.project({}), "machiya-dev")
+        self.assertEqual(dev.project({"DEV_PROJECT": "machiya-dev-x"}), "machiya-dev-x")
+        self.assertEqual(dev.local_addr({"DEV_BIND": "127.0.0.2"}), "127.0.0.2")
+        self.assertEqual(dev.local_addr({"DEV_BIND": "0.0.0.0"}), "127.0.0.1")
+        self.assertEqual(dev.local_addr({}), "127.0.0.1")
+        cmd = dev.compose_cmd({"DEV_ENGINE": "podman", "DEV_PROJECT": "machiya-dev-x"}, "/d", "ps")
+        self.assertEqual(cmd[cmd.index("--project-name") + 1], "machiya-dev-x")
+
+    def test_rooms_get_the_signin_provider(self):
+        with open(os.path.join(DEV, "compose.yml")) as f:
+            self.assertIn("MACHIYA_SIGNIN_PROVIDER: ${DEV_SIGNIN_PROVIDER:-}", f.read())
+
+
 if __name__ == "__main__":
     unittest.main()

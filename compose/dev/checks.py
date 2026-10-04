@@ -4,8 +4,10 @@ synthetic seed is where it should be, the MCP and feed-import work. HTTP checks 
 
     python3 checks.py --data DIR [--browser --shots DIR] [--only NAME,...]
 
-Talks to 127.0.0.1:<port> for the HTTP checks and to DEV_URL (the public base the stack was made with) in the
-browser. The dummy owner's password and token are read from DIR/secrets and never printed. Each check prints
+Talks to DEV_ADDR:<port> (127.0.0.1, or the --bind of a second stack) for the HTTP checks and to DEV_URL (the public
+base the stack was made with) in the browser. --browser also checks the settings that follow a person
+(docs/contracts/prefs.md) and the automatic sign-in (MACHIYA_SIGNIN_PROVIDER), and stops and starts hister-login
+once to show the rooms carry on without it. The dummy owner's password and token are read from DIR/secrets and never printed. Each check prints
 PASS/FAIL with its evidence; the exit code is the number of failures.
 """
 import argparse
@@ -23,6 +25,7 @@ import urllib.request
 RESULTS = []
 OPTIONAL = set()                                   # services a native stack may leave out (--native: searxng)
 FRONT = os.environ.get("DEV_FRONT_SCHEME", "https")
+ADDR = os.environ.get("DEV_ADDR") or "127.0.0.1"   # where this machine reaches the published ports
 UNVERIFIED = ssl._create_unverified_context()      # the throwaway dev CA; this machine to itself only
 
 
@@ -61,7 +64,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def L(port, path=""):
     """The front's ports (19200-19208) in its scheme; the plain ones (Hister 19224, the MCP 19226, ...) over http."""
-    return "%s://127.0.0.1:%d%s" % (FRONT if 19200 <= port <= 19208 else "http", port, path)
+    return "%s://%s:%d%s" % (FRONT if 19200 <= port <= 19208 else "http", ADDR, port, path)
 
 
 def hister_total(tok, q):
@@ -283,9 +286,11 @@ def scan_logs(data, needles):
                 texts[name] = f.read()
     else:
         engine = env.get("DEV_ENGINE", "podman")
-        names = subprocess.run([engine, "ps", "-a", "--format", "{{.Names}}"], capture_output=True, text=True).stdout
+        project = env.get("DEV_PROJECT") or "machiya-dev"          # this stack's containers only, not a neighbour's
+        names = subprocess.run([engine, "ps", "-a", "--filter", "label=com.docker.compose.project=" + project,
+                                "--format", "{{.Names}}"], capture_output=True, text=True).stdout
         for n in names.split():
-            if n.startswith("machiya-dev-"):
+            if n:
                 r = subprocess.run([engine, "logs", n], capture_output=True, text=True, errors="replace")
                 texts[n] = r.stdout + r.stderr
     return [n for n, t in texts.items() if any(x and x in t for x in needles)]
@@ -293,8 +298,10 @@ def scan_logs(data, needles):
 
 # -- browser ---------------------------------------------------------------------------------------------------------
 
-def browser_checks(data, password, shots, base, sso_cookie="machiya_sso"):
+def browser_checks(data, password, shots, base, sso_cookie="machiya_sso", denv=None, tok=""):
     from playwright.sync_api import sync_playwright
+    denv = denv or {}
+    auto = bool(denv.get("DEV_SIGNIN_PROVIDER"))     # MACHIYA_SIGNIN_PROVIDER: pages sign themselves in (stub OIDC)
     os.makedirs(shots, exist_ok=True)
     U = {n: "%s:%d" % (base, p) for n, p in (("landing", 19200), ("kura", 19201), ("niwa", 19202),
                                               ("konbini", 19203), ("hister", 19204))}
@@ -306,10 +313,25 @@ def browser_checks(data, password, shots, base, sso_cookie="machiya_sso"):
             page.screenshot(path=os.path.join(shots, "%s-%s-%s.png" % (engine, name, scheme)), full_page=False)
 
     def signin(page):
-        page.wait_for_selector("#hister-signin", timeout=15000)
+        """The helper's page, when it shows: name and password. With the automatic sign-in it doesn't (-> False)."""
+        try:
+            page.wait_for_selector("#hister-signin", timeout=5000 if auto else 15000)
+        except Exception:
+            if auto:
+                return False
+            raise
         page.fill("input[name=username]", "owner")
         page.fill("input[name=password]", password)
         page.click("#hister-signin button[type=submit]")
+        return True
+
+    def page_shown(p):
+        """Whether the helper's sign-in page was shown to this page (not just passed through, as the automatic
+        sign-in does)."""
+        shown = []
+        p.on("response", lambda r: shown.append(r.url) if "/machiya/signin" in r.url and r.status == 200
+             and r.request.resource_type == "document" else None)
+        return shown
 
     with sync_playwright() as pw:
         for engine in ("chromium", "webkit"):
@@ -319,9 +341,10 @@ def browser_checks(data, password, shots, base, sso_cookie="machiya_sso"):
                     continue                          # phone shots once (Chromium); WebKit runs the flows at desktop
                 ctx = browser.new_context(viewport=vw, ignore_https_errors=True)
                 p = ctx.new_page()
+                shown = page_shown(p)
                 p.goto(U["kura"] + "/n/Notes/Bamboo%20frames")
                 at_signin = "/machiya/signin" in p.url
-                if label == "":
+                if label == "" and at_signin:
                     shot(p, "helper-signin", engine)
                 signin(p)
                 p.wait_for_url(U["kura"] + "/**", timeout=20000)
@@ -345,29 +368,32 @@ def browser_checks(data, password, shots, base, sso_cookie="machiya_sso"):
                 hister_in = "/machiya/signin" not in p.url and "login" not in p.url
                 shot(p, label + "hister", engine)
                 if label == "":
-                    record("[%s] sign in once at the helper, then Kura, Niwa, Konbini, landing and Hister with no prompt"
-                           % engine, at_signin and back.startswith(U["kura"]) and ok_kura
+                    first = ("signed in automatically through the stub OIDC provider (no page, no click)" if auto
+                             else "sign in once at the helper")
+                    record("[%s] %s, then Kura, Niwa, Konbini, landing and Hister with no prompt" % (engine, first),
+                           (not shown if auto else at_signin) and back.startswith(U["kura"]) and ok_kura
                            and all(a and b for a, b in rooms.values()) and hister_in,
-                           "kura -> sign-in %s, back at %s; rooms (no prompt, content) %s; Hister UI signed in %s"
-                           % (at_signin, back, rooms, hister_in))
+                           "kura -> sign-in page shown %s, back at %s; rooms (no prompt, content) %s; Hister UI signed "
+                           "in %s" % (bool(shown) or at_signin, back, rooms, hister_in))
                     record("[%s] Kura's search page finds 'chochin'" % engine, found, "")
                     names = {c["name"]: c["value"] for c in ctx.cookies()}
                     other = {"machiya_sso", "machiya_dev_sso"} - {sso_cookie}
                     record("[%s] the helper, rooms and landing use the sign-in cookie %s (DEV_SSO_COOKIE), no other"
                            % (engine, sso_cookie), names.get(sso_cookie, "").startswith("mhs_")
                            and not (other & set(names)), "cookies %s" % sorted(names))
-                    # sign out everywhere from the helper's sessions page; the rooms send you back to sign in
+                    # sign out everywhere from the helper's sessions page; the rooms send you back to sign in, and
+                    # (the automatic sign-in) the helper shows its page instead of signing you straight back in
                     p.goto(U["hister"] + "/machiya/sessions")
                     p.click("button[value=all]")
                     p.wait_for_load_state("networkidle")
                     deadline, out = time.time() + 45, False
                     while time.time() < deadline and not out:
                         p.goto(U["konbini"] + "/")
-                        out = "/machiya/signin" in p.url
+                        out = "/machiya/signin" in p.url and p.locator("#hister-signin").count() == 1
                         if not out:
                             p.wait_for_timeout(3000)
-                    record("[%s] sign out everywhere: Konbini asks to sign in again (cache <= 30 s)" % engine, out,
-                           p.url)
+                    record("[%s] sign out everywhere: Konbini shows the sign-in page again (cache <= 30 s; no "
+                           "automatic way back in)" % engine, out, p.url)
                 ctx.close()
             # a browser that also holds a production sign-in cookie for this host (the shared-tailnet case): with the dev
             # stack's own name it is ignored and left alone, and the sign-in doesn't loop
@@ -399,15 +425,217 @@ def browser_checks(data, password, shots, base, sso_cookie="machiya_sso"):
             # the stub OIDC provider (tsidp's shape), bound to the owner
             ctx = browser.new_context(ignore_https_errors=True)
             p = ctx.new_page()
+            shown = page_shown(p)
             p.goto(U["konbini"] + "/")
-            p.click("text=Sign in with Tailscale")
-            p.wait_for_url(U["konbini"] + "/**", timeout=20000)
+            if auto:
+                p.wait_for_url(U["konbini"] + "/**", timeout=20000)
+            else:
+                p.click("text=Sign in with Tailscale")
+                p.wait_for_url(U["konbini"] + "/**", timeout=20000)
             p.wait_for_load_state("networkidle")
             st = ctx.request.get(U["konbini"] + "/api/cards").status
-            record("[%s] 'Sign in with Tailscale (dev stub)': the stub OIDC login is the owner" % engine,
-                   p.url.startswith(U["konbini"]) and st == 200, "landed on %s; /api/cards %s" % (p.url, st))
+            record("[%s] %s: the stub OIDC login is the owner" % (
+                       engine, "a fresh browser opening Konbini lands signed in with no clicks" if auto
+                       else "'Sign in with Tailscale (dev stub)'"),
+                   p.url.startswith(U["konbini"]) and st == 200 and not (auto and shown),
+                   "landed on %s; /api/cards %s; the sign-in page shown %s" % (p.url, st, bool(shown)))
+            if auto:
+                # Sign Out in a room (the form machiya.js adds to the Rooms menu): the next page shows the helper's
+                # page, not an automatic sign-in; one tap on "Sign in with Tailscale" brings you back, and then the
+                # sign-in is automatic again
+                with p.expect_response(lambda r: r.url.endswith("/signout") and r.request.method == "POST"):
+                    p.evaluate("() => document.querySelector('form.signout, form[action=\"/signout\"]').submit()")
+                p.wait_for_timeout(500)
+                marker = any(c["name"] == sso_cookie + "_out" for c in ctx.cookies())
+                deadline, page_after = time.time() + 45, False         # Niwa's cached answer lasts up to 30 s
+                while time.time() < deadline and not page_after:
+                    p.goto(U["niwa"] + "/")
+                    p.wait_for_load_state("networkidle")
+                    page_after = "/machiya/signin" in p.url and p.locator("#hister-signin").count() == 1
+                    if not page_after:
+                        p.wait_for_timeout(3000)
+                if not page_after:
+                    record("[%s] after Sign Out the helper's page shows" % engine, False, "marker %s; at %s" % (
+                        marker, p.url))
+                    ctx.close()
+                    browser.close()
+                    continue
+                if engine == "chromium":
+                    shot(p, "helper-signin-after-signout", engine)
+                p.click("text=Sign in with Tailscale")
+                p.wait_for_url(U["niwa"] + "/**", timeout=20000)
+                p.wait_for_load_state("networkidle")
+                back_in = p.url.startswith(U["niwa"])
+                cleared = not any(c["name"] == sso_cookie + "_out" for c in ctx.cookies())
+                record("[%s] after Sign Out the helper's page shows (no automatic way back in); one tap signs in, "
+                       "and clears the marker" % engine, marker and page_after and back_in and cleared,
+                       "marker set %s; page after sign-out %s; back in after a tap %s; marker cleared %s" % (
+                           marker, page_after, back_in, cleared))
             ctx.close()
             browser.close()
+        prefs_checks(pw, U, signin, shots, denv, tok)
+
+
+# -- the settings that follow a person (docs/contracts/prefs.md) -----------------------------------------------------
+
+def account(tok):
+    st, body, _ = http("GET", L(19204, "/machiya/api/prefs"), headers={"X-Access-Token": tok,
+                                                                       "Accept": "application/json"})
+    return (body or {}).get("prefs", {}) if st == 200 and isinstance(body, dict) else {"error": st}
+
+
+def body_state(p):
+    return p.evaluate("() => ({cls: document.body.className, text: document.body.dataset.text})")
+
+
+def prefs_checks(pw, U, signin, shots, denv, tok):
+    """Theme changed in Kura shows in Konbini, Niwa and landing on the next load and on another device; only the
+    changed key is sent; Use This Device's Size stays on its device; with the helper down the rooms keep working on
+    their cookies, and the change waits and lands when it is back. Screenshots of the Shared section (landing's
+    Settings: desktop and phone, light and dark)."""
+    engine_cmd = denv.get("DEV_ENGINE", "podman")
+    helper = "%s-hister-login-1" % (denv.get("DEV_PROJECT") or "machiya-dev")
+    clear = {"theme": None, "palette": None, "text_size": None, "apps_hidden": None}
+    http("PUT", L(19204, "/machiya/api/prefs"), {"prefs": clear}, headers={"X-Access-Token": tok})
+    browser = pw.chromium.launch()
+
+    def new(vw=None, **kw):
+        ctx = browser.new_context(viewport=vw or {"width": 1280, "height": 900}, ignore_https_errors=True, **kw)
+        p = ctx.new_page()
+        p.goto(U["landing"] + "/status")
+        signin(p)
+        p.wait_for_url(U["landing"] + "/**", timeout=20000)
+        p.wait_for_load_state("networkidle")
+        return ctx, p
+
+    def visit(p, room, path="/"):
+        p.goto(U[room] + path)
+        p.wait_for_load_state("networkidle")
+        p.wait_for_timeout(300)
+        return body_state(p)
+
+    # the Shared section, as the owner sees it (the account's defaults: theme System, so the shots follow the scheme)
+    for vw, name, extra in (({"width": 1280, "height": 1100}, "desktop", {}),
+                            ({"width": 390, "height": 844}, "phone", {"device_scale_factor": 2, "is_mobile": True,
+                                                                      "has_touch": True})):
+        ctx, p = new(vw, **extra)
+        visit(p, "landing", "/settings")
+        for scheme in ("light", "dark"):
+            p.emulate_media(color_scheme=scheme)
+            p.wait_for_timeout(300)
+            p.screenshot(path=os.path.join(shots, "shared-section-%s-%s.png" % (name, scheme)), full_page=True)
+        html = p.content()
+        record("[prefs] landing's Settings starts with Shared (%s): the rows, 'Follows you on every Machiya app when "
+               "signed in.', the state line, then This Device" % name,
+               html.find('id="shared"') < html.find('id="this-device"') < html.find('id="account"')
+               and html.find('id="shared"') > 0 and "Follows you on every Machiya app when signed in." in html
+               and "Signed in as owner. Saved to your account." in html and "Use This Device" in html,
+               "shots/shared-section-%s-{light,dark}.png" % name)
+        ctx.close()
+
+    # A: the laptop. Theme and Appearance changed in Kura's Settings: one PUT per change, one key each
+    a_ctx, a = new()
+    puts = []
+    a.on("request", lambda r: puts.append(r.post_data) if r.method == "PUT" and "/api/prefs" in r.url else None)
+    visit(a, "kura", "/settings")
+    with a.expect_response(lambda r: r.request.method == "PUT" and "/api/prefs" in r.url):
+        a.select_option('select[data-set="palette"]', "nord")
+    with a.expect_response(lambda r: r.request.method == "PUT" and "/api/prefs" in r.url):
+        a.select_option('select[data-set="theme"]', "day")
+    sent = [json.loads(x or "{}").get("prefs") for x in puts]
+    acct = account(tok)
+    record("[prefs] Theme and Appearance changed in Kura: each change PUTs its own key only, and the account has them",
+           sent == [{"palette": "nord"}, {"theme": "day"}] and acct.get("palette") == "nord"
+           and acct.get("theme") == "day", "PUTs %s; account %s" % (sent, acct))
+    seen = {room: body_state(a) if False else visit(a, room) for room in ("konbini", "niwa", "landing")}
+    record("[prefs] ... Konbini, Niwa and landing show it on the next load (this browser)",
+           all("palette-nord" in s["cls"] and "theme-day" in s["cls"] for s in seen.values()),
+           str({k: v["cls"] for k, v in seen.items()}))
+
+    # B: another device (a fresh browser, signed in automatically): the account's theme, and landing's first render
+    b_ctx = browser.new_context(viewport={"width": 1280, "height": 900}, ignore_https_errors=True)
+    b = b_ctx.new_page()
+    resp = b.goto(U["landing"] + "/status")
+    signin(b)
+    b.wait_for_url(U["landing"] + "/**", timeout=20000)
+    first = resp.text() if resp is not None and resp.url.startswith(U["landing"]) else ""
+    b.wait_for_load_state("networkidle")
+    first_render = 'palette-nord' in first.split("<body", 1)[-1][:300] if first else None
+    seen = {room: visit(b, room) for room in ("konbini", "niwa", "kura", "landing")}
+    record("[prefs] another device: Konbini, Niwa, Kura and landing show the account's theme",
+           all("palette-nord" in s["cls"] and "theme-day" in s["cls"] for s in seen.values()),
+           "%s; landing's very first page drawn in it (no cookies yet) %s" % (
+               {k: v["cls"] for k, v in seen.items()}, first_render))
+
+    # Use This Device's Size on A: local only (no PUT); B keeps the account's size; the Shared Text Size still syncs
+    visit(a, "landing", "/settings")
+    n = len(puts)
+    a.check("[data-device-size]")
+    a.select_option("[data-device-size-value]", "xlarge")
+    a.wait_for_timeout(500)
+    local_only = len(puts) == n
+    a_text = {room: visit(a, room)["text"] for room in ("konbini", "kura")}
+    b_text = visit(b, "konbini")["text"]
+    visit(a, "landing", "/settings")
+    with a.expect_response(lambda r: r.request.method == "PUT" and "/api/prefs" in r.url):
+        a.select_option('select[data-set="textSize"]', "large")
+    a_after = visit(a, "niwa")["text"]
+    b_after = visit(b, "niwa")["text"]
+    record("[prefs] Use This Device's Size stays on its device: A shows xlarge everywhere, sends nothing; B keeps the "
+           "account's size; a Shared Text Size change still reaches B but not A's screen",
+           local_only and set(a_text.values()) == {"xlarge"} and b_text == "standard" and a_after == "xlarge"
+           and b_after == "large" and account(tok).get("text_size") == "large",
+           "no PUT %s; A %s; B %s; after Shared=large: A %s, B %s" % (local_only, a_text, b_text, a_after, b_after))
+
+    # the helper down: the rooms keep working on their cookies (Niwa, Konbini and landing through the Tailscale
+    # fallback, as Serve's header would let them; Kura, with no fallback, says sign-in is unavailable)
+    if engine_cmd == "native":
+        print("SKIP  [prefs] the helper down (a native stack: stop hister-login by hand)")
+        browser.close()
+        return
+    login = (denv.get("DEV_TAILNET_USERS") or "owner@dev").split(",")[0].strip()
+    a_ctx.set_extra_http_headers({"Tailscale-User-Login": login})
+    subprocess.run([engine_cmd, "stop", "-t", "2", helper], capture_output=True)
+    try:
+        time.sleep(32)                                 # the rooms' cached "signed in" (30 s) runs out
+        down = {room: visit(a, room) for room in ("konbini", "niwa", "landing")}
+        banner = {room: a.locator(".machiya-banner").count() for room in ("landing",)}
+        kura = a.goto(U["kura"] + "/")
+        kura_status = kura.status if kura is not None else 0
+        visit(a, "landing", "/settings")
+        state = a.get_attribute(".prefs-state", "data-prefs-state")
+        a.screenshot(path=os.path.join(shots, "shared-section-unavailable-desktop-light.png"), full_page=True)
+        a.select_option('select[data-set="palette"]', "dracula")
+        a.wait_for_timeout(800)
+        pending = a.evaluate("() => localStorage.getItem('machiyaPrefsPending')")
+        cookie_now = a.evaluate("() => document.body.className")
+        record("[prefs] the helper down: Konbini, Niwa and landing keep working with their cookies (theme kept); the "
+               "Shared line says sign-in is unavailable; a change applies here and waits",
+               all(s["cls"] and "palette-nord" in s["cls"] for s in down.values()) and state == "unavailable"
+               and "palette-dracula" in cookie_now and "dracula" in (pending or ""),
+               "rooms %s; landing banner %s; Kura %s (no fallback there); state line %s; pending %s" % (
+                   {k: v["cls"] for k, v in down.items()}, banner, kura_status, state, pending))
+    finally:
+        subprocess.run([engine_cmd, "start", helper], capture_output=True)
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        st, body, _ = http("GET", L(19204, "/machiya/healthz"), timeout=5)
+        if st == 200 and isinstance(body, dict) and body.get("hister") == "ok":
+            break
+        time.sleep(2)
+    time.sleep(12)                                     # the rooms' health flag (10 s)
+    a_ctx.set_extra_http_headers({})
+    visit(a, "landing")
+    a.wait_for_timeout(1500)
+    acct = account(tok)
+    b_back = visit(b, "konbini")["cls"]
+    record("[prefs] the helper back: the waiting change lands in the account (sent first), and the other device "
+           "follows on its next load", acct.get("palette") == "dracula" and "palette-dracula" in b_back,
+           "account %s; B %s" % (acct, b_back))
+    http("PUT", L(19204, "/machiya/api/prefs"), {"prefs": clear}, headers={"X-Access-Token": tok})
+    a_ctx.close()
+    b_ctx.close()
+    browser.close()
 
 
 def main():
@@ -423,19 +651,21 @@ def main():
         password = f.readline().strip()
     base = os.environ.get("DEV_URL", "http://localhost").rstrip("/")
     sso_cookie = "machiya_sso"
+    denv = {}
     try:
         with open(os.path.join(a.data, "dev.env")) as f:
-            denv = f.read()
-        if "DEV_ENGINE=native" in denv:
+            for line in f:
+                if "=" in line and not line.startswith("#"):
+                    k, _, v = line.strip().partition("=")
+                    denv[k] = v
+        if denv.get("DEV_ENGINE") == "native":
             OPTIONAL.add("searxng")
-        m = re.search(r"^DEV_SSO_COOKIE=(\S+)$", denv, re.M)
-        if m:
-            sso_cookie = m.group(1)
+        sso_cookie = denv.get("DEV_SSO_COOKIE") or sso_cookie
     except OSError:
         pass
     http_checks(a.data, tok, password)
     if a.browser:
-        browser_checks(a.data, password, a.shots or os.path.join(a.data, "shots"), base, sso_cookie)
+        browser_checks(a.data, password, a.shots or os.path.join(a.data, "shots"), base, sso_cookie, denv, tok)
     failed = sum(1 for _, ok in RESULTS if not ok)
     print("\n%d check(s), %d failed" % (len(RESULTS), failed))
     return failed
