@@ -513,29 +513,31 @@ main form.search input { width: 100%; font-size: var(--fs-l); padding: 9px 12px;
 @media (prefers-reduced-motion: reduce) { .topbar form.search input { transition: none; } }
 /* the search pill (v0.17): the pinned header's second row, every width, as Shiori's field */
 .searchrow { padding: 2px 0 10px; }
-form.search.bar { display: block; max-width: 720px; }
-form.search.bar .field { position: relative; }
-form.search.bar input { width: 100%; max-width: none; height: auto; padding: 10px 44px 10px 16px; border-radius: 999px;
+form.search.searchbar { display: block; max-width: 720px; }
+form.search.searchbar .field { position: relative; }
+form.search.searchbar input { width: 100%; max-width: none; height: auto; padding: 10px 44px 10px 16px; border-radius: 999px;
   border: 1px solid var(--line2); background: var(--dark); color: var(--fg); font: inherit; font-size: var(--fs-l);
   box-shadow: var(--shadow-1); transition: none; }
-form.search.bar input::placeholder { color: var(--muted); opacity: .9; }
-form.search.bar input:focus { outline: none; border-color: var(--room); }
-form.search.bar input:focus-visible { outline: 2px solid var(--room); outline-offset: 2px; }
-form.search.bar input::-webkit-search-cancel-button { display: none; }
+form.search.searchbar input::placeholder { color: var(--muted); opacity: .9; }
+form.search.searchbar input:focus { outline: none; border-color: var(--room); }
+form.search.searchbar input:focus-visible { outline: 2px solid var(--room); outline-offset: 2px; }
+form.search.searchbar input::-webkit-search-cancel-button { display: none; }
 /* the clear X (shown once there's text) and, on phones, a magnifier that submits (v0.17.1, as Kagi's field) */
-form.search.bar .clear, form.search.bar .go { position: absolute; top: 50%; transform: translateY(-50%); width: 32px; height: 32px;
+form.search.searchbar .clear, form.search.searchbar .go { position: absolute; top: 50%; transform: translateY(-50%); width: 32px; height: 32px;
   display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--fg2); cursor: pointer; }
-form.search.bar .clear { right: 8px; }
-form.search.bar .go { right: 8px; display: none; }
-form.search.bar .clear svg, form.search.bar .go svg { width: 20px; height: 20px; }
-form.search.bar .clear::after, form.search.bar .go::after { content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px;
+form.search.searchbar .clear { right: 8px; }
+form.search.searchbar .go { right: 8px; display: none; }
+form.search.searchbar .clear svg, form.search.searchbar .go svg { width: 20px; height: 20px; }
+form.search.searchbar .clear::after, form.search.searchbar .go::after { content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px;
   transform: translate(-50%, -50%); }   /* small to look at, 44 points to tap */
-form.search.bar input:placeholder-shown ~ .clear { display: none; }
+form.search.searchbar input:placeholder-shown ~ .clear { display: none; }
 @media (max-width: 760px) {
-  form.search.bar input { font-size: 16px; padding-right: 84px; }   /* iOS zooms into fields under 16px; room for X + magnifier */
-  form.search.bar .go { display: grid; }
-  form.search.bar .clear { right: 44px; }
+  form.search.searchbar input { font-size: 16px; padding-right: 84px; }   /* iOS zooms into fields under 16px; room for X + magnifier */
+  form.search.searchbar .go { display: grid; }
+  form.search.searchbar .clear { right: 44px; }
 }
+.tabbar a.here.here-hidden, .tabbar a.here-hidden[aria-current="page"] { background: transparent; color: inherit; }
+.nav b.here.here-hidden { background: transparent; color: inherit; font-weight: inherit; box-shadow: none; }
 main.live-loading { opacity: .6; transition: opacity .15s .1s; }
 @media (prefers-reduced-motion: reduce) { main.live-loading { transition: none; } }
 .handoff { display: flex; align-items: center; gap: 10px; margin: var(--sp-4) 0; padding: 10px var(--sp-3);

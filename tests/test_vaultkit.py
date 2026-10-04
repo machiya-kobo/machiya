@@ -668,7 +668,7 @@ class SharedUITest(unittest.TestCase):
 
     def test_search_bar_is_the_headers_second_row(self):
         bar = self.shell.search_bar("a <b>", "/v/work/search", "Search Notes", "Search every note")
-        self.assertIn('class="search bar"', bar)
+        self.assertIn('class="search searchbar"', bar)
         self.assertIn('action="/v/work/search"', bar)
         self.assertIn('value="a &lt;b&gt;"', bar)
         self.assertIn('class="clear"', bar)

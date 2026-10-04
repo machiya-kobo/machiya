@@ -152,7 +152,7 @@ document.addEventListener("keydown", (ev) => {
     const t = ev.target;
     if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
     // the header's search pill (v0.17), else a search page's own field; otherwise open the room's search page
-    const field = document.querySelector("form.search.bar input[type=search]")
+    const field = document.querySelector("form.search.searchbar input[type=search]")
       || [...document.querySelectorAll("form.search input[type=search]")].find((f) => f.offsetParent !== null);
     if (field) { ev.preventDefault(); field.focus(); field.select(); return; }
     const form = document.querySelector("form.search");
@@ -250,7 +250,7 @@ if ("serviceWorker" in navigator) {
 // puts the page back. Enter still submits the form (a real search page load). Rooms whose results need script can
 // listen for "machiya:results" on document (detail: {q}) to bind them again.
 (() => {
-  const form = document.querySelector("form.search.bar");
+  const form = document.querySelector("form.search.searchbar");
   const input = form && form.querySelector("input[type=search]");
   const main = document.querySelector("main");
   if (!input || !main || !window.fetch || !window.DOMParser) return;
@@ -258,8 +258,12 @@ if ("serviceWorker" in navigator) {
   const startHTML = main.innerHTML, startURL = location.href, startTitle = document.title;
   const onSearchPage = new URL(form.action, location.href).pathname === location.pathname;
   let timer = 0, ctl = null, pushed = false;
+  // while results show, no tab or nav item is "here" (the page under them isn't); clearing puts them back (v0.17.2)
+  const marks = [...document.querySelectorAll('.tabbar a.here, .tabbar a[aria-current="page"], .nav b.here')];
+  const unmark = (off) => { for (const m of marks) m.classList.toggle("here-hidden", off); };
   const show = (html, title, url) => {
     main.innerHTML = html;
+    if (!onSearchPage) unmark(html !== startHTML);
     for (const f of main.querySelectorAll("form.search")) f.remove();     // the search page's own field: the pill is the field
     if (title) document.title = title;
     if (url && url !== location.href) {

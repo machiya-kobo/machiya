@@ -124,7 +124,7 @@ def search_bar(q="", action="/search", placeholder="Search", label="Search"):
     """The room's search pill (v0.17): a second row of the pinned header at every width, as Shiori's field. Pass it to
     header(search=...). machiya.js shows results as you type (it fetches the room's search page and swaps <main>), and
     "/" focuses it."""
-    return ('<form class="search bar" role="search" action="%s"><div class="field"><input type="search" name="q" value="%s" '
+    return ('<form class="search searchbar" role="search" action="%s"><div class="field"><input type="search" name="q" value="%s" '
             'placeholder="%s" aria-label="%s" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">'
             '<button type="button" class="clear" aria-label="Clear" title="Clear search">%s</button>'
             '<button type="submit" class="go" aria-label="Search" title="Search">%s</button></div></form>'
