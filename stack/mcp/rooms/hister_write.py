@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import time
 
 from . import IDEMPOTENT, READ, WRITE, ToolError, arg_int, arg_list, arg_str, n, s, tool
@@ -144,12 +145,24 @@ def collection_name(ctx, name):
 
 
 def log_rollback(ctx, kind, data):
+    """Save what a write is about to change, BEFORE it changes it, in a file of its own: the name carries the time to the
+    second plus a random suffix and is created exclusively, so two writes in one second never share one (sweep MACH-M-8).
+    A rollback that can't be saved stops the write."""
     d = ctx.server.config.rollback_dir
-    os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, "%s-%s.json" % (kind, time.strftime("%Y%m%d-%H%M%S", time.gmtime(ctx.server.clock()))))
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=0)
-    return path
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime(ctx.server.clock()))
+    try:
+        os.makedirs(d, exist_ok=True)
+        for _ in range(5):
+            path = os.path.join(d, "%s-%s-%s.json" % (kind, stamp, secrets.token_hex(4)))
+            try:
+                with open(path, "x", encoding="utf-8") as f:
+                    json.dump(data, f, indent=0)
+                return path
+            except FileExistsError:
+                continue
+    except OSError as e:
+        raise ToolError("the rollback file couldn't be saved (%s): nothing was changed" % e.__class__.__name__)
+    raise ToolError("the rollback file couldn't be saved: nothing was changed")
 
 
 # -- reads -------------------------------------------------------------------------------------------------------------
@@ -284,9 +297,9 @@ def collections_set(ctx, args):
     if before == value:
         return {"name": name, "value": value, "changed": False}
     guard_write(ctx)
+    rollback = log_rollback(ctx, "alias-set", {name: before})
     ctx.write("hister", "POST", "/api/add_alias", {"alias-keyword": name, "alias-value": value}, form=True)
-    log_rollback(ctx, "alias-set", {name: before})
-    return {"name": name, "before": before, "after": value, "changed": True,
+    return {"name": name, "before": before, "after": value, "changed": True, "rollback_file": rollback,
             "pages": sum(topics(ctx).get(l, 0) for l in labels)}
 
 

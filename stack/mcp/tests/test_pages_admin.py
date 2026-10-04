@@ -310,6 +310,24 @@ class Collections(Base):
         self.assertEqual((d["before"], d["after"]), ("label:(music|tech)", "label:music"))
         self.assertFalse(self.ok("collections_set", name="music-stuff", labels=["music"])["changed"])
 
+    def test_rollback_files_never_share_a_name_and_come_first(self):
+        # sweep MACH-M-8: names went to the second (two writes in one second kept one rollback), and collections_set wrote
+        # its rollback after the change, so a failed save reported failure for a change already made
+        a = self.ok("collections_set", name="one", labels=["music"])
+        b = self.ok("collections_set", name="one", labels=["tech"])            # the same clock second
+        self.assertNotEqual(a["rollback_file"], b["rollback_file"])
+        with open(a["rollback_file"]) as f:
+            self.assertEqual(json.load(f), {"@one": None})
+        with open(b["rollback_file"]) as f:
+            self.assertEqual(json.load(f), {"@one": "label:music"})
+        blocker = os.path.join(self.tmp, "not-a-dir")
+        open(blocker, "w").close()
+        self.server.config.rollback_dir = os.path.join(blocker, "rb")
+        n = len(self.posts())
+        self.err("collections_set", "rollback", name="one", labels=["hardware"])
+        self.assertEqual(len(self.posts()), n)                                 # nothing was changed
+        self.assertEqual(self.h.aliases["@one"], "label:tech")
+
     def test_the_owners_own_aliases_reserved_names_and_bad_labels_are_refused(self):
         for name in ("@mix", "everything", "@notes", "@pages", "notes", "pages", "@code", "code"):
             self.err("collections_set", name=name, labels=["tech"])
