@@ -15,5 +15,5 @@ USER 1000:1000
 EXPOSE 8080 8081
 # healthy = the helper answers (its /healthz is 503 while Hister is down; that is Hister's health, not the helper's)
 HEALTHCHECK --interval=60s --timeout=5s --start-period=10s --retries=3 \
-  CMD ["python3", "-c", "import http.client as h; c = h.HTTPConnection('127.0.0.1', 8081, timeout=4); c.request('GET', '/healthz'); c.getresponse()"]
+  CMD ["python3", "-c", "import http.client as h; c = h.HTTPConnection('127.0.0.1', 8081, timeout=4); c.request('GET', '/healthz'); c.getresponse().read(); c.close()"]
 CMD ["python3", "/app/hister_login.py"]

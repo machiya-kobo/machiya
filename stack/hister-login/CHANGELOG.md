@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.1.1
+
+- The container's healthcheck reads the reply before closing: closing early left a `ConnectionResetError` traceback in the helper's log every minute.
+
 ## 0.1.0
 
 The first version (phase 0 of the Hister sign-in): the opaque `machiya_sso` cookie, the sign-in page (Hister's own
