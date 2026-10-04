@@ -187,7 +187,7 @@ Haiku has no Docker or Podman, so the dev stack runs there with `--native`. What
   python3 -m ensurepip --altinstall && python3 -m pip install markdown pyyaml tzdata
   ```
 
-  **Proven 2026-10-05** on `tv-haiku` (R1/beta6 x86_64, services): `tools/dev-test tv-haiku --packages --native --hister-via tv-debian` = 16/16 (SearXNG skipped). Haiku quirks:
+  **Proven 2026-10-05** on `tv-haiku` (R1/beta6 x86_64), and again on a fresh VM in the docs review (hrev59866): `tools/dev-test tv-haiku --packages --native --hister-via tv-debian` = 16/16 (SearXNG skipped). `pkgman install` is a no-op on a fresh R1/beta6 (all preinstalled); pip warns about running as root, which is harmless (Haiku's `user` is uid 0), and a plain `python3 -m venv` works too. Haiku quirks:
   - **no tz database**: Niwa and Konbini stop with `ZoneInfoNotFoundError: … UTC` unless `tzdata` is installed (it is, above);
   - sshd reads `AuthorizedKeysFile config/settings/ssh/authorized_keys` (relative to /boot/home), not `~/.ssh`; `ssh-keygen -A` + a reboot makes the host keys; the login user is `user` (uid 0);
   - python3.14, git, curl, openssl3 and pkgman are preinstalled;

@@ -2,7 +2,7 @@
 
 Native installs, packages only, no ports. Covers FreeBSD 14/15, NetBSD 10 and OpenBSD 7.7–7.9. The rc.d scripts are in [`contrib/rc.d/`](../../contrib/rc.d/).
 
-**Tested on** (2026-10-04, clean test VMs, amd64): FreeBSD 15.1 (Kura), NetBSD 11.0 and OpenBSD 7.9 (Kura and Niwa), as rc.d services with this guide. On OpenBSD the apps need a vaultkit with the scrypt fix (OpenBSD's Python has no `hashlib.scrypt`). The rooms' own BSD Quickstarts and the [dev stack](../dev-stack.md) ran on all three.
+**Tested on** (2026-10-04/05, clean test VMs, amd64): FreeBSD 15.1 (Kura as an rc.d service; all three rooms natively), NetBSD 11.0 and OpenBSD 7.9 (Kura and Niwa as rc.d services), with this guide. OpenBSD's Python has no `hashlib.scrypt`: the apps start there from vaultkit v0.21.0 (Kura 0.7.0, Niwa 0.5.0, Konbini 0.12.0), and only the identity file's password features refuse. The rooms' own BSD Quickstarts and the [dev stack](../dev-stack.md) ran on all three.
 
 **Needs** apps that read `<APP>_BIND` and an env file (`<APP>_ENV_FILE` or `--env-file`, from vaultkit's `envfile`):
 
