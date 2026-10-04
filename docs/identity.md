@@ -211,6 +211,7 @@ A room mode **without the identity file**: the room asks [hister-login](services
 ## Security notes
 
 - **No secret in the file.** Passwords are scrypt hashes, tokens SHA-256 hashes, pairing codes scrypt hashes. The key that signs sessions and device tokens is `session.key` beside it (0600). Back both up; guard the key like a password.
+- **A Python without scrypt** (one built against LibreSSL, as OpenBSD's is) has no `hashlib.scrypt`. There the password features refuse with a clear message: a room with `*_SIGNIN=1` doesn't start, `POST /api/pair` answers 503, and the CLI's `passwd`, `pair` and `setup --password` stop. Everything else (open, Tailscale, header and Hister modes, tokens) works. Before vaultkit 0.21 every room crashed at import there.
 - **Mount the directory read-only** into each room. Nothing in a room can write identities; the CLI runs on the host that holds the file. A file that turns invalid keeps the last good one (and says so); a bad file at start refuses to start.
 - **Header modes trust whoever reaches the port.** In `tailscale` and `header` mode a room refuses a non-loopback bind unless `*_BIND_BEHIND_PROXY=1` says the proxy is the only way in (a Tailscale sidecar, or the compose with ports on `127.0.0.1`). Your proxy must strip the login header from what clients send. With sign-in only, list no Tailscale logins (or keep `tailscale serve` in front): a client could send that header itself.
 - **Trade-offs to know:**

@@ -843,5 +843,76 @@ class CliTest(unittest.TestCase):
             self.assertEqual(self.setup_cli(*bad)[0], 2, bad)
 
 
+class NoScryptTest(unittest.TestCase):
+    """OpenBSD's Python (LibreSSL) has no hashlib.scrypt: vaultkit must import, and every mode but the password ones
+    must start (the fleet test, 2026-10-05: DUMMY_HASH was computed at import, so every room crashed at start)."""
+
+    SCRIPT = r"""
+import hashlib, io, json, os, sys, tempfile
+del hashlib.scrypt                                           # as on OpenBSD
+sys.path.insert(0, sys.argv[1])
+from vaultkit import identity, histerauth, signin, shell, prefs   # must import
+out = {"have": identity.HAVE_SCRYPT}
+d = tempfile.mkdtemp()
+path = os.path.join(d, "identity.toml")
+with open(os.path.join(d, "session.key"), "w") as f:
+    f.write("k" * 44)
+os.chmod(os.path.join(d, "session.key"), 0o600)
+with open(path, "w") as f:
+    f.write('version = 1\nsession_key_file = "session.key"\n\n[principals.owner]\nid = "ownerid00000000a"\n'
+            'kind = "person"\nowner = true\ntailscale = ["me@example.com"]\n')
+env = {"MACHIYA_IDENTITY_FILE": path, "KURA_AUTH": "open"}
+out["open"] = identity.load_for("kura", env, bind="127.0.0.1") is not None
+out["tailscale"] = identity.load_for("kura", dict(env, KURA_AUTH="tailscale", KURA_BIND_BEHIND_PROXY="1"),
+                                     bind="0.0.0.0") is not None
+h = histerauth.load_for("kura", {"KURA_AUTH": "hister", "KURA_AUTH_SIGNIN_URL": "https://h/machiya/signin",
+                                 "KURA_HISTER_USERS": "owner", "KURA_AUTH_URL": "http://hl:8081",
+                                 "KURA_AUTH_FALLBACK": "none", "KURA_PUBLIC_URL": "https://kura.x"})
+out["hister"] = h is not None
+try:
+    identity.load_for("kura", dict(env, KURA_SIGNIN="1"), bind="127.0.0.1")
+    out["signin"] = "started"
+except identity.IdentityError as e:
+    out["signin"] = str(e)
+ident = identity.Identity(path, "kura", "open", signin=True)
+r = ident.sign_in("owner", "x" * 12, "1.2.3.4")
+out["sign_in"] = [r.status, r.error]
+r, tok = ident.pair("ABCD-EFGH", "1.2.3.4")
+out["pair"] = [r.status, tok]
+try:
+    identity.hash_password("x")
+    out["hash"] = "hashed"
+except identity.IdentityError as e:
+    out["hash"] = str(e)
+try:
+    identity.main(["--file", path, "passwd", "owner"])
+    out["cli"] = "ran"
+except SystemExit as e:
+    out["cli"] = str(e)
+print(json.dumps(out))
+"""
+
+    def test_imports_and_every_mode_but_passwords(self):
+        import subprocess
+        r = subprocess.run([sys.executable, "-c", self.SCRIPT, os.path.join(os.path.dirname(__file__), "..")],
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        out = json.loads(r.stdout.strip().splitlines()[-1])
+        self.assertFalse(out["have"])
+        self.assertTrue(out["open"] and out["tailscale"] and out["hister"])
+        self.assertIn("KURA_SIGNIN=1", out["signin"])
+        self.assertIn("no scrypt", out["signin"])
+        self.assertEqual(out["sign_in"][0], 503)
+        self.assertIn("password sign-in is unavailable", out["sign_in"][1])
+        self.assertEqual((out["pair"][0], out["pair"][1]), (503, ""))
+        self.assertIn("no scrypt", out["hash"])
+        self.assertIn("no scrypt", out["cli"])
+
+    def test_dummy_hash_is_made_on_first_use(self):
+        self.assertTrue(idn.dummy_hash().startswith("scrypt$"))
+        self.assertIs(idn.dummy_hash(), idn.dummy_hash())
+        self.assertFalse(hasattr(idn, "DUMMY_HASH"))
+
+
 if __name__ == "__main__":
     unittest.main()
