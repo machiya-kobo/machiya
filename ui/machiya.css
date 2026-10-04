@@ -351,7 +351,7 @@ header.top {
 /* END ROOM ICONS */
 
 /* ---- tab bar (phones and the installed app) ---------------------------------------------------------------- */
-/* A floating pill like Shiori's (v0.16): it spans the screen minus a margin, so five tabs never run off the edge; the
+/* A floating pill like Shiori's (v0.16; more see-through glass in v0.16.1: 70% with a stronger blur): it spans the screen minus a margin, so five tabs never run off the edge; the
    bar and the current tab follow the variant: dark = the bar on --dark, the current tab on --hl; light = the reverse. */
 .tabbar { display: none; --tab-bg: var(--dark); --tab-on: var(--hl); }
 body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
@@ -363,7 +363,8 @@ body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
   .tabbar { display: flex; gap: 4px; position: fixed; z-index: 15;
     left: calc(8px + var(--sal)); right: calc(8px + var(--sar)); bottom: calc(10px + var(--sab));
     padding: 6px; border-radius: 999px; border: 1px solid var(--line2);
-    background: color-mix(in srgb, var(--tab-bg) 88%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    background: color-mix(in srgb, var(--tab-bg) 70%, transparent);
+    backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%);
     box-shadow: 0 8px 24px rgb(0 0 0 / 0.25); }
   .tabbar > a, .tabbar > details > summary { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center;
     gap: 2px; padding: 6px 2px; border-radius: 999px; color: var(--fg); font-size: 11px; font-weight: 500; white-space: nowrap;
