@@ -9,7 +9,8 @@ Each variant names Machiya's tokens (ui/machiya.css): surfaces (bg, dark: bars a
 colours; where one would be hard to read as text, `readable()` moves its lightness (never its hue) until it is:
 
 - every variant: fg, fg2, muted and the accents >= 4.5:1 on bg (WCAG AA);
-- the Rooms menu's text (menu-fg: fg moved the same way) >= 4.5:1 on dark, the menu's panel (v0.16.6);
+- the Rooms menu's text (menu-fg: fg moved the same way) >= 4.5:1 on dark, the menu's panel (v0.16.6), and its role
+  words (menu-muted: muted moved the same way) >= 4.5:1 on dark and on hl, the current row (v0.16.7);
 - comment (faint text) >= 4.4:1 in a light variant, >= 2.75:1 in a dark one, and a dark variant's slate >= 4:1:
   what Tokyo Night has always had.
 
@@ -184,7 +185,8 @@ def _block(selectors, key, mode, indent=""):
     v = variant(key, mode)
     rows = [" ".join("--%s: %s;" % (t, v[t]) for t in ("bg", "dark", "hl", "line", "line2")),
             " ".join("--%s: %s;" % (t, v[t]) for t in ("fg", "fg2", "comment", "muted"))
-            + " --menu-fg: %s;" % readable(v["fg"], v["dark"], 4.5, mode),     # the Rooms menu's text, on --dark
+            + " --menu-fg: %s;" % readable(v["fg"], v["dark"], 4.5, mode)      # the Rooms menu's text, on --dark
+            + " --menu-muted: %s;" % readable(readable(v["muted"], v["dark"], 4.5, mode), v["hl"], 4.5, mode),   # its role words, on --dark and --hl
             " ".join("--%s: %s;" % (t, v[t]) for t in ("blue", "orange", "red", "yellow", "green")),
             " ".join("--%s: %s;" % (t, v[t]) for t in ("teal", "magenta", "cyan", "slate")),
             _shadow(mode, v["fg"])]
