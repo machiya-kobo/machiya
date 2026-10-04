@@ -522,11 +522,20 @@ form.search.bar input::placeholder { color: var(--muted); opacity: .9; }
 form.search.bar input:focus { outline: none; border-color: var(--room); }
 form.search.bar input:focus-visible { outline: 2px solid var(--room); outline-offset: 2px; }
 form.search.bar input::-webkit-search-cancel-button { display: none; }
-form.search.bar .clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 30px; height: 30px;
-  border: 0; border-radius: 50%; background: transparent; color: var(--muted); font-size: 22px; line-height: 1; cursor: pointer; }
-form.search.bar .clear::after { content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
-form.search.bar input:placeholder-shown ~ .clear { visibility: hidden; }
-@media (max-width: 760px) { form.search.bar input { font-size: 16px; } }   /* iOS zooms into fields under 16px */
+/* the clear X (shown once there's text) and, on phones, a magnifier that submits (v0.17.1, as Kagi's field) */
+form.search.bar .clear, form.search.bar .go { position: absolute; top: 50%; transform: translateY(-50%); width: 32px; height: 32px;
+  display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--fg2); cursor: pointer; }
+form.search.bar .clear { right: 8px; }
+form.search.bar .go { right: 8px; display: none; }
+form.search.bar .clear svg, form.search.bar .go svg { width: 20px; height: 20px; }
+form.search.bar .clear::after, form.search.bar .go::after { content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px;
+  transform: translate(-50%, -50%); }   /* small to look at, 44 points to tap */
+form.search.bar input:placeholder-shown ~ .clear { display: none; }
+@media (max-width: 760px) {
+  form.search.bar input { font-size: 16px; padding-right: 84px; }   /* iOS zooms into fields under 16px; room for X + magnifier */
+  form.search.bar .go { display: grid; }
+  form.search.bar .clear { right: 44px; }
+}
 main.live-loading { opacity: .6; transition: opacity .15s .1s; }
 @media (prefers-reduced-motion: reduce) { main.live-loading { transition: none; } }
 .handoff { display: flex; align-items: center; gap: 10px; margin: var(--sp-4) 0; padding: 10px var(--sp-3);
