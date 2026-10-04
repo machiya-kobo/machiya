@@ -74,12 +74,18 @@ The owner's rule (2026-10-05): settings that affect every app follow the signed-
   3. keep `clients.claim()` in `activate`, and keep the version (with `shell.UI_VERSION`) in its cache names.
 - Test it with a v1 → v2 worker: the toast appears after a reload, Reload swaps in about 1 s, and no worker is left waiting.
 
-## Menus (2026-10-05)
+## Menus, pull to refresh (2026-10-05)
 
 **Menus are closed whenever a page is shown again.** The owner's report: in an installed app, Rooms → Settings → back showed the Rooms menu still open. The cause: tapping a link inside the `<details class="rooms">` followed it with the menu open, and the back/forward cache (always on in an installed app on iOS) restored the page exactly as it was left. machiya.js now:
 - closes the menu when a link or a form inside it is followed (so even the snapshot iOS shows during the back swipe is closed). A link that leaves the page where it is (`target="_blank"`, a modifier key, `download`, or one the room handled with `preventDefault`) keeps it open;
 - closes every menu on `pageshow`, `popstate` and `pagehide`; open `<dialog>`s and popovers close too, except on a fresh load (a room may open one then on purpose). A dialog is closed with `close()`, so the room hears its `close` event;
 - covers the Rooms menu in the header and the phone's Rooms sheet. **A room's own menus** (card menus and the like) join by being `<details data-menu>`; a room's `<dialog>` sheets are covered as they are. An ordinary `<details>` in the page is content and is left alone.
+
+**Pull to refresh in the installed app.** An installed app has no reload button, so in `display-mode: standalone` (or iOS's `navigator.standalone`) machiya.js adds one gesture: at the top of the page, drag down; a round reload mark comes out from under the header, turns house blue once letting go will reload (70 px of travel, about 125 px of finger), and spins while the page reloads (`location.reload()`; static under `prefers-reduced-motion`). Browser tabs keep their own pull to refresh, untouched.
+- It never starts with a menu, sheet, dialog or popover open, in a field, on the tab bar, inside a pane that scrolls on its own, with text selected, with two fingers, on a sideways or upward swipe, or once the page has scrolled; a gesture another script takes over (`preventDefault` on `touchmove`, like Konbini's card drag) cancels it.
+- A room opts an area out with `data-no-pull`.
+- The listeners are passive. In the installed app the page doesn't rubber-band (`overscroll-behavior-y: none` on `html.pull-refresh`), so iOS's bounce never competes with the pull, and one pull reloads once.
+- Tested in Node (`tests/js/ui_sim.mjs`, run by `tests/test_vaultkit.py`) and in WebKit and Chromium at 390 px.
 
 ## Service worker (`ui/machiya-sw.js`)
 

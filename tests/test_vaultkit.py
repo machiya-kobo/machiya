@@ -777,9 +777,9 @@ class SharedUITest(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "needs node")
-class MenusTest(unittest.TestCase):
+class MenusAndPullTest(unittest.TestCase):
     """The real ui/machiya.js in Node (tests/js/ui_sim.mjs): menus closed on the way out and on return (the owner's
-    report of 2026-10-05: Rooms -> Settings -> back showed the menu still open)."""
+    report of 2026-10-05: Rooms -> Settings -> back showed the menu still open), and pull to refresh in an installed app."""
 
     @classmethod
     def setUpClass(cls):
@@ -788,7 +788,7 @@ class MenusTest(unittest.TestCase):
         if r.returncode:
             raise AssertionError("ui_sim.mjs failed:\n" + r.stderr[-3000:])
         out = json.loads(r.stdout)
-        cls.menus = out["menus"]
+        cls.menus, cls.pull = out["menus"], out["pull"]
 
     ALL_CLOSED = {"headerRooms": False, "tabRooms": False, "cardMenu": False, "disclosure": True, "sheet": False,
                   "popover": False}
@@ -823,6 +823,29 @@ class MenusTest(unittest.TestCase):
         self.assertEqual(m["noPopoverSupport"], dict(self.ALL_CLOSED, popover=True))
         self.assertEqual(m["escape"], [False, False])
         self.assertFalse(m["outside"])
+
+    def test_pull_reloads_once(self):
+        p = self.pull
+        self.assertTrue(p["htmlClass"])              # machiya.css: no rubber band in the installed app
+        self.assertEqual(p["held"], {"exists": True, "ready": True, "held": True, "top": "112px", "pull": "100px",
+                                     "opacity": "1"})  # under the header, capped at PULL.max
+        self.assertEqual((p["reloads"], p["loading"]), (1, True))
+        self.assertEqual(p["reloadsAfter"], 1)       # a second touchend or pull while it reloads: nothing
+        self.assertEqual(p["afterRestore"], {"loading": False, "opacity": "0"})
+        self.assertEqual(p["reloadsRestored"], 2)    # back from the cache, a pull works again
+        self.assertEqual(p["short"], {"ready": False, "reloads": 0, "settled": {"held": False, "opacity": "0"}})
+        self.assertEqual(p["justPast"], 1)
+        self.assertEqual((p["flatPane"], p["iosStandalone"]), (1, 1))
+        self.assertTrue(p["passive"])
+
+    def test_no_pull_where_it_would_surprise(self):
+        for case in ("scrolled", "menuOpen", "sheetOpen", "popoverOpen", "menuOpensMidPull", "innerPane", "field",
+                     "tabbar", "optOut", "selection", "twoFingers", "takenOver", "sideways", "upFirst",
+                     "scrollsMidPull", "browserTab"):
+            self.assertEqual(self.pull[case], {"reloads": 0, "mark": False}, case)
+
+    def test_browser_tabs_keep_their_own(self):
+        self.assertEqual((self.pull["browserListeners"], self.pull["browserClass"]), (0, False))
 
 
 class EnvFileTest(unittest.TestCase):

@@ -36,6 +36,12 @@
 //     histerauth's signin_meta()): a same-origin fetch answered 401 with a JSON "signin" address sends the whole page
 //     there, with return= this page (API calls are never redirected by the server, so the page has to go itself); and
 //     every Rooms menu gains a "Sign Out" row, a form posting to that path (so 7. applies to it too).
+//  9. pull to refresh (2026-10-05), only in an installed app (display-mode: standalone, or iOS's navigator.standalone),
+//     which has no reload button: at the top of the page, a drag down shows a reload mark under the header, and
+//     letting go past PULL.threshold reloads. Not while a menu, sheet or dialog is open, from inside a scrolling pane, a
+//     field or the tab bar, with text selected, with a second finger, or on a sideways swipe; a gesture another script
+//     takes over (preventDefault on touchmove, e.g. Konbini's card drag) or [data-no-pull] opts out. Browser tabs keep
+//     their own pull to refresh.
 // Apps can listen for `machiya:setting` events ({detail: {key, value}}) to react to their own settings.
 
 const room = document.body.dataset.room || "app";
@@ -671,3 +677,84 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("popstate", () => { if (pushed) location.reload(); });
 })();
 
+// 9. pull to refresh in an installed app. The gesture is a small state machine, pullStep(state, event) -> state:
+//   idle --start(ok)--> armed --move past the slop, mostly downward--> pulling --end with d >= threshold--> reload
+//   armed --sideways or upward--> off (until the finger lifts); any move that is no longer ok (scrolled, a menu opened,
+//   a second finger, text selected, another script took the gesture) --> off; end or cancel otherwise --> idle.
+// d is the distance the mark has travelled: the finger's, past the slop, times resist, at most max.
+const PULL = { slop: 10, resist: 0.6, threshold: 70, max: 100 };
+const PULL_IDLE = Object.freeze({ phase: "idle", d: 0 });
+function pullStep(s, e) {
+  if (s.phase === "reload") return s;                                   // until the page goes (or comes back: pageshow)
+  if (e.type === "start") return e.ok ? { phase: "armed", x: e.x, y: e.y, d: 0 } : PULL_IDLE;
+  if (e.type === "cancel") return PULL_IDLE;
+  if (e.type === "end") return s.phase === "pulling" && s.d >= PULL.threshold ? { phase: "reload", d: s.d } : PULL_IDLE;
+  if (s.phase !== "armed" && s.phase !== "pulling") return s;          // idle, off: wait for the next touch
+  if (!e.ok) return { phase: "off", d: 0 };
+  const dx = e.x - s.x, dy = e.y - s.y;
+  if (s.phase === "armed") {
+    if (Math.abs(dx) < PULL.slop && Math.abs(dy) < PULL.slop) return s;
+    if (dy < PULL.slop || dy < 1.5 * Math.abs(dx)) return { phase: "off", d: 0 };   // up, or a sideways swipe
+  }
+  return { phase: "pulling", x: s.x, y: s.y, d: Math.min(PULL.max, Math.max(0, (dy - PULL.slop) * PULL.resist)) };
+}
+(() => {
+  const mq = window.matchMedia ? window.matchMedia("(display-mode: standalone)") : null;
+  if (!((mq && mq.matches) || navigator.standalone === true)) return;   // a browser tab: its own pull to refresh
+  document.documentElement.classList.add("pull-refresh");             // machiya.css: no rubber band to compete with it
+  let s = PULL_IDLE, mark = null, top = 0;
+  const scrolled = () => (window.scrollY || (document.scrollingElement || {}).scrollTop || 0) > 0;
+  const selecting = () => { try { return String(window.getSelection ? getSelection() : "") !== ""; } catch { return false; } };
+  const busy = () => openMenus().length > 0 || selecting();
+  const pane = (el) => {                                // inside something that scrolls on its own
+    for (let n = el; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+      if (n.scrollHeight > n.clientHeight && /(auto|scroll)/.test(getComputedStyle(n).overflowY)) return true;
+    }
+    return false;
+  };
+  const skip = (el) => !el || !el.closest
+    || !!el.closest("input, textarea, select, [contenteditable], .tabbar, .update-toast, [data-no-pull]") || pane(el);
+  const draw = () => {
+    if (!mark) {
+      if (s.d === 0 && s.phase !== "reload") return;
+      mark = document.createElement("div");
+      mark.className = "pull";
+      mark.setAttribute("aria-hidden", "true");
+      mark.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"'
+        + ' stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>';
+      document.body.append(mark);
+    }
+    const loading = s.phase === "reload";
+    mark.style.top = top + "px";
+    mark.style.setProperty("--pull", (loading ? PULL.threshold : s.d) + "px");
+    mark.style.setProperty("--turn", Math.round((loading ? PULL.threshold : s.d) / PULL.threshold * 270) + "deg");
+    mark.style.opacity = String(Math.min(1, (loading ? PULL.threshold : s.d) / (PULL.threshold * 0.6)));
+    mark.classList.toggle("ready", loading || s.d >= PULL.threshold);
+    mark.classList.toggle("loading", loading);
+    mark.classList.toggle("held", s.phase === "pulling");          // follows the finger; otherwise it settles back
+  };
+  const step = (e) => {
+    const was = s;
+    s = pullStep(s, e);
+    if (s.phase === "reload" && was.phase !== "reload") { draw(); location.reload(); return; }
+    if (s !== was && (s.d !== was.d || s.phase !== was.phase)) draw();
+  };
+  window.addEventListener("touchstart", (ev) => {
+    const t = ev.touches[0];
+    const ok = ev.touches.length === 1 && !scrolled() && !busy() && !skip(ev.target);
+    if (ok) {
+      const h = document.querySelector("header.top");
+      top = h ? Math.max(0, h.getBoundingClientRect().bottom) : 0;
+    }
+    step({ type: "start", ok, x: t.clientX, y: t.clientY });
+  }, { passive: true });
+  window.addEventListener("touchmove", (ev) => {
+    if (s.phase !== "armed" && s.phase !== "pulling") return;
+    const t = ev.touches[0];
+    step({ type: "move", ok: ev.touches.length === 1 && !ev.defaultPrevented && !scrolled() && !busy(),
+           x: t.clientX, y: t.clientY });
+  }, { passive: true });
+  window.addEventListener("touchend", () => step({ type: "end" }), { passive: true });
+  window.addEventListener("touchcancel", () => step({ type: "cancel" }), { passive: true });
+  window.addEventListener("pageshow", (ev) => { if (ev.persisted) { s = PULL_IDLE; draw(); } });
+})();

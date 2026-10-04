@@ -1,4 +1,4 @@
-// A small browser for ui/machiya.js's menus (tests/test_vaultkit.py runs it with Node; no packages).
+// A small browser for ui/machiya.js's menus and pull to refresh (tests/test_vaultkit.py runs it with Node; no packages).
 // Each "page load" imports a fresh copy of the real machiya.js into a tiny fake DOM (elements, a selector matcher good
 // for the selectors machiya.js uses, window/document listeners). Prints {scenario: {...}} as JSON; the Python test
 // asserts on it.
@@ -269,6 +269,89 @@ const out = {};
   p.win("pageshow", { persisted: true });
   r.noPopoverSupport = snapshot(p);
   out.menus = r;
+}
+
+// -- pull to refresh ----------------------------------------------------------------------------------------------
+const down = (to, from = 200, x = 100) => {                     // a straight pull from y=from to y=from+to, 10px a move
+  const pts = [];
+  for (let d = 0; d <= to; d += 10) pts.push([x, from + d]);
+  return pts;
+};
+{
+  const r = {};
+  let p = await load(roomPage, { standalone: "media" });
+  r.htmlClass = p.root.classes.has("pull-refresh");
+  p.pull(p.named.para, down(200), { keep: true });
+  const m = p.mark();
+  r.held = { exists: !!m, ready: m && m.classes.has("ready"), held: m && m.classes.has("held"), top: m && m.style.top,
+             pull: m && m.style["--pull"], opacity: m && m.style.opacity };
+  p.win("touchend", { touches: [] });
+  r.reloads = p.state.reloads;
+  r.loading = !!m && m.classes.has("loading");
+  p.win("touchend", { touches: [] });                           // a second end (iOS) never reloads twice
+  p.pull(p.named.para, down(200));                              // nor does another pull while it reloads
+  r.reloadsAfter = p.state.reloads;
+  p.win("pageshow", { persisted: true });                       // back from the cache: the mark is gone, pulls work
+  r.afterRestore = { loading: !!m && m.classes.has("loading"), opacity: m && m.style.opacity };
+  p.pull(p.named.para, down(200));
+  r.reloadsRestored = p.state.reloads;
+
+  p = await load(roomPage, { standalone: "media" });
+  p.pull(p.named.para, down(80), { keep: true });               // (80-10)*0.6 = 42 < 70: not far enough
+  r.short = { ready: !!p.mark() && p.mark().classes.has("ready") };
+  p.win("touchend", { touches: [] });
+  r.short.reloads = p.state.reloads;
+  r.short.settled = { held: !!p.mark() && p.mark().classes.has("held"), opacity: p.mark() && p.mark().style.opacity };
+  p.pull(p.named.para, down(130));                              // (130-10)*0.6 = 72: just past
+  r.justPast = p.state.reloads;
+
+  const no = async (name, opts, fn) => {                        // fn(p) makes the pull; -> reloads and whether a mark showed
+    const q = await load(roomPage, { standalone: "media", ...opts });
+    fn(q);
+    r[name] = { reloads: q.state.reloads, mark: !!q.mark() && q.mark().style.opacity !== "0" };
+  };
+  await no("scrolled", { scrollY: 300 }, (q) => q.pull(q.named.para, down(200)));
+  await no("menuOpen", {}, (q) => { q.named.tabRooms.open = true; q.pull(q.named.para, down(200)); });
+  await no("sheetOpen", {}, (q) => { q.named.sheet.open = true; q.pull(q.named.para, down(200)); });
+  await no("popoverOpen", {}, (q) => { q.named.popover.popoverOpen = true; q.pull(q.named.para, down(200)); });
+  await no("menuOpensMidPull", {}, (q) => q.pull(q.named.para, down(200), { during: (i) => { if (i === 8) q.named.tabRooms.open = true; } }));
+  await no("innerPane", {}, (q) => q.pull(q.named.paneItem, down(200)));
+  await no("field", {}, (q) => q.pull(q.named.field, down(200)));
+  await no("tabbar", {}, (q) => q.pull(q.named.tab, down(200)));
+  await no("optOut", {}, (q) => q.pull(q.named.noPullItem, down(200)));
+  await no("selection", { selection: "some words" }, (q) => q.pull(q.named.para, down(200)));
+  await no("twoFingers", {}, (q) => q.pull(q.named.para, down(200), { fingers: 2 }));
+  await no("takenOver", {}, (q) => q.pull(q.named.para, down(200), { prevented: true }));   // Konbini's card drag
+  await no("sideways", {}, (q) => {                             // a swipe that turns downward later is still a swipe
+    const pts = [[100, 200], [120, 205], [140, 210], [160, 215]];
+    for (let d = 10; d <= 200; d += 10) pts.push([160, 215 + d]);
+    q.pull(q.named.para, pts);
+  });
+  await no("upFirst", {}, (q) => {
+    const pts = [[100, 200], [100, 185]];
+    for (let d = 10; d <= 200; d += 10) pts.push([100, 185 + d]);
+    q.pull(q.named.para, pts);
+  });
+  await no("scrollsMidPull", {}, (q) => q.pull(q.named.para, down(200), { during: (i) => { if (i === 5) q.state.scrollY = 40; } }));
+  await no("browserTab", { standalone: false }, (q) => q.pull(q.named.para, down(200)));
+
+  // a pane with nothing to scroll is no pane: the pull works there
+  p = await load(roomPage, { standalone: "media" });
+  p.pull(p.named.flatItem, down(200));
+  r.flatPane = p.state.reloads;
+  // iOS's own flag (no display-mode match needed)
+  p = await load(roomPage, { standalone: "ios" });
+  p.pull(p.named.para, down(200));
+  r.iosStandalone = p.state.reloads;
+  // a browser tab: no listeners at all, no class
+  p = await load(roomPage, { standalone: false });
+  r.browserListeners = p.listeners("touchstart") + p.listeners("touchmove");
+  r.browserClass = p.root.classes.has("pull-refresh");
+  // passive: the gesture never calls preventDefault (the page keeps scrolling smoothly)
+  p = await load(roomPage, { standalone: "media" });
+  r.passive = ["touchstart", "touchmove", "touchend", "touchcancel"]
+    .every((t) => p.options(t).length === 1 && p.options(t)[0] && p.options(t)[0].passive === true);
+  out.pull = r;
 }
 
 process.stdout.write(JSON.stringify(out));
