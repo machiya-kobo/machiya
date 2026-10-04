@@ -11,9 +11,11 @@
 #   install.sh uninstall   remove the plugin, the marketplace, the rules and the env settings. The get_history deny stays.
 #   install.sh hister-remove   only the move off the older separate `hister` server (`hister` does the same).
 # Environment: MACHIYA_MCP_URL (default https://machiya-mcp.example.ts.net/mcp), HISTER_MCP_URL (default
-# https://hister.example.ts.net/mcp), MACHIYA_REPO (this checkout; default: the one this script is in), MACHIYA_AGENT_NAME
-# (what the board's history says; default user@host). The two URLs, when set, are saved in the settings' env, where the
-# plugin's .mcp.json finds them. Needs claude, python3, and a client on the tailnet. ~/.claude/settings.json is backed up
+# https://hister.example.ts.net/mcp), HISTER_TOKEN_FILE (a file holding the Hister token, for bin/hister-headers),
+# MACHIYA_REPO (this checkout; default: the one this script is in), MACHIYA_AGENT_NAME (what the board's history says;
+# default user@host). The two URLs and the token FILE's path (never the token), when set, are saved in the settings'
+# env, where the plugin's .mcp.json and its headers helper find them. The dev stack (docs/dev-stack.md) is one more set
+# of these three. Needs claude, python3, and a client on the tailnet. ~/.claude/settings.json is backed up
 # to settings.json.bak-machiya before each change.
 set -euo pipefail
 REPO=${MACHIYA_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}
@@ -28,9 +30,9 @@ command -v python3 >/dev/null || { echo "install.sh: python3 not found" >&2; exi
 settings() {   # settings add|remove
     [[ -f $SETTINGS ]] || echo '{}' > "$SETTINGS"
     cp "$SETTINGS" "$SETTINGS.bak-machiya"
-    python3 - "$1" "$SETTINGS" "$P" "$AGENT" "${MACHIYA_MCP_URL:-}" "${HISTER_MCP_URL:-}" <<'PY'
+    python3 - "$1" "$SETTINGS" "$P" "$AGENT" "${MACHIYA_MCP_URL:-}" "${HISTER_MCP_URL:-}" "${HISTER_TOKEN_FILE:-}" <<'PY'
 import json, sys
-mode, path, prefix, agent, mcp_url, hister_url = sys.argv[1:7]
+mode, path, prefix, agent, mcp_url, hister_url, token_file = sys.argv[1:8]
 H = "mcp__plugin_machiya_hister__"
 d = json.load(open(path))
 allow = [prefix + n for n in ["board_list_cards", "board_get_card", "board_review", "board_roundup", "notes_*", "collections_list",
@@ -56,11 +58,11 @@ perm["deny"] = cur + [x for x in deny if x not in cur]
 env = d.setdefault("env", {})
 if mode == "add":
     env["MACHIYA_AGENT"] = agent
-    for k, v in (("MACHIYA_MCP_URL", mcp_url), ("HISTER_MCP_URL", hister_url)):
+    for k, v in (("MACHIYA_MCP_URL", mcp_url), ("HISTER_MCP_URL", hister_url), ("HISTER_TOKEN_FILE", token_file)):
         if v:
             env[k] = v
 else:
-    for k in ("MACHIYA_AGENT", "MACHIYA_MCP_URL", "HISTER_MCP_URL"):
+    for k in ("MACHIYA_AGENT", "MACHIYA_MCP_URL", "HISTER_MCP_URL", "HISTER_TOKEN_FILE"):
         env.pop(k, None)
 json.dump(d, open(path, "w"), indent=2)
 open(path, "a").write("\n")
