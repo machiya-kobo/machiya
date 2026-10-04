@@ -328,6 +328,7 @@ def cmd_init(a):
         "KONBINI_SRC": os.path.join(siblings, "konbini"),
         "DEV_UID": str(os.getuid()), "DEV_GID": str(os.getgid()), "DEV_USERNS": userns,
         "DEV_COOKIE_DOMAIN": a.cookie_domain or "", "DEV_TAILNET_USERS": a.tailnet_users or "owner@dev",
+        "DEV_SSO_COOKIE": a.sso_cookie or "",
         "DEV_FRONT_SCHEME": "https" if tls else "http",
         "DEV_TLS_CERT": "/certs/tls.crt" if tls else "", "DEV_TLS_KEY": "/certs/tls.key" if tls else "",
     }
@@ -651,7 +652,7 @@ def cmd_reset(a):
                               behind_serve=env["DEV_URL"].startswith("https") and env.get("DEV_FRONT_SCHEME") == "http",
                               engine=env["DEV_ENGINE"] if env["DEV_ENGINE"] != "native" else None,
                               siblings=os.path.dirname(env["KURA_SRC"]), tailnet_users=env.get("DEV_TAILNET_USERS"),
-                              cookie_domain=env.get("DEV_COOKIE_DOMAIN"))
+                              cookie_domain=env.get("DEV_COOKIE_DOMAIN"), sso_cookie=env.get("DEV_SSO_COOKIE"))
     cmd_init(init)
     a.verbose = False
     cmd_up(a)
@@ -683,6 +684,8 @@ def main():
     p.add_argument("--siblings", help="where the kura, niwa and konbini checkouts are (default: next to machiya)")
     p.add_argument("--tailnet-users", help="Niwa's and Konbini's fallback login(s) (default owner@dev)")
     p.add_argument("--cookie-domain", help="MACHIYA_COOKIE_DOMAIN (default: none, host-only cookies)")
+    p.add_argument("--sso-cookie", help="MACHIYA_SSO_COOKIE, the sign-in cookie's name (default machiya_sso; "
+                                        "machiya_dev_sso where a production stack shares the cookie domain)")
     p.set_defaults(fn=cmd_init)
     p = sub.add_parser("up")
     p.add_argument("--verbose", action="store_true")
