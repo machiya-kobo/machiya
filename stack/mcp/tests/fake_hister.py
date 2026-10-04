@@ -27,6 +27,8 @@ def make_docs():
         add("https://news.example/p/%03d" % i, "Feed item %d" % i, "feedreader", "feedreader")
     for i in range(4):
         add("https://box.example/p/%03d" % i, "Archived %d" % i, "importer")
+    for i in range(6):                      # code-import's documents: unlabelled, never pages
+        add("https://github.example/owner/repo/issues/%d" % i, "Issue %d" % i, "", "code")
     for i in range(5):
         add("https://kura.test/n/Notes/Note%d" % i, "Vault note %d" % i, "vault", "vault")
     for i in range(3):
@@ -39,7 +41,8 @@ class FakeHister:
         self.docs = make_docs()
         self.aliases = dict(aliases if aliases is not None else {
             "@tech": "label:(tech|hardware)", "@legacy": "label:(hardware|dead)", "@mix": "label:tech -domain:x.example",
-            "@pages": "* -label:vault -metadata.source:vault", "@notes": "label:vault",
+            "@pages": "* -label:vault -metadata.source:vault -metadata.source:code", "@notes": "label:vault",
+            "@code": "metadata.source:code",
             "everything": "label:(tech|music|hardware|feedreader)"})
         self.writes, self.requests, self.lock = [], [], threading.Lock()
         fake = self

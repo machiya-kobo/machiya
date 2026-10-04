@@ -23,7 +23,7 @@ A page has one **label** (a flat lowercase topic). A **collection** is an `@name
 - **A new label is the owner's.** The tools refuse one and mark it `needs_owner`: relay it as a question, don't work around it.
 - Labels are flat, lowercase, one per page. A page the owner only visited stays unlabelled; a label means they kept it.
 - `vault` (the notes), `konbini` and import labels such as a feed reader's or an archive importer's are never topics: never suggest or apply them. Notes never appear here at all.
-- Edit only `@` collections whose value is purely labels. `@notes`, `@pages`, the alias names the user has configured as reserved (`MCP_RESERVED_COLLECTIONS`) and any other alias are the owner's own: report them, leave them.
+- Edit only `@` collections whose value is purely labels. `@notes`, `@pages`, `@code`, the alias names the user has configured as reserved (`MCP_RESERVED_COLLECTIONS`) and any other alias are the owner's own: report them, leave them.
 - Writes pause during Hister's backup window. If a call says so, wait.
 - Never read the owner's visit or opened-results history; there is no tool for it, on purpose.
 

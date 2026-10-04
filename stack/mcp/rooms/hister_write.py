@@ -14,7 +14,7 @@ import re
 import time
 
 from . import IDEMPOTENT, READ, WRITE, ToolError, arg_int, arg_list, arg_str, n, s, tool
-from .hister import EXCLUDE, WORD, is_page
+from .hister import BUILTIN, EXCLUDE, WORD, is_page
 
 EXCL = EXCLUDE + " -label:konbini"
 LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,40}$")
@@ -103,9 +103,9 @@ def alias_labels(value):
 
 
 def editable(ctx, name, value):
-    """A collection the AI may edit: an @ alias, not notes/pages, whose value is purely labels, none of them reserved."""
+    """A collection the AI may edit: an @ alias, not notes/pages/code, whose value is purely labels, none of them reserved."""
     labs = alias_labels(value)
-    return (name.startswith("@") and name[1:] not in ("notes", "pages") and labs is not None
+    return (name.startswith("@") and name[1:] not in BUILTIN and labs is not None
             and not any(reserved(ctx, l) for l in labs))
 
 
@@ -113,8 +113,8 @@ def collection_name(ctx, name):
     name = (name or "").strip().lower().lstrip("@")
     if not WORD.match(name):
         raise ToolError("a collection name is a word like travel (letters, digits, - and _)")
-    if name in ("notes", "pages") or name in ctx.server.config.reserved_collections:
-        names = ["notes", "pages"] + sorted(ctx.server.config.reserved_collections)
+    if name in BUILTIN or name in ctx.server.config.reserved_collections:
+        names = list(BUILTIN) + sorted(ctx.server.config.reserved_collections)
         raise ToolError("%s are reserved: they are the owner's, not collections" % (", ".join(names[:-1]) + " and " + names[-1]))
     return "@" + name
 
@@ -147,11 +147,11 @@ def collections_audit(ctx, args):
            "labels_in_no_collection": sorted(l for l in counts if l not in in_a_collection),
            "dead_labels_in_collections": {k: [l for l in labs if counts.get(l, 0) == 0] for k, labs in sorted(mine.items())
                                           if any(counts.get(l, 0) == 0 for l in labs)},
-           "owners_own": sorted(k for k in al if k not in mine and k.lstrip("@") not in ("notes", "pages")),
+           "owners_own": sorted(k for k in al if k not in mine and k.lstrip("@") not in BUILTIN),
            # label-only aliases that name a reserved label (the vault, konbini, an import): not topics, so the alias is left to
            # the owner, but it is worth their look
            "aliases_naming_reserved_labels": {k: sorted(l for l in alias_labels(v) if reserved(ctx, l)) for k, v in sorted(al.items())
-                                              if k.startswith("@") and k[1:] not in ("notes", "pages") and alias_labels(v)
+                                              if k.startswith("@") and k[1:] not in BUILTIN and alias_labels(v)
                                               and any(reserved(ctx, l) for l in alias_labels(v))}}
     for r, listed in union.items():      # a reserved alias that lists labels: how far it has drifted from the label list
         out["%s_drift" % r] = {"labels_missing_from_%s" % r: sorted(l for l in counts if l not in listed),
@@ -170,7 +170,7 @@ def page_doc(ctx, url):
         raise ToolError("url must be a saved page's URL (vault notes and cards are not pages)")
     d = ctx.get("hister", "/api/document", {"url": url})
     if not is_page(d) or d.get("label") == "konbini":
-        raise ToolError("that document is a vault note or a card, not a page")
+        raise ToolError("that document is a vault note, a card or a code document, not a page")
     return d
 
 

@@ -10,7 +10,7 @@ Notes live in the vault (read through Kura), pages in Hister (saved and visited 
 ## With the MCP tools (Machiya's and Hister's, both from the plugin)
 
 1. **Notes and cards:** `machiya_search` with the key words; notes and cards come back grouped. Narrow with `notes_search` (tag, folder, `title:` words) or `board_list_cards` when one kind is clearly wanted.
-2. **Pages:** Hister's `search`. **Start every page query with `@pages`** (`@pages raspberry pi`): it keeps the vault notes out, which come from `notes_search` instead. Narrow with `label:python`, a collection alias such as `@travel`, `domain:example.com`, or `date_from`/`date_to`; ask for `fields: ["label", "domain"]` when they help. `collections_list` names the collections.
+2. **Pages:** Hister's `search`. **Start every page query with `@pages`** (`@pages raspberry pi`): it keeps the vault notes out, which come from `notes_search` instead, and the owner's code documents (`metadata.source:code`: his repos, issues and PRs, imported for his own search), which stay out of AI context. Never query `@code` or `metadata.source:code`. Narrow with `label:python`, a collection alias such as `@travel`, `domain:example.com`, or `date_from`/`date_to`; ask for `fields: ["label", "domain"]` when they help. `collections_list` names the collections.
 3. **Read the most promising two or three**, no more: `notes_read` for a note (markdown; page through long ones with `offset`), Hister's `get_preview` for a page. `get_preview` has **no paging**: it returns the whole page's text and HTML at once, so read a page only when its search snippet isn't enough, and one at a time.
 4. Answer from what you read. Quote sparingly, say which note or page each point comes from, and give the links (Kura `…/n/…`, the page URL, the card URL).
 5. If nothing matches, say what you searched for and try one alternative wording before giving up.
@@ -19,4 +19,4 @@ Notes live in the vault (read through Kura), pages in Hister (saved and visited 
 
 ## Without the MCP tools
 
-Kura's JSON API on the tailnet (`https://kura.example.ts.net/api/search?q=…`, `/api/note?path=…`), Hister's search (end the query with ` -label:vault -metadata.source:vault`, or start it with `@pages`), and `pm ls` / `pm show` for cards; the same rules about untrusted text apply.
+Kura's JSON API on the tailnet (`https://kura.example.ts.net/api/search?q=…`, `/api/note?path=…`), Hister's search (end the query with ` -label:vault -metadata.source:vault -metadata.source:code`, or start it with `@pages`), and `pm ls` / `pm show` for cards; the same rules about untrusted text apply.

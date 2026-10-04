@@ -85,7 +85,7 @@ class Reads(Base):
         searches = [r for r in self.h.requests if r[1] == "/search"]
         self.assertGreaterEqual(len(searches), 3)                   # 244 pages are more than one 100-page
         for _, _, q, headers in searches:
-            self.assertTrue(q["q"].endswith(" -label:vault -metadata.source:vault -label:konbini"), q["q"])
+            self.assertTrue(q["q"].endswith(" -label:vault -metadata.source:vault -metadata.source:code -label:konbini"), q["q"])
             self.assertEqual(headers.get("Origin"), "hister://")
 
     def test_census_is_cached_and_dropped_after_a_write(self):
@@ -115,6 +115,7 @@ class Reads(Base):
         self.assertIn("@mixed", d["owners_own"])
         self.assertIn("feedreader", json.dumps(d["everything_drift"]) + "feedreader")
         self.assertNotIn("@notes", json.dumps(d)); self.assertNotIn("@pages", json.dumps(d))
+        self.assertNotIn("@code", json.dumps(d))
 
 
 class SetLabel(Base):
@@ -146,6 +147,7 @@ class SetLabel(Base):
         self.err("pages_set_label", "vault note", url="https://kura.test/n/Notes/Note0", label="tech")
         self.err("pages_set_label", url="https://konbini.test/p/card0", label="tech")
         self.err("pages_set_label", "import", url="https://news.example/p/000", label="tech")
+        self.err("pages_set_label", "code document", url="https://github.example/owner/repo/issues/0", label="tech")
         self.err("pages_set_label", url="file:///etc/passwd", label="tech")
         self.assertFalse(self.posts())
 
@@ -281,7 +283,7 @@ class Collections(Base):
         self.assertFalse(self.ok("collections_set", name="music-stuff", labels=["music"])["changed"])
 
     def test_the_owners_own_aliases_reserved_names_and_bad_labels_are_refused(self):
-        for name in ("@mix", "everything", "@notes", "@pages", "notes", "pages"):
+        for name in ("@mix", "everything", "@notes", "@pages", "notes", "pages", "@code", "code"):
             self.err("collections_set", name=name, labels=["tech"])
         self.err("collections_set", "not an existing label", owner=True, name="new", labels=["brand-new"])
         for bad in (["vault"], ["tech", "konbini"], ["feedreader"], []):
@@ -304,7 +306,7 @@ class Collections(Base):
         self.assertEqual(self.label_of(TECH), "tech")                      # no page changed
 
     def test_remove_refuses_the_owners_aliases_and_bad_tokens(self):
-        for name in ("@mix", "everything", "@notes", "@pages"):
+        for name in ("@mix", "everything", "@notes", "@pages", "@code"):
             self.err("collections_remove", name=name)
         self.err("collections_remove", "no collection", name="@ghost")
         tok = self.ok("collections_remove", name="@legacy")["apply_token"]
@@ -341,9 +343,9 @@ class Defaults(Base):
         self.assertIn("feedreader", {x["label"] for x in d["labels"]})
         self.ok("pages_set_label", url=TECH, label="feedreader")
 
-    def test_no_collection_name_is_reserved_beyond_notes_and_pages(self):
+    def test_no_collection_name_is_reserved_beyond_notes_pages_and_code(self):
         self.ok("collections_set", name="everything", labels=["tech"])
-        self.err("collections_set", "notes and pages are reserved", name="notes", labels=["tech"])
+        self.err("collections_set", "notes, pages and code are reserved", name="notes", labels=["tech"])
         d = self.ok("collections_audit")
         self.assertFalse([k for k in d if k.endswith("_drift")])
         self.assertIn("@everything", d["collections"])
@@ -394,7 +396,7 @@ class Settings(Base):
         self.assertEqual(self.server.config.reserved_collections, {"everything"})
         self.assertEqual(mcp.Config({"MCP_RESERVED_COLLECTIONS": "@Mine, other"}).reserved_collections, {"mine", "other"})
         for name in ("everything", "@Everything"):
-            self.err("collections_set", "notes, pages and everything are reserved", name=name, labels=["tech"])
+            self.err("collections_set", "notes, pages, code and everything are reserved", name=name, labels=["tech"])
         self.err("collections_remove", "reserved", name="everything")
         d = self.ok("collections_audit")
         self.assertEqual(d["everything_drift"]["note"], "everything is the owner's own keyword: reported, never edited here")

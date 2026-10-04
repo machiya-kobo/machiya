@@ -117,7 +117,8 @@ def rooms():
         "/api/document": lambda q: VAULT_DOC if "kura" in q["url"] else DOC,
         "/api/stats": {"doc_count": 9},
         "/api/rules": {"aliases": {"@travel": "label:(travel)", "@notes": "label:vault", "@pages": "* -label:vault",
-                                   "@sneaky": "x metadata.source:vault", "@tools": "label:(tech)"}},
+                                   "@sneaky": "x metadata.source:vault", "@tools": "label:(tech)",
+                                   "@code": "metadata.source:code", "@repos": "metadata.source:code metadata.code_kind:repo"}},
     })
     return {"kura": kura, "konbini": konbini, "niwa": niwa, "hister": hister}
 
@@ -236,7 +237,7 @@ class Headers(Base):
         searches = [r for r in self.fakes["hister"].seen if r["path"] == "/search"]
         self.assertTrue(len(searches) >= 3)
         for r in searches:
-            self.assertTrue(r["query"]["q"].endswith(" -label:vault -metadata.source:vault -label:konbini"), r["query"]["q"])
+            self.assertTrue(r["query"]["q"].endswith(" -label:vault -metadata.source:vault -metadata.source:code -label:konbini"), r["query"]["q"])
             self.assertEqual(r["query"]["format"], "json")
         self.assertIn("domain:example.com", searches[-1]["query"]["q"])
 
@@ -419,7 +420,7 @@ class Pages(Base):
         call(self.server, "pages_relabel", {"query": "label:vault", "label": "python"})
         searches = [r for r in self.fakes["hister"].seen if r["path"] == "/search"]
         self.assertTrue(searches)
-        self.assertTrue(searches[-1]["query"]["q"].endswith(" -label:vault -metadata.source:vault -label:konbini"))
+        self.assertTrue(searches[-1]["query"]["q"].endswith(" -label:vault -metadata.source:vault -metadata.source:code -label:konbini"))
 
     def test_collections_hide_vault_aliases(self):
         d = data(call(self.server, "collections_list"))["collections"]

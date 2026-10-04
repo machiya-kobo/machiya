@@ -1,5 +1,9 @@
 # Changelog: machiya-mcp
 
+## 0.7.4
+
+- **Code documents stay out** (docs/contracts/hister.md, the code documents section: code-import's repos, docs, issues, PRs and releases, `metadata.source:code`). Every Hister query this server sends now ends ` -label:vault -metadata.source:vault -metadata.source:code -label:konbini`, so the label census, relabel plans and collection audits count pages only. `pages_set_label` refuses a code document. `@code` joins `@notes` and `@pages` as Hister's own aliases: never listed by `collections_list` (nor any alias naming `metadata.source:code`), never created, changed or removed. The server's instructions say `@pages` leaves the code out, and that it stays out of AI context.
+
 ## 0.7.3
 
 - **Keep-alive (security):** a request body the server didn't read (a refused caller's 401/403, a browser Origin's

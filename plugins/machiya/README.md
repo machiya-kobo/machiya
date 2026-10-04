@@ -16,7 +16,7 @@ The room-specific how-to lives with each room (`pm` is the board's CLI, in the K
 
 Hister ships its own MCP endpoint, `POST /mcp` (tested with v0.20.0): `search`, `get_preview` and `get_history`, all read-only. The plugin connects it as `hister` (tools `mcp__plugin_machiya_hister__<tool>`), and it is how the model reads saved pages: machiya-mcp has no page reads since 0.7.0, only the label and collection tools Hister's MCP lacks. Two rules go with it, in the skills and the [Hister contract](../../docs/contracts/hister.md#histers-mcp):
 
-- **Page queries start with `@pages`**, the alias for everything except the vault notes (Hister's `search` returns notes mixed with pages otherwise); notes come from `notes_search` and `notes_read`.
+- **Page queries start with `@pages`**, the alias for everything except the vault notes and the code documents (Hister's `search` returns them mixed with pages otherwise); notes come from `notes_search` and `notes_read`. **Code documents** (`metadata.source:code`, the owner's repos from [code-import](../../docs/services/code-import.md)) are on-device only, like notes: they stay out of AI context, and a skill never queries `@code`.
 - **`get_history` is denied** (visits and opened results stay out of AI context). `install.sh` writes the deny rule for every name the tool can have (`mcp__plugin_machiya_hister__get_history`, and `mcp__hister__get_history` for a server added by hand), which removes it from the model's view, and never takes it away.
 
 `get_preview` returns a page's whole text and HTML with no paging: read pages sparingly. Hister needs no token while its tailnet grant is the gate; once Hister's user handling is on, the connection needs the owner's Hister token as an `Authorization: Bearer` header.
