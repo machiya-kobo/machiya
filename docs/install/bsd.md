@@ -2,7 +2,7 @@
 
 Native installs, packages only, no ports. Covers FreeBSD 14/15, NetBSD 10 and OpenBSD 7.7–7.9. The rc.d scripts are in [`contrib/rc.d/`](../../contrib/rc.d/).
 
-**Tested on** (2026-10-04, clean test VMs, amd64): NetBSD 11.0 and OpenBSD 7.9, Kura and Niwa as rc.d services with this guide. On OpenBSD the apps need a vaultkit with the scrypt fix (OpenBSD's Python has no `hashlib.scrypt`). FreeBSD: see the dev stack ([dev-stack.md](../dev-stack.md)) and the rooms' own BSD Quickstarts.
+**Tested on** (2026-10-04, clean test VMs, amd64): FreeBSD 15.1 (Kura), NetBSD 11.0 and OpenBSD 7.9 (Kura and Niwa), as rc.d services with this guide. On OpenBSD the apps need a vaultkit with the scrypt fix (OpenBSD's Python has no `hashlib.scrypt`). The rooms' own BSD Quickstarts and the [dev stack](../dev-stack.md) ran on all three.
 
 **Needs** apps that read `<APP>_BIND` and an env file (`<APP>_ENV_FILE` or `--env-file`, from vaultkit's `envfile`):
 
@@ -212,7 +212,7 @@ For NetBSD's npf, add a `block in final … port { 8080, 8081, 8082, 1965, 7070 
 ## 10. Monitoring, upgrades, removal
 
 - **Health:** Kura and Niwa answer `GET /api/status` without the owner gate, and Konbini answers `GET /healthz`. Probe them through the tailnet URL. It reports `ready` and an `error` that's `null` unless something is broken.
-- **Upgrade:** `git fetch --tags && git checkout <tag>` in the code directory, then `python3 -m vaultkit.verify`, then restart the service. Package upgrades: `pkg upgrade` (FreeBSD), `pkg_add -u` (NetBSD with `PKG_PATH`, or `pkgin upgrade` if you installed pkgin), `pkg_add -u` (OpenBSD).
+- **Upgrade:** as root (the checkout is root's; git refuses another owner's), `git fetch --tags && git checkout <tag>` in the code directory, then `python3 -m vaultkit.verify`, then restart the service. Package upgrades: `pkg upgrade` (FreeBSD), `pkg_add -u` (NetBSD with `PKG_PATH`, or `pkgin upgrade` if you installed pkgin), `pkg_add -u` (OpenBSD).
 - **Remove:**
   - stop and disable the service, and delete its rc.d script;
   - remove the `tailscale serve` entries;
