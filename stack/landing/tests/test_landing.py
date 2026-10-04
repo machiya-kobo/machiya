@@ -102,6 +102,9 @@ class Stack(unittest.TestCase):
             "machiya-mcp": Fake({"/api/status": MCP}),
             "smallweb": Fake({"/api/status": SMALLWEB}),
         }
+        hister = self.fakes["hister"]
+        pages = HISTER["/search"]
+        hister.routes["/search"] = lambda: {"total": 0, "documents": []} if "code_kind" in hister.seen[-1]["query"] else pages
         self.tmp = tempfile.mkdtemp(prefix="landing-test-")
 
     def tearDown(self):
@@ -127,7 +130,7 @@ class Readers(Stack):
         self.assertEqual({k: v["state"] for k, v in a.items()},
                          {"shiori": "up", "konbini": "up", "niwa": "up", "kura": "up", "hister": "up", "searxng": "up",
                           "machiya-mcp": "up", "smallweb": "up", "vault-mirror": "absent",
-                          "feed-import": "absent"})
+                          "feed-import": "absent", "code-import": "absent"})
         self.assertEqual((a["kura"]["version"], a["kura"]["vaultkit"]), ("0.6.8", "0.17.2"))
         self.assertEqual(a["kura"]["facts"], ["314 notes"])
         self.assertEqual(a["konbini"]["facts"], ["78 cards"])
@@ -219,13 +222,15 @@ class HisterWithUsers(Stack):
     def gated(self, body):
         def route():
             seen = self.fakes["hister"].seen[-1]["headers"]
-            return body if seen.get("x-access-token") == self.TOKEN else (403, b"", "text/plain")
+            if seen.get("x-access-token") != self.TOKEN:
+                return (403, b"", "text/plain")
+            return body() if callable(body) else body
         return route
 
     def setUp(self):
         super().setUp()
         self.fakes["hister"].routes.update({"/api/stats": self.gated(HISTER["/api/stats"]),
-                                            "/search": self.gated(HISTER["/search"])})
+                                            "/search": self.gated(self.fakes["hister"].routes["/search"])})
         self.file = os.path.join(self.tmp, "hister.token")
         with open(self.file, "w") as f:
             f.write(self.TOKEN + "\n")
@@ -1057,6 +1062,65 @@ class ZeroThree(Stack):
         l = self.landing()
         l.poll()
         self.assertNotIn("shiori", l.logs)
+
+
+class CodeImport(Stack):
+    """0.3.4: the owner's repos searchable as code: Hister's "N repos", the code-import row and Repos indexed."""
+
+    STATUS = {"version": "0.1.0", "ok": True, "running": False, "started": NOW - 200, "last_success": NOW - 100,
+              "failures_in_a_row": 0, "error": None, "last_full": NOW - 3600, "last_run": {},
+              "counts": {"forgejo": {"repo": {"added": 30, "skipped": 4}, "issue": {"added": 400}},
+                         "github": {"repo": {"added": 12}, "pr": {"added": 950, "refused": 2}}}}
+
+    def write(self, path, **kw):
+        with open(path, "w") as f:
+            json.dump(dict(self.STATUS, **kw), f)
+
+    def repos_route(self, answer):
+        hister = self.fakes["hister"]
+        hister.routes["/search"] = lambda: answer if "code_kind" in hister.seen[-1]["query"] else HISTER["/search"]
+
+    def test_hister_counts_repos(self):
+        self.repos_route({"total": 1234, "documents": []})
+        a = self.landing().poll()["apps"]["hister"]
+        self.assertEqual(a["facts"], ["1.9k pages", "1.2k repos"])
+        q = [x["query"] for x in self.fakes["hister"].seen if "code_kind" in x["query"]][0]
+        self.assertIn("metadata.source%3Acode%20metadata.code_kind%3Arepo", q)
+        self.repos_route({"total": 0, "documents": []})
+        self.assertEqual(self.landing().poll()["apps"]["hister"]["facts"], ["1.9k pages"])     # 0: hidden
+        self.repos_route((500, "x", "text/plain"))
+        self.assertEqual(self.landing().poll()["apps"]["hister"]["facts"], ["1.9k pages"])     # unavailable: hidden
+
+    def test_code_import_row_and_sync(self):
+        path = os.path.join(self.tmp, "code.json")
+        a = self.landing(LANDING_CODE_STATUS=path).poll()["apps"]["code-import"]
+        self.assertEqual(a["state"], "absent")                                             # missing file: quiet
+        clock = [NOW]
+        self.write(path)
+        l = landing.Landing(landing.Config(self.env(LANDING_CODE_STATUS=path)), now=lambda: clock[0])
+        snap = l.poll()
+        a = snap["apps"]["code-import"]
+        self.assertEqual((a["state"], a["version"], a["facts"]), ("up", "0.1.0", ["Forgejo, GitHub", "42 repos"]))
+        row = {r["key"]: r for r in snap["sync"]}["code"]
+        self.assertEqual((row["label"], row["source"], row["state"], row["at"]), ("Repos indexed", "code-import", "up", NOW - 100))
+        clock[0] += 86400 + 60
+        self.fakes["kura"].routes["/api/status"] = dict(KURA, synced_at=clock[0], push=dict(KURA["push"], at=clock[0]))
+        self.write(path, last_success=clock[0] - 60,
+                   counts=dict(self.STATUS["counts"], github={"repo": {"added": 12}, "pr": {"added": 1100}}))
+        row = {r["key"]: r for r in l.poll()["sync"]}["code"]
+        self.assertEqual(row["text"], "150 added in the last day")
+        self.write(path, ok=False, error="github: HTTP 502", failures_in_a_row=4, last_success=clock[0] - 60)
+        snap = l.poll()
+        row = {r["key"]: r for r in snap["sync"]}["code"]
+        self.assertEqual((row["state"], row["error"]), ("error", "github: HTTP 502"))
+        self.assertIn("4 failed runs", row["text"])
+        self.assertIn("code-import", snap["overall"]["text"])
+        self.assertNotIn("Repos indexed", snap["overall"]["text"])
+        html = render.main_html(snap, l.history, l.logs, l.config.links, l.config.targets, clock[0])
+        self.assertIn("Repos indexed", html)
+        with open(path, "w") as f:
+            f.write("{broken")
+        self.assertEqual(l.poll()["apps"]["code-import"]["state"], "down")
 
 
 class HisterSignIn(Server):

@@ -21,6 +21,7 @@ Every app is optional. The page polls only what has an address; anything else sh
 | `LANDING_APPS` | none | the stack's services, `machiya-mcp=https://…,smallweb=https://…` |
 | `LANDING_PROBES` | none | a different address to poll than to link, per app (`hister=http://hister:4433`) |
 | `LANDING_MIRROR_STATUS` | none | vault-mirror's `status.json` (its volume, mounted read-only) |
+| `LANDING_CODE_STATUS` | none | code-import's `status.json` (a read-only copy): the code-import row and Sync's Repos indexed; missing: quiet |
 | `LANDING_FEED_STATUS` | none | feed-import's `status.json` (its data volume, mounted read-only): the feed-import row and Sync's Feeds read |
 | `LANDING_SEARCH_COUNTS` | none | a JSON file of web searches (`{"updated", "today", "yesterday", "month", "year", "by_day"}`, UTC days, counts only) written by the deployment; the Shiori card shows today / this month / this year. Missing: left out |
 | `LANDING_SEARCH_URL` | none | Shiori's search page, `https://search.example.ts.net/`: the launcher's Search everything pill GETs `<url>?q=…` (unset: no pill) |

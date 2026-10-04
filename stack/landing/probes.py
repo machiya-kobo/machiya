@@ -32,6 +32,7 @@ APPS = [
     ("smallweb", "smallweb", "services", "Gemini and Gopher"),
     ("vault-mirror", "vault-mirror", "services", "the vault's shared copy"),
     ("feed-import", "feed-import", "services", "feeds into Hister"),
+    ("code-import", "code-import", "services", "code into Hister"),
 ]
 NAMES = {k: n for k, n, _, _ in APPS}
 ROOMS_WITH_TOKEN = ("kura", "niwa", "konbini")     # LANDING_TOKEN_FILE goes to these only (never Hister or SearXNG)
@@ -44,6 +45,7 @@ FRESH = {
     "board": (15 * 60, None),           # Konbini's commit differs from Kura's for this long
     "pages": (3 * 86400, None),         # Hister's newest page (0.2.0: judged; red only when Hister is down)
     "feeds": (60 * 60, None),           # feed-import's last good run (it runs every 10 min; ok=false is broken)
+    "code": (60 * 60, None),            # code-import's last good run (every 15 min; ok=false is broken)
 }
 READERS_NAMES = {"newsblur": "NewsBlur", "miniflux": "Miniflux", "freshrss": "FreshRSS", "feedbin": "Feedbin"}
 STATES = ("up", "behind", "starting", "error", "down", "absent")
@@ -363,6 +365,7 @@ def shiori(base, now, timeout, headers):
     return out                  # 0.3.0: the version only on the card; the build stays in data (Recent Deploys)
 
 
+REPOS_QUERY = "metadata.source:code metadata.code_kind:repo"   # docs/contracts/hister.md, code documents: repo cards
 HISTER_VERSION = {}             # base -> (when asked, version): Hister's MCP is asked at most every 15 minutes
 HISTER_VERSION_TTL = 15 * 60
 
@@ -424,8 +427,15 @@ def hister(base, now, timeout, headers, token=None):
     except FetchError as e:
         if str(e) in ("HTTP 401", "HTTP 403"):          # users on: the count needs the owner's token
             note = "page count: the token was refused" if value else "page count needs LANDING_HISTER_TOKEN_FILE"
-    return result("up", version, "", [plural(int(docs), "page") if docs is not None else note], "",
-                  {"docs": docs, "newest": newest, "pages": pages})
+    repos = None
+    if docs is not None:                                # 0.3.4: the owner's repos, searchable as code (code-import)
+        try:
+            repos = num(fetch_json(base + "/search?format=json&limit=1&q=" + quote(REPOS_QUERY), h, timeout).get("total"))
+        except FetchError:
+            pass
+    return result("up", version, "", [plural(int(docs), "page") if docs is not None else note,
+                                      plural(int(repos), "repo") if repos else ""], "",
+                  {"docs": docs, "newest": newest, "pages": pages, "repos": repos})
 
 
 def searxng(base, now, timeout, headers):
@@ -506,6 +516,42 @@ def feed_import(path, now):
                   {"last_success": last, "failures": fails, "error": err, "added_total": added, "running": bool(d.get("running"))})
 
 
+def code_import(path, now):
+    """code-import's status.json ({version, ok, running, started, last_success, failures_in_a_row, error, last_full,
+    last_run, counts: {host: {kind: {status: n}}}}), copied where the page can read it (LANDING_CODE_STATUS). A
+    missing file is quiet (the service isn't here yet); ok=false is broken; no good run for an hour is behind."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        return result("absent", error="no status file yet")
+    except (OSError, ValueError):
+        raise FetchError("status file unreadable")
+    if not isinstance(d, dict):
+        raise FetchError("status file unreadable")
+    counts = d.get("counts") if isinstance(d.get("counts"), dict) else {}
+    added = repos = 0
+    for kinds in counts.values():
+        for kind, statuses in (kinds.items() if isinstance(kinds, dict) else ()):
+            n = num((statuses or {}).get("added")) if isinstance(statuses, dict) else None
+            added += int(n or 0)
+            repos += int(n or 0) if kind == "repo" else 0
+    last = num(d.get("last_success"))
+    fails = num(d.get("failures_in_a_row")) or 0
+    err = text(d.get("error"))
+    if d.get("ok") is False:
+        state = "error"
+    elif last:
+        state = age_state(last, now, "code")
+    else:
+        state = "starting"
+    forges = [{"forgejo": "Forgejo", "github": "GitHub"}.get(k, k) for k in sorted(counts)]
+    return result(state, d.get("version"), "", [", ".join(forges), plural(repos, "repo") if repos else ""],
+                  err if d.get("ok") is False else "",
+                  {"last_success": last, "failures": fails, "error": err, "added_total": added, "repos": repos,
+                   "running": bool(d.get("running"))})
+
+
 compact = count             # 0.2.1's name for the same thing
 
 
@@ -578,6 +624,8 @@ def probe(key, target, now, timeout=3.0, token="", hister_token=None):
             out = vault_mirror(target, now)
         elif key == "feed-import":
             out = feed_import(target, now)
+        elif key == "code-import":
+            out = code_import(target, now)
         elif key == "hister":
             out = hister(target.rstrip("/"), now, timeout, auth_headers(key, target, token), hister_token)
         else:
@@ -662,6 +710,17 @@ def sync_rows(apps, now, board_behind_since=None):
             bits.append(plural(int(fd["failures"]), "failed run"))
         rows.append({"key": "feeds", "label": "Feeds read", "source": "feed-import", "state": f["state"],
                      "at": fd.get("last_success"), "text": " · ".join(bits), "error": fd.get("error", "")})
+    ci = apps.get("code-import") or {}
+    cd = ci.get("data") or {}
+    if ci.get("state") not in (None, "absent", "down") and cd:          # 0.3.4: the owner's repos into Hister
+        bits = []
+        if cd.get("added_day") is not None:
+            bits.append("%s added %s" % (count(cd["added_day"]), "in the last day" if not cd.get("added_since")
+                                          else "since the page started watching"))
+        if cd.get("failures"):
+            bits.append(plural(int(cd["failures"]), "failed run"))
+        rows.append({"key": "code", "label": "Repos indexed", "source": "code-import", "state": ci["state"],
+                     "at": cd.get("last_success"), "text": " · ".join(bits), "error": cd.get("error", "")})
     return rows
 
 
@@ -679,7 +738,7 @@ def writes(d):
 
 
 ROW_APP = {"pull": "kura", "mirror": "vault-mirror", "board": "konbini", "garden": "niwa", "push": "kura", "pages": "hister",
-           "feeds": "feed-import"}
+           "feeds": "feed-import", "code": "code-import"}
 
 
 def overall(apps, rows):

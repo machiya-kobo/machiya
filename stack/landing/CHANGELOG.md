@@ -1,5 +1,10 @@
 # Changelog: machiya-landing
 
+## 0.3.4
+
+- **Repos you can search** (the owner): Hister's card shows **N repos**, the total of `metadata.source:code metadata.code_kind:repo` (code-import's repo cards; with the owner's token, polled with the page count), hidden when 0 or unavailable.
+- **code-import** joins the stack services, from its `status.json` (`LANDING_CODE_STATUS`; a missing file is quiet: "Not in this stack"): its version, the forges and the repos it indexed; Sync gets **Repos indexed**: the last good run, documents added in the last day (the page's own samples), failed runs. Behind after an hour without a good run, broken when it says `ok: false`.
+
 ## 0.3.3
 
 - **Code documents stay out of the pages** (docs/contracts/hister.md, the code documents section): Hister's newest-page search, which feeds Saved & Read and Hister's newest page, now ends ` -label:vault -metadata.source:vault -metadata.source:code`, so code-import's repos, issues and PRs never show up as saved or read pages. Hister's page count (`/api/stats`) is Hister's own total and still includes them.
