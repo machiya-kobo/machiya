@@ -164,11 +164,19 @@ Haiku has no Docker or Podman, so the dev stack runs there with `--native`. What
 
   ```sh
   pkgman install -y python3.14 git openssl3
-  python3 -m ensurepip --altinstall && python3 -m pip install markdown pyyaml
+  python3 -m ensurepip --altinstall && python3 -m pip install markdown pyyaml tzdata
   ```
 
+  **Proven 2026-10-05** on `tv-haiku` (R1/beta6 x86_64, services): `tools/dev-test tv-haiku --packages --native --hister-via tv-debian` = 16/16 (SearXNG skipped). Haiku quirks:
+  - **no tz database**: Niwa and Konbini stop with `ZoneInfoNotFoundError: … UTC` unless `tzdata` is installed (it is, above);
+  - sshd reads `AuthorizedKeysFile config/settings/ssh/authorized_keys` (relative to /boot/home), not `~/.ssh`; `ssh-keygen -A` + a reboot makes the host keys; the login user is `user` (uid 0);
+  - python3.14, git, curl, openssl3 and pkgman are preinstalled;
+  - **revert the VM between runs**: a second run on the same VM can hit `Address already in use` (stale sockets);
+  - `testvm start|stop|revert haiku` (services' testvm-ctl) manages it; the claude VM reaches it as `tv-haiku`.
+
   Python's own test suite skips its threading, socket and http.server tests on Haiku (they hang on some VMs), so the threaded stdlib servers are the thing to watch.
-- **Hister: not natively, so borrow one.** HaikuPorts has a Go 1.26 fork with cgo, but Hister's search index (bleve) needs `mmap-go` and `golang.org/x/sys/unix`, which have no Haiku support upstream. Run the Haiku stack with `--hister-via` (above): another test VM keeps a dev stack up, and Haiku's 127.0.0.1:19224 is a tunnel to its Hister. The same layout passed on FreeBSD:
+- **FreeBSD: a native Hister builds** (proven 2026-10-05: v0.20.0 with go126 1.26.7 + node24, the recipe above, 16/16 with `--hister-bin`).
+- **Hister on Haiku: not natively, so borrow one.** HaikuPorts has a Go 1.26 fork with cgo, but Hister's search index (bleve) needs `mmap-go` and `golang.org/x/sys/unix`, which have no Haiku support upstream. Run the Haiku stack with `--hister-via` (above): another test VM keeps a dev stack up, and Haiku's 127.0.0.1:19224 is a tunnel to its Hister. The same layout passed on FreeBSD:
 
   ```sh
   tools/dev-test tv-debian --keep                                  # the Hister host (Docker)

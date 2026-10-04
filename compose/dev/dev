@@ -269,6 +269,8 @@ def hister_cmd(env, data, *args, tty=False):
     conf = os.path.join(HERE, "config", "hister.yml")
     if env["DEV_ENGINE"] == "native":
         e = dict(HISTER_CONFIG=conf, HISTER_DATA_DIR=os.path.join(data, "hister"), HISTER__APP__USER_HANDLING="true",
+                 # the CLI loads the server config too, and refuses 0.0.0.0 without a base URL (found on tv-freebsd)
+                 HISTER__SERVER__BASE_URL=env.get("DEV_URL", "http://127.0.0.1") + ":19204",
                  **read_env(os.path.join(data, "secrets", "hister.env")))
         return [env.get("HISTER_BIN") or "hister"] + list(args), e
     cmd = [env["DEV_ENGINE"], "run", "--rm"] + (["-it"] if tty else []) + [
