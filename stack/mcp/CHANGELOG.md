@@ -1,5 +1,10 @@
 # Changelog: machiya-mcp
 
+## 0.7.2
+
+- **`HISTER_TOKEN_FILE`** (phase 1 of the Hister sign-in, docs/contracts/hister.md): the owner's Hister token, sent as `X-Access-Token` on every Hister call and to nothing else. Unset sends none, as before (a Hister without users ignores it). A set file that is missing, empty or not a token stops the server at start; the file is re-read when it changes, so a rotated token needs no restart (a file that vanishes keeps the last good value). Never logged, never in a repr or an error; redirects from Hister are not followed while it is set. `/api/status` says `hister_token: true|false`.
+- **Never a page's owner:** a Hister `/api/update` that carries `changes.user_id` is refused inside the server (the token is admin, so Hister itself would accept it). Updates still change a label and nothing else.
+
 ## 0.7.1
 
 - **`GET /api/changelog`** serves this server's own `CHANGELOG.md` (`text/markdown`, the first 64 KiB, an `ETag` with 304, 404 without the file; HEAD too), open like `/api/status`, so the landing page can say what a deploy brought. The image carries the file.

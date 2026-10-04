@@ -13,7 +13,9 @@ work vaults never pass (rooms/kura.py).
 With Machiya's identity file (MACHIYA_IDENTITY_FILE, vaultkit.identity) each request names a principal instead (a
 token, a Tailscale login or tagged node, or with MCP_AUTH=header a trusted proxy's header); it needs the `mcp` `use`
 grant, and its `limits` replace the buckets' defaults. The rooms see only this server: it calls them as the principal
-`mcp` with its own token (MCP_TOKEN_FILE), the caller's name in X-Agent as a label, never on anyone's behalf."""
+`mcp` with its own token (MCP_TOKEN_FILE), the caller's name in X-Agent as a label, never on anyone's behalf. Hister
+(with user handling on) gets the owner's token from HISTER_TOKEN_FILE as X-Access-Token on every call; the token is
+admin, so no write may change a page's owner (check_route)."""
 import json
 import os
 import re
@@ -26,10 +28,10 @@ from urllib.parse import unquote, urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import envelope                                   # noqa: E402
-from backend import HISTER_ORIGIN, Backend, BackendError   # noqa: E402
+from backend import HISTER_ORIGIN, Backend, BackendError, SecretFile   # noqa: E402
 from rooms import ToolError, cross, hister, hister_write, konbini, kura, niwa, prompts, vault  # noqa: E402
 
-VERSION = "0.7.1"
+VERSION = "0.7.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHANGELOG = os.path.join(HERE, "CHANGELOG.md")    # /app/CHANGELOG.md in the image; GET /api/changelog serves it
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26")
@@ -91,6 +93,21 @@ def room_token(path):
     return token
 
 
+def hister_token(path):
+    """HISTER_TOKEN_FILE: the owner's Hister token (docs/contracts/hister.md), sent as X-Access-Token on every Hister
+    call and to nothing else. Unset: none, as before (a Hister without users ignores it anyway). Set but missing, empty
+    or not a token: refuse to start. Re-read when the file changes. Never logged."""
+    path = (path or "").strip()
+    if not path:
+        return None
+    if not os.path.isfile(path):
+        raise SystemExit("machiya-mcp: HISTER_TOKEN_FILE: no token in %s" % path)
+    secret = SecretFile(path)
+    if not secret.value:
+        raise SystemExit("machiya-mcp: HISTER_TOKEN_FILE: %s doesn't hold a token on its first line" % path)
+    return secret
+
+
 # What a principal's `limits` in the identity file may set: the setting's name without MCP_, in lower case -> the bucket.
 # Other names are ignored (the file is shared by every room).
 LIMIT_KEYS = {"reads_per_min": "read", "writes_per_min": "board_write", "writes_per_day": "board_write_day",
@@ -143,6 +160,7 @@ class Config:
         self.bind = env.get("MCP_BIND", "0.0.0.0").strip() or "0.0.0.0"
         self.identity = load_identity(env, self.bind)        # None: the MCP_USERS gate, as before
         self.token = room_token(env.get("MCP_TOKEN_FILE"))   # the `mcp` principal's token for the rooms; "" without one
+        self.hister_token = hister_token(env.get("HISTER_TOKEN_FILE"))   # the owner's, for Hister only; None without
         self.port = int(env.get("MCP_PORT", "8080"))
         self.users = csv(env.get("MCP_USERS"))
         self.log = env.get("MCP_LOG", "/data/mcp.log")
@@ -227,9 +245,11 @@ class Server:
     def __init__(self, config, backends=None, clock=time.time):
         self.config, self.clock = config, clock
         self.changelog = CHANGELOG   # what GET /api/changelog serves (tests point it elsewhere)
-        # Kura, Konbini and Niwa get the `mcp` principal's token (MCP_TOKEN_FILE); Hister never does.
+        # Kura, Konbini and Niwa get the `mcp` principal's token (MCP_TOKEN_FILE); Hister never does. Hister gets the
+        # owner's (HISTER_TOKEN_FILE) and nobody else does.
         self.backends = backends if backends is not None else {
-            r: Backend(r, u, origin=HISTER_ORIGIN if r == "hister" else None, token="" if r == "hister" else config.token)
+            r: Backend(r, u, origin=HISTER_ORIGIN, access_token=config.hister_token) if r == "hister"
+            else Backend(r, u, token=config.token)
             for r, u in config.urls.items() if u}
         self.limits = {"read": Limiter(config.reads_per_min), "board_write": Limiter(config.writes_per_min),
                        "board_write_day": Limiter(config.writes_per_day, per=86400.0),
@@ -539,7 +559,10 @@ def check_route(room, method, path, body):
         if (r, m) == (room, method) and re.fullmatch(pattern, path):
             if set(body) - keys:
                 raise RuntimeError("route %s %s carries only %s" % (method, path, sorted(keys)))
-            if path == "/api/update" and set(body.get("changes") or {}) != {"label"}:
+            changes = body.get("changes") if isinstance(body.get("changes"), dict) else {}
+            if path == "/api/update" and "user_id" in changes:
+                raise RuntimeError("never a page's owner: Hister updates don't carry changes.user_id")
+            if path == "/api/update" and set(changes) != {"label"}:
                 raise RuntimeError("Hister updates change a label and nothing else")
             return
     raise RuntimeError("no write route for %s %s %s" % (room, method, path))
@@ -574,7 +597,8 @@ def make_handler(server):
             path = urlsplit(self.path).path
             if path in ("/healthz", "/api/status"):
                 return self.json(200, {"ok": True, "version": VERSION, "vaultkit": VAULTKIT, "auth": server.config.auth,
-                                       "rooms": sorted(server.backends), "tools": len(server.tools)})
+                                       "rooms": sorted(server.backends), "tools": len(server.tools),
+                                       "hister_token": getattr(server.config, "hister_token", None) is not None})
             if path == "/api/changelog":                # open, like /api/status: this server's own CHANGELOG.md
                 from vaultkit import changelog          # vendored beside this file (imported here, like identity)
                 code, body, headers = changelog.handle(server.changelog, self.headers)
