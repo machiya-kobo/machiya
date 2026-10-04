@@ -9,12 +9,23 @@ Python 3.11 or later, plus `markdown` (3.7 or later) and `pyyaml`. No build step
 ```sh
 python3 -m venv .venv && .venv/bin/pip install 'markdown>=3.7' pyyaml
 .venv/bin/python -m unittest tests.test_vaultkit
+.venv/bin/python -m unittest tests.test_devstack
 ( cd stack/mcp && ../../.venv/bin/python -m unittest discover -s tests )
 ( cd stack/smallweb && ../../.venv/bin/python -m unittest discover -s tests )
 ( cd stack/landing && ../../.venv/bin/python -m unittest discover -s tests )
 ```
 
 Add a test with every change. `tests.test_vaultkit` also checks that a vendored copy matches its manifest (it creates a throwaway git repository for that, so it needs `git`).
+
+## The dev stack
+
+To try a change against everything at once, use the dev stack ([docs/dev-stack.md](docs/dev-stack.md)): every service, Hister's users as the sign-in, synthetic data only. With the kura, niwa and konbini checkouts next to this one:
+
+```sh
+cd compose/dev && ./dev init && ./dev up && ./dev check       # ./dev reset --yes goes back to the seed
+```
+
+Never load real notes, pages or feeds into it; extend `compose/dev/seed/` instead. `tools/dev-test HOST` runs the same stack and checks on another machine.
 
 ## Rules
 

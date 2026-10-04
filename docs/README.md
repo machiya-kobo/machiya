@@ -6,6 +6,7 @@ Start with the [README](../README.md) for what Machiya is, then:
 |---|---|
 | understand how the parts fit | [architecture.md](architecture.md) (diagrams), [principles.md](principles.md) (what "standalone" means, the vocabulary) |
 | run a service | [services/](services/) (one page per service), [install/](install/), [../compose/](../compose/) and [../config/](../config/) (reference deployment) |
+| develop or test against the whole stack | [dev-stack.md](dev-stack.md): every service on synthetic data, in containers or natively, on this machine or a test VM |
 | write a client or an integration | [contracts/](contracts/): the Kura, Konbini, Hister and small-web APIs; [frontmatter.md](frontmatter.md): the note fields every service reads and writes |
 | change the look | [design.md](design.md), [ui.md](ui.md) (shared stylesheet, script, shell) |
 | reuse the vault code | [vaultkit.md](vaultkit.md) |
