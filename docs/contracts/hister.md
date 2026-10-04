@@ -19,10 +19,10 @@ How Machiya's services use [Hister](../services/hister.md). Hister is upstream c
 
 | Call | Who |
 |---|---|
-| `GET /search?q=<query>` (Hister query language: `label:`, `url:"…"`, `added:`; exclude a label with ` -label:x` appended to the query (works server-side with correct totals: `* -label:vault` = everything minus the notes). Hister has no `NOT` operator (`NOT` is a plain word) and no `exclude_label` param. `metadata.source:vault` is a query field too, e.g. `-label:vault -metadata.source:vault`) | Shiori, Konbini (reading line, link rot), machiya-mcp (labels and collections: the label census, relabel dry runs; every query ends ` -label:vault -metadata.source:vault -label:konbini`) |
-| `POST /api/add` `{url, title, text, html?, label, added?, metadata}` | Kura (the note push), feed-reader and other importers, Shiori (saves). New documents carry Hister's `metadata.source` convention: `vault` (Kura), the importer's own name (with its own `<name>_*` keys), `shiori`. |
-| `POST /api/delete` `{"query": "url:\"…\""}` | Kura (a note deleted, renamed or moved) |
-| `GET /api/document?url=<url>` | machiya-mcp (`pages_set_label` checks the page is not a note or card) |
+| `GET /search?q=<query>` (Hister query language: `label:`, `url:"…"`, `added:`; exclude a label with ` -label:x` appended to the query (works server-side with correct totals: `* -label:vault` = everything minus the notes). Hister has no `NOT` operator (`NOT` is a plain word) and no `exclude_label` param. `metadata.source:vault` is a query field too, e.g. `-label:vault -metadata.source:vault`. **Every query except the Code area's ends ` -metadata.source:code`** too ([Code documents](#code-documents-metadatasourcecode))) | Shiori, Konbini (reading line, link rot), landing (newest pages), machiya-mcp (labels and collections: the label census, relabel dry runs; every query ends ` -label:vault -metadata.source:vault -metadata.source:code -label:konbini`) |
+| `POST /api/add` `{url, title, text, html?, label, added?, metadata}` | Kura (the note push), code-import (`code`, always with `html`), feed-reader and other importers, Shiori (saves). New documents carry Hister's `metadata.source` convention: `vault` (Kura), `code` (code-import), the importer's own name (with its own `<name>_*` keys), `shiori`. A metadata value a query should match is [one lowercase token](#metadata-values). |
+| `POST /api/delete` `{"query": "url:\"…\""}` | Kura (a note deleted, renamed or moved), code-import (a repo, doc, issue or release gone; only its own documents) |
+| `GET /api/document?url=<url>` | machiya-mcp (`pages_set_label` checks the page is not a note, card or code document), code-import (whose is this URL?), feed-import (is it known?) |
 | `GET /health` | probes (open: 200 `OK` while Hister runs) |
 | `GET /api/profile` | hister-login only ([Sign-in](#sign-in)) |
 | `POST /api/label` `{url, label}`, `POST /api/update` `{query, changes: {label}}` | machiya-mcp (`pages_set_label`, `pages_relabel`; one exact `url:"…"` match per update) |
@@ -50,11 +50,15 @@ Kura pushes every note in the default vault (`personal/`), and only there; other
 
 ## Aliases
 
-`@pages` = `* -label:vault -metadata.source:vault` and `@notes` = `label:vault` (created in Hister's alias settings), so Hister's own UI, extension, TUI and MCP split pages and notes the way Shiori does. They sit beside your own topic aliases. **Shiori hides any alias whose expansion names the vault** (`label:vault` or `metadata.source:vault`) from its collections and reserves the collection names "notes" and "pages", so vault aliases never appear as Shiori collections.
+`@pages` = `* -label:vault -metadata.source:vault -metadata.source:code`, `@notes` = `label:vault` and `@code` = `metadata.source:code` (created in Hister's alias settings), so Hister's own UI, extension, TUI and MCP split pages, notes and code the way Shiori does. They sit beside your own topic aliases. **Shiori hides any alias whose expansion names the vault or the code** (`label:vault`, `metadata.source:vault` or `metadata.source:code`) from its collections and reserves the collection names "notes", "pages" and "code", so these aliases never appear as Shiori collections; machiya-mcp never lists, creates, changes or removes them.
 
-## Code documents (`metadata.source:code`): PROPOSED
+## Metadata values
 
-> **Proposed, 2026-10-04, for the lead to approve.** Nothing below is in force until the lead approves it. Then this note goes, and the endpoint table, the aliases and Hister's MCP rules above take the changes. Background: [services/code-import.md](../services/code-import.md).
+**A metadata value a query should match must be one lowercase token** (tested on v0.20.0, 2026-10-04): letters, digits and `_` only. Hister tokenizes a metadata value when it indexes it (a Unicode word split, then lowercase) but queries `metadata.<key>:<value>` with one unanalyzed term, so `/`, `-`, `.` and `:` split a value into words no query can match whole: `machiya-kobo/kura` never matches, `machiya_kobo__kura` does. A JSON boolean is indexed as a bool and isn't matched by `metadata.x:true`: send `"true"`. Values only for display may be anything. This holds for every service's keys.
+
+## Code documents (`metadata.source:code`)
+
+Approved by the lead, 2026-10-04 (the owner's decisions of 2026-10-05). Background: [services/code-import.md](../services/code-import.md).
 
 [code-import](../services/code-import.md) puts the owner's Forgejo and GitHub repos into Hister: repo cards, READMEs and docs, issues, PRs and releases. Each one is a document at its real forge URL:
 
@@ -74,14 +78,13 @@ Kura pushes every note in the default vault (`personal/`), and only there; other
   - `code_private`: `"true"|"false"`;
   - for display only: `code_repo_name`, `code_number`, `code_path`, `code_tag`, `code_twin_url`, `code_redacted`.
   - No label.
-- **Metadata values a query matches must be one lowercase token** (tested on v0.20.0). Hister tokenizes a metadata value when it indexes it, but queries it with one unanalyzed term. So a value may hold only letters, digits and `_`: `machiya-kobo/kura` never matches, `machiya_kobo__kura` does. A boolean must be sent as a string: a JSON `true` isn't matched by `metadata.x:true`. This holds for every service's metadata keys, not only code's.
 - **Every other Hister query adds ` -metadata.source:code`**, next to ` -label:vault -metadata.source:vault`:
   - Shiori's Pages, All, counts and collections;
   - machiya-mcp's suffix and the machiya plugin's skills;
   - landing's newest pages;
   - Konbini's reading line.
   Only the Code area asks for `metadata.source:code`.
-- **Aliases:** `@code` = `metadata.source:code`. `@pages` becomes `* -label:vault -metadata.source:vault -metadata.source:code`. Shiori reserves the collection name "code", and hides any alias whose expansion names `metadata.source:code`, as it does for the vault's.
+- **Aliases:** `@code` and `@pages` as in [Aliases](#aliases).
 - **Ownership.** code-import replaces or deletes a document only when Hister says its `metadata.source` is `code`. A URL the owner browsed first stays the owner's page. Other writers keep the existing rule: never re-index a URL Hister already holds.
 - **Secrets.** Code documents are always sent with `html`, because Hister's sensitive-content check reads only `html` for a web document. They go through code-import's own scan first. `skip_sensitive_check` is never set.
 - **AI: on-device only, like notes** (the owner, 2026-10-05):
@@ -95,7 +98,7 @@ Hister has its own MCP endpoint, and it is how AI clients search and read saved 
 
 - **`POST /mcp`**, Streamable HTTP with plain JSON replies (protocol 2025-06-18; no session, `GET /mcp` is 405). It is not CSRF-guarded, so it needs **no `Origin`**.
 - **Tools, all read-only:** `search` (`query` in the query language above, `limit` up to 50, `date_from`/`date_to`, `fields` such as `label`, `domain`, `text`), `get_preview` (one document by exact URL: its whole text, rendered HTML and metadata, **no paging**), `get_history` (visits and opened results). Results are `structuredContent` with the page fields under `untrusted_content`.
-- **Page queries start with `@pages`** (`@pages raspberry pi`, `@pages @travel`): Hister's `search` returns vault notes mixed with pages otherwise. Notes are read from Kura (`notes_search`, `notes_read`). This is a rule for the model, written in the skills; nothing enforces it.
+- **Page queries start with `@pages`** (`@pages raspberry pi`, `@pages @travel`): Hister's `search` returns vault notes and code documents mixed with pages otherwise. Notes are read from Kura (`notes_search`, `notes_read`). **Code documents stay out of AI context** (on-device only, like notes): a model never queries `@code` or `metadata.source:code`. This is a rule for the model, written in the skills; nothing enforces it.
 - **`get_history` is denied** on every client: browsing history stays out of AI context. The machiya plugin's `install.sh` writes a Claude Code deny rule for every name the tool can have (`mcp__plugin_machiya_hister__get_history`, `mcp__hister__get_history`), which hides it from the model. Another client (the desktop app through a local bridge, say) needs its own way to turn it off.
 - **Auth.** Without users the tailnet grant on Hister's service is the gate. With Hister's user handling on, every call needs a user's personal token, `X-Access-Token: <token>` (or `Authorization: Bearer <token>`), the owner's for the owner's documents. Hister keeps **one token per user**: regenerating it replaces it for every client at once. Configure clients with the header now; a Hister without users ignores it.
 - Hister's `search` also returns up to 20 results the owner opened from Hister's own list for exactly the same query text (`search_history` records); they are not filtered by label.

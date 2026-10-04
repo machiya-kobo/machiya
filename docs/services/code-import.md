@@ -2,7 +2,7 @@
 
 code-import copies the owner's repos on **Forgejo** and **GitHub** into [Hister](hister.md), where Shiori searches them as its **Code** area. A result opens the forge's own page. Code: [stack/code-import/](../../stack/code-import/) (settings, the metadata table and the tests are in its README).
 
-**Status: phase 1 built (0.1.0), not deployed.** The contract additions below are **proposed** until the lead approves them.
+**Status: phase 1 built (0.1.0), not deployed.** The Hister contract's [code documents](../contracts/hister.md#code-documents-metadatasourcecode) section is approved (the lead, 2026-10-04).
 
 ## What it imports (owner, 2026-10-05)
 
