@@ -361,6 +361,9 @@ body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
   body { padding-bottom: calc(84px + var(--sab)); }
   .nav, .tools .rooms, .tools .gear { display: none; }
   .topbar form.search { display: none; }   /* phones search from the tab bar's Search tab (v0.16.2); a search page keeps its own field */
+  /* a solid header on phones (v0.16.3): an installed app on iOS drew the sticky header's backdrop blur over its own logo and
+     title; opaque, it looks the same at the top of a page and stays sharp */
+  header.top { background: var(--bg); -webkit-backdrop-filter: none; backdrop-filter: none; }
   .tabbar { display: flex; gap: 4px; position: fixed; z-index: 15;
     left: calc(8px + var(--sal)); right: calc(8px + var(--sar)); bottom: calc(10px + var(--sab));
     padding: 6px; border-radius: 999px; border: 1px solid var(--line2);
