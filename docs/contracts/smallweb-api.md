@@ -59,10 +59,20 @@ Served on its own name, `https://smallweb.example.ts.net` (its own Tailscale Ser
 - `GET /page?url=…&q=…`: the answer to a Gemini `10`/`11` prompt or a gopher type-7 search.
 - `GET /?q=`: a plain search page over the same data.
 - Images are passed through. Other binaries download with `Content-Security-Policy: sandbox`.
+- **Who may make smallweb fetch** (0.3.1; sweep MACH-F-1). The answer depends on the browser's `Sec-Fetch-Site` header:
+  - Fetched: smallweb's own pages (`same-origin`), a typed or bookmarked address (`none`), a link followed from a sibling site (`same-site` with `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`; that is how Shiori's results open), and a client that isn't a browser (no `Sec-Fetch-Site`).
+  - Not fetched: another site's link to `/page` gets an "Open This Page?" page with a same-origin link.
+  - Refused with `403`: another site's script, image or frame, or a sibling's.
+  - `/api/search` from another site is `403`, and `/?q=` from another site searches nothing.
+- **What is fetched** (0.3.1). The host is resolved by smallweb, and every address must be public: the same rule as `POST /api/save`'s, with `SMALLWEB_FETCH_ALLOW` aside. The proxy is asked for that address.
+  - Mail, shell, database and admin ports are refused.
+  - A selector or URL with a control character (CR, LF, NUL, TAB) is never sent.
+  - One response may take 30 s in all.
+  - The engines' own hosts go to the proxy by name.
 
 ## Saved to Hister
 
-A page read through `/page` is saved (in the background) with `POST http://hister:4433/api/add` and `Origin: hister://`:
+A page read through `/page` is saved (in the background) with `POST http://hister:4433/api/add` and `Origin: hister://`. Only pages viewed through smallweb are saved, as listed above (the owner, 2026-10-05). A `HEAD` never saves. The HTML is an allowlist of document and text tags (0.3.1):
 
 ```json
 {"url": "gemini://example.org/notes/example-page", "title": "An Example Page",

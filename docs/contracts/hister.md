@@ -27,7 +27,7 @@ How Machiya's services use [Hister](../services/hister.md). Hister is upstream c
 | `GET /api/profile` | hister-login only ([Sign-in](#sign-in)) |
 | `POST /api/label` `{url, label}`, `POST /api/update` `{query, changes: {label}}` | machiya-mcp (`pages_set_label`, `pages_relabel`; one exact `url:"…"` match per update) |
 | `GET /api/rules`, `POST /api/add_alias`, `POST /api/delete_alias` (form posts) | machiya-mcp (`collections_*`: only `@` aliases whose value is purely labels) |
-| `POST /mcp` (Hister's MCP, below) | AI clients: Claude Code through the machiya plugin |
+| `POST /mcp` (Hister's MCP, below) | nobody in Machiya since 2026-10-05 (AI clients read pages through machiya-mcp's `pages_search` / `pages_read`; the machiya plugin denies Hister's MCP tools) |
 | `GET /preview?id=<url>` | links to Hister's saved copy |
 | `hister index` (CLI) | Konbini/Niwa link rot (fetch and store a page) |
 
@@ -90,15 +90,24 @@ Background: [services/code-import.md](../services/code-import.md).
 - **AI: on-device only, like notes:**
   - Shiori's AI treats a code result as a note;
   - `shiori-ai` refuses `metadata.source:code`, as it refuses `vault`;
-  - Hister's MCP returns code to any client with the owner's token, so for AI clients it is the model's rule, written in the skills: page queries start with `@pages`, and code results are never pulled into an AI's context.
+  - **AI clients never get code or notes** (the owner, 2026-10-05): they read pages only through machiya-mcp (`pages_search`, `pages_read`), which adds the exclusions to every query and drops any result that is a note, a card or a code document, failing closed. Hister's own MCP returns code to any client with the owner's token, so the machiya plugin denies its tools.
 
 ## Hister's MCP
 
-Hister has its own MCP endpoint, and it is how AI clients search and read saved pages; machiya-mcp has no page reads of its own (since 0.7.0), only the label and collection tools Hister's MCP lacks. Tested with v0.20.0.
+Hister has its own MCP endpoint. **AI clients don't use it** (the owner, 2026-10-05: "code and notes stay out of AI", enforced rather than a prompt rule; sweep MACH-M-4, MACH-F-10). Its `search` and `get_preview` return vault notes and code documents to any client with the token, and a query's exclusions are only as good as the model that writes them. AI clients read pages through **machiya-mcp's `pages_search` and `pages_read`** (machiya-mcp 0.8.0):
+
+- every query ends ` -label:vault -metadata.source:vault -metadata.source:code -label:konbini`;
+- every result is checked again, and a note, card, code document, room host or unknown shape is dropped (`withheld: N`);
+- `pages_read` looks the document up and refuses anything that isn't a page;
+- the Hister token stays on the server.
+
+The machiya plugin (0.3.0) no longer connects Hister's MCP, and its `install.sh` denies `mcp__plugin_machiya_hister__*` and `mcp__hister__*`. Why this design and not a filtering proxy: it reuses Hister's REST JSON, which machiya-mcp already parses and tests, and there is no MCP protocol to proxy (sessions, SSE, version negotiation). If a filter fails to parse an answer, the result is dropped.
+
+What follows describes Hister's MCP for anyone who connects it outside Machiya (tested with v0.20.0).
 
 - **`POST /mcp`**, Streamable HTTP with plain JSON replies (protocol 2025-06-18; no session, `GET /mcp` is 405). It is not CSRF-guarded, so it needs **no `Origin`**.
 - **Tools, all read-only:** `search` (`query` in the query language above, `limit` up to 50, `date_from`/`date_to`, `fields` such as `label`, `domain`, `text`), `get_preview` (one document by exact URL: its whole text, rendered HTML and metadata, **no paging**), `get_history` (visits and opened results). Results are `structuredContent` with the page fields under `untrusted_content`.
-- **Page queries start with `@pages`** (`@pages raspberry pi`, `@pages @travel`): Hister's `search` returns vault notes and code documents mixed with pages otherwise. Notes are read from Kura (`notes_search`, `notes_read`). **Code documents stay out of AI context** (on-device only, like notes): a model never queries `@code` or `metadata.source:code`. This is a rule for the model, written in the skills; nothing enforces it.
+- Hister's `search` returns vault notes and code documents mixed with pages unless the query starts `@pages`. That's why AI clients don't get it (above).
 - **`get_history` is denied** on every client: browsing history stays out of AI context. The machiya plugin's `install.sh` writes a Claude Code deny rule for every name the tool can have (`mcp__plugin_machiya_hister__get_history`, `mcp__hister__get_history`), which hides it from the model. Another client (the desktop app through a local bridge, say) needs its own way to turn it off.
 - **Auth.** Without users the tailnet grant on Hister's service is the gate. With Hister's user handling on, every call needs a user's personal token, `X-Access-Token: <token>` (or `Authorization: Bearer <token>`), the owner's for the owner's documents. Hister keeps **one token per user**: regenerating it replaces it for every client at once. Configure clients with the header now; a Hister without users ignores it.
 - Hister's `search` also returns up to 20 results the owner opened from Hister's own list for exactly the same query text (`search_history` records); they are not filtered by label.
@@ -114,6 +123,8 @@ With `app.user_handling: true` Hister has users, and [hister-login](../services/
 - **Rooms in `AUTH=hister`** ([identity.md](../identity.md#hister-sign-in-authhister)) accept the cookie, `Authorization: Bearer mhs_…` (Shiori's apps) and the owner's Hister token; an API call without one gets `401 {"error": "sign in", "signin": "<the helper's sign-in address>"}`, which a page follows by navigating there.
 
 ## What callers must never do
+
+- **Hister's per-post social extractors stay off** (`extractors.twitter`, `mastodon` and `bluesky` `enable: false`, [config/hister/config.yml](../../config/hister/config.yml)). This holds at least until Shiori's SHIO-1 fix ships (its hosted search page turns a stored `javascript:` address into a link). The Mastodon extractor stores permalinks exactly as a page wrote them, so turning it on would make that finding a high one. Decided by the owner, 2026-10-05.
 
 - SearXNG never queries Hister.
 - No Hister result, copy or `private_url` appears on gemini, gopher or the public garden export. Those read only `archive_url` (Wayback).

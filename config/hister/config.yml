@@ -28,7 +28,9 @@ crawler:
 extractors:
   # Per-post social extractors split a feed into one document per post scrolled past, and on a re-add they
   # REPLACE a document's text and metadata. X, Mastodon and Bluesky are skip-listed anyway, so the
-  # extractors would only do damage.
+  # extractors would only do damage. They also store permalinks exactly as a page wrote them, a `javascript:` one
+  # included, which Shiori's hosted page would link (sweep SHIO-1): they stay OFF at least until Shiori's fix ships
+  # (the owner, 2026-10-05; docs/contracts/hister.md).
   twitter:
     enable: false
   mastodon:
