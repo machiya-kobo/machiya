@@ -550,7 +550,28 @@ class Web(unittest.TestCase):
                      "z()"):
             self.assertNotIn(gone, doc)
         self.assertIn("<p>Hello <b>web</b> &amp; friends.</p>", doc)
-        self.assertIn("<svg><text>drawn</text></svg>", doc)
+        self.assertNotIn("<svg", doc)                                    # 0.3.1: an allowlist (MACH-F-7)
+        self.assertNotIn("drawn", doc)
+
+    def test_the_stored_html_is_an_allowlist(self):
+        """MACH-F-7 (sweep 2026-10): these passed the old blocklist."""
+        page = ('<p>keep <a href="https://ok.example/" title="t" style="x" class="c">ok</a> <a href="/rel">rel</a> '
+                '<a href="gemini://cap.example/">gem</a></p><iframe srcdoc="<script>alert(1)</script>"/>'
+                '<script/>bad()<svg><animate attributeName="href" to="javascript:alert(2)"/></svg>'
+                '<a href="data:text/html,<script>alert(3)</script>">d</a><img src="data:image/svg+xml,x" alt="i">'
+                '<a href=" jav&#x09;ascript:alert(4)">j</a><form action="https://x.example/"><input name="p">'
+                '<button>Go</button></form><math><mi>m</mi></math><base href="https://evil.example/">'
+                '<link rel="stylesheet" href="https://evil.example/x.css"><meta http-equiv="refresh" content="0;url=x">'
+                '<custom-el onclick="y()">text stays</custom-el><table><tr><td colspan="2">cell</td></tr></table>')
+        _, _, doc = web.read_page(page.encode(), "text/html", "utf-8", "https://site.example/")
+        for gone in ("srcdoc", "<iframe", "<script", "alert", "<svg", "<animate", "data:", "javascript", "jav",
+                     "<form", "<input", "<button", "<math", "<base", "<link", "<meta", "style=", "class=",
+                     "onclick", "<custom-el"):
+            self.assertNotIn(gone, doc, gone)
+        for kept in ('<a href="https://ok.example/" title="t">ok</a>', '<a href="/rel">rel</a>',
+                     '<a href="gemini://cap.example/">gem</a>', '<img alt="i">', "text stays",
+                     '<td colspan="2">cell</td>'):
+            self.assertIn(kept, doc, kept)
 
         def title_of(path, asked=""):
             r = self.fetch(WEB + path)

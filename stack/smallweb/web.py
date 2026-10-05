@@ -348,10 +348,26 @@ def collapse(text):
 
 
 class _Reader(HTMLParser):
-    DROP_HTML = {"script", "style", "iframe", "object"}                 # dropped with their content; embed too (void)
-    DROP_TEXT = {"script", "style", "noscript", "template", "svg", "title", "iframe", "object"}
-    SCRIPT_URL = re.compile(r"(javascript|vbscript):", re.I)
-    URL_ATTRS = {"href", "src", "action", "formaction", "xlink:href", "data", "poster", "background"}
+    """The page's title, text and a cleaned copy of its HTML. The copy is an allowlist (smallweb 0.3.1, MACH-F-7): only
+    the document and text tags below, only the attributes below, and links and images only to http(s), mailto, gemini,
+    gopher or a relative address. Script, style, frames, plugins, SVG, MathML, templates and forms' controls go with
+    their content; any other tag goes and its text stays."""
+    DROP_HTML = {"script", "style", "iframe", "object", "embed", "svg", "math", "template", "noscript", "frameset",
+                 "frame", "noframes", "applet", "canvas", "audio", "video", "select", "textarea", "button", "head",
+                 "xmp", "plaintext", "noembed", "dialog"}                 # dropped with their content
+    DROP_TEXT = {"script", "style", "noscript", "template", "svg", "title", "iframe", "object", "math", "select",
+                 "textarea", "button", "noframes", "noembed"}
+    ALLOWED = {"html", "body", "a", "abbr", "address", "article", "aside", "b", "bdi", "bdo", "blockquote", "br",
+               "caption", "cite", "code", "col", "colgroup", "data", "dd", "del", "details", "dfn", "div", "dl", "dt",
+               "em", "figcaption", "figure", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "i", "img",
+               "ins", "kbd", "li", "main", "mark", "nav", "ol", "p", "pre", "q", "rp", "rt", "ruby", "s", "samp",
+               "section", "small", "span", "strong", "sub", "summary", "sup", "table", "tbody", "td", "tfoot", "th",
+               "thead", "time", "tr", "u", "ul", "var", "wbr"}
+    ATTRS = {"href", "src", "alt", "title", "width", "height", "colspan", "rowspan", "cite", "datetime", "lang", "dir",
+             "start", "reversed", "scope", "headers", "abbr", "open", "value"}
+    URL_ATTRS = {"href", "src", "cite"}
+    SCHEME = re.compile(r"([a-zA-Z][a-zA-Z0-9+.-]*):")
+    SCHEMES = {"http", "https", "mailto", "gemini", "gopher"}                     # or a relative address
     BLOCK = {"p", "div", "br", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "td", "th", "table", "pre",
              "blockquote", "section", "article", "header", "footer", "nav", "aside", "main", "hr", "dt", "dd",
              "figcaption", "form", "address", "details", "summary"}
@@ -366,10 +382,12 @@ class _Reader(HTMLParser):
     def _attrs(self, attrs):
         keep = []
         for k, v in attrs:
-            if k.startswith("on"):
+            if k not in self.ATTRS:
                 continue
-            if v is not None and k in self.URL_ATTRS and self.SCRIPT_URL.match(re.sub(r"[\x00-\x20]", "", v)):
-                continue
+            if k in self.URL_ATTRS:
+                m = self.SCHEME.match(re.sub(r"[\x00-\x20]", "", v or ""))
+                if v is None or (m and m.group(1).lower() not in self.SCHEMES):
+                    continue
             keep.append(" %s" % k if v is None else ' %s="%s"' % (k, html.escape(v, quote=True)))
         return "".join(keep)
 
@@ -392,11 +410,10 @@ class _Reader(HTMLParser):
                 self.og = a["content"]
         if tag in self.BLOCK:
             self.text.append("\n")
-        if tag == "embed":
-            return
-        if tag in self.DROP_HTML and not closed:
-            self.hide_html[tag] = self.hide_html.get(tag, 0) + 1
-        elif self._visible_html():
+        if tag in self.DROP_HTML:
+            if not closed and tag != "embed":
+                self.hide_html[tag] = self.hide_html.get(tag, 0) + 1
+        elif self._visible_html() and tag in self.ALLOWED:
             self.out.append("<%s%s%s>" % (tag, self._attrs(attrs), " /" if closed else ""))
         if closed:
             return
@@ -415,11 +432,11 @@ class _Reader(HTMLParser):
             self.text.append("\n")
         if self.hide_text.get(tag):
             self.hide_text[tag] -= 1
-        if tag in self.DROP_HTML or tag == "embed":
+        if tag in self.DROP_HTML:
             if self.hide_html.get(tag):
                 self.hide_html[tag] -= 1
             return
-        if self._visible_html():
+        if self._visible_html() and tag in self.ALLOWED:
             self.out.append("</%s>" % tag)
 
     def handle_data(self, data):

@@ -9,6 +9,7 @@ Security (the sweep of 2026-10):
 - **The log has no queries** (MACH-F-5): method, path and status only; errors log their code, never the request line.
 - **A deadline** (MACH-F-8): one gemini or gopher response may take 30 s in all; a server trickling bytes no longer holds a save worker.
 - **The Tailscale header counts only from the sidecar** (MACH-F-9): `SMALLWEB_TRUSTED_PROXIES`; in `tailscale` mode a non-loopback bind without it (or `SMALLWEB_BIND_BEHIND_PROXY=1`) refuses to start. **Deploy note:** set one of them before running 0.3.1 on `0.0.0.0`.
+- **The HTML sent to Hister is an allowlist** (MACH-F-7): document and text tags, a few attributes, links and images to http(s), mailto, gemini, gopher or relative addresses only. `srcdoc`, `<script/>`, SVG and MathML, `data:` URLs, forms, `<base>`, `<link>`, `<meta>`, `style` and `class` no longer get through (feed-import uses the same reader).
 - `web.decode` uses only text encodings (feed-import 0.1.2's fix; the same file).
 
 ## 0.3.0
