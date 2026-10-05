@@ -840,6 +840,80 @@ class HisterAuth:
         return result.status, headers + [("Content-Type", "text/html; charset=utf-8")], html.encode()
 
 
+class TokenGate:
+    """A service with a gate of its own (the Tailscale header: machiya-mcp, smallweb) that also takes a room token
+    (`Authorization: Bearer mht_…`, v0.22) which hister-login issued for it: an agent on a tagged machine has no
+    Tailscale login, and must never be handed Hister's raw token. resolve(headers) -> None when the request carries
+    no room token (the service's own gate decides), else a Result: 200 (the token's Hister user, in `users`), 401 (a
+    bad, revoked or other services' token: never passed over for the header), 403 (another Hister user), 503 (the
+    helper unreachable). Answers are cached as the rooms cache theirs (30 s good, 5 s refused or down)."""
+
+    def __init__(self, name, auth_url, public_url, users, fetch=None, clock=time.monotonic):
+        self.name, self.origin = name, origin_of(public_url or "")
+        if not self.origin:
+            raise IdentityError("%s: a room token needs this service's own address (its public URL), not %r"
+                                % (name, public_url))
+        self.users = frozenset(u for u in users if u)
+        if not self.users or "*" in self.users:
+            raise IdentityError("%s: a room token needs the Hister usernames it may act as (never *)" % name)
+        self.fetch = fetch or _http_fetch(auth_url)
+        self.clock = clock
+        self.cache = collections.OrderedDict()
+        self.lock = threading.Lock()
+
+    def resolve(self, headers):
+        values = Identity.header_values(headers, "Authorization")
+        if not values:
+            return None
+        scheme, _, value = (values[0] or "").strip().partition(" ")
+        value = value.strip()
+        if len(values) == 1 and not (scheme.lower() == "bearer" and value.startswith(RTOKEN_PREFIX)):
+            return None                             # not a room token: the service's own gate (identity file, …)
+        if len(values) > 1 or not RTOKEN_RE.match(value):
+            return Result(None, 401, SIGNED_OUT, actor="token:-")
+        key = hashlib.sha256(value.encode("ascii")).hexdigest()
+        with self.lock:
+            hit = self.cache.get(key)
+            outcome = hit[1] if hit and hit[0] > self.clock() else None
+        if outcome is None:
+            try:
+                status, body = self.fetch("GET", "/v1/check", {"X-Machiya-Session": value, "X-Machiya-Room": self.origin,
+                                                               "Accept": "application/json"}, CHECK_TIMEOUT)
+                data = json.loads(body) if body else None
+            except (OSError, http.client.HTTPException, ValueError):
+                status, data = None, None
+            if status == 200 and isinstance(data, dict) and isinstance(data.get("username"), str) \
+                    and data["username"] and data.get("kind") == "token":
+                outcome, ttl = ("ok", data["username"]), TTL_OK
+            elif status in (400, 401, 403) or status == 200:
+                outcome, ttl = ("out", data.get("reason", "") if isinstance(data, dict) else ""), TTL_OUT
+            else:
+                outcome, ttl = ("down",), TTL_DOWN
+            with self.lock:
+                self.cache[key] = (self.clock() + ttl, outcome)
+                while len(self.cache) > CACHE_MAX:
+                    self.cache.popitem(last=False)
+        if outcome[0] == "ok":
+            if outcome[1] not in self.users:
+                return Result(None, 403, NOT_ALLOWED, actor="token:" + outcome[1])
+            return Result(Principal(outcome[1], "person", owner=True, via="token"), 200, OK, actor="token:" + outcome[1])
+        if outcome[0] == "out":
+            return Result(None, 401, SIGNED_OUT, actor="token:-", error=outcome[1] if outcome[1] in REFUSED_TEXT else "")
+        return Result(None, 503, UNAVAILABLE, actor="token:-")
+
+
+def token_gate_for(name, prefix, env=None, fetch=None):
+    """<P>_AUTH_URL (hister-login's internal address) turns on room tokens for a service with its own gate; then
+    <P>_PUBLIC_URL (the service's address: the token must name it) and <P>_HISTER_USERS (never *) are required.
+    None without <P>_AUTH_URL. IdentityError for a missing or bad setting."""
+    env = os.environ if env is None else env
+    auth_url = (env.get(prefix + "_AUTH_URL") or "").strip().rstrip("/")
+    if not auth_url:
+        return None
+    return TokenGate(name, auth_url, (env.get(prefix + "_PUBLIC_URL") or "").strip(),
+                     _list(env.get(prefix + "_HISTER_USERS")), fetch=fetch)
+
+
 def banner_html(text=BANNER_TEXT):
     """The fallback banner (machiya.css .machiya-banner): put it at the top of <main> when result.banner is set."""
     import html

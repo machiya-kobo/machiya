@@ -771,5 +771,59 @@ class RoomSessionTest(unittest.TestCase):
         self.assertEqual((h.calls[-1][2]["X-Machiya-Session"], h.calls[-1][2]["X-Machiya-Room"]), (RSID, NIWA))
 
 
+class TokenGateTest(unittest.TestCase):
+    """v0.22: machiya-mcp and smallweb (their own Tailscale-header gate) also take a room token scoped to them."""
+
+    def gate(self):
+        h, clock = FakeHelper(), Clock()
+        return ha.TokenGate("mcp", "http://hl:8081", "https://mcp.example.ts.net/mcp", ["owner"], fetch=h,
+                            clock=clock), h, clock
+
+    def test_no_token_is_the_services_own_gate(self):
+        g, h, _ = self.gate()
+        for hdr in (Headers(), Headers(("Authorization", "Bearer mch_ab_cd")), Headers(("Tailscale-User-Login", "x"))):
+            self.assertIsNone(g.resolve(hdr))
+        self.assertEqual(h.calls, [])
+
+    def test_token(self):
+        g, h, clock = self.gate()
+        h.answers[("/v1/check", RTOK)] = (200, b'{"username": "owner", "kind": "token"}')
+        r = g.resolve(Headers(("Authorization", "Bearer " + RTOK)))
+        self.assertEqual((r.status, r.principal.name, r.principal.via, r.actor), (200, "owner", "token", "token:owner"))
+        self.assertEqual(h.calls[-1][2]["X-Machiya-Room"], "https://mcp.example.ts.net")
+        clock.t += 29
+        g.resolve(Headers(("Authorization", "Bearer " + RTOK)))
+        self.assertEqual(len(h.calls), 1)                                     # cached 30 s
+
+    def test_refusals(self):
+        g, h, _ = self.gate()
+        h.answers[("/v1/check", RTOK)] = (401, b'{"reason": "wrong-room"}')
+        r = g.resolve(Headers(("Authorization", "Bearer " + RTOK)))
+        self.assertEqual((r.status, r.json()["reason"]), (401, "wrong-room"))
+        self.assertEqual(g.resolve(Headers(("Authorization", "Bearer mht_short"))).status, 401)
+        self.assertEqual(g.resolve(Headers(("Authorization", "Bearer " + RTOK), ("Authorization", "x"))).status, 401)
+        g2, h2, _ = self.gate()
+        h2.answers[("/v1/check", RTOK)] = (200, b'{"username": "other", "kind": "token"}')
+        self.assertEqual(g2.resolve(Headers(("Authorization", "Bearer " + RTOK))).status, 403)
+        h2.answers[("/v1/check", RSID)] = (200, b'{"username": "owner", "kind": "room"}')
+        g3, h3, _ = self.gate()
+        h3.answers[("/v1/check", RTOK)] = (200, b'{"username": "owner", "kind": "room"}')   # only a token counts
+        self.assertEqual(g3.resolve(Headers(("Authorization", "Bearer " + RTOK))).status, 401)
+        g4, h4, _ = self.gate()
+        h4.down = True
+        self.assertEqual(g4.resolve(Headers(("Authorization", "Bearer " + RTOK))).status, 503)
+
+    def test_settings(self):
+        self.assertIsNone(ha.token_gate_for("mcp", "MCP", {}))
+        g = ha.token_gate_for("mcp", "MCP", {"MCP_AUTH_URL": "http://hister-login:8081", "MCP_PUBLIC_URL":
+                                             "https://mcp.example.ts.net", "MCP_HISTER_USERS": "owner"})
+        self.assertEqual(g.origin, "https://mcp.example.ts.net")
+        for env in ({"MCP_AUTH_URL": "http://h:8081", "MCP_HISTER_USERS": "owner"},
+                    {"MCP_AUTH_URL": "http://h:8081", "MCP_PUBLIC_URL": "https://m"},
+                    {"MCP_AUTH_URL": "http://h:8081", "MCP_PUBLIC_URL": "https://m", "MCP_HISTER_USERS": "*"}):
+            with self.assertRaises(IdentityError):
+                ha.token_gate_for("mcp", "MCP", env)
+
+
 if __name__ == "__main__":
     unittest.main()
