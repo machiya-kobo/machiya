@@ -5,10 +5,10 @@
 #   docker compose up -d --build --wait
 #
 # `docker compose` works the same as `podman compose`. Profiles choose what runs (COMPOSE_PROFILES in .env, or
-# --profile on the command line): engines (hister, searxng + valkey), kura, niwa, konbini, and proxy (an optional SOCKS5
+# --profile on the command line): engines (hister, searxng + valkey), kura, niwa, konbini, smallweb, mcp, and proxy (an optional SOCKS5
 # egress proxy for SearXNG, off by default; see the `proxy` service below and config/searxng/settings.yml).
 # Ports: every published port is a variable (HISTER_PORT, SEARXNG_PORT, KURA_PORT, NIWA_PORT, NIWA_GEMINI_PORT, NIWA_GOPHER_PORT,
-# KONBINI_PORT) for when one is taken; change the matching *_PUBLIC_URL and MACHIYA_ROOMS with it.
+# KONBINI_PORT, SMALLWEB_PORT, MCP_PORT) for when one is taken; change the matching *_PUBLIC_URL and MACHIYA_ROOMS with it.
 # Services find each other by URL settings only (docs/principles.md): leave one out and the feature that needs it
 # switches off. The rooms build from their own repositories, checked out next to this one (../../kura etc.).
 #
@@ -190,3 +190,56 @@ services:
       - ${MACHIYA_IDENTITY_DIR:-/dev/null}:${MACHIYA_IDENTITY_DIR:-/identity-unused}:ro
     ports: ["127.0.0.1:${KONBINI_PORT:-8081}:8081"]
     restart: unless-stopped
+
+  # -- the stack's tools: smallweb and machiya-mcp ------------------------------------------------
+  # Each on a network of its OWN (the owner's rule, 2026-10-05: sweep MACH-M-5, MACH-F-9), plus `default` only to reach
+  # Hister, the rooms and the proxy. Both trust a Tailscale-User-Login header in `tailscale` mode, so the header must
+  # come from the proxy alone: put the Tailscale sidecar on the tool's network at the fixed address below and name it
+  # in *_TRUSTED_PROXIES (any other container's header then counts for nothing). In the default `open` mode the
+  # published port binds 127.0.0.1 and nobody else reaches it.
+  smallweb:
+    profiles: [smallweb]
+    <<: *room
+    build: ../stack/smallweb
+    environment:
+      - SMALLWEB_AUTH=${SMALLWEB_AUTH:-open}
+      - SMALLWEB_USERS=${SMALLWEB_USERS:-}
+      - SMALLWEB_TRUSTED_PROXIES=${SMALLWEB_TRUSTED_PROXIES:-}   # tailscale mode: the sidecar, 172.31.250.2/32
+      - SMALLWEB_PUBLIC_URL=${SMALLWEB_PUBLIC_URL:-http://localhost:8090}
+      - SMALLWEB_HISTER_URL=${SMALLWEB_HISTER_URL:-}             # e.g. http://hister:4433: pages read are saved there
+      - SMALLWEB_SOCKS=${SMALLWEB_SOCKS:-}                       # e.g. socks5h://proxy:1080 (the proxy profile)
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SMALLWEB_DATA:-./data/smallweb}:/data
+    networks: [smallweb, default]
+    ports: ["127.0.0.1:${SMALLWEB_PORT:-8090}:8080"]
+    mem_limit: 128m
+    restart: unless-stopped
+
+  machiya-mcp:
+    profiles: [mcp]
+    <<: *room
+    build: ../stack/mcp
+    environment:
+      - MCP_AUTH=${MCP_AUTH:-open}
+      - MCP_USERS=${MCP_USERS:-}
+      - MCP_TRUSTED_PROXIES=${MCP_TRUSTED_PROXIES:-}             # tailscale mode: the sidecar, 172.31.250.10/32
+      - KURA_URL=${MCP_KURA_URL:-http://kura:8080}
+      - KONBINI_URL=${MCP_KONBINI_URL:-http://konbini:8081}
+      - NIWA_URL=${MCP_NIWA_URL:-http://niwa:8080}
+      - HISTER_URL=${MCP_HISTER_URL:-http://hister:4433}
+      - HOME=/data
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${MCP_DATA:-./data/mcp}:/data
+    networks: [machiya-mcp, default]
+    ports: ["127.0.0.1:${MCP_PORT:-8091}:8080"]
+    mem_limit: 256m
+    restart: unless-stopped
+
+networks:
+  default: {}
+  smallweb:                                         # smallweb and its proxy only; .2 is the sidecar's address
+    ipam: {config: [{subnet: 172.31.250.0/29}]}
+  machiya-mcp:                                      # machiya-mcp and its proxy only; .10 is the sidecar's address
+    ipam: {config: [{subnet: 172.31.250.8/29}]}
