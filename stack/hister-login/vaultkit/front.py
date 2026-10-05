@@ -16,6 +16,32 @@ CONFLICT_RE = re.compile(r"^(<<<<<<< |=======[ \t]*$|>>>>>>> )", re.M)
 # never indexed as notes (no duplicates); a service may list them to merge.
 PHONE_CONFLICT = " (phone conflict "
 
+# v0.22 (LEAD-4): frontmatter bigger than this isn't parsed (the note reads as having none), and YAML aliases are
+# refused, so a 450-byte "billion laughs" can't make a room build a 5 GB title.
+MAX_FRONT = 64 * 1024
+
+
+class _NoAliases(yaml.SafeLoader):
+    """yaml.SafeLoader that refuses aliases (*name). Anchors alone are harmless and still load."""
+
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.AliasEvent):
+            event = self.peek_event()
+            raise yaml.composer.ComposerError(None, None, "YAML aliases are not allowed in frontmatter",
+                                              event.start_mark)
+        return super().compose_node(parent, index)
+
+
+def load_yaml(text):
+    """yaml.safe_load without aliases and at most MAX_FRONT characters (v0.22); YAMLError otherwise."""
+    if len(text) > MAX_FRONT:
+        raise yaml.YAMLError("frontmatter is larger than %d bytes" % MAX_FRONT)
+    loader = _NoAliases(text)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
+
 
 def _str(value):
     if value is None:
@@ -32,12 +58,13 @@ def _unlink(value):
 
 
 def note_front(text):
-    """The frontmatter dict, or None when there is none or it doesn't parse."""
+    """The frontmatter dict, or None when there is none or it doesn't parse (v0.22: or uses YAML aliases, or is bigger
+    than MAX_FRONT)."""
     m = FRONT_RE.match(text)
     if not m:
         return None
     try:
-        fm = yaml.safe_load(m.group(1))
+        fm = load_yaml(m.group(1))
     except yaml.YAMLError:
         return None
     return fm if isinstance(fm, dict) else None

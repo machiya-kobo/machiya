@@ -494,7 +494,7 @@ class HelperTest(HelperBase):
             status, headers, body = self.public("GET", q, h)
             self.assertEqual(status, 200, site)
             self.assertNotIn("Location", dict(headers), site)
-            self.assertIsNone(cookie_value(headers, "machiya_return"), site)
+            self.assertIsNone(cookie_value(headers, "__Host-machiya_return"), site)
             self.assertIn(b'<form class="group" method="post" action="/machiya/signin">', body)
             self.assertIn(b'name="return" value="shiori://signed-in"', body)
             self.assertNotIn(b"mhs_", body)
@@ -502,7 +502,7 @@ class HelperTest(HelperBase):
         # nor straight on to the provider (that would set the return cookie and finish in the callback)
         status, headers, _ = self.public("GET", q + "&provider=oidc", {"Sec-Fetch-Site": "cross-site"})
         self.assertEqual(status, 200)
-        self.assertIsNone(cookie_value(headers, "machiya_return"))
+        self.assertIsNone(cookie_value(headers, "__Host-machiya_return"))
         self.assertEqual(self.login.store.count(), before)                 # no stray "Shiori app" session
         # the app's own web session and this page's own navigation finish as before
         for site in ("none", "same-origin"):
@@ -536,7 +536,7 @@ class HelperTest(HelperBase):
             "Origin": PUBLIC, "Content-Type": "application/x-www-form-urlencoded", "Content-Length": str(len(form))}, form)
         self.assertEqual(status, 200)
         self.assertIn(b'id="hister-signin"', body)
-        self.assertTrue(cookie_value(headers, "machiya_return"))
+        self.assertTrue(cookie_value(headers, "__Host-machiya_return"))
         # only the app flow is confirmed this way; a bad return is still refused
         bad = urlencode({"return": "shiori://anything", "app": "1"}).encode()
         self.assertEqual(post({"Origin": PUBLIC}, bad)[0], 400)
