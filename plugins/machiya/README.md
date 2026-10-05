@@ -35,7 +35,7 @@ machiya-mcp knows a person by the Tailscale login its sidecar passes on. A tagge
 MACHIYA_TOKEN_FILE=~/.config/machiya/mcp-room-token plugins/machiya/install.sh
 ```
 
-The settings keep the path, never the token. `bin/machiya-headers` (the plugin's `headersHelper`) sends it only when the file holds a room token (`mht_…`: Hister's token is never sent, whatever the file holds), only to the address Claude Code connects to, over https or plain http to loopback (the dev stack), and never falls back to anything: no file, no header, and the Tailscale identity decides as before. `install.sh check` makes its test call with the same header.
+`install.sh` reads the file once and saves the token in the settings' env as `MACHIYA_MCP_TOKEN` (only a room token, `mht_…`: a Hister token is refused; only for an https or loopback-http `MACHIYA_MCP_URL`), and the plugin sends it as the fixed header `X-Machiya-Token`, which machiya-mcp (0.8.0) takes like `Authorization: Bearer`. Claude Code (2.1, checked with 2.1.289) runs no `headersHelper` for a plugin's own server, so a fixed header from the settings is the way; re-run the installer after rotating the token, and `uninstall` removes it. Unset, the header is empty and ignored: the Tailscale identity decides as before. `install.sh check` makes its test call with the same header. `bin/machiya-headers` prints the same token as `Authorization: Bearer` for a `headersHelper` on a machiya-mcp server added by hand (`claude mcp add`), with the same rules (from `MACHIYA_TOKEN_FILE` only, a room token only, https or loopback only, no fallback).
 
 ## `bin/hister-headers`
 

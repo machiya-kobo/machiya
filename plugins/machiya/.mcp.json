@@ -4,9 +4,9 @@
       "type": "http",
       "url": "${MACHIYA_MCP_URL:-https://machiya-mcp.example.ts.net/mcp}",
       "headers": {
-        "X-Agent": "${MACHIYA_AGENT:-claude-code}"
-      },
-      "headersHelper": "${CLAUDE_PLUGIN_ROOT}/bin/machiya-headers"
+        "X-Agent": "${MACHIYA_AGENT:-claude-code}",
+        "X-Machiya-Token": "${MACHIYA_MCP_TOKEN:-}"
+      }
     }
   }
 }

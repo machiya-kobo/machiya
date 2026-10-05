@@ -13,8 +13,10 @@
 # Environment: MACHIYA_MCP_URL (default https://machiya-mcp.example.ts.net/mcp), MACHIYA_REPO (this checkout; default: the
 # one this script is in), MACHIYA_AGENT_NAME (what the board's history says; default user@host), MACHIYA_TOKEN_FILE (0.4.0:
 # a file holding a room token hister-login made for machiya-mcp, for a machine with no Tailscale login, such as a tagged
-# agents' VM; its PATH is saved, never the token, and bin/machiya-headers sends it). The URL, when set, is
-# saved in the settings' env, where the plugin's .mcp.json finds it. The dev stack (docs/dev-stack.md) is one more value of
+# agents' VM: its value is saved in the settings' env as MACHIYA_MCP_TOKEN, which the plugin sends as X-Machiya-Token;
+# Claude Code runs no headersHelper for a plugin's server, so a fixed header is the way; only a room token (mht_), and
+# only for an https or loopback MACHIYA_MCP_URL). The URL, when set, is saved in the settings' env, where the plugin's
+# .mcp.json finds it. The dev stack (docs/dev-stack.md) is one more value of
 # it. Needs claude, python3, and a client on the tailnet. ~/.claude/settings.json is backed up to settings.json.bak-machiya
 # before each change.
 set -euo pipefail
@@ -29,9 +31,10 @@ command -v python3 >/dev/null || { echo "install.sh: python3 not found" >&2; exi
 settings() {   # settings add|remove
     [[ -f $SETTINGS ]] || echo '{}' > "$SETTINGS"
     cp "$SETTINGS" "$SETTINGS.bak-machiya"
-    python3 - "$1" "$SETTINGS" "$P" "$AGENT" "${MACHIYA_MCP_URL:-}" "${MACHIYA_TOKEN_FILE:-}" <<'PY'
-import json, os, sys
-mode, path, prefix, agent, mcp_url, token_file = sys.argv[1:7]
+    python3 - "$1" "$SETTINGS" "$P" "$AGENT" "${MACHIYA_MCP_URL:-}" "${MACHIYA_TOKEN_FILE:-}" "$URL" <<'PY'
+import ipaddress, json, os, re, sys
+from urllib.parse import urlsplit
+mode, path, prefix, agent, mcp_url, token_file, url = sys.argv[1:8]
 H = "mcp__plugin_machiya_hister__"
 d = json.load(open(path))
 allow = [prefix + n for n in ["board_list_cards", "board_get_card", "board_review", "board_roundup", "notes_*", "collections_list",
@@ -62,10 +65,26 @@ if mode == "add":
     env["MACHIYA_AGENT"] = agent
     if mcp_url:
         env["MACHIYA_MCP_URL"] = mcp_url
-    if token_file:
-        env["MACHIYA_TOKEN_FILE"] = os.path.abspath(token_file)    # the path, never the token
+    if token_file:      # a room token for machiya-mcp (plugin 0.4.0): only an mht_, only to https or loopback
+        try:
+            value = open(token_file, encoding="utf-8").readline().strip()
+        except OSError as e:
+            sys.exit("install.sh: MACHIYA_TOKEN_FILE: %s" % e.strerror)
+        if not re.fullmatch(r"mht_[A-Za-z0-9_-]{43}", value):
+            sys.exit("install.sh: MACHIYA_TOKEN_FILE holds no room token (mht_…): Hister's token never goes here")
+        u = urlsplit(url)
+        host = (u.hostname or "").lower()
+        try:
+            loop = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            loop = host == "localhost"
+        if not (u.scheme == "https" or (u.scheme == "http" and loop)):
+            sys.exit("install.sh: a room token goes only to an https (or loopback http) MACHIYA_MCP_URL, not %s" % url)
+        env["MACHIYA_MCP_TOKEN"] = value
+        env.pop("MACHIYA_TOKEN_FILE", None)
 else:
-    for k in ("MACHIYA_AGENT", "MACHIYA_MCP_URL", "MACHIYA_TOKEN_FILE", "HISTER_MCP_URL", "HISTER_TOKEN_FILE"):
+    for k in ("MACHIYA_AGENT", "MACHIYA_MCP_URL", "MACHIYA_MCP_TOKEN", "MACHIYA_TOKEN_FILE", "HISTER_MCP_URL",
+              "HISTER_TOKEN_FILE"):
         env.pop(k, None)
 json.dump(d, open(path, "w"), indent=2)
 open(path, "a").write("\n")
@@ -94,10 +113,14 @@ check)
     curl -fsS -m 8 "$base/healthz" | python3 -c "import sys,json; d=json.load(sys.stdin); print('server %s, %d tools, rooms: %s' % (d['version'], d['tools'], ', '.join(d['rooms'])))"
     # the call itself, with the same headers Claude Code sends (bin/machiya-headers: the room token, when one is set),
     # made in python so the token never sits in a command line
-    MACHIYA_MCP_URL=$URL python3 - "$URL" "$AGENT" "$(dirname "${BASH_SOURCE[0]}")/bin/machiya-headers" <<'PY'
-import json, subprocess, sys, urllib.request
-url, agent, helper = sys.argv[1:4]
-h = json.loads(subprocess.run([sys.executable, helper], capture_output=True, text=True).stdout or "{}")
+    python3 - "$URL" "$AGENT" "$SETTINGS" <<'PY'
+import json, os, sys, urllib.request
+url, agent, settings = sys.argv[1:4]
+try:
+    tok = (json.load(open(settings)).get("env") or {}).get("MACHIYA_MCP_TOKEN", "")
+except (OSError, ValueError):
+    tok = ""
+h = {"X-Machiya-Token": tok} if tok else {}                 # what the plugin sends (its .mcp.json)
 h.update({"Content-Type": "application/json", "X-Agent": agent, "Accept": "application/json, text/event-stream"})
 body = b'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"machiya_status","arguments":{}}}'
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -106,13 +129,13 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 try:
     raw = urllib.request.build_opener(NoRedirect).open(urllib.request.Request(url, body, h), timeout=15).read().decode()
 except Exception as e:
-    print("machiya_status failed: %s (%s)" % (e, "room token" if "Authorization" in h else "tailnet identity"))
+    print("machiya_status failed: %s (%s)" % (e, "room token" if tok else "tailnet identity"))
     sys.exit(1)
 if raw.lstrip().startswith("event:") or "data:" in raw[:200]:
     raw = raw.split("data:", 1)[1].strip().splitlines()[0]
 r = json.loads(raw)["result"]["structuredContent"]["rooms"]
 print("rooms:", ", ".join("%s %s" % (k, "ok" if v.get("ok") else "DOWN") for k, v in r.items()),
-      "(room token)" if "Authorization" in h else "(tailnet identity)")
+      "(room token)" if tok else "(tailnet identity)")
 sys.exit(1 if any(not v.get("ok") for v in r.values()) else 0)
 PY
     ;;

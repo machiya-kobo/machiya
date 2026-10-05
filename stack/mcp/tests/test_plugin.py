@@ -85,7 +85,8 @@ class HisterHeaders(Scratch):
 
 
 class MachiyaHeaders(Scratch):
-    """plugin 0.4.0: machiya-mcp gets a room token from MACHIYA_TOKEN_FILE only, never Hister's token, never pass."""
+    """plugin 0.4.0: machiya-mcp gets a room token from MACHIYA_TOKEN_FILE only, never Hister's token, never pass
+    (bin/machiya-headers for a server added by hand; the plugin's own server through its settings)."""
 
     def headers(self, **kw):
         r = subprocess.run([sys.executable, MACHIYA_HEADERS], capture_output=True, text=True, env=self.env(**kw),
@@ -115,24 +116,38 @@ class MachiyaHeaders(Scratch):
         self.assertEqual(self.headers(MACHIYA_TOKEN_FILE=os.path.join(self.dir, "gone"),
                                       MACHIYA_MCP_URL="https://mcp.example.ts.net/mcp"), {})
 
-    def test_the_plugin_uses_it_and_install_saves_the_path_only(self):
+    def test_the_plugin_sends_it_as_a_fixed_header_from_the_settings(self):
+        """Claude Code 2.1 runs no headersHelper for a plugin's own server: the plugin sends X-Machiya-Token from its
+        settings env, which install.sh fills from MACHIYA_TOKEN_FILE (a room token only, https or loopback only)."""
         with open(os.path.join(PLUGIN, ".mcp.json")) as f:
             server = json.load(f)["mcpServers"]["machiya"]
-        self.assertEqual(server["headersHelper"], "${CLAUDE_PLUGIN_ROOT}/bin/machiya-headers")
+        self.assertEqual(server["headers"]["X-Machiya-Token"], "${MACHIYA_MCP_TOKEN:-}")
+        self.assertNotIn("headersHelper", server)
         os.makedirs(os.path.join(self.dir, ".claude"))
-        with open(os.path.join(self.dir, ".claude", "settings.json"), "w") as fh:
+        settings = os.path.join(self.dir, ".claude", "settings.json")
+        with open(settings, "w") as fh:
             fh.write("{}")
-        f = self.room_file()
-        r = subprocess.run(["bash", INSTALL, "hister-remove"], capture_output=True, text=True, timeout=60,
-                           env=self.env(MACHIYA_TOKEN_FILE=f))
+        run = lambda **kw: subprocess.run(["bash", INSTALL, "hister-remove"], capture_output=True, text=True,  # noqa
+                                          timeout=60, env=self.env(**kw))
+        r = run(MACHIYA_TOKEN_FILE=self.room_file(), MACHIYA_MCP_URL="https://mcp.example.ts.net/mcp")
         self.assertEqual(r.returncode, 0, r.stderr)
-        with open(os.path.join(self.dir, ".claude", "settings.json")) as fh:
-            text = fh.read()
-        self.assertEqual(json.loads(text)["env"]["MACHIYA_TOKEN_FILE"], f)
-        self.assertNotIn(ROOM_TOKEN, text)
+        with open(settings) as fh:
+            env = json.load(fh)["env"]
+        self.assertEqual(env["MACHIYA_MCP_TOKEN"], ROOM_TOKEN)
+        self.assertNotIn("MACHIYA_TOKEN_FILE", env)
+        # Hister's token, or a plain-http address that isn't loopback: refused, nothing saved
+        for kw in ({"MACHIYA_TOKEN_FILE": self.token_file, "MACHIYA_MCP_URL": "https://mcp.example.ts.net/mcp"},
+                   {"MACHIYA_TOKEN_FILE": self.room_file(), "MACHIYA_MCP_URL": "http://mcp.example.ts.net/mcp"}):
+            with open(settings, "w") as fh:
+                fh.write("{}")
+            self.assertNotEqual(run(**kw).returncode, 0, kw)
+            with open(settings) as fh:
+                self.assertNotIn("MACHIYA_MCP_TOKEN", json.load(fh).get("env", {}))
+        r = run(MACHIYA_TOKEN_FILE=self.room_file(), MACHIYA_MCP_URL="http://127.0.0.1:19226/mcp")
+        self.assertEqual(r.returncode, 0, r.stderr)
         subprocess.run(["bash", INSTALL, "uninstall"], capture_output=True, text=True, timeout=60, env=self.env())
-        with open(os.path.join(self.dir, ".claude", "settings.json")) as fh:
-            self.assertNotIn("MACHIYA_TOKEN_FILE", json.load(fh)["env"])
+        with open(settings) as fh:
+            self.assertNotIn("MACHIYA_MCP_TOKEN", json.load(fh)["env"])
 
 
 class Install(Scratch):
