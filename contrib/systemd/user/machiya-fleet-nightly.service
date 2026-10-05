@@ -1,0 +1,22 @@
+# tools/fleet-nightly as a systemd user service, started by machiya-fleet-nightly.timer (docs/dev-stack.md, "Nightly").
+# Expects the runner's own checkout in ~/data/machiya-nightly/runner and the settings in
+# ~/.config/machiya/fleet-nightly.json.
+[Unit]
+Description=Machiya fleet nightly: the dev-stack tests and Quickstarts on the test VMs
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/data/machiya-nightly/runner
+Environment=FLEET_NIGHTLY_CONFIG=%h/.config/machiya/fleet-nightly.json
+# the runner updates itself first; if the forge is unreachable it runs as it is (the clones will then fail and say so)
+ExecStartPre=-/usr/bin/git -C %h/data/machiya-nightly/runner pull --ff-only --quiet
+ExecStart=/usr/bin/python3 %h/data/machiya-nightly/runner/tools/fleet-nightly
+# 1 = a test failed: that is a result, not a broken unit; 2 = the runner could not run
+SuccessExitStatus=1
+TimeoutStartSec=7h
+# SIGTERM to the runner only, so it stops its VMs and releases the locks; the rest is killed after TimeoutStopSec
+KillMode=mixed
+TimeoutStopSec=10min
+Nice=10

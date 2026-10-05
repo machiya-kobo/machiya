@@ -1,0 +1,11 @@
+# Starts machiya-fleet-nightly.service every night (docs/dev-stack.md, "Nightly").
+[Unit]
+Description=Machiya fleet nightly, 00:30 Pacific
+
+[Timer]
+OnCalendar=*-*-* 00:30:00 America/Los_Angeles
+# a missed night is skipped, not run in the morning when people use the VMs
+Persistent=false
+
+[Install]
+WantedBy=timers.target

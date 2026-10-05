@@ -1,0 +1,756 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Micheal Waltz and Machiya contributors
+"""fleet-nightly - every night, the dev-stack tests and the Quickstarts on each clean test VM, one VM after another,
+from fresh clones of main; a machine-readable result for a status page, never an alert.
+
+    tools/fleet-nightly [--config FILE] [--os debian,freebsd,...] [--legs dev-docker,...] [--budget MINUTES]
+                        [--out DIR] [--keep-src] [--no-publish] [--dry-run]
+
+One run:
+
+ 1. takes the run lock (OUT/.run.lock): a second run started while one is going exits at once (status 0);
+ 2. clones machiya, kura, niwa and konbini fresh from main (`git_url`, `{repo}` filled in) and notes each commit;
+ 3. for each OS in `order`: takes that VM's lock (`lock_dir`/testvm-<os>.lock, the one the agents take with
+    flock(1)) WITHOUT waiting: if another run holds it, the OS is skipped and the summary says so. Then for each leg:
+    reverts the VM (`vmctl revert <vm>`: a fresh overlay, booted), waits for a privileged login, runs the leg,
+    and records pass/fail, the duration and a short excerpt of the output. After the last leg it stops the VM
+    (`vmctl stop <vm>`) and releases the lock. Every leg starts from a revert, so no leg sees another's packages;
+ 4. writes OUT/nightly.json and OUT/nightly.txt (and a copy of both plus every leg's full log in OUT/runs/<stamp>/,
+    the last `keep_runs` kept), deletes the clones, and pipes nightly.json to `publish` (a shell command), if set.
+
+Legs (each OS lists its own in `oses.<os>.legs`):
+
+  dev-docker         machiya tools/dev-test VM --packages                      (Linux: the stack in Docker)
+  dev-native         machiya tools/dev-test VM --packages --native  + --hister-bin FILE (`hister_bin`) or
+                     --hister-via <the Hister host> (a kept Docker dev stack on `hister_host`, started on first
+                     need, kept until the last OS that needs it, then stopped)
+  stack-quickstart   machiya tools/quickstart-test --with-packages, on the VM  (the README's stack Quickstart)
+  kura-native        kura tools/quickstart-test --only native --ssh VM
+  kura-container     kura tools/quickstart-test --only container --ssh VM      (podman)
+  niwa-native        niwa tools/quickstart-test --only native --with-packages, on the VM
+  niwa-container     niwa tools/quickstart-test --only container --with-packages --engine docker, on the VM
+  konbini-native     konbini tools/quickstart-test --only native --with-packages, on the VM
+  konbini-container  konbini tools/quickstart-test --only container --with-packages, on the VM (podman)
+
+"On the VM" legs copy the four clones (with .git) to `remote_dir` there and need python3 and git first: the
+`bootstrap` line of the OS installs just those two (the README's own package block then does the rest).
+
+A total time budget (`budget_minutes`) bounds the run: a leg never runs past it (its timeout is cut to what is
+left) and no leg starts once it is spent; those legs are `skipped` with the reason. A leg is pass, fail, timeout,
+error (the VM, the copy or the bootstrap failed: not the software under test) or skipped.
+
+Exit status: 0 when every leg that ran passed, 1 when one failed, 2 when the runner itself could not run (no
+clones, no `vmctl`). Settings: built-in defaults < the JSON config file (--config, $FLEET_NIGHTLY_CONFIG, or
+~/.config/machiya/fleet-nightly.json) < $FLEET_VMCTL, $FLEET_GIT_URL, $FLEET_NIGHTLY_DIR, $FLEET_NIGHTLY_PUBLISH <
+the options. docs/dev-stack.md ("Nightly") has the JSON shape, the timer and the install steps. Nothing secret is
+printed or written to the summary: the stacks make their own dummy secrets, and excerpts are scrubbed of anything
+that looks like a token. Standard library only; needs git, ssh and tar here.
+"""
+import argparse
+import copy
+import datetime
+import fcntl
+import io
+import json
+import os
+import re
+import shlex
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tarfile
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+REPOS = ("machiya", "kura", "niwa", "konbini")
+SCHEMA = 1
+KIND = "machiya-fleet-nightly"
+
+LINUX_LEGS = ["dev-docker", "dev-native", "stack-quickstart", "kura-native", "kura-container", "niwa-native",
+              "niwa-container", "konbini-native", "konbini-container"]
+BSD_LEGS = ["dev-native", "kura-native", "niwa-native", "konbini-native"]
+
+# where: "local" runs here (the tool reaches the VM by ssh itself); "vm" runs on the VM, in remote_dir
+LEGS = {
+    "dev-docker": {"title": "dev stack, Docker (dev-test --packages)", "where": "local", "timeout": 1800},
+    "dev-native": {"title": "dev stack, native (dev-test --packages --native)", "where": "local", "timeout": 1800},
+    "stack-quickstart": {"title": "machiya README Quickstart (quickstart-test --with-packages)", "where": "vm",
+                         "repo": "machiya", "args": "--with-packages --siblings {dir}", "timeout": 2700},
+    "kura-native": {"title": "Kura README, native", "where": "local", "repo": "kura",
+                    "args": "--only native --ssh {vm}", "timeout": 1200},
+    "kura-container": {"title": "Kura README, container (podman)", "where": "local", "repo": "kura",
+                       "args": "--only container --ssh {vm}", "timeout": 1200},
+    "niwa-native": {"title": "Niwa README, native", "where": "vm", "repo": "niwa",
+                    "args": "--only native --with-packages", "timeout": 1200},
+    "niwa-container": {"title": "Niwa README, container (docker)", "where": "vm", "repo": "niwa",
+                       "args": "--only container --with-packages --engine docker", "timeout": 1200},
+    "konbini-native": {"title": "Konbini README, native", "where": "vm", "repo": "konbini",
+                       "args": "--only native --with-packages", "timeout": 1200},
+    "konbini-container": {"title": "Konbini README, container (podman)", "where": "vm", "repo": "konbini",
+                          "args": "--only container --with-packages", "timeout": 1200},
+}
+
+# python3 and git, which the on-VM test scripts need before the README's own package block runs
+BOOTSTRAP = {
+    "debian": "sudo apt-get update -q && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q git python3",
+    "freebsd": "sudo pkg install -y python3 git-lite",
+    "netbsd": "sudo env PKG_PATH=\"https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -p)/"
+              "$(uname -r | cut -d_ -f1)/All\" pkg_add python313 git-base && "
+              "sudo ln -sf /usr/pkg/bin/python3.13 /usr/pkg/bin/python3",
+    "openbsd": "doas pkg_add python%3 git",
+}
+
+DEFAULTS = {
+    "git_url": "https://github.com/machiya-kobo/{repo}.git",
+    "vmctl": "",                  # a command prefix; the tool appends `revert|stop <vm>`
+    "budget_minutes": 360,
+    "out": "/var/tmp/machiya-fleet-nightly",
+    "keep_runs": 14,
+    "publish": "",                # a shell command that reads nightly.json on stdin
+    "lock_dir": "/var/tmp",
+    "remote_dir": "/var/tmp/machiya-nightly",
+    "hister_host": "debian",      # the OS whose VM lends its Hister to dev-native legs without a hister_bin
+    "order": ["debian", "freebsd", "netbsd", "openbsd", "haiku", "arm64"],
+    "oses": {
+        "debian": {"vm": "tv-debian", "system": "debian", "legs": LINUX_LEGS},
+        "freebsd": {"vm": "tv-freebsd", "system": "freebsd", "legs": BSD_LEGS},
+        "netbsd": {"vm": "tv-netbsd", "system": "netbsd", "legs": BSD_LEGS},
+        "openbsd": {"vm": "tv-openbsd", "system": "openbsd", "legs": BSD_LEGS},
+        "haiku": {"vm": "tv-haiku", "system": "haiku", "legs": ["dev-native"]},
+        "arm64": {"vm": "tv-arm64", "system": "debian", "legs": LINUX_LEGS, "slow": 3},   # emulated: timeouts x3
+    },
+}
+ENV = {"vmctl": "FLEET_VMCTL", "git_url": "FLEET_GIT_URL", "out": "FLEET_NIGHTLY_DIR", "publish": "FLEET_NIGHTLY_PUBLISH"}
+REMOTE_PATH = "PATH=$PATH:/usr/local/bin:/usr/local/sbin:/usr/pkg/bin:/usr/pkg/sbin; export PATH; "
+
+
+class Aborted(Exception):
+    pass
+
+
+def _abort(signum, frame):
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)     # once: the cleanup that follows must not be cut short
+    raise Aborted("signal %d" % signum)
+
+
+def now():
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def iso(t):
+    return t.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def load_config(path=None, env=os.environ):
+    cfg = copy.deepcopy(DEFAULTS)
+    path = path or env.get("FLEET_NIGHTLY_CONFIG") or os.path.expanduser("~/.config/machiya/fleet-nightly.json")
+    used = None
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as f:
+            user = json.load(f)
+        for k, v in user.items():
+            if k == "oses":
+                for o, entry in v.items():
+                    cfg["oses"].setdefault(o, {}).update(entry)
+            else:
+                cfg[k] = v
+        used = path
+    for k, var in ENV.items():
+        if env.get(var):
+            cfg[k] = env[var]
+    cfg["config_file"] = used
+    d = str(cfg["remote_dir"]).rstrip("/")
+    # it goes unquoted into remote shell lines, `rm -rf` among them: a plain absolute path, two levels deep at least
+    if not re.fullmatch(r"/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+", d) or re.search(r"/\.\.?(/|$)", d):
+        sys.exit("fleet-nightly: remote_dir must be a plain absolute path like /var/tmp/machiya-nightly, not %r" % d)
+    cfg["remote_dir"] = d
+    return cfg
+
+
+# ---------------------------------------------------------------- output scrubbing and excerpts
+
+SECRETISH = [
+    (re.compile(r"(?i)\b(token|password|passwd|secret|api[_-]?key|authorization|cookie|bearer)(\s*[=:]\s*|\s+)"
+                r"(?!\[redacted\])[\"']?[^\s\"',;&]{6,}"), r"\1\2[redacted]"),
+    (re.compile(r"\b(mh[a-z]_)[A-Za-z0-9_-]{6,}"), r"\1[redacted]"),                     # machiya codes and room tokens
+    (re.compile(r"(?=[A-Za-z0-9+_-]*\d)(?=[A-Za-z0-9+_-]*[A-Za-z])\b[A-Za-z0-9+_-]{32,}={0,2}"), "[redacted]"),
+    (re.compile(r"(https?://)[^/\s:@]+:[^/\s@]+@"), r"\1[redacted]@"),                 # user:password@ in a URL
+]
+NOTEWORTHY = re.compile(r"(?i)\b(fail(ed)?|error|traceback|timed out|expected|refused|not found|missing)\b")
+
+
+def scrub(line):
+    for rx, sub in SECRETISH:
+        line = rx.sub(sub, line)
+    return line
+
+
+def excerpt(text, lines=10, width=200):
+    """The few lines that say what went wrong: the last noteworthy lines, then the tail, scrubbed and cut short."""
+    rows = [l.rstrip() for l in text.splitlines() if l.strip()]
+    keep = set([i for i, l in enumerate(rows) if NOTEWORTHY.search(l)][-(lines // 2):])
+    for i in range(len(rows) - 1, -1, -1):            # then the tail, up to `lines` in all, in the output's order
+        if len(keep) >= lines:
+            break
+        keep.add(i)
+    return [scrub(rows[i])[:width] for i in sorted(keep)]
+
+
+def summarize(leg, text, rc):
+    """One line for the summary: the check counts of a dev-test, the FAILED line of a quickstart, or the last line."""
+    m = re.findall(r"(\d+) check\(s\), (\d+) failed", text)
+    if m:
+        return scrub("%s checks, %s failed" % m[-1])
+    fails = re.findall(r"^\s*(FAIL(?:ED)?\b.*|[a-z-]+/[a-z0-9-]+: (?:exit \d+|expected .*))$", text, re.M)
+    if rc and fails:
+        return scrub(fails[-1].strip())[:200]
+    if re.search(r"quickstart test: all passed|quickstart-test: (all passed|PASS)", text):
+        return "all passed"
+    rows = [l.strip() for l in text.splitlines() if l.strip()]
+    return scrub(rows[-1])[:200] if rows else ""
+
+
+def classify(text, rc, timed_out):
+    if timed_out:
+        return "timeout"
+    if rc == 0:
+        # a room test that found nothing to run here (no blocks for this OS, no engine) exits 0 without testing
+        if re.search(r"nothing to run on this machine", text):
+            return "skipped"
+        return "pass"
+    return "fail"
+
+
+# ---------------------------------------------------------------- locks and processes
+
+def try_lock(path):
+    """A non-blocking flock on PATH: the open file (keep it to hold the lock), or None when someone else holds it."""
+    f = open(path, "a")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        f.close()
+        return None
+    return f
+
+
+def lock_free(path):
+    if not os.path.exists(path):
+        return True
+    f = try_lock(path)
+    if f is None:
+        return False
+    f.close()
+    return True
+
+
+def run_logged(argv, log, timeout, stdin=None):
+    """Run argv in its own process group, output appended to LOG. -> (rc, timed_out). The whole group is killed on a
+    timeout or an abort, so dev-test's ssh tunnels go too."""
+    with open(log, "ab") as out:
+        p = subprocess.Popen(argv, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.PIPE if stdin else
+                             subprocess.DEVNULL, start_new_session=True)
+        try:
+            p.communicate(input=stdin, timeout=max(timeout, 1))
+            return p.returncode, False
+        except subprocess.TimeoutExpired:
+            _kill(p)
+            out.write(b"\nfleet-nightly: timed out after %d s\n" % int(timeout))
+            return -1, True
+        except BaseException:
+            _kill(p)
+            raise
+
+
+def _kill(p):
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(p.pid, sig)
+        except OSError:
+            return
+        try:
+            p.wait(timeout=10)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def ssh_argv(vm, script, connect_timeout=15):
+    return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=%d" % connect_timeout, "-o", "ServerAliveInterval=30",
+            vm, "sh -c " + shlex.quote(REMOTE_PATH + script)]
+
+
+def tail(path, size=65536):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - size))
+            return f.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+# ---------------------------------------------------------------- the plan
+
+def leg_spec(leg, entry, cfg, src, hister_vm=None):
+    """-> (where, argv-or-script) for one leg; src is the directory of the fresh clones."""
+    spec = LEGS[leg]
+    vm = entry["vm"]
+    py = sys.executable or "python3"
+    if leg in ("dev-docker", "dev-native"):
+        argv = [py, os.path.join(src, "machiya", "tools", "dev-test"), vm, "--packages", "--siblings", src]
+        if leg == "dev-native":
+            argv.append("--native")
+            if entry.get("hister_bin"):
+                argv += ["--hister-bin", entry["hister_bin"]]
+            elif hister_vm:
+                argv += ["--hister-via", hister_vm]
+        return "local", argv
+    args = spec["args"].format(vm=vm, dir=cfg["remote_dir"])
+    if spec["where"] == "local":
+        return "local", [py, os.path.join(src, spec["repo"], "tools", "quickstart-test")] + shlex.split(args)
+    return "vm", "cd %s/%s && python3 tools/quickstart-test %s" % (cfg["remote_dir"], spec["repo"], args)
+
+
+def hister_plan(entry, cfg):
+    """How a dev-native leg gets its Hister: ("bin", path), ("via", host os), or ("none", why)."""
+    if entry.get("hister_bin"):
+        return "bin", entry["hister_bin"]
+    host = cfg.get("hister_host")
+    if host and host in cfg["oses"] and cfg["oses"][host]["vm"] != entry["vm"]:
+        return "via", host
+    return "none", "no Hister binary for this OS (set oses.<os>.hister_bin) and it is the Hister host itself"
+
+
+def plan(cfg, only_os=None, only_legs=None):
+    out = []
+    for o in cfg["order"]:
+        if only_os and o not in only_os:
+            continue
+        if o not in cfg["oses"]:
+            sys.exit("fleet-nightly: no OS %r in the config" % o)
+        entry = dict(cfg["oses"][o], os=o)
+        legs = [l for l in entry.get("legs", []) if not only_legs or l in only_legs]
+        bad = [l for l in legs if l not in LEGS]
+        if bad:
+            sys.exit("fleet-nightly: unknown leg(s) %s for %s (known: %s)" % (", ".join(bad), o, ", ".join(LEGS)))
+        entry["legs"] = legs
+        out.append(entry)
+    return out
+
+
+def print_plan(cfg, entries):
+    lock = lambda o: os.path.join(cfg["lock_dir"], "testvm-%s.lock" % o)
+    print("fleet-nightly plan (config: %s)" % (cfg["config_file"] or "built-in defaults"))
+    print("  sources : fresh clones of %s" % ", ".join(cfg["git_url"].format(repo=r) for r in REPOS))
+    print("  vmctl   : %s" % ("%s revert|stop <vm>" % cfg["vmctl"] if cfg["vmctl"] else "UNSET (set vmctl or $FLEET_VMCTL)"))
+    print("  budget  : %d min; output: %s; publish: %s" % (cfg["budget_minutes"], cfg["out"], cfg["publish"] or "no"))
+    needs_host = False
+    for e in entries:
+        slow = e.get("slow", 1)
+        print("\n%s (%s)%s, lock %s: %s" % (e["os"], e["vm"], " slow x%d" % slow if slow > 1 else "", lock(e["os"]),
+                                            "free" if lock_free(lock(e["os"])) else "HELD (would be skipped)"))
+        for leg in e["legs"]:
+            hv = None
+            if leg == "dev-native":
+                kind, what = hister_plan(e, cfg)
+                if kind == "none":
+                    print("  %-18s SKIP: %s" % (leg, what))
+                    continue
+                if kind == "via":
+                    hv = cfg["oses"][what]["vm"]
+                    needs_host = True
+            where, cmd = leg_spec(leg, e, cfg, "<src>", hv)
+            print("  %-18s revert, then %s" % (leg, "here" if where == "local" else "on the VM, after the bootstrap"))
+            if where == "local":
+                print("      $ " + " ".join(shlex.quote(c) for c in cmd))
+            else:
+                print("      $ (copy the clones to %s) %s" % (cfg["remote_dir"], BOOTSTRAP.get(e["system"], "(no bootstrap)")))
+                print("      $ " + cmd)
+            print("      timeout %d min" % (LEGS[leg]["timeout"] * slow // 60))
+        print("  then: %s stop %s; release the lock" % ("vmctl", e["vm"]))
+    if needs_host:
+        h = cfg["oses"][cfg["hister_host"]]
+        print("\nHister host: %s, started on the first dev-native leg that needs it (revert, dev-test %s --packages "
+              "--keep, holding its lock), stopped after the last." % (h["vm"], h["vm"]))
+
+
+# ---------------------------------------------------------------- the run
+
+class Runner:
+    def __init__(self, cfg, entries, run_dir, src, budget_s, log=None):
+        self.cfg, self.entries, self.run_dir, self.src = cfg, entries, run_dir, src
+        self.logs = os.path.join(run_dir, "logs")
+        os.makedirs(self.logs, exist_ok=True)
+        self.t0 = time.monotonic()
+        self.budget_s = budget_s
+        self.say = log or (lambda *a: print(*a, flush=True))
+        self.hister = None           # {"os", "vm", "lock", "status", ...} while a Hister host is up
+        self.hister_record = None
+        self.hister_failed = None
+        self.held = {}               # os -> lock file we hold
+        self.records = []            # one per OS, appended as it starts, so an abort keeps what ran
+
+    def remaining(self):
+        return self.budget_s - (time.monotonic() - self.t0)
+
+    def vmctl(self, verb, vm, log):
+        argv = shlex.split(self.cfg["vmctl"]) + [verb, vm]
+        with open(log, "ab") as f:
+            f.write(("\n$ vmctl %s %s\n" % (verb, vm)).encode())
+        rc, to = run_logged(argv, log, 1200)
+        return rc == 0 and not to
+
+    def wait_login(self, entry, log):
+        """After a revert: until the VM takes a login with sudo or doas (Haiku: a plain login)."""
+        probe = "sudo -n true 2>/dev/null || doas true 2>/dev/null || [ \"$(uname -s)\" = Haiku ]"
+        deadline = time.monotonic() + 300 * entry.get("slow", 1)
+        while time.monotonic() < deadline:
+            r = subprocess.run(ssh_argv(entry["vm"], probe, 10), capture_output=True, stdin=subprocess.DEVNULL)
+            if r.returncode == 0:
+                # a reverted Debian runs cloud-init again: a test that starts while it still works can fail on its own
+                settle = "if command -v cloud-init >/dev/null 2>&1; then sudo -n cloud-init status --wait >/dev/null 2>&1; fi; true"
+                run_logged(ssh_argv(entry["vm"], settle), log, max(60, deadline - time.monotonic()))
+                return True
+            time.sleep(5)
+        with open(log, "ab") as f:
+            f.write(b"fleet-nightly: no privileged login on the VM\n")
+        return False
+
+    def fresh_vm(self, entry, log):
+        if not self.vmctl("revert", entry["vm"], log):
+            return "the revert failed"
+        if not self.wait_login(entry, log):
+            return "no login after the revert"
+        return None
+
+    def copy_and_bootstrap(self, entry, log):
+        d = self.cfg["remote_dir"]
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            for r in REPOS:
+                tar.add(os.path.join(self.src, r), arcname=r)
+        rc, to = run_logged(ssh_argv(entry["vm"], "rm -rf %s && mkdir -p %s && tar -xzf - -C %s" % (d, d, d)), log,
+                            600, stdin=buf.getvalue())
+        if rc or to:
+            return "copying the clones failed"
+        boot = BOOTSTRAP.get(entry["system"])
+        if boot:
+            with open(log, "ab") as f:
+                f.write(("$ %s\n" % boot).encode())
+            rc, to = run_logged(ssh_argv(entry["vm"], boot), log, 900 * entry.get("slow", 1))
+            if rc or to:
+                return "the bootstrap (python3, git) failed"
+        return None
+
+    # -- the Hister host: a kept Docker dev stack lending its Hister to dev-native legs (dev-test --hister-via)
+
+    def hister_up(self, host_os):
+        if self.hister:
+            return None
+        if self.hister_failed:
+            return self.hister_failed
+        entry = dict(self.cfg["oses"][host_os], os=host_os)
+        lock = try_lock(os.path.join(self.cfg["lock_dir"], "testvm-%s.lock" % host_os))
+        t = time.monotonic()
+        log = os.path.join(self.logs, "hister-host.log")
+        if lock is None:
+            self.hister_failed = "the Hister host %s is locked by another run" % entry["vm"]
+        else:
+            self.say("== Hister host: %s (dev-test --packages --keep)" % entry["vm"])
+            err = self.fresh_vm(entry, log)
+            if not err:
+                _, argv = leg_spec("dev-docker", entry, self.cfg, self.src)
+                rc, to = run_logged(argv + ["--keep"], log, min(1800 * entry.get("slow", 1), max(self.remaining(), 60)))
+                if rc or to:
+                    err = "its dev stack failed: " + summarize("dev-docker", tail(log), rc or 1)
+            self.hister_record = {"os": host_os, "vm": entry["vm"], "status": "error" if err else "pass",
+                                  "duration_s": int(time.monotonic() - t), "summary": err or summarize("dev-docker", tail(log), 0),
+                                  "log": os.path.relpath(log, self.run_dir)}
+            if err:
+                self.hister_failed = "the Hister host %s: %s" % (entry["vm"], err)
+                self.vmctl("stop", entry["vm"], log)
+                lock.close()
+            else:
+                self.hister = {"os": host_os, "vm": entry["vm"], "lock": lock, "log": log}
+        if self.hister_failed and not self.hister_record:
+            self.hister_record = {"os": host_os, "vm": entry["vm"], "status": "skipped", "duration_s": 0,
+                                  "summary": self.hister_failed}
+        return self.hister_failed
+
+    def hister_down(self):
+        if self.hister:
+            self.say("== Hister host: stopping %s" % self.hister["vm"])
+            self.vmctl("stop", self.hister["vm"], self.hister["log"])
+            self.hister["lock"].close()
+            self.hister = None
+
+    def hister_needed_after(self, index):
+        for e in self.entries[index + 1:]:
+            if "dev-native" in e["legs"] and hister_plan(e, self.cfg)[0] == "via":
+                return True
+        return False
+
+    # -- one leg, one OS
+
+    def leg(self, entry, leg):
+        rec = {"leg": leg, "title": LEGS[leg]["title"], "status": "skipped", "duration_s": 0, "prep_s": 0}
+        slow = entry.get("slow", 1)
+        if self.remaining() < 60:
+            rec["summary"] = "the time budget is spent"
+            return rec
+        hv = None
+        if leg == "dev-native":
+            kind, what = hister_plan(entry, self.cfg)
+            if kind == "none":
+                rec["summary"] = what
+                return rec
+            if kind == "bin" and not os.path.isfile(what):
+                rec.update(status="error", summary="hister_bin %s is missing here" % os.path.basename(what))
+                return rec
+            if kind == "via":
+                err = self.hister_up(what)
+                if err:
+                    rec.update(status="error", summary=err)
+                    return rec
+                hv = self.hister["vm"]
+        log = os.path.join(self.logs, "%s-%s.log" % (entry["os"], leg))
+        rec["log"] = os.path.relpath(log, self.run_dir)
+        where, cmd = leg_spec(leg, entry, self.cfg, self.src, hv)
+        self.say("-- %s %s: revert" % (entry["os"], leg))
+        t = time.monotonic()
+        err = self.fresh_vm(entry, log)
+        if not err and where == "vm":
+            err = self.copy_and_bootstrap(entry, log)
+        rec["prep_s"] = int(time.monotonic() - t)
+        if err:
+            rec.update(status="error", summary=err, excerpt=excerpt(tail(log)))
+            return rec
+        argv = cmd if where == "local" else ssh_argv(entry["vm"], cmd)
+        with open(log, "ab") as f:
+            f.write(("\n$ %s\n" % (" ".join(shlex.quote(c) for c in cmd) if where == "local" else cmd)).encode())
+        limit = min(LEGS[leg]["timeout"] * slow, self.remaining())
+        self.say("-- %s %s: run (limit %d min)" % (entry["os"], leg, limit // 60))
+        t = time.monotonic()
+        rc, timed_out = run_logged(argv, log, limit)
+        rec["duration_s"] = int(time.monotonic() - t)
+        text = tail(log)
+        rec["status"] = classify(text, rc, timed_out)
+        rec["exit"] = rc
+        rec["summary"] = "timed out after %d min" % (limit // 60) if timed_out else summarize(leg, text, rc)
+        if rec["status"] != "pass":
+            rec["excerpt"] = excerpt(text)
+        self.say("-- %s %s: %s (%s) in %ds" % (entry["os"], leg, rec["status"].upper(), rec["summary"], rec["duration_s"]))
+        return rec
+
+    def one_os(self, index, entry):
+        o = entry["os"]
+        rec = {"os": o, "vm": entry["vm"], "status": "skipped", "legs": [], "started": iso(now()), "duration_s": 0}
+        self.records.append(rec)
+        t = time.monotonic()
+        if self.hister and self.hister["vm"] == entry["vm"]:
+            self.hister_down()        # the Hister host's VM is this OS's VM: give it back first
+        if self.remaining() < 60:
+            rec["reason"] = "the time budget is spent"
+            rec["legs"] = [{"leg": l, "title": LEGS[l]["title"], "status": "skipped", "summary": rec["reason"]}
+                           for l in entry["legs"]]
+            return rec
+        lockpath = os.path.join(self.cfg["lock_dir"], "testvm-%s.lock" % o)
+        lock = try_lock(lockpath)
+        if lock is None:
+            rec["reason"] = "%s is in use: another run holds %s" % (entry["vm"], lockpath)
+            rec["legs"] = [{"leg": l, "title": LEGS[l]["title"], "status": "skipped", "summary": rec["reason"]}
+                           for l in entry["legs"]]
+            self.say("== %s: SKIPPED (%s)" % (o, rec["reason"]))
+            return rec
+        self.held[o] = lock
+        self.say("== %s (%s)" % (o, entry["vm"]))
+        try:
+            for leg in entry["legs"]:
+                rec["legs"].append(self.leg(entry, leg))
+        except Aborted:
+            rec["reason"] = "aborted during %s" % (entry["legs"][len(rec["legs"])] if len(rec["legs"]) < len(entry["legs"]) else "the cleanup")
+            raise
+        finally:
+            rec["status"] = worst([l["status"] for l in rec["legs"]])
+            rec["duration_s"] = int(time.monotonic() - t)
+            ok = self.vmctl("stop", entry["vm"], os.path.join(self.logs, "%s-vmctl.log" % o))
+            if not ok:
+                rec["cleanup"] = "the stop failed"
+            lock.close()
+            self.held.pop(o, None)
+            if self.hister and not self.hister_needed_after(index):
+                self.hister_down()
+        return rec
+
+    def cleanup(self):
+        self.hister_down()
+        for o, lock in list(self.held.items()):
+            self.vmctl("stop", self.cfg["oses"][o]["vm"], os.path.join(self.logs, "%s-vmctl.log" % o))
+            lock.close()
+        self.held = {}
+
+
+def worst(statuses):
+    for s in ("fail", "timeout", "error", "pass"):
+        if s in statuses:
+            return "fail" if s == "timeout" else s
+    return "skipped"
+
+
+def clone_sources(cfg, src, log):
+    sources = {}
+    os.makedirs(src, exist_ok=True)
+    for r in REPOS:
+        url = cfg["git_url"].format(repo=r)
+        d = os.path.join(src, r)
+        rc, to = run_logged(["git", "clone", "--quiet", url, d], log, 600)
+        if rc or to:
+            raise RuntimeError("cloning %s failed" % r)
+        g = lambda *a: subprocess.run(["git", "-C", d] + list(a), capture_output=True, text=True).stdout.strip()
+        sources[r] = {
+            "commit": g("rev-parse", "--short=7", "HEAD"),
+            "describe": g("describe", "--tags", "--always", "--match", "v[0-9]*"),
+            "date": g("log", "-1", "--format=%cI"),
+            "subject": g("log", "-1", "--format=%s")[:120],
+        }
+    return sources
+
+
+def human(result):
+    c = result["counts"]
+    loc = lambda s: datetime.datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(
+        tzinfo=datetime.timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    dur = lambda s: "%dh%02dm" % (s // 3600, s % 3600 // 60) if s >= 3600 else "%dm%02ds" % (s // 60, s % 60)
+    lines = ["Machiya fleet nightly %s, %s: %s (%d pass, %d fail, %d error, %d skipped)%s" % (
+        loc(result["started"]), dur(result["duration_s"]), result["status"].upper(), c["pass"], c["fail"], c["error"],
+        c["skipped"], "; ABORTED" if result.get("aborted") else "")]
+    if result.get("sources"):
+        lines.append("sources: " + ", ".join("%s %s (%s)" % (r, s["commit"], s["describe"])
+                                             for r, s in result["sources"].items()))
+    if result.get("error"):
+        lines.append("runner error: " + result["error"])
+    h = result.get("hister_host")
+    if h:
+        lines.append("Hister host %s: %s, %s (%s)" % (h["vm"], h["status"], dur(h["duration_s"]), h["summary"]))
+    for o in result["oses"]:
+        lines.append("%-8s %-7s %s" % (o["os"], o["status"].upper(), o.get("reason", "")))
+        for l in o["legs"]:
+            lines.append("  %-18s %-7s %7s  %s" % (l["leg"], l["status"], dur(l.get("duration_s", 0)), l.get("summary", "")))
+    return "\n".join(lines) + "\n"
+
+
+def write_atomic(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
+def finish(result, out, run_dir, cfg, publish):
+    result["finished"] = iso(now())
+    statuses = [l["status"] for o in result["oses"] for l in o["legs"]]
+    result["counts"] = {k: sum(1 for s in statuses if s == k or (k == "fail" and s == "timeout"))
+                        for k in ("pass", "fail", "error", "skipped")}
+    result["status"] = "error" if result.get("error") else worst(statuses)
+    data = json.dumps(result, indent=1, ensure_ascii=False) + "\n"
+    text = human(result)
+    for d in (run_dir, out):
+        write_atomic(os.path.join(d, "nightly.json"), data)
+        write_atomic(os.path.join(d, "nightly.txt"), text)
+    print("\n" + text, end="")
+    runs = sorted(n for n in os.listdir(os.path.join(out, "runs")) if re.fullmatch(r"\d{8}T\d{6}Z", n))
+    for old in runs[:-max(1, int(cfg["keep_runs"]))]:
+        shutil.rmtree(os.path.join(out, "runs", old), ignore_errors=True)
+    if publish and cfg["publish"]:
+        r = subprocess.run(cfg["publish"], shell=True, input=data.encode(), capture_output=True, timeout=300)
+        print("fleet-nightly: publish %s" % ("ok" if r.returncode == 0 else "FAILED (exit %d): %s" % (
+            r.returncode, scrub(r.stderr.decode("utf-8", "replace").strip()[-300:]))))
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--config", help="the JSON config (default: $FLEET_NIGHTLY_CONFIG or ~/.config/machiya/fleet-nightly.json)")
+    ap.add_argument("--os", help="only these OSes, comma-separated (default: the config's order)")
+    ap.add_argument("--legs", help="only these legs, comma-separated")
+    ap.add_argument("--budget", type=int, help="the total time budget in minutes")
+    ap.add_argument("--out", help="the output directory")
+    ap.add_argument("--keep-src", action="store_true", help="keep the fresh clones in OUT/runs/<stamp>/src")
+    ap.add_argument("--no-publish", action="store_true", help="don't run the publish command")
+    ap.add_argument("--dry-run", action="store_true", help="print the plan and exit")
+    a = ap.parse_args(argv)
+    cfg = load_config(a.config)
+    if a.budget:
+        cfg["budget_minutes"] = a.budget
+    if a.out:
+        cfg["out"] = a.out
+    entries = plan(cfg, a.os.split(",") if a.os else None, a.legs.split(",") if a.legs else None)
+    if a.dry_run:
+        print_plan(cfg, entries)
+        return 0
+    if not cfg["vmctl"]:
+        print("fleet-nightly: no vmctl (the command that reverts and stops a test VM): set it in the config or $FLEET_VMCTL")
+        return 2
+    out = os.path.abspath(cfg["out"])
+    os.makedirs(os.path.join(out, "runs"), exist_ok=True)
+    os.chmod(out, 0o700)          # the logs are the owner's; NOT a umask: the clones' file modes travel into the images
+    run_lock = try_lock(os.path.join(out, ".run.lock"))
+    if run_lock is None:
+        print("fleet-nightly: another run is going (%s/.run.lock); nothing to do" % out)
+        return 0
+    started = now()
+    run_dir = os.path.join(out, "runs", started.strftime("%Y%m%dT%H%M%SZ"))
+    os.makedirs(run_dir, exist_ok=True)
+    src = os.path.join(run_dir, "src")
+    runner = Runner(cfg, entries, run_dir, src, cfg["budget_minutes"] * 60)
+    runner_records = runner.records
+    result = {"schema": SCHEMA, "kind": KIND, "host": socket.gethostname(), "started": iso(started),
+              "budget_s": cfg["budget_minutes"] * 60, "leg_titles": {k: v["title"] for k, v in LEGS.items()},
+              "sources": {}, "oses": runner_records}
+    try:
+        result["runner"] = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short=7", "HEAD"], capture_output=True,
+                                          text=True).stdout.strip() or None
+    except OSError:
+        result["runner"] = None
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, _abort)
+    t0 = time.monotonic()
+    try:
+        print("fleet-nightly: cloning %s" % ", ".join(REPOS), flush=True)
+        result["sources"] = clone_sources(cfg, src, os.path.join(run_dir, "logs", "clone.log"))
+        for i, entry in enumerate(entries):
+            runner.one_os(i, entry)
+            sys.stdout.flush()
+    except Aborted as exc:
+        result["aborted"] = str(exc)
+    except Exception as exc:    # the runner's own failure: still clean up and say so in the result
+        result["error"] = scrub(str(exc))[:300]
+    finally:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        runner.cleanup()
+        result["duration_s"] = int(time.monotonic() - t0)
+        result["budget_exhausted"] = runner.remaining() < 60
+        if runner.hister_record:
+            result["hister_host"] = runner.hister_record
+        done = {o["os"] for o in result["oses"]}
+        for e in entries:              # the OSes an abort or error left out still show up, as skipped
+            if e["os"] not in done:
+                why = "the run stopped before it (%s)" % ("aborted" if result.get("aborted") else "runner error")
+                result["oses"].append({"os": e["os"], "vm": e["vm"], "status": "skipped", "reason": why,
+                                       "legs": [{"leg": l, "title": LEGS[l]["title"], "status": "skipped",
+                                                 "summary": why} for l in e["legs"]], "duration_s": 0})
+        if not a.keep_src:
+            shutil.rmtree(src, ignore_errors=True)
+        finish(result, out, run_dir, cfg, not a.no_publish)
+        run_lock.close()
+    if result.get("error"):
+        return 2
+    return 1 if result["status"] == "fail" else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

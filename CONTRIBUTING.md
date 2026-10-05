@@ -26,7 +26,7 @@ To try a change against everything at once, use the dev stack ([docs/dev-stack.m
 cd compose/dev && ./dev init && ./dev up && ./dev check       # ./dev reset --yes goes back to the seed
 ```
 
-Never load real notes, pages or feeds into it; extend `compose/dev/seed/` instead. `tools/dev-test HOST` runs the same stack and checks on another machine.
+Never load real notes, pages or feeds into it; extend `compose/dev/seed/` instead. `tools/dev-test HOST` runs the same stack and checks on another machine; `tools/fleet-nightly` runs them and the Quickstarts on every test VM each night ([docs/dev-stack.md](docs/dev-stack.md#nightly)).
 
 ## Rules
 

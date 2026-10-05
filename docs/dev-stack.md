@@ -174,6 +174,93 @@ CGO_ENABLED=1 go126 build -trimpath -ldflags "-s -w" -o hister .
 
 These are upstream's Dockerfile steps without its Linux-only static linking (`-linkmode external -extldflags -static`, `-tags netgo,osusergo`); proven on FreeBSD 15.1 (2026-10-05, below). If `npm ci` fails on FreeBSD, build the UI on Linux (the same two npm commands, or `podman run --rm -v $PWD:/app -w /app node:24 sh -c '…'`) and copy `webui/app/build/` over: it is plain HTML, CSS and JavaScript. Then `tools/dev-test tv-freebsd --packages --native --hister-bin ./hister`. OpenBSD and NetBSD: the same steps with their Go 1.26 and Node packages, unchecked.
 
+## Nightly
+
+[`tools/fleet-nightly`](../tools/fleet-nightly) runs the tests above and the Quickstarts on every test VM, one after another, every night, from fresh clones of `main`. A failed leg is not a production breakage: the result goes to a status page and nowhere else (no alert, no email).
+
+```sh
+tools/fleet-nightly --dry-run                                  # the plan: each OS, its legs, the exact commands, lock state
+tools/fleet-nightly --os debian --legs dev-docker --budget 60  # one leg on one VM, end to end
+```
+
+For each OS in `order` it takes that VM's lock (`/var/tmp/testvm-<os>.lock`, the one people and agents take with `flock`) **without waiting**: a VM someone is using is skipped, and the summary says so. Then each leg starts from a revert (a fresh overlay, booted), so no leg sees another's packages; after the last leg the VM is stopped and the lock released. The legs:
+
+| Leg | Runs | Where it applies (defaults) |
+|---|---|---|
+| `dev-docker` | `tools/dev-test VM --packages` | Debian, arm64 |
+| `dev-native` | `tools/dev-test VM --packages --native`, with `--hister-bin` when the OS has a `hister_bin`, else `--hister-via` the Hister host | every OS (Debian itself only with a `hister_bin`) |
+| `stack-quickstart` | the README's stack Quickstart: `tools/quickstart-test --with-packages`, on the VM | Debian, arm64 |
+| `kura-native`, `kura-container` | Kura's `tools/quickstart-test --only native\|container --ssh VM` | native: Debian, arm64, the BSDs; container (podman): Debian, arm64 |
+| `niwa-native`, `niwa-container` | Niwa's `tools/quickstart-test --only native\|container --with-packages` (container: `--engine docker`), on the VM | native: Debian, arm64, the BSDs; container: Debian, arm64 |
+| `konbini-native`, `konbini-container` | Konbini's `tools/quickstart-test --only native\|container --with-packages` (container: podman), on the VM | as Niwa |
+
+Legs that run on the VM get the four clones (with their history) in `/var/tmp/machiya-nightly` there, and a bootstrap that installs only `python3` and `git` (the test scripts need them before the README's package block runs). The Hister host (`hister_host`, default Debian's VM) is a kept Docker dev stack (`dev-test --packages --keep`), started by the first `dev-native` leg that needs it and stopped after the last one. arm64 is emulated, so its timeouts are tripled (`slow`).
+
+A leg is `pass`, `fail`, `timeout`, `error` (the VM, the copy or the bootstrap failed, not the software under test) or `skipped` (the VM was in use, the budget was spent, or the leg can't run there). The total budget (`budget_minutes`, default 360) cuts each leg's timeout to what is left and starts nothing once it is spent. A second run started while one is going exits at once. Exit status: 0 all ran legs passed, 1 a leg failed, 2 the runner itself could not run.
+
+### Settings
+
+Defaults, then a JSON file (`--config`, `$FLEET_NIGHTLY_CONFIG`, or `~/.config/machiya/fleet-nightly.json`), then `$FLEET_VMCTL`, `$FLEET_GIT_URL`, `$FLEET_NIGHTLY_DIR`, `$FLEET_NIGHTLY_PUBLISH`, then the options. `oses.<os>` entries merge into the defaults key by key:
+
+```json
+{
+  "vmctl": "ssh -o BatchMode=yes -i /home/you/.ssh/testvm-ctl you@vm-host",
+  "git_url": "git@github.com:machiya-kobo/{repo}.git",
+  "out": "/home/you/data/machiya-nightly/out",
+  "publish": "ssh -o BatchMode=yes -i /home/you/.ssh/testvm-ctl you@vm-host nightly-report",
+  "budget_minutes": 360,
+  "oses": {
+    "debian":  {"hister_bin": "/home/you/data/machiya-nightly/hister/hister_0.20.0_linux_amd64"},
+    "arm64":   {"hister_bin": "/home/you/data/machiya-nightly/hister/hister_0.20.0_linux_arm64"},
+    "freebsd": {"hister_bin": "/home/you/data/machiya-nightly/hister/hister-freebsd-amd64"}
+  }
+}
+```
+
+- `vmctl`: a command prefix; the tool appends `revert <vm>` (throw the overlay away and boot a fresh copy, returning once ssh answers) or `stop <vm>`.
+- `git_url`: `{repo}` is machiya, kura, niwa or konbini. The test VMs never fetch from the forge themselves: the clones are copied over.
+- `out`: `nightly.json` and `nightly.txt` (the latest run), and `runs/<stamp>/` with both again and every leg's full log (`keep_runs`, default 14).
+- `publish`: a shell command that reads `nightly.json` on its standard input, run after each run.
+- `oses.<os>`: `vm` (an ssh name), `system` (debian, freebsd, netbsd, openbsd, haiku: picks the bootstrap), `legs`, `slow`, `hister_bin` (a Hister for that OS, [built](#building-hister-for-a-bsd) or upstream's Linux release). `order` is the order of the OSes, `hister_host` the OS whose VM lends its Hister.
+
+### The result (`nightly.json`)
+
+```json
+{
+ "schema": 1, "kind": "machiya-fleet-nightly", "host": "dev-host",
+ "started": "2026-10-05T07:30:01Z", "finished": "2026-10-05T10:41:12Z", "duration_s": 11471,
+ "status": "fail", "counts": {"pass": 21, "fail": 1, "error": 0, "skipped": 2},
+ "budget_s": 21600, "budget_exhausted": false, "runner": "1a2b3c4",
+ "sources": {"kura": {"commit": "da57851", "describe": "v0.8.0", "date": "2026-10-04T…", "subject": "kura 0.8.0: …"}, "…": {}},
+ "leg_titles": {"dev-docker": "dev stack, Docker (dev-test --packages)", "…": "…"},
+ "hister_host": {"os": "debian", "vm": "tv-debian", "status": "pass", "duration_s": 301, "summary": "23 checks, 0 failed"},
+ "oses": [
+  {"os": "openbsd", "vm": "tv-openbsd", "status": "fail", "started": "…", "duration_s": 1520, "legs": [
+    {"leg": "dev-native", "title": "…", "status": "fail", "exit": 1, "duration_s": 212, "prep_s": 74,
+     "summary": "dev-test: the package step failed", "excerpt": ["…the last lines that matter, scrubbed…"],
+     "log": "logs/openbsd-dev-native.log"}]},
+  {"os": "haiku", "vm": "tv-haiku", "status": "skipped", "reason": "tv-haiku is in use: another run holds /var/tmp/testvm-haiku.lock", "legs": ["…"]}
+ ]
+}
+```
+
+`status` (top, per OS, per leg) is the worst of what ran: fail (a timeout counts as one), then error, then pass; `skipped` when nothing ran. `summary` is one line (a dev-test's check counts, a quickstart's failed step); `excerpt` (failures only) is at most ten lines of 200 characters, with anything that looks like a token, a password or a session code replaced by `[redacted]`. `aborted` (a signal) and `error` (the runner's own failure, e.g. a clone) appear when they happened. A status page shows the grid (OS × leg), the sources and the run's age; a result older than about 36 hours means the run didn't happen, which is worth showing, not alerting on.
+
+### On a timer
+
+Run it on the machine that holds the VM locks, the ssh keys to the VMs and their controller, and read access to the repositories: there the locks are the same ones people and agents take. A systemd user timer, in [`contrib/systemd/user/`](../contrib/systemd/user/):
+
+```sh
+git clone <machiya> ~/data/machiya-nightly/runner                       # the runner's own checkout (the unit pulls it first)
+install -Dm644 ~/data/machiya-nightly/runner/contrib/systemd/user/machiya-fleet-nightly.{service,timer} -t ~/.config/systemd/user/
+$EDITOR ~/.config/machiya/fleet-nightly.json                             # the settings above
+~/data/machiya-nightly/runner/tools/fleet-nightly --dry-run              # check the plan
+systemctl --user daemon-reload && systemctl --user enable --now machiya-fleet-nightly.timer
+loginctl enable-linger "$USER"                                          # the timer runs with nobody logged in
+```
+
+The timer starts it at 00:30 Pacific (a full fleet takes about three hours; the budget stops it by 06:30, before the working day needs the VMs). `Persistent=false`: a missed night is skipped, not run in the morning. A failed test exits 1, which the unit counts as success (`SuccessExitStatus=1`): only a runner that can't run marks the unit failed. `journalctl --user -u machiya-fleet-nightly` has the progress; `systemctl --user start machiya-fleet-nightly` runs it now.
+
 ## Without containers (`--native`)
 
 `./dev init --native` runs every service as a process from the checkouts: the same environment as `compose.yml`, with each service name rewritten to `127.0.0.1:<port>` and each container path to `$DEV_DATA` (the `x-native` blocks there say how). The front listens on 19200–19208 as before, the services behind it on 19230–19240, Hister on 19224 and machiya-mcp on 19226, Niwa's gemini and gopher on 1965 and 7070. `./dev up` starts them in the background (pid files in `$DEV_DATA/run/`, logs in `$DEV_DATA/logs/`); `./dev down` stops them.
