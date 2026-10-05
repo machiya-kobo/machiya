@@ -4,7 +4,7 @@
 """dev - the Machiya dev stack: every service, synthetic data only, Hister's users as the sign-in (docs/dev-stack.md).
 
     ./dev init [--url URL] [--behind-serve] [--bind ADDR] [--data DIR] [--native] [--siblings DIR]
-               [--tailnet-users LOGINS] [--project NAME] [--signin-provider oidc|""]
+               [--tailnet-users LOGINS] [--project NAME] [--signin-provider oidc|""] [--auth-legacy none]
     ./dev up                 build and start everything (the vault mirror first), wait, then seed Hister once
     ./dev seed               (again) the synthetic Hister corpus: pages, labels, collections, history; idempotent
     ./dev check [--browser] [--shots DIR]   the checks (HTTP; --browser adds Playwright, Chromium and WebKit)
@@ -210,6 +210,9 @@ def make_secrets(data):
     put("forgejo-token", "devfj_" + secrets.token_urlsafe(24))           # code-import's fake forges
     put("github-lantern-token", "devgh_" + secrets.token_urlsafe(24))
     put("github-workshop-token", "devgh_" + secrets.token_urlsafe(24))
+    # a room token (hister-login 0.3.0) for the stack's own callers of the rooms (machiya-mcp, Niwa -> Konbini,
+    # landing's owner reads) and for agents: registered with the helper at `up` (token add), never Hister's token
+    put("room-token", "mht_" + secrets.token_urlsafe(32))
 
 
 DATA_DIRS = ("hister", "login", "kura", "niwa", "konbini", "mirror", "landing", "mcp", "smallweb", "feed-import",
@@ -347,6 +350,9 @@ def cmd_init(a):
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,40}", a.project):
         die("--project is a compose project name: lowercase letters, digits, _ and -")
     a.signin_provider = (getattr(a, "signin_provider", "oidc") or "").strip().lower()
+    a.auth_legacy = (getattr(a, "auth_legacy", "") or "").strip().lower()
+    if a.auth_legacy and not set(a.auth_legacy.split(",")) <= {"none", "domain-cookie", "hister-token"}:
+        die("--auth-legacy is none, or a list of domain-cookie and hister-token")
     if a.signin_provider not in ("", "oidc"):
         die("--signin-provider is oidc (the stub OIDC provider, as tsidp in production) or empty (the helper's page)")
     remote = getattr(a, "remote_hister", None)
@@ -382,6 +388,7 @@ def cmd_init(a):
         "DEV_COOKIE_DOMAIN": a.cookie_domain or "", "DEV_TAILNET_USERS": a.tailnet_users or "owner@dev",
         "DEV_SSO_COOKIE": a.sso_cookie or "", "DEV_REMOTE_HISTER": os.path.abspath(remote) if remote else "",
         "DEV_PROJECT": a.project or PROJECT, "DEV_SIGNIN_PROVIDER": a.signin_provider,
+        "DEV_AUTH_LEGACY": getattr(a, "auth_legacy", "") or "",
         "DEV_FRONT_SCHEME": "https" if tls else "http",
         "DEV_TLS_CERT": "/certs/tls.crt" if tls else "", "DEV_TLS_KEY": "/certs/tls.key" if tls else "",
     }
@@ -555,6 +562,27 @@ def ready(port, path, want=None, headers=None):
     return st == 200 and (want is None or (isinstance(body, dict) and want(body)))
 
 
+TOKEN_ROOMS = "kura,niwa,konbini,machiya,machiya-mcp,smallweb"
+
+
+def register_room_token(env, data):
+    """The stack's room token (secrets/room-token) registered with the helper (idempotent: `token add` says when it
+    already is). The helper's command reads it from the file: the value never goes in argv."""
+    args = ["token", "add", "--user", OWNER, "--label", "dev stack", "--rooms", TOKEN_ROOMS]
+    if env["DEV_ENGINE"] == "native":
+        plan = {p[0]: p for p in native_plan(env)}
+        _, _, cwd, extra, _ = plan["hister-login"]
+        r = subprocess.run([sys.executable, "hister_login.py"] + args + ["--from-file",
+                           os.path.join(data, "secrets", "room-token")], cwd=cwd, env=dict(os.environ, **extra),
+                           capture_output=True, text=True)
+    else:
+        r = compose(env, data, "exec", "-T", "hister-login", "python3", "/app/hister_login.py", *args,
+                    "--from-file", "/secrets/room-token", check=False, capture=True)
+    if r.returncode != 0:
+        die("hister-login refused the stack's room token: %s" % (r.stdout + r.stderr).strip()[-400:])
+    say("room token: %s" % r.stdout.strip().splitlines()[-1] if r.stdout.strip() else "room token registered")
+
+
 def cmd_up(a):
     data = data_dir(a.data)
     env = load(data)
@@ -586,13 +614,14 @@ def cmd_up(a):
     wait_for(lambda: ready(19224, "/health"), 120, "Hister (19224/health)")
     wait_for(lambda: ready(19204, "/health"), 60, "the front (19204)")
     wait_for(lambda: ready(19204, "/machiya/healthz", lambda b: b.get("hister") == "ok"), 60, "the helper")
+    register_room_token(env, data)
     wait_for(lambda: ready(19201, "/api/status", lambda b: b.get("ready")), 180, "Kura")
     wait_for(lambda: ready(19202, "/api/status", lambda b: b.get("ready")), 180, "Niwa")
     wait_for(lambda: ready(19203, "/healthz"), 180, "Konbini")
     wait_for(lambda: ready(19200, "/healthz"), 60, "landing")
     seed(env, data, quiet=True)
     skip = {"shiori"} | ({"searxng"} if env["DEV_ENGINE"] == "native" else set())       # a client; optional natively
-    owner = {"Authorization": "Bearer " + secret(data, "owner-token")}      # landing signs in like the rooms
+    owner = {"Authorization": "Bearer " + secret(data, "room-token")}       # landing signs in like the rooms
     wait_for(lambda: ready(19200, "/api/status", lambda b: all(
         (v or {}).get("state") == "up" for k, v in b.get("apps", {}).items() if k not in skip), owner), 120,
         "landing to see every app up")
@@ -670,8 +699,11 @@ def status(env, data):
     if env.get("DEV_FRONT_SCHEME") == "https":
         print("  TLS: the throwaway dev CA is %s (trust it in a browser, or accept the warning)"
               % os.path.join(data, "certs", "ca.crt"))
-    print("  agents: MACHIYA_MCP_URL=http://%s:19226/mcp (pages, notes and the board; Hister's own MCP is not for AI "
-          "clients, docs/contracts/hister.md)" % ADDR[0])
+    print("  agents: MACHIYA_MCP_URL=http://%s:19226/mcp MACHIYA_TOKEN_FILE=%s (pages, notes and the board; a room "
+          "token for the rooms, machiya-mcp and smallweb, never Hister; Hister's own MCP is not for AI clients)"
+          % (ADDR[0], os.path.join(data, "secrets", "room-token")))
+    print("  sign-in: each room keeps its own host-only cookie (hister-login 0.3.0); legacy: %s"
+          % (env.get("DEV_AUTH_LEGACY") or "domain-cookie,hister-token (the default)"))
     if env.get("DEV_SIGNIN_PROVIDER"):
         print("  sign-in: automatic through the stub OIDC provider (MACHIYA_SIGNIN_PROVIDER=%s); after Sign Out, the "
               "helper's page" % env["DEV_SIGNIN_PROVIDER"])
@@ -718,7 +750,8 @@ def cmd_reset(a):
                               cookie_domain=env.get("DEV_COOKIE_DOMAIN"), sso_cookie=env.get("DEV_SSO_COOKIE"),
                               remote_hister=env.get("DEV_REMOTE_HISTER") or None,
                               project=env.get("DEV_PROJECT") or PROJECT,
-                              signin_provider=env.get("DEV_SIGNIN_PROVIDER", ""))
+                              signin_provider=env.get("DEV_SIGNIN_PROVIDER", ""),
+                              auth_legacy=env.get("DEV_AUTH_LEGACY", ""))
     cmd_init(init)
     a.verbose = False
     cmd_up(a)
@@ -760,6 +793,9 @@ def main():
     p.add_argument("--signin-provider", default="oidc",
                    help="MACHIYA_SIGNIN_PROVIDER for the rooms and landing: oidc (the default, as production: a page "
                         "signs itself in through the stub OIDC provider) or '' (the helper's page)")
+    p.add_argument("--auth-legacy", default="",
+                   help="HISTER_LOGIN_LEGACY: none (the switch: rooms take only their own cookie, room tokens and apps' "
+                        "ids) or empty (default: the old shared cookie and Hister's raw token still work)")
     p.set_defaults(fn=cmd_init)
     p = sub.add_parser("up")
     p.add_argument("--verbose", action="store_true")

@@ -87,8 +87,8 @@ def mcp(port, method, params=None, headers=None):
 
 # -- HTTP ------------------------------------------------------------------------------------------------------------
 
-def http_checks(data, tok, password):
-    bearer = {"Authorization": "Bearer " + tok}
+def http_checks(data, tok, password, rtok="", denv=None):
+    bearer = {"Authorization": "Bearer " + (rtok or tok)}        # the rooms: a room token (hister-login 0.3.0)
     probes = [("landing", 19200, "/healthz"), ("kura", 19201, "/api/status"), ("niwa", 19202, "/api/status"),
               ("konbini", 19203, "/api/health"), ("hister", 19204, "/health"), ("hister-login", 19204,
               "/machiya/healthz"), ("searxng", 19205, "/healthz"), ("machiya-mcp", 19206, "/healthz"),
@@ -122,7 +122,7 @@ def http_checks(data, tok, password):
 
     st, body, _ = http("GET", L(19201, "/api/search?q=bamboo"), headers=bearer)
     titles = [r.get("title") for r in (body or {}).get("results", [])] if isinstance(body, dict) else []
-    record("Kura: the owner's Hister token works; search 'bamboo' finds notes", st == 200 and "Bamboo frames" in titles,
+    record("Kura: the stack's room token works; search 'bamboo' finds notes", st == 200 and "Bamboo frames" in titles,
            "HTTP %s, %d result(s): %s" % (st, len(titles), titles[:5]))
 
     st, body, _ = http("GET", L(19201, "/api/vaults"), headers=bearer)
@@ -145,7 +145,7 @@ def http_checks(data, tok, password):
     st, body, _ = http("GET", L(19202, "/api/status"))
     published = body.get("published") if isinstance(body, dict) else None
     st2, page, _ = http("GET", L(19202, "/"), headers=bearer)
-    record("Niwa: the garden is published (9 notes) and its home page loads with the token",
+    record("Niwa: the garden is published (9 notes) and its home page loads with the room token",
            st == 200 and (published or 0) >= 9 and st2 == 200 and "Bamboo frames" in str(page),
            "published %s; GET / %s" % (published, st2))
 
@@ -232,9 +232,149 @@ def http_checks(data, tok, password):
                 forge_tokens.append(f.readline().strip())
         except OSError:
             pass
-    leaks = scan_logs(data, [tok, password] + forge_tokens)
-    record("no secret in any service log (the owner's password and token, the fake forges' tokens)", not leaks,
-           ", ".join(leaks))
+    room_session_checks(data, password, tok, rtok, denv or {})
+
+    leaks = scan_logs(data, [tok, password, rtok] + forge_tokens)
+    record("no secret in any service log (the owner's password and Hister token, the room token, the fake forges' "
+           "tokens)", not leaks, ", ".join(leaks))
+
+
+# -- room sessions (hister-login 0.3.0, vaultkit 0.22: docs/identity.md "One cookie per room") -----------------------
+
+def set_cookies(hdrs):
+    return list(hdrs.get_all("Set-Cookie") or []) if hdrs else []
+
+
+def cookie_named(cookies, name):
+    for c in cookies:
+        k, _, rest = c.partition("=")
+        if k.strip() == name:
+            return rest.split(";", 1)[0], c
+    return None, None
+
+
+def room_session_checks(data, password, tok, rtok, denv):
+    """At the HTTP level, as a browser would: a room's code works once, only at its room, only with its browser's
+    nonce; the room's cookie is host-only; a room session works in its own room only; Sign Out in one room ends the
+    others; with HISTER_LOGIN_LEGACY=none Hister's raw token opens no room while the room token does."""
+    import base64
+    import hashlib
+    pub = os.environ.get("DEV_URL", "https://localhost").rstrip("/")
+    secure = pub.startswith("https://")
+    base = (denv.get("DEV_SSO_COOKIE") or "machiya_sso")
+    pre = "__Host-" if secure else ""
+    room_cookie = lambda room: pre + base + "_" + room                      # noqa: E731
+    ports = {"kura": 19201, "niwa": 19202, "konbini": 19203, "landing": 19200}
+    s256 = lambda n: base64.urlsafe_b64encode(hashlib.sha256(n.encode()).digest()).rstrip(b"=").decode()  # noqa
+    nonce = lambda: base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()                         # noqa
+    # a browser's Hister session, as the helper's sign-in page gets it (its script posts to Hister's /api/login)
+    st, _, hdrs = http("POST", L(19204, "/api/login"), {"username": "owner", "password": password},
+                       headers={"Origin": "hister://", "Accept": "application/json"}, follow=False)
+    hister, _ = cookie_named(set_cookies(hdrs), "hister")
+    if not hister:
+        record("room sessions: a Hister sign-in for the checks", False, "POST /api/login: HTTP %s" % st)
+        return
+    own = {}
+
+    def trip(room, n):
+        """The room's trip to the helper with state=S256(n) -> (Location, code)."""
+        cookie = "hister=" + hister + ("; %s=%s" % (pre + base, own["sid"]) if own.get("sid") else "")
+        st, _, h = http("GET", L(19204, "/machiya/signin?" + urllib.parse.urlencode(
+            {"return": "%s:%d/" % (pub, ports[room]), "state": s256(n)})), headers={"Cookie": cookie}, follow=False)
+        sid, _ = cookie_named(set_cookies(h), pre + base)
+        if sid:
+            own["sid"] = sid
+        loc = (h or {}).get("Location", "") if h else ""
+        return loc, (urllib.parse.parse_qs(urllib.parse.urlsplit(loc).query).get("code") or [""])[0]
+
+    def callback(room, code, n):
+        h = {"Accept": "text/html"}
+        if n:
+            h["Cookie"] = "%s_state=%s" % (room_cookie(room), n)
+        st, _, hdrs = http("GET", L(ports[room], "/machiya/callback?" + urllib.parse.urlencode({"code": code})),
+                           headers=h, follow=False)
+        value, raw = cookie_named(set_cookies(hdrs), room_cookie(room))
+        return st, value, raw, (hdrs or {}).get("Location", "") if hdrs else ""
+
+    # one trip: the code comes back to Kura's callback; Kura trades it for its own host-only cookie
+    n = nonce()
+    loc, code = trip("kura", n)
+    st, kura_rs, raw, where = callback("kura", code, n)
+    attrs = [a.strip() for a in (raw or "").split(";")[1:]]
+    record("room sessions: the helper sends the browser back to Kura's /machiya/callback with a one-time code; Kura "
+           "trades it for its own cookie %s (host-only: Secure, HttpOnly, SameSite=Lax, Path=/, no Domain)"
+           % room_cookie("kura"),
+           loc.startswith("%s:19201/machiya/callback?code=mhc_" % pub) and n not in loc and st == 302
+           and (kura_rs or "").startswith("mhr_") and where == "%s:19201/" % pub and "HttpOnly" in attrs
+           and "SameSite=Lax" in attrs and "Path=/" in attrs and ("Secure" in attrs or not secure)
+           and not any(a.lower().startswith("domain") for a in attrs),
+           "Location %s…; callback HTTP %s -> %s; cookie attributes %s" % (loc[:60], st, where, attrs))
+    k = {"Cookie": "%s=%s" % (room_cookie("kura"), kura_rs)}
+    st_ok, _, _ = http("GET", L(19201, "/api/search?q=bamboo"), headers=k)
+    st_replay, again, _, _ = callback("kura", code, n)
+    record("room sessions: the code works once (a replay is refused and makes no cookie); the new cookie opens Kura",
+           st_ok == 200 and st_replay == 401 and not again, "Kura with the cookie %s; replay HTTP %s, cookie %s" % (
+               st_ok, st_replay, bool(again)))
+    # bound to its room and to this browser's nonce
+    n = nonce()
+    _, code = trip("kura", n)
+    st_other, other, _, _ = callback("niwa", code, n)                    # Kura's code at Niwa's door
+    st_after, after, _, _ = callback("kura", code, n)                    # ... and it is gone
+    n2 = nonce()
+    _, code2 = trip("kura", n2)
+    st_wrong, wrong, _, _ = callback("kura", code2, nonce())             # another browser's nonce
+    _, code3 = trip("kura", nonce())
+    st_none, none, _, _ = callback("kura", code3, "")                    # no state cookie at all
+    record("room sessions: a code is bound: refused at another room (and then gone), with another browser's nonce, "
+           "and with no state cookie",
+           (st_other, st_after, st_wrong, st_none) == (401, 401, 401, 401) and not (other or after or wrong or none),
+           "Niwa %s, Kura afterwards %s, wrong nonce %s, no state %s" % (st_other, st_after, st_wrong, st_none))
+    # a room session works in its own room only
+    st_niwa, b_niwa, _ = http("GET", L(19202, "/api/suggestions"), headers={"Cookie": "%s=%s" % (room_cookie("niwa"),
+                                                                                           kura_rs)})
+    st_bearer, _, _ = http("GET", L(19203, "/api/cards"), headers={"Authorization": "Bearer " + kura_rs})
+    record("room sessions: Kura's session opens no other room (as Niwa's cookie, or as a Bearer at Konbini)",
+           st_niwa == 401 and st_bearer == 401 and isinstance(b_niwa, dict) and b_niwa.get("reason") == "wrong-room",
+           "Niwa %s %s; Konbini %s" % (st_niwa, b_niwa if isinstance(b_niwa, dict) else "", st_bearer))
+    # Hister's raw token in the rooms, and the room token
+    legacy = (denv.get("DEV_AUTH_LEGACY") or "").strip()
+    raw_tok = {name: http("GET", L(port, path), headers={"Authorization": "Bearer " + tok})[0]
+               for name, port, path in (("kura", 19201, "/api/search?q=x"), ("konbini", 19203, "/api/cards"),
+                                        ("niwa", 19202, "/api/suggestions"))}
+    xat = http("GET", L(19201, "/api/search?q=x"), headers={"X-Access-Token": tok})
+    room_tok = {name: http("GET", L(port, path), headers={"Authorization": "Bearer " + rtok})[0]
+                for name, port, path in (("kura", 19201, "/api/search?q=x"), ("konbini", 19203, "/api/cards"),
+                                         ("niwa", 19202, "/api/suggestions"))} if rtok else {}
+    if legacy == "none":
+        record("the switch (HISTER_LOGIN_LEGACY=none): Hister's raw owner token opens no room (Bearer or "
+               "X-Access-Token: 401 legacy-off); the room token opens every room",
+               set(raw_tok.values()) == {401} and xat[0] == 401 and isinstance(xat[1], dict)
+               and xat[1].get("reason") == "legacy-off" and room_tok and set(room_tok.values()) == {200},
+               "raw token %s, X-Access-Token %s %s; room token %s" % (raw_tok, xat[0], xat[1] if isinstance(
+                   xat[1], dict) else "", room_tok))
+    else:
+        record("before the switch (HISTER_LOGIN_LEGACY=%s): Hister's raw token still opens the rooms, and so does the "
+               "room token" % (legacy or "default"), set(raw_tok.values()) == {200} and set(room_tok.values()) == {200},
+               "raw token %s; room token %s" % (raw_tok, room_tok))
+    # Sign Out in Kura ends Niwa's session of the same browser (the helper session and every room session made from it)
+    n = nonce()
+    _, code = trip("niwa", n)
+    _, niwa_rs, _, _ = callback("niwa", code, n)
+    nh = {"Cookie": "%s=%s" % (room_cookie("niwa"), niwa_rs)}
+    before = http("GET", L(19202, "/api/suggestions"), headers=nh)[0]
+    st_out, _, hdrs = http("POST", L(19201, "/signout"), {}, headers=dict(k, Origin="%s:19201" % pub), form=True,
+                           follow=False)
+    marker, mraw = cookie_named(set_cookies(hdrs), room_cookie("kura") + "_out")
+    deadline, after = time.time() + 40, before
+    while time.time() < deadline:
+        after = http("GET", L(19202, "/api/suggestions"), headers=nh)[0]
+        if after == 401:
+            break
+        time.sleep(3)
+    record("room sessions: Sign Out in Kura ends the browser's Niwa session too (within Niwa's 30 s cache), and sets "
+           "Kura's own host-only marker", before == 200 and st_out == 303 and after == 401 and marker == "1"
+           and "domain" not in (mraw or "").lower(), "Niwa before %s, Kura sign-out %s, Niwa after %s; marker %s" % (
+               before, st_out, after, mraw))
 
 
 def code_checks(data, tok):
@@ -376,11 +516,25 @@ def browser_checks(data, password, shots, base, sso_cookie="machiya_sso", denv=N
                            "kura -> sign-in page shown %s, back at %s; rooms (no prompt, content) %s; Hister UI signed "
                            "in %s" % (bool(shown) or at_signin, back, rooms, hister_in))
                     record("[%s] Kura's search page finds 'chochin'" % engine, found, "")
-                    names = {c["name"]: c["value"] for c in ctx.cookies()}
-                    other = {"machiya_sso", "machiya_dev_sso"} - {sso_cookie}
-                    record("[%s] the helper, rooms and landing use the sign-in cookie %s (DEV_SSO_COOKIE), no other"
-                           % (engine, sso_cookie), names.get(sso_cookie, "").startswith("mhs_")
-                           and not (other & set(names)), "cookies %s" % sorted(names))
+                    jar = {c["name"]: c for c in ctx.cookies()}
+                    pre = "__Host-" if base.startswith("https://") else ""
+                    host = urllib.parse.urlsplit(base).hostname
+                    want = [pre + sso_cookie] + [pre + sso_cookie + "_" + r for r in ("kura", "niwa", "konbini",
+                                                                                     "landing")]
+                    host_only = {n: (jar[n]["value"][:4], jar[n]["domain"], jar[n]["secure"], jar[n]["httpOnly"],
+                                     jar[n]["sameSite"]) for n in want if n in jar}
+                    legacy = (denv.get("DEV_AUTH_LEGACY") or "").strip() == "none"
+                    other = {"machiya_sso", "machiya_dev_sso"} - ({sso_cookie} if not legacy else set())
+                    record("[%s] one cookie per room, host-only: the helper's own %s (mhs_) and %s_<room> for Kura, "
+                           "Niwa, Konbini and landing (mhr_), each Secure, HttpOnly, Lax, on %s alone (no Domain)%s"
+                           % (engine, pre + sso_cookie, pre + sso_cookie, host,
+                              "; no shared machiya_sso (the switch)" if legacy else ""),
+                           len(host_only) == 5 and host_only[pre + sso_cookie][0] == "mhs_"
+                           and all(v[0] == "mhr_" for n, v in host_only.items() if n != pre + sso_cookie)
+                           and all(v[1] == host and (v[2] or not pre) and v[3] and v[4] == "Lax"
+                                   for v in host_only.values())
+                           and not (other & set(jar)),
+                           "cookies %s; %s" % (sorted(jar), host_only))
                     # sign out everywhere from the helper's sessions page; the rooms send you back to sign in, and
                     # (the automatic sign-in) the helper shows its page instead of signing you straight back in
                     p.goto(U["hister"] + "/machiya/sessions")
@@ -418,9 +572,12 @@ def browser_checks(data, password, shots, base, sso_cookie="machiya_sso", denv=N
                 names = {c["name"]: c["value"] for c in ctx.cookies()}
                 record("[%s] with a production machiya_sso cookie too: one sign-in, no loop, the production cookie "
                        "untouched" % engine, ok and all(visits.values()) and len(signins) <= 2
-                       and names.get("machiya_sso") == prod and names.get(sso_cookie, "").startswith("mhs_"),
-                       "sign-in page loads %d; rooms %s; machiya_sso kept %s; %s set %s" % (
-                           len(signins), visits, names.get("machiya_sso") == prod, sso_cookie, sso_cookie in names))
+                       and names.get("machiya_sso") == prod
+                       and names.get(("__Host-" if base.startswith("https://") else "") + sso_cookie + "_kura",
+                                     "").startswith("mhr_"),
+                       "sign-in page loads %d; rooms %s; machiya_sso kept %s; Kura's own cookie set %s" % (
+                           len(signins), visits, names.get("machiya_sso") == prod,
+                           any(n.endswith(sso_cookie + "_kura") for n in names)))
                 ctx.close()
             # the stub OIDC provider (tsidp's shape), bound to the owner
             ctx = browser.new_context(ignore_https_errors=True)
@@ -446,7 +603,8 @@ def browser_checks(data, password, shots, base, sso_cookie="machiya_sso", denv=N
                 with p.expect_response(lambda r: r.url.endswith("/signout") and r.request.method == "POST"):
                     p.evaluate("() => document.querySelector('form.signout, form[action=\"/signout\"]').submit()")
                 p.wait_for_timeout(500)
-                marker = any(c["name"] == sso_cookie + "_out" for c in ctx.cookies())
+                pre = "__Host-" if base.startswith("https://") else ""
+                marker = any(c["name"] == pre + sso_cookie + "_konbini_out" for c in ctx.cookies())   # Konbini's own
                 deadline, page_after = time.time() + 45, False         # Niwa's cached answer lasts up to 30 s
                 while time.time() < deadline and not page_after:
                     p.goto(U["niwa"] + "/")
@@ -466,7 +624,8 @@ def browser_checks(data, password, shots, base, sso_cookie="machiya_sso", denv=N
                 p.wait_for_url(U["niwa"] + "/**", timeout=20000)
                 p.wait_for_load_state("networkidle")
                 back_in = p.url.startswith(U["niwa"])
-                cleared = not any(c["name"] == sso_cookie + "_out" for c in ctx.cookies())
+                cleared = not any(c["name"] in (pre + sso_cookie + "_out", pre + sso_cookie + "_niwa_out")
+                                  for c in ctx.cookies())
                 record("[%s] after Sign Out the helper's page shows (no automatic way back in); one tap signs in, "
                        "and clears the marker" % engine, marker and page_after and back_in and cleared,
                        "marker set %s; page after sign-out %s; back in after a tap %s; marker cleared %s" % (
@@ -649,6 +808,10 @@ def main():
         tok = f.readline().strip()
     with open(os.path.join(sec, "owner-password")) as f:
         password = f.readline().strip()
+    rtok = ""
+    if os.path.exists(os.path.join(sec, "room-token")):
+        with open(os.path.join(sec, "room-token")) as f:
+            rtok = f.readline().strip()
     base = os.environ.get("DEV_URL", "http://localhost").rstrip("/")
     sso_cookie = "machiya_sso"
     denv = {}
@@ -663,7 +826,7 @@ def main():
         sso_cookie = denv.get("DEV_SSO_COOKIE") or sso_cookie
     except OSError:
         pass
-    http_checks(a.data, tok, password)
+    http_checks(a.data, tok, password, rtok, denv)
     if a.browser:
         browser_checks(a.data, password, a.shots or os.path.join(a.data, "shots"), base, sso_cookie, denv, tok)
     failed = sum(1 for _, ok in RESULTS if not ok)

@@ -84,12 +84,18 @@ services:
       HISTER_LOGIN_OIDC_LABEL: "Tailscale (dev stub)"
       HISTER_LOGIN_RETURN_HOSTS: "${DEV_HOST}:19200,${DEV_HOST}:19201,${DEV_HOST}:19202,${DEV_HOST}:19203,${DEV_HOST}:19204"
       HISTER_LOGIN_DB: /data/hister-login.sqlite3
-    volumes: ["${DEV_DATA}/login:/data"]
+      # hister-login 0.3.0: none = the switch (rooms take only their own cookie, room tokens and apps' ids); empty keeps
+      # the old shared cookie and Hister's raw token working (the default, for stacks with older rooms)
+      HISTER_LOGIN_LEGACY: ${DEV_AUTH_LEGACY:-domain-cookie,hister-token}
+      HISTER_LOGIN_TOKEN_SERVICES: "machiya-mcp=${DEV_URL}:19206,smallweb=${DEV_URL}:19207"
+    volumes:
+      - ${DEV_DATA}/login:/data
+      - ${DEV_DATA}/secrets/room-token:/secrets/room-token:ro     # registered at `dev up` (token add)
     depends_on: [hister]
     x-native:
       cmd: ["python3", "-u", "hister_login.py"]
       cwd: "${MACHIYA_SRC}/stack/hister-login"
-      paths: {/data: "${DEV_DATA}/login"}
+      paths: {/data: "${DEV_DATA}/login", /secrets: "${DEV_DATA}/secrets"}
       env: {HISTER_LOGIN_BIND: "127.0.0.1", HISTER_LOGIN_PORT: "19235", HISTER_LOGIN_INTERNAL_PORT: "19236"}
 
   stub-idp:                                           # a tsidp-shaped OIDC provider (stack/hister-login/dev)
@@ -219,7 +225,7 @@ services:
       NIWA_KURA_URL: ${DEV_URL}:19201
       NIWA_KONBINI_URL: ${DEV_URL}:19203
       NIWA_KONBINI_API_URL: http://konbini:8081
-      NIWA_KONBINI_TOKEN_FILE: /secrets/owner-token
+      NIWA_KONBINI_TOKEN_FILE: /secrets/room-token       # a room token (hister-login 0.3.0), never Hister's
       NIWA_GOPHER_PUBLIC_PORT: "19212"
       NIWA_HISTER_URL: http://hister:4433
       NIWA_HISTER_TOKEN_FILE: /secrets/owner-token
@@ -231,6 +237,7 @@ services:
       - ${DEV_DATA}/vault.git:${DEV_DATA}/vault.git
       - ${DEV_DATA}/mirror/vault:${DEV_DATA}/mirror/vault:ro
       - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
+      - ${DEV_DATA}/secrets/room-token:/secrets/room-token:ro
     ports:
       - "${DEV_BIND:-127.0.0.1}:19211:1965"
       - "${DEV_BIND:-127.0.0.1}:19212:7070"
@@ -301,7 +308,8 @@ services:
       LANDING_MIRROR_STATUS: /mirror/status.json        # vault-mirror's
       LANDING_FEED_STATUS: /feed/status.json
       LANDING_CODE_STATUS: /code/status.json         # code-import's (landing 0.3.4: its row and Sync's Repos indexed)
-      LANDING_HISTER_TOKEN_FILE: /secrets/owner-token
+      LANDING_HISTER_TOKEN_FILE: /secrets/owner-token   # Hister only
+      LANDING_TOKEN_FILE: /secrets/room-token           # the rooms' owner reads (landing 0.5.0)
       LANDING_STATE: /data/landing.json
       LANDING_POLL: "20"
     volumes:
@@ -310,6 +318,7 @@ services:
       - ${DEV_DATA}/feed-import:/feed:ro
       - ${DEV_DATA}/code-import:/code:ro
       - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
+      - ${DEV_DATA}/secrets/room-token:/secrets/room-token:ro
     x-native:
       cmd: ["python3", "-u", "landing.py"]
       cwd: "${MACHIYA_SRC}/stack/landing"
@@ -326,7 +335,7 @@ services:
       KONBINI_URL: http://konbini:8081
       NIWA_URL: http://niwa:8080
       HISTER_URL: http://hister:4433
-      MCP_TOKEN_FILE: /secrets/owner-token            # AUTH=hister rooms accept the owner's Hister token as Bearer
+      MCP_TOKEN_FILE: /secrets/room-token             # a room token for Kura, Konbini and Niwa (hister-login 0.3.0)
       HISTER_TOKEN_FILE: /secrets/owner-token
       MCP_LOG: /data/mcp.log
       MCP_ROLLBACK_DIR: /data/rollback
@@ -343,6 +352,7 @@ services:
       - ${DEV_DATA}/vault.git:${DEV_DATA}/vault.git
       - ${DEV_DATA}/mirror/vault:${DEV_DATA}/mirror/vault:ro
       - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
+      - ${DEV_DATA}/secrets/room-token:/secrets/room-token:ro
     ports: ["${DEV_BIND:-127.0.0.1}:19226:8080"]          # plain, for agents on this machine
     depends_on: [kura, konbini, niwa]
     x-native:

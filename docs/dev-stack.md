@@ -75,7 +75,19 @@ Sign in as `owner` with the password in `$DEV_DATA/secrets/owner-password`. One 
 
 **Automatic sign-in.** A stack made since hister-login 0.2.0 sets `MACHIYA_SIGNIN_PROVIDER=oidc` (`--signin-provider oidc`, the default; `--signin-provider ''` for the page), as production does. A room or landing that needs a sign-in then goes through the stub OIDC provider, which plays tsidp and signs the owner in at once: no page and no click. After a Sign Out (a room's, or the helper's) the helper's page shows until the next sign-in. An older `dev.env` has no `DEV_SIGNIN_PROVIDER` and keeps the page.
 
-**How it differs from a deployment.** All rooms share one host name, so cookies (Hister's own `hister` cookie too) are shared by port rather than by a cookie domain, and `MACHIYA_COOKIE_DOMAIN` is empty. landing signs in like the rooms (`AUTH=hister`, fallback `tailscale`); machiya-mcp and smallweb run `AUTH=open`, so the network decides who reaches them: the ports bind to `127.0.0.1`, and on the tailnet only owner-only grants should reach them. Niwa and Konbini call each other and Kura with the owner's Hister token; Hister's MCP and every service's Hister calls use it too.
+**One cookie per room** (hister-login 0.3.0, vaultkit 0.22; [identity.md](identity.md#one-cookie-per-room)). Each room and landing keeps its own host-only `__Host-machiya_sso_<room>`, made from a one-time code; the helper keeps `__Host-machiya_sso`. On the dev stack every room is the same host on different ports, and cookies ignore ports, which is why the names carry the room. `--auth-legacy none` at init makes the stack run **after the switch** (`HISTER_LOGIN_LEGACY=none`): the rooms then take only their own cookie, the apps' ids and room tokens, never the shared `machiya_sso` or Hister's raw token. Without it (an older `dev.env`, or a stack whose rooms vendor an older vaultkit) the helper keeps the old ways working.
+
+**How it differs from a deployment.** All rooms share one host name, so cookies (Hister's own `hister` cookie too) are shared by port rather than by a cookie domain, and `MACHIYA_COOKIE_DOMAIN` is empty. landing signs in like the rooms (`AUTH=hister`, fallback `tailscale`); machiya-mcp and smallweb run `AUTH=open`, so the network decides who reaches them: the ports bind to `127.0.0.1`, and on the tailnet only owner-only grants should reach them. machiya-mcp, Niwa (to Konbini) and landing call the rooms with the stack's **room token** (`$DEV_DATA/secrets/room-token`, made at init and registered with the helper at `up`, scoped to the rooms, machiya-mcp and smallweb); every service's Hister calls use the owner's Hister token, which goes to Hister only.
+
+**The room-session checks** (`check`, at the HTTP level):
+- one trip: the helper sends the code to Kura's `/machiya/callback`, and Kura sets its own cookie, host-only, with no `Domain`;
+- the code works once;
+- the code is bound: refused at another room, with another browser's nonce, and without a state cookie;
+- Kura's session opens no other room;
+- with `--auth-legacy none`, Hister's raw token opens no room (`401 legacy-off`) while the room token opens every one;
+- Sign Out in Kura ends the browser's Niwa session within 30 s.
+
+With `--browser`, it also checks that each room's cookie in a real browser is `__Host-…_<room>` on the host alone, Secure, HttpOnly and Lax, and that no shared `machiya_sso` exists after the switch.
 
 **The settings checks** (`check --browser`, [contracts/prefs.md](contracts/prefs.md)):
 - screenshots of landing's Shared section (desktop and phone, light and dark);
@@ -102,14 +114,14 @@ sudo tailscale serve status; sudo tailscale funnel status          # every line 
 
 `--tailnet-users` is what Niwa and Konbini admit in their Tailscale fallback. The tailnet policy must grant those ports to the owner's devices only. The ports for agents (19224, 19226) and the stand-ins (19209–19212) stay on `127.0.0.1`.
 
-**The sign-in cookie's name.** A real stack whose sign-in cookie is set on the tailnet's whole domain (`MACHIYA_COOKIE_DOMAIN=<tailnet>.ts.net`) also sends that cookie to the dev host, and a room reads the first `machiya_sso` it finds: a browser signed in to that stack would bounce between the dev rooms and the helper. So the dev stack on a tailnet names its own cookie, `--sso-cookie machiya_dev_sso` (`MACHIYA_SSO_COOKIE` in the helper, the rooms and landing). That needs rooms and a landing that vendor a vaultkit reading `MACHIYA_SSO_COOKIE`: with older ones, leave it unset (the default `machiya_sso`) and use a separate browser profile for the dev stack. To switch an existing stack, set `DEV_SSO_COOKIE=machiya_dev_sso` in `$DEV_DATA/dev.env` and `./dev up`. Tokens (agents, the MCP) are not affected either way.
+**The sign-in cookie's name.** Until production's switch (`HISTER_LOGIN_LEGACY=none`), its sign-in cookie is set on the tailnet's whole domain (`MACHIYA_COOKIE_DOMAIN=<tailnet>.ts.net`) and so also reaches the dev host, where a room with legacy reading still on would pick it up: a browser signed in to that stack would bounce between the dev rooms and the helper. (After the switch production sets no shared cookie, and the rooms read only their own.) So the dev stack on a tailnet names its own cookie, `--sso-cookie machiya_dev_sso` (`MACHIYA_SSO_COOKIE` in the helper, the rooms and landing). That needs rooms and a landing that vendor a vaultkit reading `MACHIYA_SSO_COOKIE`: with older ones, leave it unset (the default `machiya_sso`) and use a separate browser profile for the dev stack. To switch an existing stack, set `DEV_SSO_COOKIE=machiya_dev_sso` in `$DEV_DATA/dev.env` and `./dev up`. Tokens (agents, the MCP) are not affected either way.
 
 ## Agents on the dev stack
 
-The [machiya plugin](../plugins/machiya/) reads one setting, saved in Claude Code's settings by its installer:
+The [machiya plugin](../plugins/machiya/) reads one setting, saved in Claude Code's settings by its installer, and (plugin 0.4.0) the path of a room token file for a machine with no Tailscale login:
 
 ```sh
-MACHIYA_MCP_URL=http://127.0.0.1:19226/mcp \
+MACHIYA_MCP_URL=http://127.0.0.1:19226/mcp MACHIYA_TOKEN_FILE=$DEV_DATA/secrets/room-token \
   plugins/machiya/install.sh            # `install.sh check` tests the connection without changing anything
 ```
 
