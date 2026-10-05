@@ -17,6 +17,7 @@ import time
 
 from .front import CONFLICT_RE
 from .frontmatter import merge_note
+from .git import failure
 from .notes import safe_path
 
 
@@ -42,8 +43,7 @@ class GitSync:
             return subprocess.run(["git", "-C", self.repo, *args], capture_output=True, text=True, timeout=timeout,
                                   check=True, env=env).stdout
         except (subprocess.SubprocessError, OSError) as e:
-            print("git %s failed: %s" % (" ".join(a for a in args if not a.startswith("user.")),
-                                         (getattr(e, "stderr", "") or str(e)).strip()), flush=True)
+            print(failure(args, e), flush=True)
             return ""
 
     def no_symlinks(self):

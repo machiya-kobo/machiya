@@ -292,6 +292,38 @@ class MirrorTest(unittest.TestCase):
         finally:
             shutil.rmtree(tmp)
 
+    def test_a_failed_fetch_is_reported(self):
+        """MACH-F-4: update() used to return the old HEAD as if it had synced when the fetch failed."""
+        tmp = tempfile.mkdtemp()
+        try:
+            src = os.path.join(tmp, "src")
+            os.makedirs(src)
+            make_repo(src)
+            m = vaultkit.Mirror("file://" + src, os.path.join(tmp, "copy"))
+            head, _ = m.update()
+            self.assertEqual(m.failed, "")
+            os.rename(src, src + ".gone")
+            self.assertEqual(m.update(), (head, False))
+            self.assertIn("fetch", m.failed)
+            os.rename(src + ".gone", src)
+            m.update()
+            self.assertEqual(m.failed, "")
+            broken = vaultkit.Mirror("file://" + os.path.join(tmp, "nowhere"), os.path.join(tmp, "copy2"))
+            self.assertEqual(broken.update(), ("", False))
+            self.assertIn("clone", broken.failed)
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_credentials_in_urls_are_redacted(self):
+        """KURA-9: Git.run printed argv and git's stderr as they were."""
+        from vaultkit.git import redact
+        self.assertEqual(redact("fatal: https://user:s3cret@forge.example/x.git and ssh://git@h/x"),
+                         "fatal: https://***@forge.example/x.git and ssh://***@h/x")
+        g = vaultkit.Git(tempfile.gettempdir())
+        g.run("ls-remote", "https://user:s3cret@127.0.0.1:9/x.git", timeout=10)
+        self.assertTrue(g.error)
+        self.assertNotIn("s3cret", g.error)
+
     def test_auth_env_keeps_token_out_of_argv(self):
         env = vaultkit.auth_env("s3cret")
         self.assertEqual(env["GIT_CONFIG_KEY_0"], "http.extraHeader")

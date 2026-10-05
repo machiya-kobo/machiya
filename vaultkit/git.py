@@ -5,23 +5,41 @@ environment config (GIT_CONFIG_COUNT/KEY/VALUE), so it is never in argv, never i
 """
 import base64
 import os
+import re
 import subprocess
+
+_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/@\s]+@")
+
+
+def redact(text):
+    """Text with any URL's user name and password replaced by *** (v0.22, KURA-9): for logs and status."""
+    return _USERINFO.sub(r"\1***@", str(text or ""))
+
+
+def failure(args, e):
+    """The one-line description of a failed git call: no `-c user.*` values, no credentials in URLs."""
+    return redact("git %s failed: %s" % (" ".join(a for a in args if not a.startswith("user.")),
+                                         (getattr(e, "stderr", "") or str(e)).strip()))
 
 
 class Git:
     def __init__(self, repo):
         self.repo = repo
         self.env = None             # extra environment for every call (Mirror's credential)
+        self.error = ""             # the last failure (v0.22), "" after a call that worked
 
     def run(self, *args, timeout=300):
-        """stdout, or "" when git fails (the failure is printed, minus any `-c user.*` values)."""
+        """stdout, or "" when git fails (the failure is printed, minus any `-c user.*` values and any credentials in a
+        URL, and kept in self.error until the next call that works)."""
         try:
             env = dict(os.environ, **self.env) if self.env else None
-            return subprocess.run(["git", "-C", self.repo, *args], capture_output=True, text=True,
-                                  timeout=timeout, check=True, env=env).stdout
+            out = subprocess.run(["git", "-C", self.repo, *args], capture_output=True, text=True,
+                                 timeout=timeout, check=True, env=env).stdout
+            self.error = ""
+            return out
         except (subprocess.SubprocessError, OSError) as e:
-            print("git %s failed: %s" % (" ".join(a for a in args if not a.startswith("user.")),
-                                         (getattr(e, "stderr", "") or str(e)).strip()), flush=True)
+            self.error = failure(args, e)
+            print(self.error, flush=True)
             return ""
 
     def head(self):
@@ -57,24 +75,36 @@ class Mirror(Git):
         super().__init__(dest)
         self.url, self.branch = url, branch
         self.env = auth_env(token, user)
+        self.failed = ""            # v0.22: why the last update() didn't reach the remote ("" when it did)
+
+    def step(self, *args, timeout=300):
+        out = self.run(*args, timeout=timeout)
+        if self.error and not self.failed:
+            self.failed = self.error
+        return out
 
     def update(self):
-        """Clone or fetch; returns (HEAD, changed?).
+        """Clone or fetch; returns (HEAD, changed?). v0.22 (MACH-F-4): when the clone, fetch or reset fails, `failed`
+        says why (and HEAD is the old one); a caller must not report that as synced.
 
         Symlinks are never checked out (v0.22, KURA-2): the clone has core.symlinks=false, so a committed link is a
         small plain file holding its target's name, and an existing clone is switched over (its links replaced) on the
         next update."""
+        self.failed = ""
         before = self.head() if os.path.isdir(os.path.join(self.repo, ".git")) else ""
         if not before:
             os.makedirs(self.repo, exist_ok=True)
             args = ["clone", "-q", "-c", "core.symlinks=false"] + (["-b", self.branch] if self.branch else []) \
                 + ["--", self.url, "."]
-            self.run(*args, timeout=1800)
+            self.step(*args, timeout=1800)
         else:
             self.no_symlinks()
-            self.run("fetch", "-q", "--prune", "origin")
-            self.run("reset", "-q", "--hard", "origin/" + self.branch if self.branch else "@{upstream}")
+            self.step("fetch", "-q", "--prune", "origin")
+            if not self.failed:
+                self.step("reset", "-q", "--hard", "origin/" + self.branch if self.branch else "@{upstream}")
         after = self.head()
+        if not after and not self.failed:
+            self.failed = self.error or "no commit after the update"
         return after, bool(after) and after != before
 
     def no_symlinks(self):
