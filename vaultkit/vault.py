@@ -90,8 +90,9 @@ class Vault:
         return self.by_name.get(t) or self.by_name.get(t.split("/")[-1])
 
     def tended_dates(self):
-        """{rel: YYYY-MM-DD of the note's latest commit}."""
-        out = self.git("log", "--format=@%as", "--name-only", "--", self.subdir or ".")
+        """{rel: YYYY-MM-DD of the note's latest commit}. v0.22 (KURA-5): core.quotePath=false, so a non-ASCII name
+        (町家.md, café notes.md) isn't printed quoted and octal-escaped, and keeps its date."""
+        out = self.git("-c", "core.quotePath=false", "log", "--format=@%as", "--name-only", "--", self.subdir or ".")
         dates, current = {}, None
         prefix = self.subdir + "/" if self.subdir else ""
         for line in out.splitlines():

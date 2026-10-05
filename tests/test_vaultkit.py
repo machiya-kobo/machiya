@@ -407,6 +407,52 @@ class SymlinkTest(unittest.TestCase):
             self.assertEqual(f.read(), "TOKEN-OUTSIDE-THE-VAULT\n")
 
 
+class TendedNamesTest(unittest.TestCase):
+    def test_non_ascii_names_keep_their_dates(self):
+        """KURA-5 (sweep 2026-10): git quoted non-ASCII paths, so these notes had no date."""
+        tmp = tempfile.mkdtemp()
+        try:
+            make_repo(tmp)
+            for name in ("町家.md", "café notes.md"):
+                with open(os.path.join(tmp, "personal", name), "w") as f:
+                    f.write("---\ntitle: x\n---\nx\n")
+            sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "add", "-A", cwd=tmp)
+            sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "names", "--date",
+               "2026-02-03T00:00:00", cwd=tmp)
+            v = vaultkit.Vault(tmp, "personal")
+            v.revision = "r"
+            v.index()
+            self.assertEqual(v.tended.get("町家.md"), v.tended.get("café notes.md"))
+            self.assertTrue(v.tended.get("町家.md"))
+        finally:
+            shutil.rmtree(tmp)
+
+
+class YamlBombTest(unittest.TestCase):
+    """LEAD-4 (sweep 2026-10): YAML aliases in frontmatter could expand a 450-byte note into a 5 GB title."""
+
+    BOMB = ("---\na: &a [x, x, x, x, x, x, x, x, x, x]\nb: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]\n"
+            "c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]\nd: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]\n"
+            "e: &e [*d, *d, *d, *d, *d, *d, *d, *d, *d, *d]\nf: &f [*e, *e, *e, *e, *e, *e, *e, *e, *e, *e]\n"
+            "title: *f\n---\nbody\n")
+
+    def test_aliases_are_refused(self):
+        self.assertIsNone(vaultkit.note_front(self.BOMB))
+        n = vaultkit.Note("bomb.md", vaultkit.note_front(self.BOMB) or {}, self.BOMB)
+        self.assertEqual(n.title, "bomb")                          # read as a note without frontmatter
+        with self.assertRaises(vaultkit.EditError):
+            vaultkit.edit_front(self.BOMB, {"growth": "evergreen"})
+
+    def test_anchors_alone_and_ordinary_notes_still_load(self):
+        self.assertEqual(vaultkit.note_front("---\ntitle: &t A\ntags: [x]\n---\n"), {"title": "A", "tags": ["x"]})
+        self.assertEqual(vaultkit.note_front("---\ntitle: A\n---\n"), {"title": "A"})
+
+    def test_oversized_frontmatter_is_not_parsed(self):
+        from vaultkit.front import MAX_FRONT
+        big = "---\ntitle: A\nsummary: %s\n---\n" % ("x" * MAX_FRONT)
+        self.assertIsNone(vaultkit.note_front(big))
+
+
 class MigrationNamesTest(unittest.TestCase):
     """Legacy and current field names are both read (docs/frontmatter.md); the current ones win."""
 
