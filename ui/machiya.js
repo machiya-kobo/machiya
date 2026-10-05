@@ -40,9 +40,9 @@
 //     which has no reload button: at the top of the page, a drag down brings the content down after the finger, with a
 //     reload mark in the gap under the header; letting go past PULL.threshold holds it open, spinning, and reloads, and
 //     short of that it springs back (the second pass, 2026-10-05: at first only the mark moved). Not while a menu,
-//     sheet or dialog is open, from inside a scrolling pane, a field or the tab bar, with text selected, with a second finger, or on a sideways swipe; a gesture another script
-//     takes over (preventDefault on touchmove, e.g. Konbini's card drag) or [data-no-pull] opts out. Browser tabs keep
-//     their own pull to refresh.
+//     sheet or dialog is open, from inside a scrolling pane, a field or the tab bar, with text selected, with a second
+//     finger, or on a sideways swipe; a gesture another script takes over (preventDefault on touchmove, e.g. Konbini's
+//     card drag) or [data-no-pull] opts out. Browser tabs keep their own pull to refresh.
 // Apps can listen for `machiya:setting` events ({detail: {key, value}}) to react to their own settings.
 
 const room = document.body.dataset.room || "app";
