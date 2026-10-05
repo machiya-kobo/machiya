@@ -794,6 +794,12 @@ class TokenGateTest(unittest.TestCase):
         clock.t += 29
         g.resolve(Headers(("Authorization", "Bearer " + RTOK)))
         self.assertEqual(len(h.calls), 1)                                     # cached 30 s
+        r = g.resolve(Headers(("X-Machiya-Token", RTOK)))                      # the plugin's fixed header
+        self.assertEqual((r.status, r.principal.name), (200, "owner"))
+        self.assertIsNone(g.resolve(Headers(("X-Machiya-Token", ""))))         # empty (no token set): none
+        for bad in (Headers(("X-Machiya-Token", "junk")), Headers(("X-Machiya-Token", RTOK), ("Authorization", "x")),
+                    Headers(("X-Machiya-Token", RTOK), ("X-Machiya-Token", RTOK))):
+            self.assertEqual(g.resolve(bad).status, 401)
 
     def test_refusals(self):
         g, h, _ = self.gate()
