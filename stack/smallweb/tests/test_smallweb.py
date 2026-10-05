@@ -265,6 +265,8 @@ def fake_resolve(host, port, type=0, **kw):
                 for ip in NAMES[host]]
     if host.replace(".", "").isdigit():
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (host, port))]
+    if host.endswith(".test") and host != "nowhere.test":      # the gemini and gopher fakes (all on 127.0.0.1)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
     raise socket.gaierror("no such name: %s" % host)
 
 
@@ -864,6 +866,154 @@ class Gateway(unittest.TestCase):
             smallweb.socks_addr("http://proxy:1080")
         self.assertEqual(smallweb.socks_addr("socks5h://proxy:1080"), "proxy:1080")
 
+
+
+RAW = []                                                   # bytes a plain TCP listener received (MACH-F-1)
+
+
+def raw_server():
+    class H(socketserver.BaseRequestHandler):
+        def handle(self):
+            self.request.settimeout(1)
+            try:
+                RAW.append(self.request.recv(4096))
+            except OSError:
+                pass
+    s = socketserver.ThreadingTCPServer(("127.0.0.1", 0), H)
+    s.daemon_threads = True
+    threading.Thread(target=s.serve_forever, daemon=True).start()
+    return s.server_address[1]
+
+
+RAW_PORT = raw_server()
+CROSS = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+
+
+class Sweep(unittest.TestCase):
+    """The 2026-10 sweep: MACH-F-1 (a relay to anything), F-2 (planted saves), F-5 (logs), F-8 (no deadline), F-9."""
+
+    def fresh(self):
+        HISTER_DOCS.clear()
+        Fakes.gemini_requests.clear()
+        smallweb.store.q("DELETE FROM cache WHERE kind='page'")
+        smallweb.store.q("DELETE FROM saves")
+
+    def test_no_control_characters_in_a_selector(self):
+        RAW.clear()
+        code, _, body = page("gopher://raw.test:%d/0x%%0D%%0AINJECTED%%0D%%0A" % RAW_PORT)
+        self.assertEqual(code, 502)
+        self.assertIn("control characters", body)
+        time.sleep(0.3)
+        self.assertFalse([r for r in RAW if b"INJECTED" in r])
+        self.assertEqual(page("gemini://capsule.test:%d/a%%00b" % GEM_PORT)[0], 502)
+
+    def test_private_hosts_and_bad_ports_are_never_reached(self):
+        Fakes.resolved.clear()
+        for url, why in (("gopher://inside.test/1", "private address"), ("gopher://127.0.0.2:%d/1" % GOPHER_PORT,
+                         "private address"), ("gemini://inside.test/", "private address"),
+                         ("gopher://hole.test:25/1", "port 25"), ("gopher://hole.test:6379/1", "port 6379")):
+            code, _, body = page(url)
+            self.assertEqual(code, 502, url)
+            self.assertIn(why, body, url)
+        self.assertEqual(Fakes.resolved, [])                         # the proxy was never asked
+        smallweb.store.q("DELETE FROM cache WHERE kind='robots'")
+        menu = page("gopher://hole.test:%d/1" % GOPHER_PORT)
+        self.assertEqual(menu[0], 200)                               # a public (allowed) hole still opens
+        self.assertIn("127.0.0.1:%d" % GOPHER_PORT, Fakes.resolved)   # by the vetted address
+
+    def test_another_site_cant_make_smallweb_fetch_or_save(self):
+        self.fresh()
+        code, _, body = page(CAP + "/", headers=CROSS)
+        self.assertEqual(code, 200)
+        self.assertIn("Open This Page?", body)
+        self.assertIn('href="/page?url=', body)
+        for h in ({"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "image"},
+                  {"Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "image"},
+                  {"Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}):
+            self.assertEqual(page(CAP + "/", headers=h)[0], 403, h)
+        self.assertEqual(get("/api/search?q=example+query&source=tlgs", headers=CROSS)[0], 403)
+        smallweb.store.q("DELETE FROM cache WHERE kind='search'")
+        self.assertEqual(get("/?q=never+asked&source=tlgs", headers=CROSS)[0], 200)   # the home page; nothing searched
+        time.sleep(0.5)
+        self.assertEqual(Fakes.gemini_requests, [])
+        self.assertEqual(HISTER_DOCS, [])
+
+    def test_saves_only_for_pages_viewed_through_smallweb(self):
+        for headers, saved in (({"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate"}, True),
+                               ({"Sec-Fetch-Site": "none", "Sec-Fetch-Mode": "navigate"}, True),
+                               ({"Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "navigate",
+                                 "Sec-Fetch-Dest": "document"}, True),          # a result clicked in Shiori
+                               ({}, True)):                                      # an app, not a browser
+            self.fresh()
+            self.assertEqual(page(CAP + "/", headers=headers)[0], 200)
+            self.assertEqual(wait_for(lambda: HISTER_DOCS, 2), saved, headers)
+        self.fresh()
+        req = urllib.request.Request(BASE + "/page?url=" + urllib.parse.quote(CAP + "/", safe=""), method="HEAD",
+                                     headers={"Tailscale-User-Login": "user@test"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            self.assertEqual(r.status, 200)
+        time.sleep(0.5)
+        self.assertEqual(HISTER_DOCS, [])                            # HEAD never saves
+
+    def test_the_log_has_no_queries(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            page(CAP + "/?secretword")
+            get("/?q=secretsearch")
+            get("/page?url=gemini%3A%2F%2Fcapsule.test%2Fask&q=secretanswer")
+            time.sleep(0.2)
+        log = err.getvalue()
+        self.assertIn("smallweb GET /page ", log)
+        self.assertIn("smallweb GET / 200", log)
+        for word in ("secretword", "secretsearch", "secretanswer", "capsule.test"):
+            self.assertNotIn(word, log)
+
+    def test_a_trickling_server_hits_the_deadline(self):
+        a, b = socket.socketpair()
+        stop = threading.Event()
+
+        def trickle():
+            while not stop.is_set():
+                try:
+                    b.sendall(b"x")
+                except OSError:
+                    return
+                time.sleep(0.05)
+        threading.Thread(target=trickle, daemon=True).start()
+        try:
+            a.settimeout(5)
+            t = time.time()
+            with self.assertRaises(smolnet.FetchError) as cm:
+                smolnet.read_all(a, deadline=0.5)
+            self.assertEqual(cm.exception.kind, "timeout")
+            self.assertLess(time.time() - t, 3)
+        finally:
+            stop.set()
+            a.close()
+            b.close()
+
+    def test_the_header_counts_only_from_the_trusted_proxy(self):
+        old = smallweb.TRUSTED
+        smallweb.TRUSTED = web.parse_allow("10.9.9.9/32")[1]
+        try:
+            self.assertEqual(get("/")[0], 403)                       # 127.0.0.1 isn't the sidecar
+        finally:
+            smallweb.TRUSTED = old
+        self.assertEqual(get("/")[0], 200)
+
+    def test_a_public_bind_needs_a_trusted_proxy(self):
+        old = (smallweb.TRUSTED, smallweb.BEHIND_PROXY)
+        try:
+            smallweb.TRUSTED, smallweb.BEHIND_PROXY = [], False
+            with self.assertRaises(SystemExit):
+                smallweb.check_bind("0.0.0.0")
+            smallweb.check_bind("127.0.0.1")
+            smallweb.BEHIND_PROXY = True
+            smallweb.check_bind("0.0.0.0")
+            smallweb.TRUSTED, smallweb.BEHIND_PROXY = web.parse_allow("172.31.250.2/32")[1], False
+            smallweb.check_bind("0.0.0.0")
+        finally:
+            smallweb.TRUSTED, smallweb.BEHIND_PROXY = old
 
 
 class KeepAlive(unittest.TestCase):

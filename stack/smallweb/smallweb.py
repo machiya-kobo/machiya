@@ -17,6 +17,7 @@ Machiya's auth shape: SMALLWEB_AUTH=tailscale (SMALLWEB_USERS) | open, SMALLWEB_
 """
 import concurrent.futures
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -35,7 +36,7 @@ import smolnet   # noqa: E402
 import web       # noqa: E402
 from store import Store   # noqa: E402
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -71,6 +72,19 @@ DATA = os.environ.get("SMALLWEB_DATA", "/data")
 # http(s) saves never reach a private address (loopback, RFC 1918, CGNAT/Tailscale, link-local, …) unless it is listed
 # here: host names (exact) and CIDRs. Unset = nothing private.
 FETCH_ALLOW = web.parse_allow(os.environ.get("SMALLWEB_FETCH_ALLOW"))
+# 0.3.1 (MACH-F-9): the addresses (CIDRs) whose Tailscale-User-Login is believed: the Tailscale sidecar's. Unset: any
+# address, which is only safe on a loopback bind, or behind a proxy on a network nobody else is on
+# (SMALLWEB_BIND_BEHIND_PROXY=1 says so; main() refuses a non-loopback bind in tailscale mode without one of them).
+TRUSTED = web.parse_allow(os.environ.get("SMALLWEB_TRUSTED_PROXIES"))[1]
+BEHIND_PROXY = (os.environ.get("SMALLWEB_BIND_BEHIND_PROXY") or "").strip().lower() in ("1", "true", "yes", "on")
+# 0.3.1 (MACH-F-1): ports a gemini:// or gopher:// page is never fetched from, even on a public host: the Fetch standard's
+# "bad ports" (mail, shells, IRC, ...) plus common databases and admin APIs. Gopher and Gemini live on 70, 1965 and many
+# others, so this is a deny list.
+BAD_PORTS = {1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 87, 95, 101, 102, 103, 104, 109,
+             110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526,
+             530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 2375,
+             2376, 3306, 3659, 4045, 4190, 5060, 5061, 5432, 5984, 6000, 6379, 6566, 6665, 6666, 6667, 6668, 6669,
+             6697, 9200, 9300, 10080, 11211, 27017}
 USER_AGENT = "smallweb/%s (Machiya; saves a page its owner asked for)" % VERSION
 # Room tokens (0.3.0): with SMALLWEB_AUTH_URL (hister-login's internal address) a caller may also send
 # `Authorization: Bearer mht_…`, a room token hister-login issued for SMALLWEB_PUBLIC_URL's origin, acting as one of
@@ -240,6 +254,20 @@ def tofu(r):
     return store.tofu_check("%s:%d" % (u.hostname, u.port or 1965), r.cert_sha256, r.not_after)
 
 
+def vet(host, port):
+    """The address a requested gemini:// or gopher:// page is fetched from (0.3.1, MACH-F-1): never a bad port, and
+    resolved here with every address public (web.vet, the http(s) rule; SMALLWEB_FETCH_ALLOW lets some through).
+    FetchError otherwise, which the page shows."""
+    if int(port) in BAD_PORTS:
+        raise smolnet.FetchError("refused", "port %d is never fetched" % int(port))
+    try:
+        return web.vet(host, int(port), FETCH_ALLOW)[0]
+    except web.Blocked:
+        raise smolnet.FetchError("refused", "%s is a private address, which smallweb never fetches" % host)
+    except web.WebError as e:
+        raise smolnet.FetchError("unreachable", str(e))
+
+
 def robots_allows(scheme, host, port, path):
     """Gemini robots.txt for the virtual agents `webproxy` and `*`; gopher robots.txt for `*`. Cached for a day; a
     missing or unreadable file allows everything."""
@@ -248,10 +276,12 @@ def robots_allows(scheme, host, port, path):
     if text is None or not fresh:
         try:
             if scheme == "gemini":
-                r = polite.run(host, lambda: smolnet.gemini("gemini://%s:%d/robots.txt" % (host, port), SOCKS))
+                r = polite.run(host, lambda: smolnet.gemini("gemini://%s:%d/robots.txt" % (host, port), SOCKS,
+                                                                    vet=vet))
                 text = smolnet.decode(r.body) if r.status == 20 and r.mime.startswith("text/") else ""
             else:
-                body = smolnet.decode(polite.run(host, lambda: smolnet.gopher(host, port, "robots.txt", "", SOCKS)))
+                body = smolnet.decode(polite.run(host, lambda: smolnet.gopher(host, port, "robots.txt", "", SOCKS,
+                                                                              vet=vet)))
                 text = body if re.search(r"(?im)^\s*user-agent\s*:", body) else ""
         except smolnet.FetchError:
             text = text or ""
@@ -278,7 +308,7 @@ def answers_prompt(url):
         return cached == "1"
     try:
         host = urlsplit(base).hostname
-        r = polite.run(host, lambda: smolnet.gemini(base, SOCKS))
+        r = polite.run(host, lambda: smolnet.gemini(base, SOCKS, vet=vet))
         verdict = r.status in (10, 11)
     except smolnet.FetchError:
         return True
@@ -344,7 +374,7 @@ def open_gemini(url, q):
         r, cached = gemini_cached(url)
         if not r:
             try:
-                r = polite.run(host, lambda: smolnet.gemini(url, SOCKS))
+                r = polite.run(host, lambda: smolnet.gemini(url, SOCKS, vet=vet))
             except smolnet.FetchError as ex:
                 return notice_page(url, "Couldn't Reach the Capsule", ex.detail or ex.kind, 502)
             trust = tofu(r)
@@ -433,7 +463,7 @@ def open_gopher(url, q):
         body = raw
     else:
         try:
-            body = polite.run(host, lambda: smolnet.gopher(host, port, sel, query, SOCKS))
+            body = polite.run(host, lambda: smolnet.gopher(host, port, sel, query, SOCKS, vet=vet))
         except smolnet.FetchError as ex:
             return notice_page(url, "Couldn't Reach the Gopher Hole", ex.detail or ex.kind, 502)
         store.put("page", url, body)
@@ -701,9 +731,36 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Connection", "close")     # sets close_connection: the unread bytes go with it
         super().end_headers()
 
+    def log_request(self, code="-", size="-"):
+        """Method, path and status only (0.3.1, MACH-F-5): the query holds searches, the pages opened and answers to
+        Gemini input prompts, which stay out of the log."""
+        path = urlsplit(getattr(self, "path", "") or "").path
+        if path.startswith(("/api/status", "/api/changelog")):
+            return
+        sys.stderr.write("smallweb %s %s %s\n" % (smolnet.CONTROL.sub("?", getattr(self, "command", None) or "-")[:16],
+                                                   smolnet.CONTROL.sub("?", path)[:200], getattr(code, "value", code)))
+
+    def log_error(self, fmt, *args):
+        sys.stderr.write("smallweb error %s\n" % (args[0] if args else "-"))     # never the raw request line
+
     def log_message(self, fmt, *args):
-        if not self.path.startswith(("/api/status", "/api/changelog")):
-            sys.stderr.write("smallweb %s %s\n" % (self.headers.get("Tailscale-User-Login", "-"), fmt % args))
+        pass
+
+    def site(self):
+        """Who sent this request, by the browser's Fetch Metadata (0.3.1, MACH-F-1, MACH-F-2):
+        "own"       smallweb's own pages, or typed / bookmarked (Sec-Fetch-Site same-origin or none)
+        "navigate"  a link followed from a sibling site (same-site, a top-level document navigation: Shiori's results)
+        "direct"    no Sec-Fetch-Site: not a browser (Shiori's apps, an agent with a room token, curl)
+        "cross"     anything else: another site's page, or a sibling's script or image"""
+        sfs = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if not sfs:
+            return "direct"
+        if sfs in ("same-origin", "none"):
+            return "own"
+        if sfs == "same-site" and (self.headers.get("Sec-Fetch-Mode") or "").lower() == "navigate" \
+                and (self.headers.get("Sec-Fetch-Dest") or "document").lower() == "document":
+            return "navigate"
+        return "cross"
 
     def allowed(self):
         if AUTH == "open":
@@ -711,6 +768,8 @@ class Handler(BaseHTTPRequestHandler):
         presented, user = room_token_user(self.headers)     # 0.3.0: a room token decides when there is one
         if presented:
             return user is not None
+        if TRUSTED and not web.allowed_ip(self.client_address[0], ((), TRUSTED)):
+            return False                                    # 0.3.1: the header counts only from the sidecar
         return "*" in USERS or self.headers.get("Tailscale-User-Login", "") in USERS
 
     def public_url(self):
@@ -759,6 +818,8 @@ class Handler(BaseHTTPRequestHandler):
             with open(os.path.join(HERE, "smallweb.css"), "rb") as f:
                 return self.send(200, f.read(), "text/css", [("Cache-Control", "max-age=3600")])
         if u.path == "/api/search":
+            if self.site() == "cross":                     # 0.3.1: another site's script spends no engine queries
+                return self.send_json(403, {"error": "cross-site request refused"})
             try:
                 q, sources, page = self.search_args(qs)
             except ValueError as ex:
@@ -770,6 +831,8 @@ class Handler(BaseHTTPRequestHandler):
             if picked:
                 qs["source"] = picked
             chosen = [x for x in qs.get("source", "").split(",") if x] or None
+            if self.site() == "cross":                     # 0.3.1: a link from another site searches nothing
+                qs["q"] = ""
             if not qs.get("q", "").strip():
                 return self.send(200, render.page("smallweb", '<div class="empty"><h2>Search the Small Web</h2><p>'
                                                   'Gemini (TLGS, Kennedy) and Gopher (Veronica-2), asked only when '
@@ -782,8 +845,19 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, render.page("%s - smallweb" % q, render.results(q, data, sources), home=True,
                                               q=q, sources=sources))
         if u.path == "/page":
+            site = self.site()
+            if site == "cross":
+                # another site can't make smallweb fetch anything (0.3.1, MACH-F-1): a navigation gets a page with
+                # a same-origin link to open it, anything else a 403
+                if (self.headers.get("Sec-Fetch-Mode") or "").lower() != "navigate":
+                    return self.send(403, "cross-site request refused\n", "text/plain")
+                again = "/page?" + u.query
+                return self.send(200, render.page("Open This Page?", '<div class="empty"><h2>Open This Page?</h2><p>'
+                                                  'Another site sent you here: %s</p><p><a href="%s">Open it in smallweb'
+                                                  '</a></p></div>' % (render.e(qs.get("url", "")), render.e(again)),
+                                                  native=False))
             p = open_page(qs.get("url", ""), qs.get("q"))
-            if p.save:
+            if p.save and self.command == "GET":            # 0.3.1, MACH-F-2: never on HEAD, never cross-site
                 threading.Thread(target=save_to_hister, args=(p.save,), daemon=True).start()
             if p.html:
                 return self.send(p.status, p.html)
@@ -855,6 +929,24 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, "not found\n", "text/plain")
 
 
+def check_bind(bind=None):
+    """0.3.1 (MACH-F-9): in tailscale mode, the Tailscale-User-Login header is the identity, so anyone who can reach the
+    port can forge it. Refuse a non-loopback bind unless SMALLWEB_TRUSTED_PROXIES names the sidecar or
+    SMALLWEB_BIND_BEHIND_PROXY=1 says the network holds only the proxy."""
+    bind = BIND if bind is None else bind
+    if AUTH == "open" or TRUSTED or BEHIND_PROXY:
+        return
+    try:
+        loopback = ipaddress.ip_address(bind).is_loopback
+    except ValueError:
+        loopback = bind == "localhost"
+    if not loopback:
+        raise SystemExit("smallweb: SMALLWEB_BIND=%s trusts Tailscale-User-Login from anyone who can reach it. Set "
+                         "SMALLWEB_TRUSTED_PROXIES to the Tailscale sidecar's address (or CIDR), or "
+                         "SMALLWEB_BIND_BEHIND_PROXY=1 when only the proxy shares its network, or bind 127.0.0.1."
+                         % bind)
+
+
 def main():
     print("smallweb %s: auth %s%s, listening on %s:%d; egress %s; Hister %s" % (
         VERSION, AUTH, "" if AUTH == "open" else " (%s)" % (",".join(sorted(USERS)) or "NOBODY: set SMALLWEB_USERS"),
@@ -866,6 +958,7 @@ def main():
         print("smallweb: WARNING: SMALLWEB_AUTH=open: no identity check. Anyone who can reach %s:%d can search and "
               "read through smallweb and add pages to Hister. Use it only on localhost or a trusted LAN." % (BIND, PORT),
               flush=True)
+    check_bind()
     store.prune()
     server = ThreadingHTTPServer((BIND, PORT), Handler)
     server.daemon_threads = True

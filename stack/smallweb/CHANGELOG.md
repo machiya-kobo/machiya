@@ -1,5 +1,16 @@
 # Changelog: smallweb
 
+## 0.3.1
+
+Security (the sweep of 2026-10):
+- **No relay to anything** (MACH-F-1): a gopher selector or query, or a Gemini URL, with a control character (CR, LF, NUL, TAB, …) is never sent. A requested gemini:// or gopher:// page is resolved by smallweb, every address must be public (the http(s) rule, `SMALLWEB_FETCH_ALLOW` aside), and the proxy is asked for that address; mail, shell, database and admin ports are refused. The fixed search engines still go to the proxy by name.
+- **Another site can't drive it** (MACH-F-1, F-2): by Fetch Metadata, `/page` from another site's page shows "Open This Page?" with a same-origin link and fetches nothing; another site's (or a sibling's) script or image gets 403, as does a cross-site `/api/search`; a cross-site `/?q=` searches nothing.
+- **Only pages viewed through smallweb are saved to Hister** (owner, 2026-10-05; MACH-F-2): smallweb's own pages, a typed address, a link followed from a sibling site (Shiori's results) or a non-browser client. Never on `HEAD`.
+- **The log has no queries** (MACH-F-5): method, path and status only; errors log their code, never the request line.
+- **A deadline** (MACH-F-8): one gemini or gopher response may take 30 s in all; a server trickling bytes no longer holds a save worker.
+- **The Tailscale header counts only from the sidecar** (MACH-F-9): `SMALLWEB_TRUSTED_PROXIES`; in `tailscale` mode a non-loopback bind without it (or `SMALLWEB_BIND_BEHIND_PROXY=1`) refuses to start. **Deploy note:** set one of them before running 0.3.1 on `0.0.0.0`.
+- `web.decode` uses only text encodings (feed-import 0.1.2's fix; the same file).
+
 ## 0.3.0
 
 - **Room tokens beside the Tailscale header** (the owner's decisions of 2026-10-05: tools stop taking Hister's raw token; the agents' VM is a tagged node with no Tailscale login). With `SMALLWEB_AUTH_URL` (hister-login's internal address), `SMALLWEB_PUBLIC_URL` and `SMALLWEB_HISTER_USERS`, a caller may send `Authorization: Bearer mht_…`, a room token hister-login issued for this service, acting as that Hister user (cached 30 s). A bad, revoked or other service's token is refused and never falls back to the header; without one the header decides as before.

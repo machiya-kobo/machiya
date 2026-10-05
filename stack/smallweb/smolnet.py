@@ -1,5 +1,6 @@
 """The small web's two protocols, client side: Gemini (TLS, TOFU) and Gopher, optionally through a SOCKS5 proxy
-(socks5h: the proxy resolves names, so no DNS leaks from the server). Politeness lives here too: one connection per
+(socks5h: the proxy resolves names). A page someone asks for is vetted first (`vet`, smallweb 0.3.1): resolved here, every
+address public, then reached by that address, as http(s) saves are; the fixed search engines go by name. Politeness lives here too: one connection per
 host at a time, a minimum gap between requests to the same host, and 44 SLOW DOWN honoured.
 
 Specs: gemini://geminiprotocol.net/docs/protocol-specification.gmi, RFC 1436 (gopher), RFC 4266 (gopher URLs).
@@ -7,6 +8,7 @@ Specs: gemini://geminiprotocol.net/docs/protocol-specification.gmi, RFC 1436 (go
 import datetime
 import hashlib
 import ipaddress
+import re
 import socket
 import ssl
 import struct
@@ -21,6 +23,8 @@ for _s in ("gemini",):                         # teach urljoin/urlsplit that gem
             _lst.append(_s)
 
 TIMEOUT = 10            # seconds, connect and each read
+DEADLINE = 30           # seconds for one whole response (0.3.1, MACH-F-8): a server trickling a byte at a time can't hold a worker
+CONTROL = re.compile(r"[\x00-\x1f\x7f]")    # never sent: a CR/LF in a selector or URL would start another line (MACH-F-1)
 PROXY = {"fails": 0, "error": None}     # the SOCKS proxy itself: consecutive failures (a host refusing isn't one)
 MAX_BODY = 5 << 20      # bytes
 DEFAULT_PORT = {"gemini": 1965, "gopher": 70}
@@ -39,6 +43,8 @@ class FetchError(Exception):
 def canonical(url):
     """The one spelling of a gemini:// or gopher:// URL: lowercase scheme and host, no default port, no fragment,
     '#' in a gopher selector percent-encoded (Hister drops fragments). Raises ValueError for anything else."""
+    if CONTROL.search(url.strip()):
+        raise ValueError("control characters in the URL")
     u = urlsplit(url.strip())
     scheme = u.scheme.lower()
     if scheme not in DEFAULT_PORT or not u.hostname:
@@ -179,9 +185,11 @@ def connect(host, port, proxy="", timeout=TIMEOUT):
         raise FetchError("unreachable", "%s:%d: %s" % (host, port, e))
 
 
-def read_all(s, cap=MAX_BODY):
-    parts, size = [], 0
+def read_all(s, cap=MAX_BODY, deadline=DEADLINE):
+    parts, size, end = [], 0, time.monotonic() + deadline
     while True:
+        if time.monotonic() > end:
+            raise FetchError("timeout", "the server took longer than %d s" % deadline)
         try:
             chunk = s.recv(65536)
         except (ssl.SSLEOFError, ssl.SSLZeroReturnError, ConnectionResetError):
@@ -217,9 +225,12 @@ class GeminiResponse:
         return "utf-8"
 
 
-def gemini(url, proxy="", timeout=TIMEOUT):
+def gemini(url, proxy="", timeout=TIMEOUT, vet=None):
     """One Gemini request (no redirects followed). The certificate is not verified here: the caller applies TOFU
-    with cert_sha256 / not_after."""
+    with cert_sha256 / not_after. `vet(host, port)` (0.3.1): the address to connect to, checked by the caller, or a
+    FetchError; without it the name goes to the proxy (socks5h), as for the fixed search engines."""
+    if CONTROL.search(url):
+        raise FetchError("refused", "the URL has control characters")
     u = urlsplit(url)
     host, port = u.hostname, u.port or 1965
     req = (url + "\r\n").encode("utf-8")
@@ -229,7 +240,7 @@ def gemini(url, proxy="", timeout=TIMEOUT):
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-    raw = connect(host, port, proxy, timeout)
+    raw = connect(vet(host, port) if vet else host, port, proxy, timeout)
     try:
         try:
             t = ctx.wrap_socket(raw, server_hostname=host)
@@ -283,10 +294,14 @@ def cert_not_after(der):
 
 # -- Gopher ----------------------------------------------------------------------------------------------------------
 
-def gopher(host, port, selector, query="", proxy="", timeout=TIMEOUT):
-    """One Gopher request: selector[<TAB>query]<CRLF>, read to EOF."""
+def gopher(host, port, selector, query="", proxy="", timeout=TIMEOUT, vet=None):
+    """One Gopher request: selector[<TAB>query]<CRLF>, read to EOF. A selector or query with a control character (CR,
+    LF, NUL, TAB, ...) is never sent (0.3.1, MACH-F-1: it would smuggle more lines to whatever listens there). `vet`:
+    as for gemini()."""
+    if CONTROL.search(selector) or CONTROL.search(query):
+        raise FetchError("refused", "the selector has control characters")
     line = selector + (("\t" + query) if query else "") + "\r\n"
-    s = connect(host, port, proxy, timeout)
+    s = connect(vet(host, port) if vet else host, port, proxy, timeout)
     with s:
         s.sendall(line.encode("utf-8"))
         return read_all(s)
