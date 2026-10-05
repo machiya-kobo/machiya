@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<rect width="512" height="512" rx="112" fill="#1a1b26"/>
+<rect x="144" y="120" width="224" height="300" rx="22" fill="#292e42"/>
+<rect x="144" y="262" width="224" height="14" fill="#1a1b26"/>
+<g>
+<rect x="164" y="146" width="36" height="108" rx="10" fill="#7aa2f7"/><rect x="208" y="166" width="32" height="88" rx="10" fill="#7aa2f7" opacity=".55"/><rect x="248" y="140" width="38" height="114" rx="10" fill="#ff9e64"/><rect x="294" y="160" width="34" height="94" rx="10" fill="#9ece6a"/>
+<rect x="164" y="296" width="34" height="108" rx="10" fill="#9ece6a" opacity=".55"/><rect x="206" y="280" width="38" height="124" rx="10" fill="#7aa2f7"/><rect x="252" y="300" width="32" height="104" rx="10" fill="#ff9e64" opacity=".55"/><rect x="292" y="286" width="36" height="118" rx="10" fill="#9ece6a"/>
+</g>
+<path d="M136 128 L92 110 Q84 107 84 116 L84 412 Q84 421 92 419 L136 408 Z" fill="#414868"/>
+<path d="M376 128 L420 110 Q428 107 428 116 L428 412 Q428 421 420 419 L376 408 Z" fill="#414868"/>
+<path d="M104 436 L408 436" stroke="#565f89" stroke-width="22" stroke-linecap="round"/>
+</svg>
