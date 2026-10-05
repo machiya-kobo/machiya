@@ -14,6 +14,8 @@ from http.server import ThreadingHTTPServer
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 DEV = os.path.join(ROOT, "compose", "dev")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import test_private_names                                       # noqa: E402  (the private-name matcher)
 
 
 def load(name, path, env=None):
@@ -196,12 +198,13 @@ class SyntheticOnly(unittest.TestCase):
     """The seed is invented: no tailnet names, no real hosts, nothing that looks like a secret."""
 
     def test_seed_is_synthetic(self):
-        bad = re.compile(r"ts\.net|hale-|server|owner|passkey|@gmail|@icloud|mch_|mhs_", re.I)
+        bad = re.compile(r"ts\.net|passkey|@gmail|@icloud|mch_|mhs_", re.I)
         for root, _, names in os.walk(os.path.join(DEV, "seed")):
             for n in names:
                 with open(os.path.join(root, n), encoding="utf-8") as f:
                     text = f.read()
                 self.assertIsNone(bad.search(text), os.path.join(root, n))
+                self.assertEqual(test_private_names.findings_in(n, text), [], os.path.join(root, n))
                 for url in re.findall(r"https?://([a-z0-9.-]+)", text):
                     self.assertTrue(url.endswith(".example") or url == "localhost", url)
 

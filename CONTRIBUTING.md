@@ -16,6 +16,8 @@ done
 
 Add a test with every change. smallweb's tests also need `openssl`. `tests.test_vaultkit` also checks that a vendored copy matches its manifest (it creates a throwaway git repository for that, so it needs `git`).
 
+`tests.test_private_names` fails when a name from the deployment Machiya grew up in (its hosts, tailnet, accounts, people) appears in any tracked text file. Use a neutral example instead (`example.ts.net`, `<host>`, `owner`, `you`, `your-org`, the dev seeds' `lantern`); its docstring explains the hashed list, the allow-list (only the copyright line today) and how to add a name. Never widen the allow-list to silence a real finding.
+
 ## The dev stack
 
 To try a change against everything at once, use the dev stack ([docs/dev-stack.md](docs/dev-stack.md)): every service, Hister's users as the sign-in, synthetic data only. With the kura, niwa and konbini checkouts next to this one:
