@@ -72,7 +72,7 @@ Served on its own name, `https://smallweb.example.ts.net` (its own Tailscale Ser
 
 ## Saved to Hister
 
-A page read through `/page` is saved (in the background) with `POST http://hister:4433/api/add` and `Origin: hister://`. Only pages viewed through smallweb are saved, as listed above (the owner, 2026-10-05). A `HEAD` never saves. The HTML is an allowlist of document and text tags (0.3.1):
+A page read through `/page` is saved (in the background) with `POST http://hister:4433/api/add` and `Origin: hister://`. Only pages viewed through smallweb are saved, as listed above (decided 2026-10-05). A `HEAD` never saves. The HTML is an allowlist of document and text tags (0.3.1):
 
 ```json
 {"url": "gemini://example.org/notes/example-page", "title": "An Example Page",

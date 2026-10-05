@@ -18,7 +18,7 @@ reader keeps none; the story's date in a backfill).
   python3 feedimport.py               the service: a run every FEED_IMPORT_INTERVAL seconds, status in status.json
   python3 feedimport.py --once        one run, then exit (non-zero if it failed)
   python3 feedimport.py --import-legacy state.json
-                                      take over server's newsblur-import.py state (once, before the first run)
+                                      take over the older newsblur-import.py's state (once, before the first run)
   python3 feedimport.py --dry-run [--limit N] [--no-fetch] [--stream read|starred]
                                       print what would be sent, at most N entries PER STREAM per reader (default 10:
                                       up to 10 starred + 10 read); writes nothing anywhere (no state, no Hister writes;
@@ -374,7 +374,7 @@ class Importer:
 
 
 def import_legacy(store, path):
-    """Take over the state of server's hister/newsblur-import.py (starred saves only, 2026-09-28): a save it sent
+    """Take over the state of the older hister/newsblur-import.py (starred saves only, 2026-09-28): a save it sent
     (`done`) or Hister refused (`rejected`) is recorded as handled, so it is never sent again. One it gave up on
     (`failed`, e.g. a site that blocks the server) or still had `pending` is left out: this importer tries it again
     and can store NewsBlur's copy instead. Returns {status: count} of what was recorded."""

@@ -52,7 +52,7 @@ FINAL = ("added", "known", "refused", "rejected", "skipped")
 DOC_EXTS = (".md", ".markdown", ".mdown", ".mkd")
 README_RE = re.compile(r"^readme(\.(md|markdown|mdown|mkd|txt|rst|org))?$", re.I)
 DEFAULT_EXCLUDE = ""                    # none by default (0.1.4): a deployment names its own
-# Vendored, sample and test trees (owner, 2026-10-05): READMEs, docs/ and the other markdown stay. Any depth.
+# Vendored, sample and test trees (decided 2026-10-05): READMEs, docs/ and the other markdown stay. Any depth.
 DEFAULT_DOC_SKIP = tuple(p for d in ("node_modules", "vendor", "third_party", "sample-vault", "tests", "test", "fixtures",
                                      "examples") for p in (d + "/*", "*/" + d + "/*"))
 HOSTS = {"forgejo": "Forgejo", "github": "GitHub"}
@@ -99,7 +99,7 @@ def in_window(window, tz, now=None):
 # -- which repos ------------------------------------------------------------------------------------------------------
 
 def parse_twins(value):
-    """CODE_IMPORT_TWINS: `github:machiya-kobo=forgejo:machiya,forgejo:owner=github:owner`: a repo of the
+    """CODE_IMPORT_TWINS: `github:your-org=forgejo:your-org,forgejo:you=github:you`: a repo of the
     right-hand owner whose name matches a repo of the left-hand owner is the same repo, indexed once, on the left."""
     out = []
     for pair in [p.strip() for p in (value or "").split(",") if p.strip()]:
@@ -131,7 +131,7 @@ class Rules:
                 reason = "fork"
             elif r.archived:
                 reason = "archived"
-            elif r.mirror:                              # a pull mirror (owner, 2026-10-05): the original is elsewhere
+            elif r.mirror:                              # a pull mirror (decided 2026-10-05): the original is elsewhere
                 reason = "mirror"
             elif r.name.lower() in self.exclude or r.full_name.lower() in self.exclude:
                 reason = "excluded"
@@ -147,7 +147,7 @@ class Rules:
 
 
 def parse_readme_only(value):
-    """CODE_IMPORT_README_ONLY: `github:owner/big-fork,…`: repos imported as their card and README only
+    """CODE_IMPORT_README_ONLY: `github:you/big-fork,…`: repos imported as their card and README only
     (no other docs, issues, PRs or releases). -> {(host, "owner/repo")}, lowercase."""
     out = set()
     for item in [x.strip() for x in (value or "").split(",") if x.strip()]:

@@ -149,7 +149,7 @@ class Hister:
         return status
 
     def labels(self):
-        """The topic labels named in Hister's aliases (label:x and label:(a|b)), as the server importer reads them."""
+        """The topic labels named in Hister's aliases (label:x and label:(a|b)), as the older importer read them."""
         status, rules = self.call("GET", "/api/rules")
         out = set()
         if status == 200 and isinstance(rules, dict):

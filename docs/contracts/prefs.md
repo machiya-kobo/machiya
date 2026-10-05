@@ -1,6 +1,6 @@
 # Preferences: the settings that follow a person
 
-One set of settings that follows the signed-in person to every Machiya app and every device. The owner asked for it on 2026-10-05 ("If I sign in and then change settings that affect all apps, like theme, I expect them to change in every app") and answered the design's questions the same day. This page is the contract for every reader and writer:
+One set of settings that follows the signed-in person to every Machiya app and every device. It was asked for on 2026-10-05 ("If I sign in and then change settings that affect all apps, like theme, I expect them to change in every app") and the design's questions were settled the same day. This page is the contract for every reader and writer:
 
 - the rooms (Kura, Niwa, Konbini) and landing, through vaultkit (`vaultkit/prefs.py`, `signin.handle_prefs`, `histerauth.forward_prefs`, `ui/machiya.js`);
 - [hister-login](../services/hister-login.md), which keeps the account's copy;
@@ -121,11 +121,11 @@ A change made offline can override a newer one from another device when it lands
 | other rooms in the same browser | on return to their tab, from the shared cookies, with no network |
 | other devices, Shiori's native apps | on the next load, and on return to the tab or app after 30 s or more (a 304 when nothing changed); the apps on foreground and on opening Settings |
 
-There is no push stream and no polling (the owner, 2026-10-05).
+There is no push stream and no polling (decided 2026-10-05).
 
 ## "Use This Device's Size"
 
-Text Size is the one Shared setting a device may override (the owner, 2026-10-05). The This Device section has a switch, **Use This Device's Size**. When it is on, a second picker sets this device's own size:
+Text Size is the one Shared setting a device may override (decided 2026-10-05). The This Device section has a switch, **Use This Device's Size**. When it is on, a second picker sets this device's own size:
 
 - On the web it is the cookie `machiya_textSizeDevice` (shared by the rooms in that browser). The page shows it instead of the account's size, and it is never sent anywhere.
 - The Shared Text Size row keeps showing and changing the account's size, which every other device follows.

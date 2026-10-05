@@ -412,7 +412,7 @@ CODE_DOC = dict(DOC, url="https://forge.example/o/r/issues/1", label="", metadat
 
 
 class Pages(Base):
-    """Code and notes stay out of AI (owner, 2026-10-05; sweep MACH-M-4, MACH-F-10): page search and text come from this
+    """Code and notes stay out of AI (decided 2026-10-05; sweep MACH-M-4, MACH-F-10): page search and text come from this
     server again, and nothing but a page ever reaches the model, whatever Hister answers."""
 
     def test_vault_code_and_room_documents_never_come_back(self):

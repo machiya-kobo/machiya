@@ -199,8 +199,8 @@ EXPECTED = {
 class Units(unittest.TestCase):
     def test_repo_key_is_one_token(self):
         self.assertEqual(codeimport.repo_key("machiya-kobo", "kura"), "machiya_kobo__kura")
-        self.assertEqual(codeimport.repo_key("owner", "owner.com"), "owner__owner_com")
-        self.assertEqual(codeimport.repo_key("owner", "Dot--Files"), "owner__dot_files")
+        self.assertEqual(codeimport.repo_key("lantern", "lantern.example"), "lantern__lantern_example")
+        self.assertEqual(codeimport.repo_key("Lantern", "Dot--Files"), "lantern__dot_files")
         for owner, name in (("machiya-kobo", "kura"), ("a.b", "c:d"), ("x", "2048-game")):
             self.assertRegex(codeimport.repo_key(owner, name), r"^[a-z0-9_]+$")
 
@@ -636,9 +636,9 @@ LAMP_KEPT = {gh_url("/workshop-kobo/lamp"), gh_url("/workshop-kobo/lamp/blob/mai
 
 class ReadmeOnly(Base):
     def test_setting(self):
-        self.assertEqual(codeimport.parse_readme_only(" github:owner/big-fork, forgejo:a/b "),
-                         {("github", "owner/big-fork"), ("forgejo", "a/b")})
-        for bad in ("owner/qmk", "gitlab:a/b", "github:a", "github:a/b/c", "github:/b"):
+        self.assertEqual(codeimport.parse_readme_only(" github:Lantern/Big_Firmware-fork, forgejo:a/b "),
+                         {("github", "lantern/big_firmware-fork"), ("forgejo", "a/b")})
+        for bad in ("lantern/fork", "gitlab:a/b", "github:a", "github:a/b/c", "github:/b"):
             with self.assertRaises(SystemExit):
                 codeimport.parse_readme_only(bad)
 

@@ -47,7 +47,7 @@ class SchemaTest(unittest.TestCase):
         self.assertEqual(prefs.validate(ok), ok)
 
     def test_pills(self):
-        """Shiori's pill row is Shared (the owner, 2026-10-05): the store checks its shape, Shiori its ids."""
+        """Shiori's pill row is Shared (decided 2026-10-05): the store checks its shape, Shiori its ids."""
         v = prefs.validate({"pills": json.dumps({"hidden": ["images"], "order": ["all", "notes"]}, indent=2)})
         self.assertEqual(v, {"pills": '{"order":["all","notes"],"hidden":["images"]}'})
         for bad in ("x", "[]", '{"order": ["A"]}', '{"order": "all"}', '{"x": []}', json.dumps({"order": ["a"] * 33})):
@@ -287,7 +287,7 @@ class ForwardTest(unittest.TestCase):
 
 
 class AutoSigninTest(unittest.TestCase):
-    """MACHIYA_SIGNIN_PROVIDER (the owner, 2026-10-05: "Yes, Tailscale automatically"): a room sends a browser with no
+    """MACHIYA_SIGNIN_PROVIDER (decided 2026-10-05: "Yes, Tailscale automatically"): a room sends a browser with no
     sign-in straight through the helper's provider (provider=…&auto=1); the loop guard's page links to the plain
     page; a deliberate sign-out sets the marker that makes the helper show its page instead."""
 

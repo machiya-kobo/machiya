@@ -1,5 +1,5 @@
 """GitHub for code-import. GET only (REST, `X-GitHub-Api-Version: 2022-11-28`), with one fine-grained, read-only token
-per resource owner (a fine-grained token has exactly one: `owner` and `machiya-kobo` need two), sent as
+per resource owner (a fine-grained token has exactly one: `you` and `your-org` need two), sent as
 `Authorization: Bearer …`. Permissions: Metadata, Contents, Issues and Pull requests, all read. Never a classic token.
 
 | Call | Use |

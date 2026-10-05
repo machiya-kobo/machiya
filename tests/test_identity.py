@@ -54,7 +54,7 @@ grants = { kura = { read = true, vaults = ["default", "team"] } }
 [[principals.vm.tokens]]
 id = "abcd12"
 hash = "%(th)s"
-label = "claude VM"
+label = "agent VM"
 [[principals.vm.tokens]]
 id = "old123"
 hash = "%(th_old)s"
@@ -551,7 +551,7 @@ class ReviewTest(Base):
         for bad in (good.replace("[principals.newbie]", '[principals."newbie\\n"]'),
                     good.replace('tailscale_tag = "mcp"', 'tailscale_tag = "mcp\\n"'),
                     good.replace('id = "abcd12"', "id = 123456"),
-                    good.replace('label = "claude VM"', 'label = "claude VM"\nowner = true')):
+                    good.replace('label = "agent VM"', 'label = "agent VM"\nowner = true')):
             self.write(bad)
             with self.assertRaises(idn.IdentityError):
                 idn.read_file(self.path)

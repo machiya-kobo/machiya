@@ -10,7 +10,7 @@ Notes live in the vault (read through Kura), pages in Hister (saved and visited 
 ## With the MCP tools (Machiya's, from the plugin)
 
 1. **Notes and cards:** `machiya_search` with the key words; notes and cards come back grouped. Narrow with `notes_search` (tag, folder, `title:` words) or `board_list_cards` when one kind is clearly wanted.
-2. **Pages:** `pages_search` with the words (Hister's query language: `domain:example.com` works), and `label` or `collection` (`collections_list` names them) to narrow. It returns saved and visited web pages only: vault notes come from `notes_search`, and the owner's code documents (his repos, issues and PRs, imported for his own search) stay out of AI context and are never returned.
+2. **Pages:** `pages_search` with the words (Hister's query language: `domain:example.com` works), and `label` or `collection` (`collections_list` names them) to narrow. It returns saved and visited web pages only: vault notes come from `notes_search`, and the owner's code documents (their repos, issues and PRs, imported for their own search) stay out of AI context and are never returned.
 3. **Read the most promising two or three**, no more: `notes_read` for a note (markdown; page through long ones with `offset`), `pages_read` for a page (its saved text, paged the same way). Read a page only when its search snippet isn't enough, and one at a time.
 4. Answer from what you read. Quote sparingly, say which note or page each point comes from, and give the links (Kura `…/n/…`, the page URL, the card URL).
 5. If nothing matches, say what you searched for and try one alternative wording before giving up.

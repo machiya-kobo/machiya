@@ -90,11 +90,11 @@ Background: [services/code-import.md](../services/code-import.md).
 - **AI: on-device only, like notes:**
   - Shiori's AI treats a code result as a note;
   - `shiori-ai` refuses `metadata.source:code`, as it refuses `vault`;
-  - **AI clients never get code or notes** (the owner, 2026-10-05): they read pages only through machiya-mcp (`pages_search`, `pages_read`), which adds the exclusions to every query and drops any result that is a note, a card or a code document, failing closed. Hister's own MCP returns code to any client with the owner's token, so the machiya plugin denies its tools.
+  - **AI clients never get code or notes** (decided 2026-10-05): they read pages only through machiya-mcp (`pages_search`, `pages_read`), which adds the exclusions to every query and drops any result that is a note, a card or a code document, failing closed. Hister's own MCP returns code to any client with the owner's token, so the machiya plugin denies its tools.
 
 ## Hister's MCP
 
-Hister has its own MCP endpoint. **AI clients don't use it** (the owner, 2026-10-05: "code and notes stay out of AI", enforced rather than a prompt rule; sweep MACH-M-4, MACH-F-10). Its `search` and `get_preview` return vault notes and code documents to any client with the token, and a query's exclusions are only as good as the model that writes them. AI clients read pages through **machiya-mcp's `pages_search` and `pages_read`** (machiya-mcp 0.8.0):
+Hister has its own MCP endpoint. **AI clients don't use it** (decided 2026-10-05: "code and notes stay out of AI", enforced rather than a prompt rule; sweep MACH-M-4, MACH-F-10). Its `search` and `get_preview` return vault notes and code documents to any client with the token, and a query's exclusions are only as good as the model that writes them. AI clients read pages through **machiya-mcp's `pages_search` and `pages_read`** (machiya-mcp 0.8.0):
 
 - every query ends ` -label:vault -metadata.source:vault -metadata.source:code -label:konbini`;
 - every result is checked again, and a note, card, code document, room host or unknown shape is dropped (`withheld: N`);
@@ -125,7 +125,7 @@ With `app.user_handling: true` Hister has users, and [hister-login](../services/
 
 ## What callers must never do
 
-- **Hister's per-post social extractors are on, behind the skip rules** (`extractors.twitter`, `mastodon` and `bluesky` `enable: true`, [config/hister/config.yml](../../config/hister/config.yml)). X, Bluesky and the main Mastodon servers stay in the skip rules, so automatic history never reaches an extractor; an explicit save reaches one with `metadata.ignore_skip_rules: true` (Shiori's share sheet, Shortcuts, Linux `shiori save`; never automatic capture). They stayed off until Shiori 0.5.7 stopped linking stored `javascript:` addresses (sweep SHIO-1): the Mastodon extractor stores permalinks exactly as a page wrote them, so every client must keep refusing non-web schemes. Decided by the owner, 2026-10-05.
+- **Hister's per-post social extractors are on, behind the skip rules** (`extractors.twitter`, `mastodon` and `bluesky` `enable: true`, [config/hister/config.yml](../../config/hister/config.yml)). X, Bluesky and the main Mastodon servers stay in the skip rules, so automatic history never reaches an extractor; an explicit save reaches one with `metadata.ignore_skip_rules: true` (Shiori's share sheet, Shortcuts, Linux `shiori save`; never automatic capture). They stayed off until Shiori 0.5.7 stopped linking stored `javascript:` addresses (sweep SHIO-1): the Mastodon extractor stores permalinks exactly as a page wrote them, so every client must keep refusing non-web schemes. Decided 2026-10-05.
 
 - SearXNG never queries Hister.
 - No Hister result, copy or `private_url` appears on gemini, gopher or the public garden export. Those read only `archive_url` (Wayback).

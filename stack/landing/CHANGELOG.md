@@ -2,7 +2,7 @@
 
 ## 0.5.0
 
-- **Its own sign-in cookie** (vaultkit 0.22; the owner's decision of 2026-10-05 after the sweep's LEAD-1): landing keeps a host-only `__Host-machiya_sso_landing`, made from a one-time code hister-login sends back to `/machiya/callback`, instead of reading the shared `machiya_sso` on the tailnet's whole domain (still read while hister-login's `HISTER_LOGIN_LEGACY` allows it). One sign-in still covers everything: the first visit makes one silent trip. Sign Out sets landing's own marker; the helper remembers the ended session, so no room signs the browser straight back in.
+- **Its own sign-in cookie** (vaultkit 0.22; decided 2026-10-05 after the sweep's LEAD-1): landing keeps a host-only `__Host-machiya_sso_landing`, made from a one-time code hister-login sends back to `/machiya/callback`, instead of reading the shared `machiya_sso` on the tailnet's whole domain (still read while hister-login's `HISTER_LOGIN_LEGACY` allows it). One sign-in still covers everything: the first visit makes one silent trip. Sign Out sets landing's own marker; the helper remembers the ended session, so no room signs the browser straight back in.
 - **Room tokens for the owner's reads**: when `LANDING_TOKEN_FILE` holds a room token from hister-login (`mht_…`, scoped to Kura, Niwa and Konbini), it goes to them as `Authorization: Bearer` (over https, or loopback), and Hister's token (`LANDING_HISTER_TOKEN_FILE`) goes to Hister only. Without one, as before until the switch.
 - vaultkit re-vendored.
 
@@ -13,7 +13,7 @@
 
 ## 0.4.0
 
-- **The Shared settings follow you** (the owner, 2026-10-05; [docs/contracts/prefs.md](../../docs/contracts/prefs.md)): in `LANDING_AUTH=hister` mode with the helper, `/api/prefs` is the account's. It is forwarded to hister-login's `/v1/prefs` with the caller's own credential and never kept here, so a theme picked in Kura shows here on the next load, and on every other device. In the Tailscale fallback it answers 503 (no account while sign-in is down) and the page keeps its cookies. Without the helper, `LANDING_PREFS` as before.
+- **The Shared settings follow you** (decided 2026-10-05; [docs/contracts/prefs.md](../../docs/contracts/prefs.md)): in `LANDING_AUTH=hister` mode with the helper, `/api/prefs` is the account's. It is forwarded to hister-login's `/v1/prefs` with the caller's own credential and never kept here, so a theme picked in Kura shows here on the next load, and on every other device. In the Tailscale fallback it answers 503 (no account while sign-in is down) and the page keeps its cookies. Without the helper, `LANDING_PREFS` as before.
 - **Settings starts with Shared**: Theme, Appearance, Text Size and Apps, "Follows you on every Machiya app when signed in." and where they are kept now ("Signed in as … Saved to your account.", or "Sign-in is unavailable…"). Then **This Device** (Use This Device's Size), Account and About.
 - **Automatic sign-in** with `MACHIYA_SIGNIN_PROVIDER=oidc`, as the rooms: a page that needs a sign-in goes through tsidp with no taps. Sign Out sets the marker that makes the helper show its page instead until the next sign-in.
 - A fresh browser's first page is drawn in the account's theme (the sign-in check carries it).

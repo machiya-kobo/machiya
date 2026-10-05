@@ -23,9 +23,9 @@
 
 ## 0.1.1
 
-The first production run stopped at one TLS handshake timeout (`github(owner) GET /repos/owner/repo/releases`), before GitHub's machiya-kobo was reached. Now:
+The first production run stopped at one TLS handshake timeout (`github(<owner>) GET /repos/<owner>/<repo>/releases`), before GitHub's machiya-kobo was reached. Now:
 - **Every forge call is tried again on a transient failure**: a TLS, connect or read timeout, a reset or dropped connection, a 5xx, a 429 or a secondary rate limit. It waits 2, 8 and 30 s (`CODE_IMPORT_RETRY_DELAYS`), or the forge's `Retry-After` when longer; a wait over 120 s fails the call instead. 401, 403 and 404 are never tried again. The run's counts say how many retries there were.
-- **Each source (an owner on a forge: `forgejo:owner`, `github:machiya-kobo`, …) is on its own.** A source that still fails is recorded, and the others go on: their documents land.
+- **Each source (an owner on a forge: `forgejo:you`, `github:your-org`, …) is on its own.** A source that still fails is recorded, and the others go on: their documents land.
   - A failed source withdraws nothing. Its withdrawals, repo stamps and full-run mark are held until the whole source completes, so the next good run picks them up.
   - A source whose twins' source failed uses that source's last listing from the state. If that source has never been listed, it waits ("waiting for …").
   - Full runs are per source too (`last_full:<source>`), so the first 0.1.1 run is a full one for each source; unchanged documents cost nothing.
@@ -40,8 +40,8 @@ The first production run stopped at one TLS handshake timeout (`github(owner) GE
 
 ## 0.1.0
 
-- New: the owner's repos on **Forgejo** (API v1, one read-only token) and **GitHub** (REST, one fine-grained read-only token per owner) go into Hister as documents at their real forge URLs, marked `metadata.source: code`, with `code_host`, `code_repo` (one token: `owner__repo`), `code_repo_name`, `code_kind` (repo, readme, doc, issue, pr, release), `code_state` (open, closed, merged), `code_private` (`"true"`/`"false"`) and `code_updated`. The owner's decisions of 2026-10-05: every repo he owns except forks, archived repos, mirrors and `obsidian`, `pass-store`, `backup`; repo cards, READMEs and markdown docs, issues and PRs (title, body, state; no comments), releases; no code bodies.
-- Markdown in vendored, sample and test trees (`node_modules/`, `vendor/`, `third_party/`, `sample-vault/`, `tests/`, `test/`, `fixtures/`, `examples/`) and hidden folders is skipped by default; READMEs, `docs/` and the other markdown stay (owner, 2026-10-05).
+- New: the owner's repos on **Forgejo** (API v1, one read-only token) and **GitHub** (REST, one fine-grained read-only token per owner) go into Hister as documents at their real forge URLs, marked `metadata.source: code`, with `code_host`, `code_repo` (one token: `owner__repo`), `code_repo_name`, `code_kind` (repo, readme, doc, issue, pr, release), `code_state` (open, closed, merged), `code_private` (`"true"`/`"false"`) and `code_updated`. Decided 2026-10-05: every repo of the listed owners except forks, archived repos, mirrors and the names in `CODE_IMPORT_EXCLUDE`; repo cards, READMEs and markdown docs, issues and PRs (title, body, state; no comments), releases; no code bodies.
+- Markdown in vendored, sample and test trees (`node_modules/`, `vendor/`, `third_party/`, `sample-vault/`, `tests/`, `test/`, `fixtures/`, `examples/`) and hidden folders is skipped by default; READMEs, `docs/` and the other markdown stay (decided 2026-10-05).
 - A repo on both forges is indexed once (`CODE_IMPORT_TWINS`), with the other copy's link on every document.
 - Every document is sent with `html`, after code-import's own secret scan (redact by default, or refuse); `skip_sensitive_check` is never set. Files named like secrets are never read.
 - A URL Hister already holds as the owner's own page is left alone; only documents whose `metadata.source` is `code` are ever replaced or deleted. Deleted, renamed, moved, archived and newly excluded repos, and deleted docs, releases and issues, are withdrawn.

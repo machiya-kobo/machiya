@@ -30,7 +30,7 @@ extractors:
   # REPLACE a document's text and metadata. They are on, but X, Mastodon's main servers and Bluesky stay in the
   # skip rules, so automatic history never reaches them (that once made 66 documents in 90 s); an explicit save
   # reaches an extractor with `metadata.ignore_skip_rules: true`. They were off until Shiori 0.5.7 stopped linking
-  # stored `javascript:` addresses (sweep SHIO-1). The owner, 2026-10-05; docs/contracts/hister.md.
+  # stored `javascript:` addresses (sweep SHIO-1). Decided 2026-10-05; docs/contracts/hister.md.
   # Turn one off if a bookmark loses its text.
   twitter:
     enable: true

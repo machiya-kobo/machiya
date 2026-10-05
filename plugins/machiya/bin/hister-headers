@@ -9,7 +9,7 @@ A production token must never reach anything else (sweep MACH-M-1). Where the to
 - $HISTER_TOKEN_FILE set: that file's first line, and nothing else, ever (missing or unreadable: no header, never a
   fallback). It goes to an https address, or over plain http to loopback only (the dev stack's token file);
 - otherwise, with `hpass` (pass with this machine's host key, so nothing prompts): $HISTER_TOKEN_PASS, else this
-  machine's own copy hosts/<host>/hister-owner-token, else hosts/server/stacks/hister/owner-token. Only for an https
+  machine's own copy hosts/<host>/hister-owner-token (<host>: the short hostname). Only for an https
   address that is not loopback and not on a dev-stack port (19200-19226).
 Anything else prints {}: no header. Never prints anything but the JSON, and never why (no token in any log).
 """
@@ -52,8 +52,7 @@ def first_line(path):
 
 def from_pass(env):
     host = socket.gethostname().split(".")[0].lower()
-    for entry in (env.get("HISTER_TOKEN_PASS") or "", "hosts/%s/hister-owner-token" % host,
-                  "hosts/server/stacks/hister/owner-token"):
+    for entry in (env.get("HISTER_TOKEN_PASS") or "", "hosts/%s/hister-owner-token" % host):
         if not entry:
             continue
         try:

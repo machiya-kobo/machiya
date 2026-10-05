@@ -1,7 +1,7 @@
 """Hister reads: pages_search, pages_read, collections_list, and the page rules the label and collection tools
 (hister_write) share.
 
-Page search and page text are served here again since 0.8.0 (the owner, 2026-10-05: "code and notes stay out of AI" is
+Page search and page text are served here again since 0.8.0 (decided 2026-10-05: "code and notes stay out of AI" is
 enforced, not a prompt rule): AI clients no longer get Hister's own MCP, whose `search` and `get_preview` return vault
 notes and code documents to anyone who asks. Pages only, twice over: every query this server sends carries
 ` -label:vault -metadata.source:vault -metadata.source:code`, and every document that comes back is checked again

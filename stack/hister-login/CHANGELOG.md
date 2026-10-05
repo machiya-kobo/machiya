@@ -2,7 +2,7 @@
 
 ## 0.3.0
 
-- **A cookie per room, host-only** (the owner, 2026-10-05, after the sweep's LEAD-1/KONB-2). The helper's own session is now `__Host-machiya_sso` on Hister's host only, and each room keeps a `__Host-machiya_sso_<room>` of its own (vaultkit `histerauth`, the rooms only re-vendor):
+- **A cookie per room, host-only** (decided 2026-10-05, after the sweep's LEAD-1/KONB-2). The helper's own session is now `__Host-machiya_sso` on Hister's host only, and each room keeps a `__Host-machiya_sso_<room>` of its own (vaultkit `histerauth`, the rooms only re-vendor):
   - a room sends a browser here with `state=<SHA-256 of a nonce>`; once the helper knows the browser it sends it to the room's `/machiya/callback?code=mhc_…`;
   - the room trades the code at the new internal **`POST /v1/redeem`**: one use, 60 s, only for that room's origin (`X-Machiya-Room`) and that browser's nonce (`X-Machiya-State`), only while its helper session lives, for a room session `mhr_…`;
   - `/v1/check`, `/v1/prefs` and `/v1/signout` take `mhr_…` with `X-Machiya-Room` (another room's session is `401 wrong-room`), and answer `kind` and `room`;
@@ -27,13 +27,13 @@
 
 ## 0.2.0
 
-- **The settings that follow a person** (the owner, 2026-10-05; [docs/contracts/prefs.md](../../docs/contracts/prefs.md)): the helper keeps one store of each Hister user's settings, in its own file `prefs.sqlite3` beside the sessions file (`HISTER_LOGIN_PREFS_DB`, 0600), keyed by `hi:<sha256(username)[:32]>`, which is derived only from the credential the helper resolves itself (no endpoint takes a user id).
+- **The settings that follow a person** (decided 2026-10-05; [docs/contracts/prefs.md](../../docs/contracts/prefs.md)): the helper keeps one store of each Hister user's settings, in its own file `prefs.sqlite3` beside the sessions file (`HISTER_LOGIN_PREFS_DB`, 0600), keyed by `hi:<sha256(username)[:32]>`, which is derived only from the credential the helper resolves itself (no endpoint takes a user id).
   - The internal `GET`/`PUT /v1/prefs` is for the rooms and landing, which forward their `/api/prefs` with the caller's own `X-Machiya-Session` or `X-Access-Token` (exactly one, as for `/v1/check`).
   - The public `GET`/`PUT /machiya/api/prefs` is for Shiori's apps (`Bearer mhs_…`), extensions and scripts (a Hister token), and the hosted pages through their nginx (the sign-in cookie; a `PUT` needs an `Origin` among the return hosts; no CORS).
   - The answer is `{"v", "rev", "prefs", "updated"}` with `ETag: "<rev>"` (304 on `If-None-Match`). A `PUT` merges only the keys sent and is checked against vaultkit's schema (400). Values are never logged.
   - `/v1/check` also carries the Shared values as `prefs`, so a room draws a fresh browser's first page in the person's theme.
 - **`hister_login.py prefs import|show|delete --user NAME`.** `import` seeds an account from the rooms' old `prefs.sqlite3` files, which it opens read-only: for each key the newest `updated` across the files wins, and only when it is newer than the account's own, so a second run changes nothing. `delete` is for an account removed.
-- **Automatic sign-in** (the owner, 2026-10-05: "Yes, Tailscale automatically"). With `MACHIYA_SIGNIN_PROVIDER=oidc` the rooms and landing send a page that needs a sign-in to `/machiya/signin?…&provider=oidc&auto=1`, and the helper goes straight to Hister's OIDC sign-in: tsidp knows the device, so there are no taps, and each installed web app signs itself in.
+- **Automatic sign-in** (decided 2026-10-05: "Yes, Tailscale automatically"). With `MACHIYA_SIGNIN_PROVIDER=oidc` the rooms and landing send a page that needs a sign-in to `/machiya/signin?…&provider=oidc&auto=1`, and the helper goes straight to Hister's OIDC sign-in: tsidp knows the device, so there are no taps, and each installed web app signs itself in.
   - **A deliberate sign-out** sets the marker `<sign-in cookie>_out` (`machiya_sso_out`) on the shared domain for 30 days: `/machiya/signout`, the sessions page signing this browser out, or a room's `/signout` (vaultkit). With the marker, `auto=1` shows the page instead, so Sign Out never bounces straight back in. The next successful sign-in clears it.
   - **A failed round trip:** a callback that doesn't finish a sign-in this helper started lands on the page with "Sign in with … didn't work. Try again, or sign in with your password." and a 10-minute marker, so it never loops.
   - **A tap** on "Sign In with Tailscale" (`provider=` without `auto`) always goes through.

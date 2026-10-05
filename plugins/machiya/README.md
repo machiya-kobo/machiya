@@ -29,7 +29,7 @@ Set `MACHIYA_MCP_URL` if the server isn't at `https://machiya-mcp.example.ts.net
 
 ## A machine with no Tailscale login: a room token (plugin 0.4.0)
 
-machiya-mcp knows a person by the Tailscale login its sidecar passes on. A tagged machine (the claude VM is `tag:dev`) has none, so machiya-mcp (0.8.0) also takes a **room token**: `Authorization: Bearer mht_…`, which hister-login makes for machiya-mcp and which opens machiya-mcp only, never Hister or a room ([identity.md](../../docs/identity.md#room-tokens)). Make one on hister-login's sessions page (Room Tokens, tick machiya-mcp) or where the helper runs (`hister_login.py token mint --user <owner> --label "claude VM" --rooms machiya-mcp --out FILE`), keep it in pass (`pass:hosts/<host>/machiya-mcp-room-token`), write it to a 0600 file on the machine, and install with its path:
+machiya-mcp knows a person by the Tailscale login its sidecar passes on. A tagged machine (an agents' VM tagged `tag:dev`, say) has none, so machiya-mcp (0.8.0) also takes a **room token**: `Authorization: Bearer mht_…`, which hister-login makes for machiya-mcp and which opens machiya-mcp only, never Hister or a room ([identity.md](../../docs/identity.md#room-tokens)). Make one on hister-login's sessions page (Room Tokens, tick machiya-mcp) or where the helper runs (`hister_login.py token mint --user <owner> --label "agent VM" --rooms machiya-mcp --out FILE`), keep it in pass (`pass:hosts/<host>/machiya-mcp-room-token`), write it to a 0600 file on the machine, and install with its path:
 
 ```
 MACHIYA_TOKEN_FILE=~/.config/machiya/mcp-room-token plugins/machiya/install.sh
