@@ -41,7 +41,7 @@ def cookie_value(headers, name):
     return None
 
 
-class HelperTest(unittest.TestCase):
+class HelperBase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.fake = FakeHister()
@@ -96,6 +96,39 @@ class HelperTest(unittest.TestCase):
     def age(self, seconds=60):
         self.login.store.q("UPDATE sessions SET verified_at = verified_at - ?", (seconds,))
 
+    def one_connection(self, port, requests):
+        """[(status, headers, body)] for requests sent one after another down ONE kept-alive connection."""
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        out = []
+        try:
+            for method, path, headers, *body in requests:
+                conn.request(method, path, body=body[0] if body else None, headers=headers)
+                r = conn.getresponse()
+                out.append((r.status, dict(r.getheaders()), r.read()))
+        finally:
+            conn.close()
+        return out
+
+    def raw(self, port, data):
+        """Everything the server sends back for `data` on one connection, and whether it closed the connection."""
+        import socket
+        s = socket.create_connection(("127.0.0.1", port), timeout=2)
+        s.sendall(data)
+        out, closed = b"", False
+        try:
+            while True:
+                chunk = s.recv(65536)
+                if not chunk:
+                    closed = True
+                    break
+                out += chunk
+        except socket.timeout:
+            pass
+        s.close()
+        return out, closed
+
+
+class HelperTest(HelperBase):
     # -- sign-in
 
     def test_signin_page_when_not_signed_in(self):
@@ -107,9 +140,9 @@ class HelperTest(unittest.TestCase):
         self.assertIn(b"/machiya/static/machiya.css", body)
         self.assertNotIn(b'"/static/', body)                           # Hister owns /static/ on this host
         self.assertNotIn(b"<script>", body)                            # no inline script (CSP script-src 'self')
-        ret = cookie_value(headers, "machiya_return")
+        ret = cookie_value(headers, "__Host-machiya_return")
         self.assertTrue(ret)
-        c = [x for x in cookies_of(headers) if x.startswith("machiya_return=")][0]
+        c = [x for x in cookies_of(headers) if x.startswith("__Host-machiya_return=")][0]
         self.assertIn("Max-Age=600", c)
         self.assertNotIn("Domain", c)                                   # host-only
         csp = dict((k.lower(), v) for k, v in headers)["content-security-policy"]
@@ -145,14 +178,14 @@ class HelperTest(unittest.TestCase):
                                              {"Cookie": "hister=" + session})
             self.assertEqual((status, dict(headers)["Location"]), (303, PUBLIC + "/"), bad)
             status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": bad}))
-            self.assertIsNone(cookie_value(headers, "machiya_return") or None, bad)
+            self.assertIsNone(cookie_value(headers, "__Host-machiya_return") or None, bad)
         # the app flow takes the app's scheme only, never a page
         status, _, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": KURA, "app": "1"}),
                                    {"Cookie": "hister=" + session})
         self.assertEqual(status, 400)
         # a forged machiya_return is checked again when used
         forged = hl.b64e(json.dumps({"r": "https://evil.example/", "a": 0}).encode())
-        self.assertEqual(self.login.read_return("machiya_return=" + forged), (None, False))
+        self.assertEqual(self.login.read_return("__Host-machiya_return=" + forged), (None, False, ""))
 
     def test_return_hosts_default(self):
         self.assertEqual(self.settings.return_hosts, ["hister.example.test", "kura.example.test",
@@ -202,7 +235,7 @@ class HelperTest(unittest.TestCase):
 
     def test_tokens(self):
         self.assertEqual(self.check(token="tok-owner"), (200, {"username": "owner", "user_id": 1, "via": "token",
-                                                              "prefs": {}}))
+                                                              "kind": "hister-token", "room": None, "prefs": {}}))
         self.assertEqual(self.check(token="tok-other")[1]["username"], "other")
         self.assertEqual(self.check(token="nope"), (401, {"reason": "signed-out"}))
         n = self.fake.calls["/api/profile"]
@@ -330,7 +363,7 @@ class HelperTest(unittest.TestCase):
         anon, state = self.fake.oauth_started()
         ret = hl.b64e(json.dumps({"r": KURA, "a": 0}).encode())
         status, headers, _ = self.public("GET", "/api/oauth/callback?provider=oidc&code=c&state=" + state,
-                                         {"Cookie": "hister=%s; machiya_return=%s; machiya_theme=night" % (anon, ret)})
+                                         {"Cookie": "hister=%s; __Host-machiya_return=%s; machiya_theme=night" % (anon, ret)})
         self.assertEqual(status, 302)
         self.assertEqual(dict(headers)["Location"], KURA)
         histers = [c for c in cookies_of(headers) if c.startswith("hister=")]
@@ -340,7 +373,7 @@ class HelperTest(unittest.TestCase):
         sid = cookie_value(headers, "machiya_sso")
         self.assertEqual(self.check(sid)[1]["username"], "owner")
         self.assertEqual(self.login.store.q("SELECT hister_session FROM sessions")[0][0], new)
-        self.assertTrue(any(c.startswith("machiya_return=;") for c in cookies_of(headers)))
+        self.assertTrue(any(c.startswith("__Host-machiya_return=;") for c in cookies_of(headers)))
 
     def test_callback_shim_without_return_keeps_histers_location(self):
         anon, state = self.fake.oauth_started()
@@ -358,7 +391,7 @@ class HelperTest(unittest.TestCase):
         anon, state = self.fake.oauth_started()
         ret = hl.b64e(json.dumps({"r": "shiori://signed-in", "a": 1}).encode())
         status, headers, _ = self.public("GET", "/api/oauth/callback?provider=oidc&code=c&state=" + state,
-                                         {"Cookie": "hister=%s; machiya_return=%s" % (anon, ret)})
+                                         {"Cookie": "hister=%s; __Host-machiya_return=%s" % (anon, ret)})
         loc = urlsplit(dict(headers)["Location"])
         self.assertEqual((loc.scheme, loc.netloc), ("shiori", "signed-in"))
         frag = {k: v[0] for k, v in parse_qs(loc.fragment).items()}
@@ -372,29 +405,29 @@ class HelperTest(unittest.TestCase):
         q = urlencode({"return": KURA, "provider": "oidc", "auto": "1"})
         status, headers, _ = self.public("GET", "/machiya/signin?" + q)
         self.assertEqual((status, dict(headers)["Location"]), (303, "/api/oauth?provider=oidc"))
-        self.assertTrue(cookie_value(headers, "machiya_return"))
+        self.assertTrue(cookie_value(headers, "__Host-machiya_return"))
 
     def test_auto_signin_after_a_deliberate_signout_shows_the_page(self):
         session, sid, _ = self.sign_in()
         status, headers, _ = self.public("POST", "/machiya/signout", {
             "Cookie": "hister=%s; machiya_sso=%s" % (session, sid), "Origin": PUBLIC, "Content-Length": "0"})
-        marker = [c for c in cookies_of(headers) if c.startswith("machiya_sso_out=1")]
+        marker = [c for c in cookies_of(headers) if c.startswith("__Host-machiya_sso_out=1")]
         self.assertEqual(len(marker), 1)
-        self.assertIn("Domain=example.test", marker[0])                     # the rooms' sign-outs set the same one
+        self.assertNotIn("Domain", marker[0])                    # 0.3.0: host-only (the helper remembers ended ids)
         q = urlencode({"return": KURA, "provider": "oidc", "auto": "1"})
-        status, headers, body = self.public("GET", "/machiya/signin?" + q, {"Cookie": "machiya_sso_out=1"})
+        status, headers, body = self.public("GET", "/machiya/signin?" + q, {"Cookie": "__Host-machiya_sso_out=1"})
         self.assertEqual(status, 200)                                       # the page, not straight back in
         self.assertIn(b'id="hister-signin"', body)
         self.assertIn(b'href="/api/oauth?provider=oidc"', body)            # one tap still works
         # a tap (provider= without auto, Shiori's button) is a choice: it goes through
         q = urlencode({"return": KURA, "provider": "oidc"})
-        self.assertEqual(self.public("GET", "/machiya/signin?" + q, {"Cookie": "machiya_sso_out=1"})[0], 303)
+        self.assertEqual(self.public("GET", "/machiya/signin?" + q, {"Cookie": "__Host-machiya_sso_out=1"})[0], 303)
         # signing in again clears the marker, so the next time is automatic again
         session = self.fake.signed_in()
         status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": KURA}),
-                                         {"Cookie": "hister=%s; machiya_sso_out=1" % session})
+                                         {"Cookie": "hister=%s; __Host-machiya_sso_out=1" % session})
         self.assertEqual(status, 303)
-        cleared = [c for c in cookies_of(headers) if c.startswith("machiya_sso_out=;")]
+        cleared = [c for c in cookies_of(headers) if c.startswith("__Host-machiya_sso_out=;")]
         self.assertTrue(cleared and all("Max-Age=0" in c for c in cleared))
 
     def test_sessions_page_signout_sets_the_marker(self):
@@ -403,23 +436,23 @@ class HelperTest(unittest.TestCase):
             "Cookie": "machiya_sso=" + sid, "Origin": PUBLIC, "Content-Type": "application/x-www-form-urlencoded",
             "Content-Length": "6"}, b"do=all")
         self.assertEqual(status, 303)
-        self.assertTrue(any(c.startswith("machiya_sso_out=1") for c in cookies_of(headers)))
+        self.assertTrue(any(c.startswith("__Host-machiya_sso_out=1") for c in cookies_of(headers)))
 
     def test_failed_round_trip_lands_on_the_page_once(self):
         """The provider's round trip didn't finish (a bad state, Hister refusing): the page with a message and a short
         marker, so the next automatic try shows the page instead of looping."""
         ret = hl.b64e(json.dumps({"r": KURA, "a": 0}).encode())
         status, headers, body = self.public("GET", "/api/oauth/callback?provider=oidc&code=c&state=bad",
-                                            {"Cookie": "machiya_return=" + ret})
+                                            {"Cookie": "__Host-machiya_return=" + ret})
         self.assertEqual(status, 401)
         self.assertIn(b"didn&#x27;t work", body)
         self.assertIn(b'id="hister-signin"', body)
-        failed = [c for c in cookies_of(headers) if c.startswith("machiya_sso_out=failed")]
+        failed = [c for c in cookies_of(headers) if c.startswith("__Host-machiya_sso_out=failed")]
         self.assertTrue(failed and "Max-Age=600" in failed[0] and "Domain" not in failed[0])
-        self.assertTrue(any(c.startswith("machiya_return=;") for c in cookies_of(headers)))
+        self.assertTrue(any(c.startswith("__Host-machiya_return=;") for c in cookies_of(headers)))
         self.assertIsNone(cookie_value(headers, "machiya_sso"))
         q = urlencode({"return": KURA, "provider": "oidc", "auto": "1"})
-        self.assertEqual(self.public("GET", "/machiya/signin?" + q, {"Cookie": "machiya_sso_out=failed"})[0], 200)
+        self.assertEqual(self.public("GET", "/machiya/signin?" + q, {"Cookie": "__Host-machiya_sso_out=failed"})[0], 200)
 
     def test_signin_straight_to_a_provider(self):
         """Shiori's "Sign In with Tailscale" (0.1.3): ?provider=oidc sets the return cookie and goes to Hister's OAuth."""
@@ -428,7 +461,7 @@ class HelperTest(unittest.TestCase):
                                          {"Sec-Fetch-Site": "none"})                 # the app's own web session
         self.assertEqual(status, 303)
         self.assertEqual(dict(headers)["Location"], "/api/oauth?provider=oidc")
-        self.assertTrue(cookie_value(headers, "machiya_return"))
+        self.assertTrue(cookie_value(headers, "__Host-machiya_return"))
         status, headers, body = self.public("GET", "/machiya/signin?" + urlencode({"return": KURA, "provider": "github"}))
         self.assertEqual(status, 200)                                  # a provider not offered: the page, as before
         self.assertIn(b'id="hister-signin"', body)
@@ -616,37 +649,6 @@ class HelperTest(unittest.TestCase):
 
     # -- keep-alive (0.1.2): Tailscale Serve sends different people's requests down one connection
 
-    def one_connection(self, port, requests):
-        """[(status, headers, body)] for requests sent one after another down ONE kept-alive connection."""
-        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-        out = []
-        try:
-            for method, path, headers, *body in requests:
-                conn.request(method, path, body=body[0] if body else None, headers=headers)
-                r = conn.getresponse()
-                out.append((r.status, dict(r.getheaders()), r.read()))
-        finally:
-            conn.close()
-        return out
-
-    def raw(self, port, data):
-        """Everything the server sends back for `data` on one connection, and whether it closed the connection."""
-        import socket
-        s = socket.create_connection(("127.0.0.1", port), timeout=2)
-        s.sendall(data)
-        out, closed = b"", False
-        try:
-            while True:
-                chunk = s.recv(65536)
-                if not chunk:
-                    closed = True
-                    break
-                out += chunk
-        except socket.timeout:
-            pass
-        s.close()
-        return out, closed
-
     def test_keep_alive_check_answers_each_request_alone(self):
         _, sid, _ = self.sign_in()
         _, other, _ = self.sign_in(session=self.fake.signed_in("other"))
@@ -708,6 +710,348 @@ class HelperTest(unittest.TestCase):
         got = self.one_connection(self.int, [("POST", "/v1/signout", {"X-Machiya-Session": "x"}, b"{}"),
                                              ("GET", "/v1/check", {"X-Machiya-Session": sid})])
         self.assertEqual([g[0] for g in got], [204, 200])
+
+
+KURA_O, NIWA_O, SEARCH_O = "https://kura.example.test", "https://niwa.example.test", "https://search.example.test"
+
+
+class RoomSessionTest(HelperBase):
+    """0.3.0: the helper's own cookie host-only; a one-time code per room; room sessions bound to their room and to
+    their helper session; room tokens; HISTER_LOGIN_LEGACY; the hosted pages' hosts (proxied origins)."""
+    EXTRA = {"HISTER_LOGIN_PROXIED_ORIGINS": SEARCH_O, "MACHIYA_SIGNIN_PROVIDER": "oidc",
+             "MACHIYA_ROOMS": ENV["MACHIYA_ROOMS"] + ",machiya=https://machiya.example.test"}
+
+    def trip(self, ret=KURA, nonce=None, session=None, own=None):
+        """A room's trip to the helper with a state: -> (session, own id, nonce, code, headers)."""
+        session = session or self.fake.signed_in()
+        nonce = nonce or hl.b64e(os.urandom(32))
+        cookie = "hister=" + session + ("; __Host-machiya_sso=" + own if own else "")
+        status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode(
+            {"return": ret, "state": hl.histerauth.state_hash(nonce)}), {"Cookie": cookie})
+        self.assertEqual(status, 303)
+        loc = urlsplit(dict(headers)["Location"])
+        code = parse_qs(loc.query).get("code", [None])[0]
+        return session, cookie_value(headers, "__Host-machiya_sso") or own, nonce, code, headers
+
+    def redeem(self, code, room=KURA_O, nonce="x" * 43, extra=None):
+        h = {"X-Machiya-Code": code or "", "X-Machiya-Room": room, "X-Machiya-State": nonce, "Content-Length": "0"}
+        h.update(extra or {})
+        status, _, body = self.internal("POST", "/v1/redeem", h)
+        return status, json.loads(body or b"null")
+
+    def room_check(self, value, room=KURA_O):
+        h = {"X-Machiya-Session": value}
+        if room is not None:
+            h["X-Machiya-Room"] = room
+        status, _, body = self.internal("GET", "/v1/check", h)
+        return status, json.loads(body or b"null")
+
+    def test_own_cookie_is_host_only(self):
+        _, sid, _, _, headers = self.trip()
+        own = [c for c in cookies_of(headers) if c.startswith("__Host-machiya_sso=")][0]
+        for attr in ("Secure", "HttpOnly", "SameSite=Lax", "Path=/"):
+            self.assertIn(attr, own)
+        self.assertNotIn("Domain", own)
+        legacy = [c for c in cookies_of(headers) if c.startswith("machiya_sso=")]      # legacy on (the default):
+        self.assertTrue(legacy and "Domain=example.test" in legacy[0])                 # the old copy too, same id
+        self.assertEqual(cookie_value(headers, "machiya_sso"), sid)
+
+    def test_code_goes_to_the_rooms_callback_and_works_once(self):
+        _, sid, nonce, code, headers = self.trip()
+        loc = urlsplit(dict(headers)["Location"])
+        self.assertEqual((loc.scheme, loc.netloc, loc.path), ("https", "kura.example.test", "/machiya/callback"))
+        self.assertTrue(hl.histerauth.CODE_RE.match(code))
+        self.assertNotIn(nonce, dict(headers)["Location"])
+        status, data = self.redeem(code, nonce=nonce)
+        self.assertEqual((status, data["return"], data["username"]), (200, KURA, "owner"))
+        self.assertTrue(hl.histerauth.RSID_RE.match(data["session"]))
+        self.assertTrue(86400 * 170 < data["max_age"] <= 86400 * 180)
+        self.assertEqual(self.redeem(code, nonce=nonce), (401, {"reason": "bad-code"}))       # once
+        status, info = self.room_check(data["session"])
+        self.assertEqual((status, info["kind"], info["room"], info["username"]), (200, "room", KURA_O, "owner"))
+        self.assertEqual(self.room_check(data["session"], NIWA_O), (401, {"reason": "wrong-room"}))
+        self.assertEqual(self.room_check(data["session"], None), (401, {"reason": "wrong-room"}))   # an old room
+        # a room that also accepts another origin (the hosted pages): its list
+        self.assertEqual(self.room_check(data["session"], NIWA_O + ", " + KURA_O)[0], 200)
+        stored = self.login.store.q("SELECT count(*) FROM room_sessions WHERE rsid_hash = ?",
+                                    (hl.sha(data["session"]),))[0][0]
+        self.assertEqual(stored, 1)
+        self.assertFalse(self.login.store.q("SELECT 1 FROM room_sessions WHERE rsid_hash = ?", (data["session"],)))
+
+    def test_code_is_bound(self):
+        _, _, nonce, code, _ = self.trip()
+        self.assertEqual(self.redeem(code, room=NIWA_O, nonce=nonce)[0], 401)          # another room's: and gone
+        self.assertEqual(self.redeem(code, nonce=nonce)[0], 401)
+        _, _, nonce, code, _ = self.trip()
+        self.assertEqual(self.redeem(code, nonce="y" * 43)[0], 401)                     # another browser's nonce
+        _, _, nonce, code, _ = self.trip()
+        self.login.store.q("UPDATE codes SET expires_at = ?", (hl.now() - 1,))
+        self.assertEqual(self.redeem(code, nonce=nonce)[0], 401)                        # 60 s
+        session, sid, nonce, code, _ = self.trip()
+        self.login.end_hister(session)                                                  # signed out meanwhile
+        self.assertEqual(self.redeem(code, nonce=nonce)[0], 401)
+        for bad in ({"X-Machiya-Room": "junk"}, {"X-Machiya-Room": KURA_O + ", " + NIWA_O}):
+            _, _, nonce, code, _ = self.trip()
+            self.assertEqual(self.redeem(code, nonce=nonce, extra=bad)[0], 401)
+
+    def test_no_state_no_code(self):
+        session = self.fake.signed_in()
+        status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": KURA}),
+                                         {"Cookie": "hister=" + session})
+        self.assertEqual((status, dict(headers)["Location"]), (303, KURA))      # back as it was: the room's own trip
+        self.assertEqual(self.login.store.q("SELECT count(*) FROM codes")[0][0], 0)
+
+    def test_signed_in_by_own_cookie_alone(self):
+        """Hister's own cookie gone, the helper's still there: the trip finishes on the helper's session."""
+        _, sid, _, _, _ = self.trip()
+        nonce = "z" * 43
+        status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode(
+            {"return": KURA, "state": hl.histerauth.state_hash(nonce)}), {"Cookie": "__Host-machiya_sso=" + sid})
+        self.assertEqual(status, 303)
+        code = parse_qs(urlsplit(dict(headers)["Location"]).query)["code"][0]
+        self.assertEqual(self.redeem(code, nonce=nonce)[0], 200)
+
+    def test_signout_in_a_room_ends_every_room_and_shows_the_page_next(self):
+        session, sid, nonce, code, _ = self.trip()
+        kura = self.redeem(code, nonce=nonce)[1]["session"]
+        _, _, nonce, code, _ = self.trip(ret="https://niwa.example.test/", session=session, own=sid)
+        niwa = self.redeem(code, room=NIWA_O, nonce=nonce)[1]["session"]
+        self.assertEqual(self.login.store.count(), 1)                                   # one browser, two rooms
+        status, _, _ = self.internal("POST", "/v1/signout", {"X-Machiya-Session": niwa, "X-Machiya-Room": NIWA_O,
+                                                             "Content-Length": "0"})
+        self.assertEqual(status, 204)
+        self.assertEqual(self.room_check(kura)[0], 401)
+        self.assertEqual(self.room_check(niwa, NIWA_O)[0], 401)
+        self.assertEqual(self.check(sid)[0], 401)
+        self.assertEqual(self.fake.sessions.get(session), None)                         # Hister's logout too
+        # the next automatic trip from another room: the page, the marker set here, the dead cookie dropped
+        q = urlencode({"return": KURA, "state": "s" * 43, "provider": "oidc", "auto": "1"})
+        status, headers, body = self.public("GET", "/machiya/signin?" + q,
+                                            {"Cookie": "hister=%s; __Host-machiya_sso=%s" % (session, sid)})
+        self.assertEqual(status, 200)
+        self.assertIn(b'id="hister-signin"', body)
+        self.assertEqual(cookie_value(headers, "__Host-machiya_sso_out"), "1")
+        self.assertEqual(cookie_value(headers, "__Host-machiya_sso"), "")
+        # a room session of another room can't sign this one out
+        session, sid, nonce, code, _ = self.trip()
+        kura = self.redeem(code, nonce=nonce)[1]["session"]
+        self.internal("POST", "/v1/signout", {"X-Machiya-Session": kura, "X-Machiya-Room": NIWA_O,
+                                              "Content-Length": "0"})
+        self.assertEqual(self.room_check(kura)[0], 200)
+
+    def test_hister_ui_signout_ends_room_sessions(self):
+        session, sid, nonce, code, _ = self.trip()
+        kura = self.redeem(code, nonce=nonce)[1]["session"]
+        self.fake.sessions.pop(session)                                                 # signed out in Hister's UI
+        self.login.store.q("UPDATE sessions SET verified_at = verified_at - 60")
+        self.assertEqual(self.room_check(kura), (401, {"reason": "signed-out"}))
+        self.assertEqual(self.login.store.q("SELECT count(*) FROM room_sessions")[0][0], 0)
+
+    def test_sessions_page_lists_rooms_and_tokens(self):
+        session, sid, nonce, code, _ = self.trip()
+        self.redeem(code, nonce=nonce)
+        c = {"Cookie": "__Host-machiya_sso=" + sid}
+        status, _, body = self.public("GET", "/machiya/sessions", c)
+        self.assertEqual(status, 200)
+        self.assertIn(b"Kura", body)
+        self.assertIn(b"Room Tokens", body)
+        form = urlencode([("do", "token-new"), ("label", "pm on the laptop"), ("room", "konbini"),
+                          ("room", "niwa"), ("room", "bogus")]).encode()
+        post = dict(c, Origin=PUBLIC, **{"Content-Type": "application/x-www-form-urlencoded",
+                                         "Content-Length": str(len(form))})
+        status, _, body = self.public("POST", "/machiya/sessions", post, form)
+        self.assertEqual(status, 200)
+        value = body.split(b'<code class="token-value">')[1].split(b"<")[0].decode()
+        self.assertTrue(hl.histerauth.RTOKEN_RE.match(value))
+        self.assertEqual(self.room_check(value, NIWA_O)[0], 200)
+        self.assertEqual(self.room_check(value, KURA_O), (401, {"reason": "wrong-room"}))
+        status, _, body = self.public("GET", "/machiya/sessions", c)
+        self.assertIn(b"pm on the laptop", body)
+        self.assertNotIn(value.encode(), body)                                          # shown once
+        tid = self.login.store.tokens_of("owner")[0]["id"]
+        form = urlencode({"do": "token-revoke", "token": tid}).encode()
+        post["Content-Length"] = str(len(form))
+        self.assertEqual(self.public("POST", "/machiya/sessions", post, form)[0], 303)
+        self.assertEqual(self.room_check(value, NIWA_O)[0], 401)
+        self.assertNotIn(value, self.err.getvalue())
+
+    def test_token_cli(self):
+        out = os.path.join(self.tmp, "pm-token")
+        env = {"HISTER_LOGIN_DB": self.settings.db, "MACHIYA_ROOMS": self.EXTRA["MACHIYA_ROOMS"]}
+        buf = io.StringIO()
+        self.assertEqual(hl.token_cli(["mint", "--user", "owner", "--label", "pm", "--rooms", "kura,niwa",
+                                       "--out", out], env, buf), 0)
+        self.assertEqual(stat.S_IMODE(os.stat(out).st_mode), 0o600)
+        with open(out) as f:
+            value = f.read().strip()
+        self.assertNotIn(value, buf.getvalue())
+        self.assertEqual(self.room_check(value, NIWA_O)[1]["kind"], "token")
+        buf = io.StringIO()
+        self.assertEqual(hl.token_cli(["mint", "--user", "owner", "--label", "x", "--rooms", "nowhere"], env, buf), 1)
+        mine = os.path.join(self.tmp, "made-elsewhere")
+        with open(mine, "w") as f:
+            f.write("mht_" + "M" * 43 + "\n")
+        for _ in range(2):                                                              # idempotent
+            self.assertEqual(hl.token_cli(["add", "--user", "owner", "--label", "dev", "--rooms",
+                                           "https://kura.example.test", "--from-file", mine], env, io.StringIO()), 0)
+        self.assertEqual(self.room_check("mht_" + "M" * 43)[0], 200)
+        buf = io.StringIO()
+        hl.token_cli(["list"], env, buf)
+        self.assertEqual(len(buf.getvalue().strip().splitlines()), 2)
+        self.assertNotIn("mht_", buf.getvalue())
+        tid = buf.getvalue().split()[0]
+        self.assertEqual(hl.token_cli(["revoke", tid], env, io.StringIO()), 0)
+        self.assertEqual(hl.token_cli(["revoke", tid], env, io.StringIO()), 1)
+
+    def test_prefs_with_a_room_session(self):
+        _, _, nonce, code, _ = self.trip()
+        rs = self.redeem(code, nonce=nonce)[1]["session"]
+        h = {"X-Machiya-Session": rs, "X-Machiya-Room": KURA_O}
+        body = json.dumps({"prefs": {"theme": "day"}}).encode()
+        status, _, out = self.internal("PUT", "/v1/prefs", dict(h, **{"Content-Type": "application/json",
+                                                                      "Content-Length": str(len(body))}), body)
+        self.assertEqual((status, json.loads(out)["prefs"]["theme"]), (200, "day"))
+        status, _, out = self.internal("GET", "/v1/prefs", dict(h, **{"X-Machiya-Room": NIWA_O}))
+        self.assertEqual((status, json.loads(out)["reason"]), (401, "wrong-room"))
+
+    # the hosted pages' hosts (proxied origins)
+
+    def test_proxied_origin_round_trip(self):
+        session = self.fake.signed_in()
+        page = SEARCH_O + "/search?q=x"
+        # 1. a hosted page's 401 goes to the helper as today (no state): the helper sends it through its /start
+        status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": page}),
+                                         {"Cookie": "hister=" + session})
+        start = dict(headers)["Location"]
+        self.assertEqual(start, SEARCH_O + "/machiya/start?" + urlencode({"return": page}))
+        sid = cookie_value(headers, "__Host-machiya_sso")
+        # 2. /machiya/start on search.* (nginx passes Host): a state cookie there, then the sign-in with its hash
+        host = {"Host": "search.example.test"}
+        status, headers, _ = self.public("GET", urlsplit(start).path + "?" + urlsplit(start).query, host)
+        self.assertEqual(status, 302)
+        nonce = cookie_value(headers, "__Host-machiya_sso_shiori_state")
+        state = [c for c in cookies_of(headers) if c.startswith("__Host-machiya_sso_shiori_state=")][0]
+        self.assertNotIn("Domain", state)
+        loc = urlsplit(dict(headers)["Location"])
+        q = parse_qs(loc.query)
+        self.assertEqual((PUBLIC + loc.path, q["return"], q["state"], q["provider"]),
+                         (PUBLIC + "/machiya/signin", [page], [hl.histerauth.state_hash(nonce)], ["oidc"]))
+        # 3. the sign-in (already signed in) sends a code to search.*'s callback
+        status, headers, _ = self.public("GET", loc.path + "?" + loc.query,
+                                         {"Cookie": "hister=%s; __Host-machiya_sso=%s" % (session, sid)})
+        cb = urlsplit(dict(headers)["Location"])
+        self.assertEqual(cb.scheme + "://" + cb.netloc + cb.path, SEARCH_O + "/machiya/callback")
+        # 4. the callback on search.* (the helper answers as that host): the room cookie there, then the page
+        status, headers, _ = self.public("GET", cb.path + "?" + cb.query,
+                                         dict(host, Cookie="__Host-machiya_sso_shiori_state=" + nonce))
+        self.assertEqual((status, dict(headers)["Location"]), (302, page))
+        rs = cookie_value(headers, "__Host-machiya_sso_shiori")
+        self.assertTrue(hl.histerauth.RSID_RE.match(rs))
+        # 5. nginx's auth_request: the session (or the cookie itself) and the host's origin
+        for h in ({"X-Machiya-Session": rs, "X-Machiya-Room": SEARCH_O},
+                  {"Cookie": "a=b; __Host-machiya_sso_shiori=" + rs, "X-Machiya-Room": SEARCH_O}):
+            status, headers, _ = self.internal("GET", "/v1/nginx", h)
+            self.assertEqual((status, dict(headers).get("X-Hister-Cookie")), (200, "hister=" + session))
+        self.assertEqual(self.internal("GET", "/v1/nginx", {"X-Machiya-Session": rs, "X-Machiya-Room": KURA_O})[0],
+                         401)
+        # prefs on search.* with its cookie; a PUT from another origin is refused
+        c = dict(host, Cookie="__Host-machiya_sso_shiori=" + rs)
+        self.assertEqual(self.public("GET", "/machiya/api/prefs", c)[0], 200)
+        body = json.dumps({"prefs": {"theme": "night"}}).encode()
+        put = dict(c, **{"Content-Type": "application/json", "Content-Length": str(len(body))})
+        self.assertEqual(self.public("PUT", "/machiya/api/prefs", dict(put, Origin=PUBLIC), body)[0], 403)
+        self.assertEqual(self.public("PUT", "/machiya/api/prefs", dict(put, Origin=SEARCH_O), body)[0], 200)
+        # the helper's own pages aren't served on search.*
+        self.assertEqual(self.public("GET", "/machiya/sessions", c)[0], 404)
+        self.assertEqual(self.public("GET", "/machiya/signin", c)[0], 404)
+        # Sign Out on search.* (same-origin): everything ends, the marker stops the automatic trip from there
+        self.assertEqual(self.public("POST", "/machiya/signout", dict(c, **{"Content-Length": "0"}))[0], 403)
+        status, headers, _ = self.public("POST", "/machiya/signout", dict(c, Origin=SEARCH_O, **{"Content-Length": "0"}))
+        self.assertEqual((status, cookie_value(headers, "__Host-machiya_sso_shiori_out")), (303, "1"))
+        self.assertEqual(self.internal("GET", "/v1/nginx", {"X-Machiya-Session": rs, "X-Machiya-Room": SEARCH_O})[0],
+                         401)
+        status, headers, _ = self.public("GET", "/machiya/start?return=%2F",
+                                         dict(host, Cookie="__Host-machiya_sso_shiori_out=1"))
+        self.assertNotIn("provider", dict(headers)["Location"])
+
+    # keep-alive and smuggling on the new endpoints
+
+    def test_keep_alive_redeem_and_room_checks_answer_each_request_alone(self):
+        _, _, nonce, code, _ = self.trip()
+        _, _, nonce2, code2, _ = self.trip(session=self.fake.signed_in("other"))
+        got = self.one_connection(self.int, [
+            ("POST", "/v1/redeem", {"X-Machiya-Code": code, "X-Machiya-Room": KURA_O, "X-Machiya-State": nonce,
+                                    "Content-Length": "0"}),
+            ("POST", "/v1/redeem", {"X-Machiya-Code": code, "X-Machiya-Room": KURA_O, "X-Machiya-State": nonce,
+                                    "Content-Length": "0"}),                               # used
+            ("POST", "/v1/redeem", {"X-Machiya-Code": code2, "X-Machiya-Room": KURA_O, "X-Machiya-State": nonce2,
+                                    "Content-Length": "0"}),                               # another person's
+            ("POST", "/v1/redeem", {"Content-Length": "0"}),
+        ])
+        self.assertEqual([g[0] for g in got], [200, 401, 200, 401])
+        mine, theirs = json.loads(got[0][2])["session"], json.loads(got[2][2])["session"]
+        got = self.one_connection(self.int, [
+            ("GET", "/v1/check", {"X-Machiya-Session": mine, "X-Machiya-Room": KURA_O}),
+            ("GET", "/v1/check", {"X-Machiya-Session": mine, "X-Machiya-Room": NIWA_O}),
+            ("GET", "/v1/check", {"X-Machiya-Session": theirs, "X-Machiya-Room": KURA_O}),
+            ("GET", "/v1/check", {"X-Machiya-Room": KURA_O}),
+            ("GET", "/v1/check", {"X-Machiya-Session": mine, "X-Machiya-Room": KURA_O}),
+        ])
+        self.assertEqual([g[0] for g in got], [200, 401, 200, 400, 200])
+        self.assertEqual([json.loads(g[2]).get("username") for g in got], ["owner", None, "other", None, "owner"])
+
+    def test_keep_alive_unread_or_chunked_body_never_becomes_a_request(self):
+        _, sid, _, _, _ = self.trip()
+        smuggled = b"GET /v1/nginx HTTP/1.1\r\nHost: x\r\nX-Machiya-Session: %s\r\n\r\n" % sid.encode()
+        for port, head in ((self.int, b"POST /v1/redeem HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n"),
+                           (self.pub, b"GET /machiya/callback?code=x HTTP/1.1\r\nHost: search.example.test\r\n"),
+                           (self.pub, b"GET /machiya/start HTTP/1.1\r\nHost: search.example.test\r\n"),
+                           (self.pub, b"POST /machiya/signout HTTP/1.1\r\nHost: search.example.test\r\n"
+                                      b"Transfer-Encoding: chunked\r\n")):
+            out, closed = self.raw(port, head + b"Content-Length: %d\r\n\r\n" % len(smuggled) + smuggled)
+            self.assertEqual(out.count(b"HTTP/1.1 "), 1, head)
+            self.assertTrue(closed, head)
+            self.assertNotIn(b"X-Hister-Cookie", out)
+        # a redeem's body, when read, is only a body: one answer, never a second request
+        out, _ = self.raw(self.int, b"POST /v1/redeem HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n"
+                          % len(smuggled) + smuggled)
+        self.assertEqual(out.count(b"HTTP/1.1 "), 1)
+        self.assertNotIn(b"X-Hister-Cookie", out)
+
+
+class LegacyOffTest(HelperBase):
+    """HISTER_LOGIN_LEGACY=none: the switch. No shared-domain cookie, and rooms refuse a browser's helper id and
+    Hister's raw token; apps keep their mhs_; Hister's own host (public prefs) still takes the token."""
+    EXTRA = {"HISTER_LOGIN_LEGACY": "none"}
+
+    def test_switch(self):
+        session = self.fake.signed_in()
+        status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": KURA}),
+                                         {"Cookie": "hister=" + session})
+        sid = cookie_value(headers, "__Host-machiya_sso")
+        self.assertTrue(sid)
+        self.assertIsNone(cookie_value(headers, "machiya_sso"))                          # no shared-domain copy
+        room = {"X-Machiya-Room": KURA_O}
+        for h in ({"X-Machiya-Session": sid}, {"X-Access-Token": "tok-owner"}):
+            status, _, body = self.internal("GET", "/v1/check", dict(h, **room))
+            self.assertEqual((status, json.loads(body)), (401, {"reason": "legacy-off"}), h)
+            status, _, body = self.internal("GET", "/v1/prefs", dict(h, **room))
+            self.assertEqual(status, 401)
+        status, _, body = self.internal("GET", "/v1/check", {"X-Access-Token": "tok-owner"})   # an old room too
+        self.assertEqual(status, 401)
+        app = self.login.store.create(self.fake.signed_in(), "owner", 1, "app", "iPhone")
+        self.assertEqual(self.internal("GET", "/v1/check", {"X-Machiya-Session": app, **room})[0], 200)
+        self.assertEqual(self.public("GET", "/machiya/api/prefs", {"X-Access-Token": "tok-owner"})[0], 200)
+        self.assertEqual(self.public("GET", "/machiya/sessions", {"Cookie": "machiya_sso=" + sid})[0], 303)
+        self.assertEqual(self.public("GET", "/machiya/sessions", {"Cookie": "__Host-machiya_sso=" + sid})[0], 200)
+
+    def test_settings(self):
+        with self.assertRaises(SystemExit):
+            hl.Settings(dict(ENV, HISTER_LOGIN_LEGACY="cookies"))
+        self.assertEqual(hl.Settings(dict(ENV, HISTER_LOGIN_LEGACY="hister-token")).legacy, {"hister-token"})
+        self.assertEqual(hl.Settings(dict(ENV)).legacy, {"domain-cookie", "hister-token"})
+        with self.assertRaises(SystemExit):
+            hl.Settings(dict(ENV, HISTER_LOGIN_PROXIED_ORIGINS="https://search.example.test/path"))
 
 
 class PrefsTest(unittest.TestCase):

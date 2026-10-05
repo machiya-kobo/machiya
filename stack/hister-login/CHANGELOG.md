@@ -1,5 +1,20 @@
 # Changelog: hister-login
 
+## 0.3.0
+
+- **A cookie per room, host-only** (the owner, 2026-10-05, after the sweep's LEAD-1/KONB-2). The helper's own session is now `__Host-machiya_sso` on Hister's host only, and each room keeps a `__Host-machiya_sso_<room>` of its own (vaultkit `histerauth`, the rooms only re-vendor):
+  - a room sends a browser here with `state=<SHA-256 of a nonce>`; once the helper knows the browser it sends it to the room's `/machiya/callback?code=mhc_…`;
+  - the room trades the code at the new internal **`POST /v1/redeem`**: one use, 60 s, only for that room's origin (`X-Machiya-Room`) and that browser's nonce (`X-Machiya-State`), only while its helper session lives, for a room session `mhr_…`;
+  - `/v1/check`, `/v1/prefs` and `/v1/signout` take `mhr_…` with `X-Machiya-Room` (another room's session is `401 wrong-room`), and answer `kind` and `room`;
+  - a sign-in without a state gets no code: the browser goes back to the address as it is.
+- **Sign-out ends every room.** A room's sign-out (with its `mhr_…`), `/machiya/signout` and the sessions page end the Hister session, the browser's helper id, and every room session and unused code made from it. The id is remembered as ended for 30 days (a new `ended` table), so the next automatic trip from any room shows the page; the marker `__Host-machiya_sso_out` is host-only now.
+- **Room tokens** (`mht_…`) for headless callers instead of Hister's raw token: scoped to rooms, kept as a hash, made on the sessions page (Room Tokens) or with `hister_login.py token mint|add|list|revoke`. A token opens only the rooms it names, never Hister.
+- **`HISTER_LOGIN_LEGACY`** (default `domain-cookie,hister-token`, so this release changes nothing for old rooms): while `domain-cookie` is on, the old `machiya_sso` is still set on `MACHIYA_COOKIE_DOMAIN` and rooms may use a browser's helper id; while `hister-token` is on, rooms may use Hister's raw token. **`none` is the switch** (docs/identity.md, the migration); the helper logs, at most hourly per room, each legacy credential it still accepts.
+- **The hosted pages' hosts** (`HISTER_LOGIN_PROXIED_ORIGINS`): their nginx sends `/machiya/start`, `/machiya/callback`, `/machiya/signout`, `/machiya/api/prefs` and `/machiya/static/` here with their `Host`, and the helper is their room (`__Host-machiya_sso_shiori`). `/v1/nginx` takes that room session with `X-Machiya-Room` (or the cookie itself). The pages need no change to sign in.
+- The sessions page shows the rooms each browser has opened.
+- Tests: the code (once, 60 s, its room, its nonce, its helper session), room sessions bound to their room, sign-out across rooms and the page after it, Hister's own sign-out, room tokens (the page and the command), prefs with a room session, the switch, the proxied origins' whole round trip, and keep-alive and smuggling on `/v1/redeem`, `/machiya/callback`, `/machiya/start` and a proxied sign-out.
+- vaultkit re-vendored (room sessions).
+
 ## 0.2.1
 
 - **The app sign-in never finishes on another site's link** (the 2026-10 sweep, LEAD-3). Any page could send the owner to `/machiya/signin?app=1&return=shiori://anything`. Hister's Lax cookie went along, and the helper created an app session and sent `#sid=…&hister=…` to whatever app owns the `shiori:` scheme on that device. Now:

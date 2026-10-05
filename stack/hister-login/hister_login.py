@@ -2,17 +2,27 @@
 
 Hister keeps its session cookie (`hister`) on its own host. This helper sits on that host too (Tailscale Serve sends
 it /machiya/… and /api/oauth/callback; everything else goes to Hister) and turns a Hister session into an opaque id,
-`machiya_sso=mhs_…`, on the tailnet's shared domain. The rooms ask it about that id (or a Hister token) over the
-internal network; it asks Hister's GET /api/profile and caches the answer for 30 s. Signing out anywhere ends the
-Hister session and every id on it. Hister itself is not patched.
+its own host-only cookie `__Host-machiya_sso=mhs_…` (0.3.0; before, `machiya_sso` on the tailnet's shared domain,
+which HISTER_LOGIN_LEGACY still sets during the move). Each room gets a cookie of its own: the room sends the browser
+here with a state, the helper sends it back to the room's /machiya/callback with a one-time code (60 s, one use,
+bound to that room's origin and the browser's state), and the room trades it at POST /v1/redeem for a room session
+(`mhr_…`) that only that room accepts. The rooms ask about a credential over the internal network (/v1/check, naming
+themselves in X-Machiya-Room); the helper asks Hister's GET /api/profile and caches the answer for 30 s. Signing out
+anywhere ends the Hister session, every id on it and every room session made from them. Headless callers get room
+tokens (`mht_…`, scoped to rooms; the sessions page or `token mint`) instead of Hister's raw token. Hister itself is
+not patched.
 
 Two ports:
   public   (HISTER_LOGIN_PORT, 8080): GET /machiya/signin, GET /api/oauth/callback (a pass-through shim),
-           POST /machiya/signout, GET/POST /machiya/sessions, POST /machiya/api/app-session, GET /machiya/healthz
+           POST /machiya/signout, GET/POST /machiya/sessions (sessions, the rooms each opened, room tokens),
+           POST /machiya/api/app-session, GET /machiya/healthz
            (the probe's: 200 while the helper and its state work, with Hister's state as "hister"; 503 only when the
            helper's own state fails), GET/PUT /machiya/api/prefs (0.2.0: the account's settings, for Shiori's apps,
-           extensions and hosted pages), /machiya/static/…
-  internal (HISTER_LOGIN_INTERNAL_PORT, 8081; never routed by Serve): GET /v1/check, POST /v1/signout,
+           extensions and hosted pages), /machiya/static/…; on a HISTER_LOGIN_PROXIED_ORIGINS host (the hosted pages,
+           through their nginx with their Host) only GET /machiya/start, /machiya/callback, /machiya/signed-out,
+           /machiya/api/prefs, /machiya/static/… and POST /machiya/signout, as that host's room
+  internal (HISTER_LOGIN_INTERNAL_PORT, 8081; never routed by Serve): GET /v1/check, POST /v1/redeem (0.3.0),
+           POST /v1/signout,
            GET /v1/nginx (nginx auth_request), GET /healthz (the rooms': 503 unless the helper AND Hister are fine),
            GET/PUT /v1/prefs (0.2.0: a room's /api/prefs, forwarded with the caller's own credential)
 
@@ -25,6 +35,9 @@ sessions file stays as small and as sensitive as it is. Standard library only, p
     python3 hister_login.py prefs import --user NAME FILE…    seed NAME's settings from the rooms' old prefs files
     python3 hister_login.py prefs show --user NAME            what NAME's account holds
     python3 hister_login.py prefs delete --user NAME          forget NAME's settings (an account removed)
+    python3 hister_login.py token mint --user NAME --label L --rooms kura,konbini [--days N] [--out FILE]
+    python3 hister_login.py token add --user NAME --label L --rooms … --from-file FILE    (a value made elsewhere)
+    python3 hister_login.py token list | token revoke ID      room tokens for headless callers (0.3.0)
 """
 import argparse
 import base64
@@ -48,7 +61,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.2.1"
+VERSION = "0.3.0"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -97,7 +110,30 @@ class Settings:
         self.sso = (env.get("MACHIYA_SSO_COOKIE") or "").strip() or SSO
         if not COOKIE_NAME_RE.match(self.sso):
             raise SystemExit("hister-login: MACHIYA_SSO_COOKIE must be a cookie name (letters, digits, _ and -)")
-        self.out = self.sso + "_out"            # the signed-out marker: no automatic sign-in (histerauth sets it too)
+        # 0.3.0: the helper's own cookies are host-only (__Host- over https): its session never leaves Hister's host
+        self.prefix = histerauth.HOST_PREFIX if self.secure else ""
+        self.own = self.prefix + self.sso               # the helper's browser session (__Host-machiya_sso)
+        self.out = self.prefix + self.sso + "_out"      # the signed-out marker: no automatic sign-in
+        self.legacy_out = self.sso + "_out"             # (0.2.x) the marker on the shared domain
+        self.return_cookie = self.prefix + RETURN_COOKIE
+        self.origin = histerauth.origin_of(self.public_url)
+        raw = env.get("HISTER_LOGIN_LEGACY")
+        legacy = {"domain-cookie", "hister-token"} if raw is None else \
+            {x.strip().lower() for x in raw.split(",") if x.strip()} - {"none"}
+        if legacy - {"domain-cookie", "hister-token"}:
+            raise SystemExit("hister-login: HISTER_LOGIN_LEGACY is a list of domain-cookie and hister-token, or none")
+        self.legacy = legacy
+        self.proxied = []                               # Shiori's hosted pages: their nginx sends /machiya/… here
+        for o in (env.get("HISTER_LOGIN_PROXIED_ORIGINS") or "").split(","):
+            if o.strip():
+                norm = histerauth.origin_of(o.strip())
+                if not norm or urlsplit(o.strip()).path not in ("", "/") or norm == self.origin:
+                    raise SystemExit("hister-login: HISTER_LOGIN_PROXIED_ORIGINS is a list of https://host[:port], "
+                                     "not %r" % o)
+                self.proxied.append(norm)
+        self.proxied_cookie = self.prefix + self.sso + "_shiori"   # the hosted pages' room cookie, on their hosts
+        provider = (env.get("MACHIYA_SIGNIN_PROVIDER") or "").strip().lower()
+        self.auto_provider = provider if histerauth.PROVIDER_RE.match(provider or "-") else ""
         u = urlsplit(self.public_url)
         own = u.hostname + ("" if u.port in (None, 443) else ":%d" % u.port)
         hosts = env.get("HISTER_LOGIN_RETURN_HOSTS")
@@ -109,12 +145,21 @@ class Settings:
                     hosts.append(p.hostname + ("" if p.port in (None, 443) else ":%d" % p.port))
         else:
             hosts = [h.strip() for h in hosts.split(",") if h.strip()]
+        for o in self.proxied:
+            p = urlsplit(o)
+            hosts.append(p.hostname + ("" if p.port in (None, 443) else ":%d" % p.port))
         self.return_hosts = sorted(set(hosts) | {own})
+        # the rooms by name (token scopes: "kura" -> its origin), from MACHIYA_ROOMS; machiya = landing
+        self.rooms = {}
+        for key, url in shell.rooms(env).items():
+            o = histerauth.origin_of(url)
+            if o and key not in ("hister", "searxng") and o != self.origin:
+                self.rooms[key] = o
         self.app_schemes = [s.strip().lower() for s in (env.get("HISTER_LOGIN_APP_SCHEMES") or "shiori").split(",")
                             if s.strip()]
         self.cookie_domain = (env.get("MACHIYA_COOKIE_DOMAIN") or "").strip().lstrip(".")
-        if not self.cookie_domain:
-            LOG("hister-login: MACHIYA_COOKIE_DOMAIN is unset: machiya_sso stays on this host, so no room sees it")
+        if "domain-cookie" in self.legacy and not self.cookie_domain:
+            LOG("hister-login: MACHIYA_COOKIE_DOMAIN is unset: the legacy machiya_sso stays on this host")
         self.db = (env.get("HISTER_LOGIN_DB") or "/data/hister-login.sqlite3").strip()
         self.prefs_db = prefs_path(env)
         self.bind = (env.get("HISTER_LOGIN_BIND") or "0.0.0.0").strip()
@@ -239,7 +284,40 @@ CREATE TABLE IF NOT EXISTS pending_logout (
   hister_session TEXT NOT NULL,
   since INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS room_sessions (
+  rsid_hash TEXT PRIMARY KEY,
+  parent TEXT NOT NULL,
+  audience TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS room_sessions_parent ON room_sessions (parent);
+CREATE TABLE IF NOT EXISTS codes (
+  code_hash TEXT PRIMARY KEY,
+  parent TEXT NOT NULL,
+  audience TEXT NOT NULL,
+  state TEXT NOT NULL,
+  return_url TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tokens (
+  token_hash TEXT PRIMARY KEY,
+  username TEXT NOT NULL,
+  user_id INTEGER NOT NULL DEFAULT 0,
+  label TEXT NOT NULL,
+  audiences TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_used INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS ended (
+  sid_hash TEXT PRIMARY KEY,
+  at INTEGER NOT NULL
+);
 """
+CODE_TTL = 60                           # a code's life: the browser is on its way back already
+ROOM_SEEN_EVERY = 60
 
 
 class Store:
@@ -261,7 +339,7 @@ class Store:
                 self.db.execute("PRAGMA journal_mode=WAL")
             self.db.execute("PRAGMA busy_timeout=3000")
             self.db.executescript(SCHEMA)
-            self.db.execute("PRAGMA user_version=1")
+            self.db.execute("PRAGMA user_version=2")    # 2 (0.3.0): room sessions, codes, room tokens, ended
 
     def q(self, sql, args=()):
         with self.lock:
@@ -284,7 +362,7 @@ class Store:
             return None
         row = dict(rows[0])
         if row["expires_at"] <= now():
-            self.q("DELETE FROM sessions WHERE sid_hash = ?", (row["sid_hash"],))
+            self.drop_sid(row["sid_hash"])
             return None
         return row
 
@@ -299,10 +377,136 @@ class Store:
         if now() - row["last_seen"] >= 60:
             self.q("UPDATE sessions SET last_seen = ? WHERE sid_hash = ?", (now(), row["sid_hash"]))
 
-    def drop_hister(self, hister_hash):
-        """Delete every id on one Hister session; -> how many."""
+    def drop_hister(self, hister_hash, ended=False):
+        """Delete every id on one Hister session, with every room session and unused code made from them; `ended`: a
+        deliberate sign-out, remembered (the ended table) so the browser isn't signed straight back in. -> how many
+        ids."""
         with self.lock:
-            return self.db.execute("DELETE FROM sessions WHERE hister_hash = ?", (hister_hash,)).rowcount
+            hashes = [r[0] for r in self.db.execute("SELECT sid_hash FROM sessions WHERE hister_hash = ?",
+                                                     (hister_hash,)).fetchall()]
+            self._drop(hashes, ended)
+            return len(hashes)
+
+    def drop_sid(self, sid_hash, ended=False):
+        with self.lock:
+            self._drop([sid_hash], ended)
+
+    def _drop(self, hashes, ended):
+        """(lock held) the ids, their room sessions and codes; tombstones for a deliberate sign-out."""
+        for h in hashes:
+            self.db.execute("DELETE FROM room_sessions WHERE parent = ?", (h,))
+            self.db.execute("DELETE FROM codes WHERE parent = ?", (h,))
+            self.db.execute("DELETE FROM sessions WHERE sid_hash = ?", (h,))
+            if ended:
+                self.db.execute("INSERT OR REPLACE INTO ended VALUES (?, ?)", (h, now()))
+
+    def by_hash(self, sid_hash):
+        rows = self.q("SELECT rowid, * FROM sessions WHERE sid_hash = ?", (sid_hash,))
+        if not rows:
+            return None
+        row = dict(rows[0])
+        if row["expires_at"] <= now():
+            self.drop_sid(row["sid_hash"])
+            return None
+        return row
+
+    def was_ended(self, sid):
+        """This id was signed out on purpose (within OUT_MAX_AGE)."""
+        if not isinstance(sid, str) or not SID_RE.match(sid):
+            return False
+        return bool(self.q("SELECT 1 FROM ended WHERE sid_hash = ? AND at > ?", (sha(sid), now() - OUT_MAX_AGE)))
+
+    # room sessions (0.3.0)
+
+    def create_room(self, parent, audience):
+        rsid = histerauth.ROOM_PREFIX + b64e(secrets.token_bytes(32))
+        t = now()
+        expires = parent["created_at"] + CAP_DAYS * 86400
+        self.q("INSERT INTO room_sessions VALUES (?,?,?,?,?,?)", (sha(rsid), parent["sid_hash"], audience, t, t,
+                                                                   expires))
+        return rsid, max(expires - t, 60)
+
+    def get_room(self, rsid):
+        if not isinstance(rsid, str) or not histerauth.RSID_RE.match(rsid):
+            return None
+        rows = self.q("SELECT * FROM room_sessions WHERE rsid_hash = ?", (sha(rsid),))
+        if not rows:
+            return None
+        row = dict(rows[0])
+        if row["expires_at"] <= now():
+            self.q("DELETE FROM room_sessions WHERE rsid_hash = ?", (row["rsid_hash"],))
+            return None
+        if now() - row["last_seen"] >= ROOM_SEEN_EVERY:
+            self.q("UPDATE room_sessions SET last_seen = ? WHERE rsid_hash = ?", (now(), row["rsid_hash"]))
+        return row
+
+    def rooms_of(self, parent_hash):
+        return [r[0] for r in self.q("SELECT DISTINCT audience FROM room_sessions WHERE parent = ? AND expires_at > ? "
+                                     "ORDER BY audience", (parent_hash, now()))]
+
+    # codes (0.3.0): one use, CODE_TTL seconds
+
+    def create_code(self, parent_hash, audience, state, return_url):
+        code = histerauth.CODE_PREFIX + b64e(secrets.token_bytes(32))
+        self.q("INSERT INTO codes VALUES (?,?,?,?,?,?)", (sha(code), parent_hash, audience, state, return_url,
+                                                           now() + CODE_TTL))
+        return code
+
+    def take_code(self, code):
+        """The code's row, deleted in the same breath (a second redeem finds nothing); None when unknown or expired."""
+        if not isinstance(code, str) or not histerauth.CODE_RE.match(code):
+            return None
+        with self.lock:
+            row = self.db.execute("SELECT * FROM codes WHERE code_hash = ?", (sha(code),)).fetchone()
+            if row is None:
+                return None
+            self.db.execute("DELETE FROM codes WHERE code_hash = ?", (row["code_hash"],))
+        row = dict(row)
+        return row if row["expires_at"] > now() else None
+
+    # room tokens (0.3.0): headless callers; only the hash is kept
+
+    def add_token(self, value, username, label, audiences, days=0, user_id=0):
+        t = now()
+        self.q("INSERT INTO tokens VALUES (?,?,?,?,?,?,?,?)", (sha(value), username, user_id, label[:80],
+                                                               ",".join(audiences), t, 0,
+                                                               t + days * 86400 if days else 0))
+        return sha(value)[:12]
+
+    def get_token(self, value):
+        if not isinstance(value, str) or not histerauth.RTOKEN_RE.match(value):
+            return None
+        rows = self.q("SELECT * FROM tokens WHERE token_hash = ?", (sha(value),))
+        if not rows:
+            return None
+        row = dict(rows[0])
+        if row["expires_at"] and row["expires_at"] <= now():
+            return None
+        if now() - row["last_used"] >= ROOM_SEEN_EVERY:
+            self.q("UPDATE tokens SET last_used = ? WHERE token_hash = ?", (now(), row["token_hash"]))
+        row["audiences"] = [a for a in row["audiences"].split(",") if a]
+        return row
+
+    def tokens_of(self, username=None):
+        sql, args = "SELECT * FROM tokens", ()
+        if username is not None:
+            sql, args = sql + " WHERE username = ?", (username,)
+        out = []
+        for r in self.q(sql + " ORDER BY created_at", args):
+            r = dict(r)
+            r["id"], r["audiences"] = r["token_hash"][:12], [a for a in r["audiences"].split(",") if a]
+            out.append(r)
+        return out
+
+    def revoke_token(self, token_id, username=None):
+        """Revoke by the id (the first 12 hex of the hash, as listed); -> how many (0 or 1)."""
+        if not re.fullmatch(r"[0-9a-f]{12}", token_id or ""):
+            return 0
+        sql, args = "DELETE FROM tokens WHERE substr(token_hash, 1, 12) = ?", (token_id,)
+        if username is not None:
+            sql, args = sql + " AND username = ?", args + (username,)
+        with self.lock:
+            return self.db.execute(sql, args).rowcount
 
     def of_user(self, user_id):
         return [dict(r) for r in self.q("SELECT rowid, * FROM sessions WHERE user_id = ? AND expires_at > ? "
@@ -313,8 +517,17 @@ class Store:
         return dict(rows[0]) if rows else None
 
     def cleanup(self):
+        """Expired ids (with what was made from them), room sessions, codes, tokens and old tombstones."""
+        t = now()
         with self.lock:
-            return self.db.execute("DELETE FROM sessions WHERE expires_at <= ?", (now(),)).rowcount
+            n = self.db.execute("DELETE FROM sessions WHERE expires_at <= ?", (t,)).rowcount
+            self.db.execute("DELETE FROM room_sessions WHERE expires_at <= ? OR parent NOT IN "
+                            "(SELECT sid_hash FROM sessions)", (t,))
+            self.db.execute("DELETE FROM codes WHERE expires_at <= ? OR parent NOT IN (SELECT sid_hash FROM sessions)",
+                            (t,))
+            self.db.execute("DELETE FROM tokens WHERE expires_at > 0 AND expires_at <= ?", (t,))
+            self.db.execute("DELETE FROM ended WHERE at <= ?", (t - OUT_MAX_AGE,))
+            return n
 
     def count(self):
         return self.q("SELECT count(*) FROM sessions")[0][0]
@@ -339,14 +552,78 @@ class Login:
         self.prefs = prefs or vprefs.Store(settings.prefs_db)
         self.tokens = {}                # sha(token) -> (expires, outcome)
         self.tokens_lock = threading.Lock()
+        self.legacy_said = {}
 
-    def who(self, kind, value):
-        """A credential -> ("ok", username) | ("out",) | ("off",) | ("down",): the same checks as /v1/check."""
+    def who(self, kind, value, rooms=None):
+        """A credential -> ("ok", username) | ("out", reason) | ("off",) | ("down",): the same checks as /v1/check
+        (resolve)."""
+        answer = self.resolve(kind, value, rooms)
+        return ("ok", answer[1]["username"]) if answer[0] == "ok" else answer
+
+    def resolve(self, kind, value, rooms=None):
+        """One credential -> ("ok", info) | ("out", reason) | ("off",) | ("down",). info: username, user_id, kind
+        (room | token | app | browser), room (a room session's origin), label, row (the helper session, when one).
+        rooms: None for the helper's own callers (apps, its pages, the public prefs); else the asking room's origins
+        (X-Machiya-Room; [] from a room too old to say), and then:
+          - a room session (mhr_) must be one of those origins' (else "wrong-room"), and its helper session alive;
+          - a room token (mht_) must name the room's own origin (the first);
+          - a browser's helper id (the old shared-domain cookie) and Hister's raw token only while
+            HISTER_LOGIN_LEGACY allows them (else "legacy-off"); an app's id (mhs_, kind app) in every room."""
+        if kind == "sid" and isinstance(value, str) and value.startswith(histerauth.ROOM_PREFIX):
+            kind = "room"
+        if kind == "sid" and isinstance(value, str) and value.startswith(histerauth.RTOKEN_PREFIX):
+            kind = "rtoken"
+        if kind == "room":
+            room = self.store.get_room(value)
+            if room is None:
+                return ("out", "signed-out")
+            if rooms is not None and room["audience"] not in rooms:
+                return ("out", "wrong-room")
+            parent = self.store.by_hash(room["parent"])
+            if parent is None:
+                return ("out", "signed-out")
+            outcome, row = self.check_row(parent)
+            if outcome != "ok":
+                return (outcome, "signed-out") if outcome == "out" else (outcome,)
+            return ("ok", {"username": row["username"], "user_id": row["user_id"], "kind": "room",
+                           "room": room["audience"], "row": row, "via": "session"})
+        if kind == "rtoken":
+            tok = self.store.get_token(value)
+            if tok is None:
+                return ("out", "signed-out")
+            if rooms is not None and (not rooms or rooms[0] not in tok["audiences"]):
+                return ("out", "wrong-room")
+            return ("ok", {"username": tok["username"], "user_id": tok["user_id"], "kind": "token",
+                           "label": tok["label"], "via": "token"})
         if kind == "sid":
             outcome, row = self.check_sid(value)
-            return ("ok", row["username"]) if outcome == "ok" else (outcome,)
+            if outcome != "ok":
+                return (outcome, "signed-out") if outcome == "out" else (outcome,)
+            if rooms is not None and row["kind"] == "browser" and "domain-cookie" not in self.s.legacy:
+                return ("out", "legacy-off")
+            if rooms is not None and row["kind"] == "browser":
+                self.legacy_seen("the shared-domain cookie", rooms)
+            return ("ok", {"username": row["username"], "user_id": row["user_id"], "kind": row["kind"], "row": row,
+                           "via": "session"})
+        if rooms is not None and "hister-token" not in self.s.legacy:
+            return ("out", "legacy-off")
         answer = self.check_token(value)
-        return ("ok", answer[1]) if answer[0] == "ok" else (answer[0],)
+        if answer[0] != "ok":
+            return (answer[0], "signed-out") if answer[0] == "out" else answer
+        if rooms is not None:
+            self.legacy_seen("Hister's raw token", rooms)
+        return ("ok", {"username": answer[1], "user_id": answer[2], "kind": "hister-token", "via": "token"})
+
+    def legacy_seen(self, what, rooms):
+        """Say (at most hourly per room and kind) that a room still got a legacy credential: the gate before
+        HISTER_LOGIN_LEGACY=none is a quiet log."""
+        key = (what, rooms[0] if rooms else "an old room")
+        with self.tokens_lock:
+            last = self.legacy_said.get(key, 0)
+            if time.monotonic() - last < 3600:
+                return
+            self.legacy_said[key] = time.monotonic()
+        LOG("hister-login: legacy: %s from %s (HISTER_LOGIN_LEGACY)" % key)
 
     def shared_prefs(self, username):
         """The account's Shared settings for /v1/check (a fresh browser's first render); {} when the file fails."""
@@ -362,6 +639,10 @@ class Login:
         row = self.store.get(sid)
         if row is None:
             return "out", None
+        return self.check_row(row)
+
+    def check_row(self, row):
+        """A live helper session's row, checked with Hister when it was last checked VERIFY_TTL s ago or more."""
         if now() - row["verified_at"] < VERIFY_TTL:
             self.store.seen(row)
             return "ok", row
@@ -392,10 +673,12 @@ class Login:
                 self.tokens[key] = (time.monotonic() + ttl, answer)
         return answer
 
-    def end_hister(self, hister_session):
-        """Sign one Hister session out and drop every id on it. -> Set-Cookie values from Hister's logout. When Hister
-        can't be reached the ids still go (the rooms see 401 at once) and the logout is retried later."""
-        n = self.store.drop_hister(sha(hister_session))
+    def end_hister(self, hister_session, ended=True):
+        """Sign one Hister session out and drop every id on it, and every room session and code made from them; with
+        `ended` (a sign-out someone asked for) the ids are remembered, so a browser that comes back with one sees the
+        page, not an automatic sign-in. -> Set-Cookie values from Hister's logout. When Hister can't be reached the
+        ids still go (the rooms see 401 at once) and the logout is retried later."""
+        n = self.store.drop_hister(sha(hister_session), ended=ended)
         ended, cookies = self.hister.logout(hister_session)
         if not ended:
             self.store.pending_add(hister_session)
@@ -419,68 +702,144 @@ class Login:
         return "; ".join(attrs)
 
     def sso_cookie(self, sid):
-        return self.cookie(self.s.sso, sid, CAP_DAYS * 86400, domain=True)
+        """The helper's own session cookie: host-only (__Host-machiya_sso), plus, while HISTER_LOGIN_LEGACY has
+        domain-cookie, the old copy on the shared domain for rooms that haven't moved to their own cookie yet."""
+        out = [self.cookie(self.s.own, sid, CAP_DAYS * 86400)]
+        if "domain-cookie" in self.s.legacy:
+            out.append(self.cookie(self.s.sso, sid, CAP_DAYS * 86400, domain=True))
+        return out
 
     def sso_clear(self):
-        out = [self.cookie(self.s.sso, "", 0, domain=True)]
+        """Drop the helper's session cookie, and the legacy shared-domain one wherever it may be (always: harmless)."""
+        out = [self.cookie(self.s.own, "", 0)]
         if self.s.cookie_domain:
+            out.append(self.cookie(self.s.sso, "", 0, domain=True))
+        if self.s.own != self.s.sso:
             out.append(self.cookie(self.s.sso, "", 0))
         return out
 
+    def own_sid(self, headers):
+        """The browser's helper id: the host-only cookie, else (legacy) the shared-domain one."""
+        sid = sso_value(headers, self.s.own)
+        if sid is None and "domain-cookie" in self.s.legacy and self.s.own != self.s.sso:
+            sid = sso_value(headers, self.s.sso)
+        return sid
+
     def signed_out(self):
-        """A deliberate sign-out: the marker that stops the automatic sign-in (?provider=) until the next sign-in, on
-        the shared domain so the rooms' own sign-outs set the same one."""
-        return [self.cookie(self.s.out, "1", OUT_MAX_AGE, domain=True)]
+        """A deliberate sign-out: the marker that stops the automatic sign-in (?provider=) until the next sign-in.
+        Host-only (0.3.0): the rooms keep their own, and the helper remembers ended ids itself (the ended table)."""
+        return [self.cookie(self.s.out, "1", OUT_MAX_AGE)]
 
     def marker_clear(self):
-        out = [self.cookie(self.s.out, "", 0, domain=True)]
+        out = [self.cookie(self.s.out, "", 0)]
         if self.s.cookie_domain:
-            out.append(self.cookie(self.s.out, "", 0))
+            out.append(self.cookie(self.s.legacy_out, "", 0, domain=True))
         return out
 
     def marked(self, headers):
-        """The browser signed out on purpose, or the last automatic round trip failed: show the page."""
-        return bool(histerauth.HisterAuth.cookie_values(headers.get("Cookie"), self.s.out))
+        """The browser signed out on purpose, or the last automatic round trip failed: show the page. Also when its
+        own cookie names an id that was signed out on purpose (a room's Sign Out can't set this host's marker)."""
+        names = [self.s.out] + ([self.s.legacy_out] if "domain-cookie" in self.s.legacy else [])
+        if any(histerauth.HisterAuth.cookie_values(headers.get("Cookie"), n) for n in names):
+            return True
+        return self.store.was_ended(sso_value(headers, self.s.own) or sso_value(headers, self.s.sso))
 
-    def return_cookie(self, ret, app):
-        value = b64e(json.dumps({"r": ret, "a": 1 if app else 0}, separators=(",", ":")).encode())
-        return self.cookie(RETURN_COOKIE, value, RETURN_MAX_AGE)
+    def return_cookie(self, ret, app, state=""):
+        data = {"r": ret, "a": 1 if app else 0}
+        if state:
+            data["s"] = state
+        value = b64e(json.dumps(data, separators=(",", ":")).encode())
+        return self.cookie(self.s.return_cookie, value, RETURN_MAX_AGE)
+
+    def return_clear(self):
+        return self.cookie(self.s.return_cookie, "", 0)
 
     def read_return(self, cookie_header):
-        """The remembered (return, app) from machiya_return, checked again now; (None, False) if none holds."""
-        for value in histerauth.HisterAuth.cookie_values(cookie_header, RETURN_COOKIE)[:2]:
+        """The remembered (return, app, state) from the return cookie, checked again now; (None, False, "") if none
+        holds."""
+        for value in histerauth.HisterAuth.cookie_values(cookie_header, self.s.return_cookie)[:2]:
             try:
                 data = json.loads(b64d(value))
                 app = data.get("a") == 1
                 ret = self.safe(data.get("r"), app)
+                state = data.get("s") if isinstance(data.get("s"), str) and histerauth.NONCE_RE.match(data["s"]) \
+                    else ""
                 if ret:
-                    return ret, app
+                    return ret, app, state
             except (ValueError, TypeError, AttributeError, UnicodeError):
                 continue
-        return None, False
+        return None, False, ""
 
     def safe(self, ret, app=False):
         if app:     # 0.2.1 (sweep LEAD-3): exactly <scheme>://signed-in (HisterKit's callbackURL), no other path
             return ret if isinstance(ret, str) and ret in ("%s://signed-in" % s for s in self.s.app_schemes) else None
         return histerauth.safe_return(ret, self.s.return_hosts, ())
 
-    def finish(self, hister_session, answer, ret, app, headers, label=""):
-        """A good Hister session: an id for it, and where to go. -> (location, cookies)."""
+    def finish(self, hister_session, answer, ret, app, headers, label="", state=""):
+        """A good Hister session: an id for it, and where to go. -> (location, cookies). For a room's address with a
+        state (0.3.0) the way back is that room's /machiya/callback with a one-time code; without a state it is the
+        address itself (the room then makes its own trip; a proxied origin goes through its /machiya/start)."""
         username, user_id = answer[1], answer[2]
         if app:
             sid = self.store.create(hister_session, username, user_id, "app", label or "Shiori app")
             return ret + "#" + urlencode({"sid": sid, "hister": hister_session}), []
-        cookies = []
-        for value in histerauth.HisterAuth.cookie_values(headers.get("Cookie"), self.s.sso)[:4]:
-            row = self.store.get(value)
-            if row and row["hister_hash"] == sha(hister_session):
-                break                   # this browser already holds an id for this session
-        else:
+        cookies, row = [], None
+        names = [self.s.own] + ([self.s.sso] if "domain-cookie" in self.s.legacy and self.s.own != self.s.sso
+                                else [])
+        have = {n: histerauth.HisterAuth.cookie_values(headers.get("Cookie"), n)[:4] for n in names}
+        for value in [v for n in names for v in have[n]]:
+            r = self.store.get(value)
+            if r and r["hister_hash"] == sha(hister_session) and r["kind"] == "browser":
+                row, sid = r, value     # this browser already holds an id for this session
+                break
+        if row is None:
             sid = self.store.create(hister_session, username, user_id, "browser", device_label(headers))
-            cookies.append(self.sso_cookie(sid))
+            row = self.store.get(sid)
+            cookies += self.sso_cookie(sid)
+        else:
+            if sid not in have[self.s.own]:
+                cookies.append(self.cookie(self.s.own, sid, CAP_DAYS * 86400))     # moved to the host-only cookie
+            if "domain-cookie" in self.s.legacy and self.s.own != self.s.sso and sid not in have.get(self.s.sso, []):
+                cookies.append(self.cookie(self.s.sso, sid, CAP_DAYS * 86400, domain=True))
         if self.marked(headers):                # signed in again: the automatic sign-in is back
             cookies += self.marker_clear()
-        return ret or self.s.public_url + "/", cookies
+        return self.way_back(row, ret, state), cookies
+
+    def way_back(self, row, ret, state):
+        """Where a signed-in browser goes: a room's callback with a code (a state came with it), a proxied origin's
+        start (no state: the hosted pages make their trip there), the address itself, or Hister's front page."""
+        if not ret:
+            return self.s.public_url + "/"
+        origin = histerauth.origin_of(ret)
+        if not origin or origin == self.s.origin:
+            return ret
+        if state:
+            code = self.store.create_code(row["sid_hash"], origin, state, ret)
+            return origin + histerauth.CALLBACK_PATH + "?" + urlencode({"code": code})
+        if origin in self.s.proxied:
+            return origin + "/machiya/start?" + urlencode({"return": ret})
+        return ret
+
+    def redeem(self, code, room, nonce):
+        """A room trades a code (POST /v1/redeem, or the proxied origins' callback here): -> (status, JSON). The code
+        is gone after this, good or not. It must be the asking room's (its origin), carry this browser's nonce (its
+        SHA-256 is the state the trip started with), and its helper session must still be alive."""
+        row = self.store.take_code(code)
+        if row is None or not room or row["audience"] != room or not isinstance(nonce, str) \
+                or not histerauth.NONCE_RE.match(nonce) \
+                or not secrets.compare_digest(histerauth.state_hash(nonce), row["state"]):
+            return 401, {"reason": "bad-code"}
+        parent = self.store.by_hash(row["parent"])
+        if parent is None:
+            return 401, {"reason": "bad-code"}
+        outcome, parent = self.check_row(parent)
+        if outcome == "out" or parent is None and outcome == "ok":
+            return 401, {"reason": "bad-code"}
+        if outcome != "ok":
+            return 503, {"reason": "user-handling-off" if outcome == "off" else "hister-unavailable"}
+        rsid, max_age = self.store.create_room(parent, room)
+        return 200, {"session": rsid, "return": row["return_url"], "username": parent["username"],
+                     "user_id": parent["user_id"], "max_age": max_age, "prefs": self.shared_prefs(parent["username"])}
 
 
 def device_label(headers):
@@ -532,8 +891,9 @@ def render(headers, title, body, scripts=()):
     return page.replace('"/static/', '"/machiya/static/').encode()
 
 
-def signin_page(s, headers, ret, app, error=""):
-    nxt = "/machiya/signin?" + urlencode([("return", ret or "")] + ([("app", "1")] if app else []))
+def signin_page(s, headers, ret, app, error="", state=""):
+    nxt = "/machiya/signin?" + urlencode([("return", ret or "")] + ([("state", state)] if state else [])
+                                         + ([("app", "1")] if app else []))
     oauth = ""
     if "oidc" in s.providers:
         oauth = ('<p class="actions"><a class="button" href="/api/oauth?provider=oidc">Sign in with %s</a></p>'
@@ -573,28 +933,68 @@ def message_page(headers, heading, text, actions=()):
     return render(headers, heading + " · Machiya", shell.message(heading, text, actions))
 
 
-def sessions_page(s, headers, me, rows, done=""):
+ROOM_NAMES = {"kura": "Kura", "niwa": "Niwa", "konbini": "Konbini", "machiya": "Machiya", "shiori": "Shiori"}
+
+
+def room_name(s, origin):
+    """An origin as the sessions page names it: the room (from MACHIYA_ROOMS), the hosted pages, or its host."""
+    for key, o in s.rooms.items():
+        if o == origin:
+            return ROOM_NAMES.get(key, key.capitalize())
+    if origin in s.proxied:
+        return "Shiori (%s)" % urlsplit(origin).hostname.split(".")[0]
+    return urlsplit(origin).netloc or origin
+
+
+def sessions_page(s, headers, me, rows, done="", tokens=(), new_token=None):
     items = []
     for r in rows:
         this = r["sid_hash"] == me["sid_hash"]
         when = time.strftime("%Y-%m-%d %H:%M", time.gmtime(r["last_seen"]))
+        rooms = ", ".join(room_name(s, o) for o in r.get("rooms") or ())
         items.append(
-            '<div class="item"><span>%s<br><small class="value">%s · last seen %s UTC%s</small></span>'
+            '<div class="item"><span>%s<br><small class="value">%s · last seen %s UTC%s%s</small></span>'
             '<form method="post" action="/machiya/sessions"><input type="hidden" name="id" value="%d">'
             '<button type="submit" name="do" value="one">Sign&nbsp;Out</button></form></div>'
             % (e(r["label"] or r["kind"]), "app" if r["kind"] == "app" else "browser", e(when),
-               " · this device" if this else "", r["rowid"]))
+               " · this device" if this else "", (" · " + e(rooms)) if rooms else "", r["rowid"]))
     note = '<div class="machiya-banner" role="status">%s</div>' % e(done) if done else ""
+    toks = []
+    for t in tokens:
+        used = time.strftime("%Y-%m-%d", time.gmtime(t["last_used"])) if t["last_used"] else "never"
+        toks.append(
+            '<div class="item"><span>%s<br><small class="value">%s · made %s · last used %s · id %s</small></span>'
+            '<form method="post" action="/machiya/sessions"><input type="hidden" name="token" value="%s">'
+            '<button type="submit" name="do" value="token-revoke">Revoke</button></form></div>'
+            % (e(t["label"]), e(", ".join(room_name(s, o) for o in t["audiences"])),
+               e(time.strftime("%Y-%m-%d", time.gmtime(t["created_at"]))), e(used), e(t["id"]), e(t["id"])))
+    shown = ""
+    if new_token and new_token.get("value"):
+        shown = ('<div class="machiya-banner" role="status">New token for %s. Copy it now: it isn&#x27;t shown '
+                 'again.<br><code class="token-value">%s</code></div>' % (e(new_token["label"]), e(new_token["value"])))
+    elif new_token and new_token.get("error"):
+        shown = '<p class="signin-error" role="alert">%s</p>' % e(new_token["error"])
+    boxes = "".join('<label class="item"><span>%s</span><input type="checkbox" name="room" value="%s"></label>'
+                    % (e(ROOM_NAMES.get(k, k.capitalize())), e(k)) for k in sorted(s.rooms))
     body = (
         '<main class="settings sessions"><h1 class="sechead">Signed In as %s</h1>%s'
         '<h2>Sessions</h2><div class="group">%s</div>'
-        '<p class="footnote">Every browser and app signed in through Hister. Signing one out ends it in Hister and in '
-        'every room within a minute. Hister tokens (extensions, scripts) are separate.</p>'
+        '<p class="footnote">Every browser and app signed in through Hister, and the rooms each browser has opened. '
+        'Signing one out ends it in Hister and in every room within a minute.</p>'
+        '<h2>Room Tokens</h2>%s<div class="group">%s</div>'
+        '<p class="footnote">For scripts, agents and extensions: each opens only the rooms it names, never Hister. '
+        'Send it as <code>Authorization: Bearer</code>.</p>'
+        '<form class="group" method="post" action="/machiya/sessions">'
+        '<label class="item"><span>Name</span><input name="label" required maxlength="80" '
+        'placeholder="pm on the laptop"></label>%s'
+        '<div class="item"><span></span><button type="submit" name="do" value="token-new">New Token</button></div>'
+        '</form>'
         '<h2>Everywhere</h2><div class="group"><div class="item"><span>Sign out every session above</span>'
         '<form method="post" action="/machiya/sessions"><button type="submit" name="do" value="all">'
         'Sign&nbsp;Out Everywhere</button></form></div></div>'
         '</main>'
-    ) % (e(me["username"]), note, "".join(items) or '<div class="item"><span>None</span></div>')
+    ) % (e(me["username"]), note, "".join(items) or '<div class="item"><span>None</span></div>', shown,
+         "".join(toks) or '<div class="item"><span>None</span></div>', boxes)
     return render(headers, "Sessions · Machiya", body)
 
 
@@ -678,10 +1078,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         status, headers, body = answer
         self.send(status, headers, body)
 
-    def prefs_for(self, kind, value, cookie=False):
+    def prefs_for(self, kind, value, cookie=False, rooms=None, origins=None):
         """GET/PUT of the account's settings (docs/contracts/prefs.md) for one credential: the key is only ever the
-        user that credential proves. A PUT carried by the sign-in cookie must come from one of the return hosts' pages
-        (the hosted pages, through their nginx). Values are never logged."""
+        user that credential proves (resolved as /v1/check does; `rooms`: the asking room's origins, None for the
+        helper's own callers). A PUT carried by a cookie must come from `origins` (default: the return hosts' pages).
+        Values are never logged."""
         lg = self.login
         if self.command == "PUT":
             body = vsignin.read_body(self.headers, self.rfile, vprefs.MAX_BODY)
@@ -691,9 +1092,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._body_read = True
         elif self.command not in ("GET", "HEAD"):
             return self.json(405, {"error": "GET or PUT"}, [("Allow", "GET, PUT")])
-        who = lg.who(kind, value)
+        who = lg.who(kind, value, rooms)
         if who[0] == "out":
-            return self.json(401, {"error": "sign in", "signin": lg.s.public_url + "/machiya/signin"})
+            return self.json(401, {"error": "sign in", "signin": lg.s.public_url + "/machiya/signin",
+                                   "reason": who[1] if len(who) > 1 else "signed-out"})
         if who[0] != "ok":
             return self.json(503, {"error": "preferences unavailable",
                                    "reason": "user-handling-off" if who[0] == "off" else "hister-unavailable"})
@@ -704,7 +1106,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if vprefs.matches(self.headers.get("If-None-Match"), rev):
                     return self.reply(vsignin.not_modified(rev))
                 return self.reply(vsignin.prefs_answer(200, rev, values, updated))
-            if cookie and not vsignin.same_origin(self.headers, lg.s.secure, self.prefs_origins()):
+            if cookie and not vsignin.same_origin(self.headers, lg.s.secure, origins or self.prefs_origins()):
                 return self.json(403, {"error": "cross-site write refused"})
             changes, refused = vsignin.parse_put(self.headers, body)
             if refused:
@@ -736,14 +1138,27 @@ class Internal(Handler):
             return self.json(404, {"error": "not found"})
         self.internal_prefs()
 
+    def rooms(self):
+        """X-Machiya-Room: the asking room's origins (its own first; v0.22 rooms always say), [] from an older room
+        or an unreadable header (then only legacy credentials can pass)."""
+        values = self.headers.get_all("X-Machiya-Room") or []
+        return histerauth.origins_header(values[0]) if len(values) == 1 else []
+
+    def one_credential(self):
+        """Exactly one of X-Machiya-Session (mhs_, mhr_, mht_) and X-Access-Token (Hister's), once: (kind, value), or
+        None (the caller answers 400)."""
+        sid = self.headers.get_all("X-Machiya-Session") or []
+        token = self.headers.get_all("X-Access-Token") or []
+        if len(sid) + len(token) != 1:
+            return None
+        return ("sid", sid[0].strip()) if sid else ("token", token[0].strip())
+
     def internal_prefs(self):
         """GET/PUT /v1/prefs: a room's /api/prefs, with the caller's own credential (exactly one, as /v1/check)."""
-        sid = self.headers.get("X-Machiya-Session")
-        token = self.headers.get("X-Access-Token")
-        if (sid is None) == (token is None) or len(self.headers.get_all("X-Machiya-Session") or []) > 1 \
-                or len(self.headers.get_all("X-Access-Token") or []) > 1:
+        cred = self.one_credential()
+        if cred is None:                            # a PUT's unread body closes the connection (end_headers)
             return self.json(400, {"reason": "one credential"})
-        return self.prefs_for("sid" if sid is not None else "token", (sid if sid is not None else token).strip())
+        return self.prefs_for(cred[0], cred[1], rooms=self.rooms())
 
     def do_POST(self):
         self.guard(self._post)
@@ -757,43 +1172,71 @@ class Internal(Handler):
             return self.json(200 if ok else 503, {"ok": ok, "hister": state, "version": VERSION,
                                                   "sessions": lg.store.count()})
         if path == "/v1/check":
-            sid = self.headers.get("X-Machiya-Session")
-            token = self.headers.get("X-Access-Token")
-            if (sid is None) == (token is None):
+            cred = self.one_credential()
+            if cred is None:
                 return self.json(400, {"reason": "one credential"})
-            if sid is not None:
-                outcome, row = lg.check_sid(sid.strip())
-                if outcome == "ok":
-                    return self.json(200, {"username": row["username"], "user_id": row["user_id"], "via": "session",
-                                           "kind": row["kind"], "prefs": lg.shared_prefs(row["username"])})
-            else:
-                answer = lg.check_token(token.strip())
-                outcome = answer[0]
-                if outcome == "ok":
-                    return self.json(200, {"username": answer[1], "user_id": answer[2], "via": "token",
-                                           "prefs": lg.shared_prefs(answer[1])})
-            if outcome == "out":
-                return self.json(401, {"reason": "signed-out"})
-            return self.json(503, {"reason": "user-handling-off" if outcome == "off" else "hister-unavailable"})
+            answer = lg.resolve(cred[0], cred[1], self.rooms())
+            if answer[0] == "ok":
+                info = answer[1]
+                return self.json(200, {"username": info["username"], "user_id": info["user_id"], "via": info["via"],
+                                       "kind": info["kind"], "room": info.get("room"),
+                                       "prefs": lg.shared_prefs(info["username"])})
+            if answer[0] == "out":
+                return self.json(401, {"reason": answer[1] if len(answer) > 1 else "signed-out"})
+            return self.json(503, {"reason": "user-handling-off" if answer[0] == "off" else "hister-unavailable"})
         if path == "/v1/nginx":
-            sid = (self.headers.get("X-Machiya-Session") or "").strip()
-            outcome, row = lg.check_sid(sid) if sid else ("out", None)
-            if outcome == "ok":
-                return self.send(200, [("X-Hister-Cookie", "%s=%s" % (HISTER_COOKIE, row["hister_session"])),
-                                       ("X-Hister-User", row["username"]), ("Cache-Control", "no-store")])
-            return self.send(401 if outcome == "out" else 503, [("Cache-Control", "no-store")])
+            return self.nginx()
         if path == "/v1/prefs":
             return self.internal_prefs()
         self.json(404, {"error": "not found"})
 
+    def nginx(self):
+        """GET /v1/nginx (auth_request for the hosted pages): the hosted pages' room session (X-Machiya-Session, or
+        their room cookie in Cookie) with X-Machiya-Room (their origin) -> 200 and X-Hister-Cookie for nginx's own
+        hop to Hister; legacy: a browser's helper id without X-Machiya-Room (while domain-cookie is on)."""
+        lg = self.login
+        rooms = self.rooms()
+        sid = (self.headers.get("X-Machiya-Session") or "").strip()
+        if not sid and rooms:
+            sid = next((v for v in histerauth.HisterAuth.cookie_values(self.headers.get("Cookie"),
+                                                                       lg.s.proxied_cookie)[:4]
+                        if histerauth.RSID_RE.match(v)), "")
+        answer = lg.resolve("sid", sid, rooms) if sid else ("out",)
+        row = answer[1].get("row") if answer[0] == "ok" else None
+        if row is not None:
+            return self.send(200, [("X-Hister-Cookie", "%s=%s" % (HISTER_COOKIE, row["hister_session"])),
+                                   ("X-Hister-User", row["username"]), ("Cache-Control", "no-store")])
+        return self.send(401 if answer[0] == "out" else 503, [("Cache-Control", "no-store")])
+
     def _post(self):
-        if urlsplit(self.path).path != "/v1/signout":
+        path = urlsplit(self.path).path
+        if path == "/v1/redeem":
+            return self.redeem()
+        if path != "/v1/signout":
             return self.json(404, {"error": "not found"})
         self.body()
-        row = self.login.store.get((self.headers.get("X-Machiya-Session") or "").strip())
+        lg = self.login
+        value = (self.headers.get("X-Machiya-Session") or "").strip()
+        if value.startswith(histerauth.ROOM_PREFIX):
+            room = lg.store.get_room(value)
+            rooms = self.rooms()
+            row = lg.store.by_hash(room["parent"]) if room and (not rooms or room["audience"] in rooms) else None
+        else:
+            row = lg.store.get(value)
         if row:
-            self.login.end_hister(row["hister_session"])
+            lg.end_hister(row["hister_session"])
         self.send(204, [("Cache-Control", "no-store")])
+
+    def redeem(self):
+        """POST /v1/redeem: a room trades the code its callback got (X-Machiya-Code), saying who it is
+        (X-Machiya-Room: its own origin) and what this browser's nonce is (X-Machiya-State)."""
+        if self.body() is None:
+            return self.json(413, {"error": "request body too large"})
+        rooms = self.rooms()
+        status, data = self.login.redeem((self.headers.get("X-Machiya-Code") or "").strip(),
+                                         rooms[0] if len(rooms) == 1 else None,
+                                         (self.headers.get("X-Machiya-State") or "").strip())
+        self.json(status, data)
 
 
 class Public(Handler):
@@ -814,42 +1257,151 @@ class Public(Handler):
     def _put(self):
         if urlsplit(self.path).path != "/machiya/api/prefs":
             return self.json(404, {"error": "not found"})
+        origin = self.request_origin()
+        if origin in self.login.s.proxied:
+            return self.proxied_prefs(origin)
         self.public_prefs()
 
+    # -- the hosted pages' hosts (HISTER_LOGIN_PROXIED_ORIGINS): their nginx sends /machiya/… here with their Host
+
+    def proxied_get(self, origin, path):
+        """A proxied origin's GET: the helper is that origin's room ("shiori") for these paths only."""
+        if path.startswith("/machiya/static/"):
+            return self.static(path[len("/machiya/static/"):])
+        if path == "/machiya/start":
+            return self.proxied_start(origin)
+        if path == "/machiya/callback":
+            return self.proxied_callback(origin)
+        if path == "/machiya/api/prefs":
+            return self.proxied_prefs(origin)
+        if path == "/machiya/signed-out":
+            return self.page(200, message_page(self.headers, "Signed Out", "You're signed out of Hister and every "
+                                               "Machiya room on this device.",
+                                               [("/machiya/start?return=%2F", "Sign In Again")]))
+        self.page(404, message_page(self.headers, "Not Found", "There's nothing here.", [("/", "Go Back")]))
+
+    def proxied_names(self):
+        c = self.login.s.proxied_cookie
+        return c, c + "_state", c + "_out"
+
+    def proxied_start(self, origin):
+        """GET /machiya/start?return=<page> on a hosted pages' host: a fresh nonce in that host's own state cookie,
+        then the helper's sign-in with its SHA-256 (and the automatic provider, unless this host signed out on
+        purpose). The helper sends a browser here when a hosted page's address came without a state."""
+        lg = self.login
+        _, state_name, out_name = self.proxied_names()
+        q = self.query()
+        ret = q.get("return") or "/"
+        if ret.startswith("/") and not ret.startswith(("//", "/\\")):
+            ret = origin + ret
+        if histerauth.origin_of(ret) != origin or not lg.safe(ret):
+            ret = origin + "/"
+        nonce = histerauth.new_nonce()
+        params = [("return", ret), ("state", histerauth.state_hash(nonce))]
+        marked = bool(histerauth.HisterAuth.cookie_values(self.headers.get("Cookie"), out_name))
+        if lg.s.auto_provider and lg.s.auto_provider in lg.s.providers and not marked:
+            params += [("provider", lg.s.auto_provider), ("auto", "1")]
+        self.redirect(lg.s.public_url + "/machiya/signin?" + urlencode(params),
+                      [lg.cookie(state_name, nonce, histerauth.STATE_MAX_AGE)], status=302)
+
+    def proxied_callback(self, origin):
+        """GET /machiya/callback?code=… on a hosted pages' host: the code traded here (as a room would at
+        /v1/redeem), the room cookie set on that host, then the page."""
+        lg = self.login
+        name, state_name, out_name = self.proxied_names()
+        code = self.query().get("code") or ""
+        nonce = next((v for v in histerauth.HisterAuth.cookie_values(self.headers.get("Cookie"), state_name)[:4]
+                      if histerauth.NONCE_RE.match(v)), "")
+        status, data = lg.redeem(code, origin, nonce) if code and nonce else (401, {})
+        done = [lg.cookie(state_name, "", 0)]
+        if status == 200:
+            ret = data["return"] if histerauth.origin_of(data["return"]) == origin else origin + "/"
+            cookies = [lg.cookie(name, data["session"], data["max_age"])] + done + [lg.cookie(out_name, "", 0)]
+            return self.send(302, [("Location", ret), ("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer")]
+                             + [("Set-Cookie", c) for c in cookies])
+        if status == 503:
+            return self.page(503, message_page(self.headers, "Sign-In Is Unavailable", "Hister can't be reached right "
+                                               "now. Try again in a minute.", [("/", "Try Again")]),
+                             [("Set-Cookie", c) for c in done])
+        self.page(401, message_page(self.headers, "Sign In", "That sign-in didn't finish. Sign in to continue.",
+                                    [("/machiya/start?return=%2F", "Sign In")]), [("Set-Cookie", c) for c in done])
+
+    def proxied_prefs(self, origin):
+        name, _, _ = self.proxied_names()
+        sid = next((v for v in histerauth.HisterAuth.cookie_values(self.headers.get("Cookie"), name)[:4]
+                    if histerauth.RSID_RE.match(v)), "")
+        if not sid:
+            if self.command == "PUT":
+                self.body()
+            return self.json(401, {"error": "sign in", "signin": origin + "/machiya/start?return=%2F"})
+        return self.prefs_for("room", sid, cookie=True, rooms=[origin], origins=[origin])
+
+    def proxied_post(self, origin, path):
+        """POST /machiya/signout on a hosted pages' host (same-origin): the browser's helper session ends (Hister's,
+        every room's), this host's cookie goes, and its marker stops the automatic sign-in from here."""
+        lg = self.login
+        if self.body() is None:
+            return self.json(413, {"error": "request body too large"})
+        if path != "/machiya/signout":
+            return self.json(404, {"error": "not found"})
+        if not vsignin.same_origin(self.headers, lg.s.secure, (origin,)):
+            return self.page(403, message_page(self.headers, "Refused", "A sign-out must come from this page."))
+        name, state_name, out_name = self.proxied_names()
+        for value in histerauth.HisterAuth.cookie_values(self.headers.get("Cookie"), name)[:4]:
+            room = lg.store.get_room(value)
+            parent = lg.store.by_hash(room["parent"]) if room and room["audience"] == origin else None
+            if parent:
+                lg.end_hister(parent["hister_session"])
+        self.redirect("/machiya/signed-out", [lg.cookie(name, "", 0), lg.cookie(state_name, "", 0),
+                                              lg.cookie(out_name, "1", OUT_MAX_AGE)])
+
     def public_prefs(self):
-        """GET/PUT /machiya/api/prefs: Shiori's apps (Authorization: Bearer mhs_…), extensions and scripts (a Hister
-        token: X-Access-Token or Bearer), the hosted pages through their nginx (the sign-in cookie; a PUT then needs
-        an Origin among the return hosts). No CORS: no other site's page may read or write it."""
+        """GET/PUT /machiya/api/prefs: Shiori's apps (Authorization: Bearer mhs_…), extensions and scripts (a room
+        token, Bearer mht_…, or a Hister token: X-Access-Token or Bearer; this is Hister's own host), the browser's
+        own sign-in cookie (a PUT then needs an Origin among the return hosts), and the hosted pages through their
+        nginx (proxied(): their room cookie). No CORS: no other site's page may read or write it."""
         auth = self.headers.get_all("Authorization") or []
         tok = self.headers.get_all("X-Access-Token") or []
         if len(auth) > 1 or len(tok) > 1 or (auth and tok):
+            if self.command == "PUT":
+                self.body()
             return self.json(400, {"error": "one credential"})
+        refused = {"error": "sign in", "signin": self.login.s.public_url + "/machiya/signin"}
         if tok:
             value = tok[0].strip()
             if not histerauth.TOKEN_RE.match(value):
-                return self.json(401, {"error": "sign in", "signin": self.login.s.public_url + "/machiya/signin"})
+                return self.json(401, refused)
             return self.prefs_for("token", value)
         if auth:
             scheme, _, value = auth[0].strip().partition(" ")
             value = value.strip()
             if scheme.lower() != "bearer" or not histerauth.TOKEN_RE.match(value or " "):
-                return self.json(401, {"error": "sign in", "signin": self.login.s.public_url + "/machiya/signin"})
-            if value.startswith(SID_PREFIX):
-                return self.prefs_for("sid", value)
+                return self.json(401, refused)
+            if value.startswith((SID_PREFIX, histerauth.RTOKEN_PREFIX)):
+                return self.prefs_for("sid" if value.startswith(SID_PREFIX) else "rtoken", value)
             return self.prefs_for("token", value)
-        sid = sso_value(self.headers, self.login.s.sso)
+        sid = self.login.own_sid(self.headers)
         if not sid:
             if self.command == "PUT":
                 self.body()
-            return self.json(401, {"error": "sign in", "signin": self.login.s.public_url + "/machiya/signin"})
+            return self.json(401, refused)
         return self.prefs_for("sid", sid, cookie=True)
 
     def same_origin(self):
         return vsignin.same_origin(self.headers, self.login.s.secure, (self.login.s.public_url,))
 
+    def request_origin(self):
+        """The origin this request was made to, from Host: a proxied origin (the hosted pages, through their nginx,
+        which passes Host on) or anything else (the helper's own host)."""
+        host = (self.headers.get("Host") or "").strip()
+        return histerauth.origin_of(("https://" if self.login.s.secure else "http://") + host) if host else None
+
     def _get(self):
         lg, s = self.login, self.login.s
         path = urlsplit(self.path).path
+        origin = self.request_origin()
+        if origin in s.proxied:
+            return self.proxied_get(origin, path)
         if path in ("/machiya", "/machiya/"):
             return self.redirect("/machiya/sessions")
         if path == "/machiya/healthz":         # the probe's: the helper's own health; Hister's is its own probe's
@@ -894,6 +1446,8 @@ class Public(Handler):
         q = self.query() if form is None else form
         app = q.get("app") == "1"
         ret = lg.safe(q.get("return"), app)
+        state = q.get("state") or ""
+        state = state if not app and histerauth.NONCE_RE.match(state) else ""   # a room's trip: a code goes back
         if q.get("return") and not ret:
             LOG("hister-login: refused a return address (not an allowed host)")
         if app and not ret:
@@ -905,24 +1459,34 @@ class Public(Handler):
             # session (LEAD-3); confirm with a same-origin POST, creating and remembering nothing until then
             return self.page(200, confirm_page(self.headers, ret, (q.get("provider") or "").strip().lower()[:20]))
         session = hister_cookie(self.headers)
-        if session:
-            answer = lg.hister.profile(session=session)
-            if answer[0] == "ok":
-                location, cookies = lg.finish(session, answer, ret, app, self.headers)
-                cookies.append(lg.cookie(RETURN_COOKIE, "", 0))
-                return self.redirect(location, cookies)
-            if answer[0] in ("down", "off"):
-                return self.unavailable(answer[0])
-        elif lg.hister.health() != "ok":
+        answer = lg.hister.profile(session=session) if session else None
+        if answer is None or answer[0] == "out":
+            own = lg.own_sid(self.headers)          # this browser's helper id, when Hister's own cookie is gone
+            outcome, row = lg.check_sid(own) if own else ("out", None)
+            if outcome == "ok" and row["kind"] == "browser":
+                session, answer = row["hister_session"], ("ok", row["username"], row["user_id"])
+            elif outcome in ("down", "off"):
+                return self.unavailable(outcome)
+        if answer is not None and answer[0] == "ok":
+            location, cookies = lg.finish(session, answer, ret, app, self.headers, state=state)
+            cookies.append(lg.return_clear())
+            return self.redirect(location, cookies)
+        if answer is not None and answer[0] in ("down", "off"):
+            return self.unavailable(answer[0])
+        if answer is None and lg.hister.health() != "ok":
             return self.unavailable(lg.hister.health_state)
-        cookies = [lg.return_cookie(ret, app)] if ret else [lg.cookie(RETURN_COOKIE, "", 0)]
+        cookies = [lg.return_cookie(ret, app, state)] if ret else [lg.return_clear()]
+        marked = lg.marked(self.headers)
+        if marked and lg.store.was_ended(lg.own_sid(self.headers) or sso_value(self.headers, lg.s.sso)):
+            # a room's Sign Out ended this browser's id: remember it here, and drop the dead cookie
+            cookies += lg.signed_out() + lg.sso_clear()
         provider = (q.get("provider") or "").strip().lower()
         # straight to that sign-in, the return cookie set as for the page: a tap on Shiori's "Sign In with Tailscale"
         # (provider=) always; a room's automatic sign-in (provider=…&auto=1, MACHIYA_SIGNIN_PROVIDER) unless the
         # browser signed out on purpose or the last round trip failed (the marker): then the page, never a loop
-        if provider and provider in lg.s.providers and not (q.get("auto") == "1" and lg.marked(self.headers)):
+        if provider and provider in lg.s.providers and not (q.get("auto") == "1" and marked):
             return self.redirect("/api/oauth?provider=" + provider, cookies)
-        self.page(200, signin_page(lg.s, self.headers, ret, app), [("Set-Cookie", c) for c in cookies])
+        self.page(200, signin_page(lg.s, self.headers, ret, app, state=state), [("Set-Cookie", c) for c in cookies])
 
     def unavailable(self, state):
         text = ("Hister's user accounts are switched off, so nobody can sign in." if state == "user-handling-off"
@@ -962,36 +1526,43 @@ class Public(Handler):
         if status in (302, 303) and new:
             answer = lg.hister.profile(session=new)
             if answer[0] == "ok":
-                ret, app = lg.read_return(self.headers.get("Cookie"))
-                location, cookies = lg.finish(new, answer, ret, app, self.headers)
+                ret, app, state = lg.read_return(self.headers.get("Cookie"))
+                location, cookies = lg.finish(new, answer, ret, app, self.headers, state=state)
                 if not ret:
                     location = dict((k.lower(), v) for k, v in out).get("location", location)
                 out = [(k, v) for k, v in out if k.lower() != "location"] + [("Location", location)]
-                out += [("Set-Cookie", c) for c in cookies + [lg.cookie(RETURN_COOKIE, "", 0)]]
+                out += [("Set-Cookie", c) for c in cookies + [lg.return_clear()]]
                 return self.send(status, out, body)
-        ret, app = lg.read_return(self.headers.get("Cookie"))
+        ret, app, state = lg.read_return(self.headers.get("Cookie"))
         if ret:     # a sign-in this helper started (a room's automatic one, a tap) that didn't finish: the page, with
             LOG("hister-login: a sign-in through the provider didn't finish (Hister answered %s)" % status)
             cookies = [v for k, v in out if k.lower() == "set-cookie"]          # Hister's own, for its host
-            cookies += [lg.cookie(RETURN_COOKIE, "", 0), lg.cookie(lg.s.out, "failed", FAILED_MAX_AGE)]
+            cookies += [lg.return_clear(), lg.cookie(lg.s.out, "failed", FAILED_MAX_AGE)]
             return self.page(401, signin_page(lg.s, self.headers, ret, app, error="Sign in with %s didn't work. Try "
-                                              "again, or sign in with your password." % lg.s.oidc_label),
+                                              "again, or sign in with your password." % lg.s.oidc_label, state=state),
                              [("Set-Cookie", c) for c in cookies])
         self.send(status, out, body)
 
-    def sessions(self):
+    def sessions(self, new_token=None, status=200):
         lg = self.login
-        sid = sso_value(self.headers, self.login.s.sso)
+        sid = lg.own_sid(self.headers)
         outcome, row = lg.check_sid(sid) if sid else ("out", None)
         if outcome in ("down", "off"):
             return self.unavailable("user-handling-off" if outcome == "off" else "down")
         if outcome != "ok":
             return self.redirect("/machiya/signin?" + urlencode({"return": lg.s.public_url + "/machiya/sessions"}))
-        done = "Signed that session out." if self.query().get("done") == "one" else ""
-        self.page(200, sessions_page(lg.s, self.headers, row, lg.store.of_user(row["user_id"]), done))
+        done = {"one": "Signed that session out.", "token": "Revoked that token."}.get(self.query().get("done"), "")
+        rows = lg.store.of_user(row["user_id"])
+        for r in rows:
+            r["rooms"] = lg.store.rooms_of(r["sid_hash"])
+        self.page(status, sessions_page(lg.s, self.headers, row, rows, done, lg.store.tokens_of(row["username"]),
+                                        new_token))
 
     def _post(self):
         path = urlsplit(self.path).path
+        origin = self.request_origin()
+        if origin in self.login.s.proxied:
+            return self.proxied_post(origin, path)
         if path == "/machiya/signin":
             return self.signin_post()
         if path == "/machiya/signout":
@@ -1034,7 +1605,7 @@ class Public(Handler):
         if not self.same_origin():
             return self.page(403, message_page(self.headers, "Refused", "A sign-out must come from this page."))
         cookies, ended = [], set()
-        row = lg.store.get(sso_value(self.headers, self.login.s.sso))
+        row = lg.store.get(lg.own_sid(self.headers))
         if row:
             cookies += lg.end_hister(row["hister_session"])
             ended.add(row["hister_hash"])
@@ -1052,13 +1623,19 @@ class Public(Handler):
             return self.json(413, {"error": "request body too large"})
         if not self.same_origin():
             return self.page(403, message_page(self.headers, "Refused", "That must come from the sessions page."))
-        outcome, me = lg.check_sid(sso_value(self.headers, self.login.s.sso) or "")
+        outcome, me = lg.check_sid(lg.own_sid(self.headers) or "")
         if outcome != "ok":
             return self.redirect("/machiya/sessions")
         try:
-            form = {k: v[0] for k, v in parse_qs(data.decode("utf-8"), max_num_fields=4).items()}
+            lists = parse_qs(data.decode("utf-8"), max_num_fields=24)
         except (ValueError, UnicodeError):
             return self.json(400, {"error": "unreadable form"})
+        form = {k: v[0] for k, v in lists.items()}
+        if form.get("do") == "token-new":
+            return self.token_new(me, form.get("label", ""), lists.get("room", []))
+        if form.get("do") == "token-revoke":
+            lg.store.revoke_token(form.get("token", ""), me["username"])
+            return self.redirect("/machiya/sessions?done=token")
         if form.get("do") == "all":
             seen = set()
             for r in lg.store.of_user(me["user_id"]):
@@ -1077,6 +1654,18 @@ class Public(Handler):
                 return self.redirect("/machiya/signed-out", lg.sso_clear() + lg.signed_out()
                                      + [lg.cookie(HISTER_COOKIE, "", 0)])
         self.redirect("/machiya/sessions?done=one")
+
+    def token_new(self, me, label, rooms):
+        """New Token on the sessions page: a room token (mht_) for the rooms ticked, shown once on the answer."""
+        lg = self.login
+        label = re.sub(r"[\x00-\x1f\x7f]", "", label).strip()[:80]
+        audiences = [lg.s.rooms[r] for r in rooms if r in lg.s.rooms]
+        if not label or not audiences:
+            return self.sessions(new_token={"error": "Name the token and tick at least one room."}, status=400)
+        value = histerauth.RTOKEN_PREFIX + b64e(secrets.token_bytes(32))
+        lg.store.add_token(value, me["username"], label, sorted(set(audiences)), user_id=me["user_id"])
+        LOG("hister-login: a room token was made on the sessions page (%s)" % ", ".join(sorted(set(rooms))))
+        self.sessions(new_token={"value": value, "label": label})
 
     def app_session(self):
         """POST /machiya/api/app-session {"hister": S, "label": "iPhone"}: an app that signed in to Hister with a
@@ -1204,7 +1793,91 @@ def prefs_cli(argv, env=None, out=sys.stdout):
     return 0
 
 
+# -- the token command (0.3.0): room tokens for headless callers ----------------------------------------------------
+
+def token_cli(argv, env=None, out=sys.stdout):
+    """`token mint|add|list|revoke`, run where the helper runs (its sessions file, HISTER_LOGIN_DB). A token's value
+    never goes in argv: mint prints it once (or writes it to --out, 0600), add reads it from --from-file.
+    --rooms takes room names from MACHIYA_ROOMS (machiya = landing) or origins (https://host[:port]). -> exit code."""
+    env = os.environ if env is None else env
+    ap = argparse.ArgumentParser(prog="hister_login.py token")
+    sub = ap.add_subparsers(dest="what", required=True)
+    for name, text in (("mint", "make a room token (printed once, or --out FILE)"),
+                       ("add", "register a token made elsewhere (--from-file FILE)")):
+        p = sub.add_parser(name, help=text)
+        p.add_argument("--user", required=True, help="the Hister username the token acts as")
+        p.add_argument("--label", required=True, help="who holds it (pm on the laptop, machiya-mcp, …)")
+        p.add_argument("--rooms", required=True, help="kura,niwa,konbini,machiya or origins, comma-separated")
+        p.add_argument("--days", type=int, default=0, help="expire after N days (default: never)")
+        if name == "mint":
+            p.add_argument("--out", help="write the token to FILE (0600) instead of printing it")
+        else:
+            p.add_argument("--from-file", required=True, dest="src")
+    sub.add_parser("list", help="every token: id, user, label, rooms, made, last used")
+    p = sub.add_parser("revoke", help="revoke a token by its id (as listed)")
+    p.add_argument("id")
+    a = ap.parse_args(argv)
+    say = lambda *x: print(*x, file=out)                    # noqa: E731
+    store = Store((env.get("HISTER_LOGIN_DB") or "/data/hister-login.sqlite3").strip())
+    named = {k: histerauth.origin_of(u) for k, u in shell.rooms(env).items()}
+    if a.what == "list":
+        for t in store.tokens_of():
+            say("%s  %-12s %-28s %s  made %s  last used %s%s" % (
+                t["id"], t["username"], t["label"][:28], ",".join(t["audiences"]),
+                time.strftime("%Y-%m-%d", time.gmtime(t["created_at"])),
+                time.strftime("%Y-%m-%d", time.gmtime(t["last_used"])) if t["last_used"] else "never",
+                "  expires %s" % time.strftime("%Y-%m-%d", time.gmtime(t["expires_at"])) if t["expires_at"] else ""))
+        return 0
+    if a.what == "revoke":
+        n = store.revoke_token(a.id.strip().lower())
+        say("revoked %s" % a.id if n else "no token %s" % a.id)
+        return 0 if n else 1
+    audiences = []
+    for r in [x.strip() for x in a.rooms.split(",") if x.strip()]:
+        o = named.get(r) if r in named else histerauth.origin_of(r) if "://" in r else None
+        if not o or (r not in named and urlsplit(r).path not in ("", "/")):
+            say("%s: not a room in MACHIYA_ROOMS (%s) nor an origin" % (r, ", ".join(sorted(named)) or "none"))
+            return 1
+        audiences.append(o)
+    if not audiences or not a.label.strip() or not a.user.strip():
+        say("a token needs a user, a label and at least one room")
+        return 1
+    if a.what == "add":
+        try:
+            with open(a.src, encoding="utf-8") as f:
+                value = f.readline().strip()
+        except OSError as ex:
+            say("%s: %s" % (a.src, ex.strerror))
+            return 1
+        if not histerauth.RTOKEN_RE.match(value):
+            say("%s: not a room token (mht_ and 43 characters)" % a.src)
+            return 1
+        if store.get_token(value) is not None:
+            say("already registered (%s)" % sha(value)[:12])
+            return 0
+    else:
+        value = histerauth.RTOKEN_PREFIX + b64e(secrets.token_bytes(32))
+    tid = store.add_token(value, a.user.strip(), a.label.strip(), sorted(set(audiences)), days=max(a.days, 0))
+    if a.what == "mint":
+        if a.out:
+            fd = os.open(a.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(value + "\n")
+            os.chmod(a.out, 0o600)
+            say("token %s for %s (%s) written to %s" % (tid, a.user, ",".join(sorted(set(audiences))), a.out))
+        else:
+            say(value)
+            say("token %s for %s (%s): copy it now, it isn't shown again" % (tid, a.user,
+                                                                           ",".join(sorted(set(audiences)))))
+    else:
+        say("token %s for %s (%s) registered" % (tid, a.user, ",".join(sorted(set(audiences)))))
+    return 0
+
+
 def main():
+    if sys.argv[1:2] == ["token"]:
+        os.umask(0o077)
+        sys.exit(token_cli(sys.argv[2:]))
     if sys.argv[1:2] == ["prefs"]:
         os.umask(0o077)
         sys.exit(prefs_cli(sys.argv[2:]))
