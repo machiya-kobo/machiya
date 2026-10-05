@@ -116,14 +116,20 @@ def room_token_user(headers):
     Tailscale header decides); a bad, revoked or other service's token is refused and never passed over."""
     import http.client
     values = headers.get_all("Authorization") or []
-    if not values:
-        return False, None
-    scheme, _, value = values[0].strip().partition(" ")
-    value = value.strip()
-    if len(values) == 1 and not (scheme.lower() == "bearer" and value.startswith("mht_")):
-        return False, None
-    if not AUTH_URL or len(values) > 1 or not RTOKEN_RE.match(value):
-        return True, None
+    extra = [v.strip() for v in headers.get_all("X-Machiya-Token") or [] if v.strip()]   # a client with fixed headers
+    if extra:
+        if values or len(extra) > 1 or not AUTH_URL or not RTOKEN_RE.match(extra[0]):
+            return True, None
+        value = extra[0]
+    else:
+        if not values:
+            return False, None
+        scheme, _, value = values[0].strip().partition(" ")
+        value = value.strip()
+        if len(values) == 1 and not (scheme.lower() == "bearer" and value.startswith("mht_")):
+            return False, None
+        if not AUTH_URL or len(values) > 1 or not RTOKEN_RE.match(value):
+            return True, None
     key = hashlib.sha256(value.encode("ascii")).hexdigest()
     with _ROOM_TOKENS_LOCK:
         hit = _ROOM_TOKENS.get(key)

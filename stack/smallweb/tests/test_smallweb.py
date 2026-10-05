@@ -1213,6 +1213,8 @@ class RoomTokenTest(unittest.TestCase):
         self.assertEqual(get("/search?q=x", user=None, headers={"Authorization": "Bearer " + bad})[0], 403)
         self.assertEqual(get("/search?q=x", user="user@test", headers={"Authorization": "Bearer " + bad})[0], 403)
         self.assertEqual(get("/search?q=x", user="user@test")[0] != 403, True)       # no token: the header
+        self.assertNotEqual(get("/search?q=x", user=None, headers={"X-Machiya-Token": self.good})[0], 403)
+        self.assertEqual(get("/search?q=x", user="user@test", headers={"X-Machiya-Token": bad})[0], 403)
 
 
 if __name__ == "__main__":

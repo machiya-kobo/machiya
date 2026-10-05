@@ -30,6 +30,23 @@ MDIMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 CALLOUT_RE = re.compile(r"^> \[!(\w+)\][+-]?[ \t]*(.*)$", re.M)
 TASK_RE = re.compile(r"<li>(<p>)?\[([ xX])\] ")
 SMALLWEB_AUTOLINK_RE = re.compile(r"<((?:gemini|gopher)://[^\s<>\"']+)>", re.I)   # Markdown autolinks only http(s)
+# v0.22: the oldest Python-Markdown vaultkit runs with. 3.7 to 3.10 on Python 3.13 run out of memory on a note with two
+# unclosed `<!--` in separate paragraphs (their HTML-block preprocessor and the newer html.parser): one note takes a
+# room down. 3.11 renders it in milliseconds.
+MIN_MARKDOWN = (3, 11)
+
+
+def markdown_ok(version):
+    """Is this Python-Markdown version string at least MIN_MARKDOWN?"""
+    parts = re.findall(r"\d+", str(version or ""))[:2]
+    return len(parts) == 2 and tuple(int(p) for p in parts) >= MIN_MARKDOWN
+
+
+if not markdown_ok(getattr(markdown, "__version__", "")):
+    raise ImportError("vaultkit needs Python-Markdown %d.%d or later, found %s: older versions can be driven out of "
+                      "memory by a single note. Install it with pip (pip install 'markdown>=%d.%d'), in a venv if the "
+                      "system's package is older." % (MIN_MARKDOWN + (getattr(markdown, "__version__", "?"),) + MIN_MARKDOWN))
+
 HIDDEN = ("Templates/",)
 IGNORED = ("CLAUDE.md",)            # agent instructions, not notes
 

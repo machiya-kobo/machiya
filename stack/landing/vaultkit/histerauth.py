@@ -842,7 +842,8 @@ class HisterAuth:
 
 class TokenGate:
     """A service with a gate of its own (the Tailscale header: machiya-mcp, smallweb) that also takes a room token
-    (`Authorization: Bearer mht_…`, v0.22) which hister-login issued for it: an agent on a tagged machine has no
+    (`Authorization: Bearer mht_…`, or `X-Machiya-Token: mht_…` from a client that can only send fixed headers, such
+    as the machiya Claude Code plugin; v0.22) which hister-login issued for it: an agent on a tagged machine has no
     Tailscale login, and must never be handed Hister's raw token. resolve(headers) -> None when the request carries
     no room token (the service's own gate decides), else a Result: 200 (the token's Hister user, in `users`), 401 (a
     bad, revoked or other services' token: never passed over for the header), 403 (another Hister user), 503 (the
@@ -863,14 +864,21 @@ class TokenGate:
 
     def resolve(self, headers):
         values = Identity.header_values(headers, "Authorization")
-        if not values:
-            return None
-        scheme, _, value = (values[0] or "").strip().partition(" ")
-        value = value.strip()
-        if len(values) == 1 and not (scheme.lower() == "bearer" and value.startswith(RTOKEN_PREFIX)):
-            return None                             # not a room token: the service's own gate (identity file, …)
-        if len(values) > 1 or not RTOKEN_RE.match(value):
-            return Result(None, 401, SIGNED_OUT, actor="token:-")
+        extra = [v.strip() for v in Identity.header_values(headers, "X-Machiya-Token") if isinstance(v, str)
+                 and v.strip()]
+        if extra:                                   # X-Machiya-Token (a client that can only set static headers, such
+            if values or len(extra) > 1 or not RTOKEN_RE.match(extra[0]):   # as a Claude Code plugin; empty is none)
+                return Result(None, 401, SIGNED_OUT, actor="token:-")
+            value = extra[0]
+        else:
+            if not values:
+                return None
+            scheme, _, value = (values[0] or "").strip().partition(" ")
+            value = value.strip()
+            if len(values) == 1 and not (scheme.lower() == "bearer" and value.startswith(RTOKEN_PREFIX)):
+                return None                         # not a room token: the service's own gate (identity file, …)
+            if len(values) > 1 or not RTOKEN_RE.match(value):
+                return Result(None, 401, SIGNED_OUT, actor="token:-")
         key = hashlib.sha256(value.encode("ascii")).hexdigest()
         with self.lock:
             hit = self.cache.get(key)
