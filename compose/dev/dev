@@ -670,8 +670,8 @@ def status(env, data):
     if env.get("DEV_FRONT_SCHEME") == "https":
         print("  TLS: the throwaway dev CA is %s (trust it in a browser, or accept the warning)"
               % os.path.join(data, "certs", "ca.crt"))
-    print("  agents: MACHIYA_MCP_URL=http://%s:19226/mcp HISTER_MCP_URL=http://%s:19224/mcp "
-          "HISTER_TOKEN_FILE=%s" % (ADDR[0], ADDR[0], os.path.join(data, "secrets", "owner-token")))
+    print("  agents: MACHIYA_MCP_URL=http://%s:19226/mcp (pages, notes and the board; Hister's own MCP is not for AI "
+          "clients, docs/contracts/hister.md)" % ADDR[0])
     if env.get("DEV_SIGNIN_PROVIDER"):
         print("  sign-in: automatic through the stub OIDC provider (MACHIYA_SIGNIN_PROVIDER=%s); after Sign Out, the "
               "helper's page" % env["DEV_SIGNIN_PROVIDER"])
