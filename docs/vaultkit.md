@@ -4,12 +4,13 @@ The shared core of Machiya's vault services, in `vaultkit/` of this repo. Each s
 
 | Module | What |
 |---|---|
-| `front.py` | frontmatter (`note_front`, `tags_of`), git conflict markers, conflict copies written by a sync tool (Obsidian LiveSync), `_str`, `_unlink` |
-| `notes.py` | `read_notes(root)`, `Note` (title, tags, published, stage, type, confidence, summary), `relative()` dates |
-| `vault.py` | `Vault`: the index (notes, wikilink names, images, links, backlinks, last-changed dates from git) and the Markdown renderer (`garden` and `all`/`kura` link modes; a `retro` flag for HTML 3.2 tables, unused) |
+| `front.py` | frontmatter (`note_front`, `tags_of`; v0.22: YAML aliases refused and at most `MAX_FRONT` = 64 KiB, `load_yaml`), git conflict markers, conflict copies written by a sync tool (Obsidian LiveSync), `_str`, `_unlink` |
+| `notes.py` | `read_notes(root)` (v0.22: symlinks skipped, files opened with `O_NOFOLLOW`), `read_file(path)`, `safe_path(root, rel)` (the path to write, or `ValueError` for `..`, an absolute path or any symlinked part: every writer uses it), `Note` (title, tags, published, stage, type, confidence, summary), `relative()` dates |
+| `vault.py` | `Vault`: the index (notes, wikilink names, images, links, backlinks, last-changed dates from git) and the Markdown renderer (`garden` and `all`/`kura` link modes; a `retro` flag for HTML 3.2 tables, unused). v0.22: needs Python-Markdown 3.11 or later (`MIN_MARKDOWN`; older ones run out of memory on one note under Python 3.13, so the import refuses them); symlinked images are not indexed |
 | `frontmatter.py` | `edit_front` (set/remove top-level keys or the tags block, touching nothing else), `merge_note` (three-way frontmatter merge), `version_of`, `EditError` |
-| `gitsync.py` | `GitSync`: a read-write clone a service commits to in batches (author, paths, an events log with union merge), pull with rebase and a file-by-file replay on conflict (never commits conflict markers), push |
-| `git.py` | `Git` (a runner) and `Mirror` (a read-only clone of an https/ssh/file remote kept up to date; a token travels as a header in git's environment, never in argv or `.git/config`) |
+| `gitsync.py` | `GitSync`: a read-write clone a service commits to in batches (author, paths, an events log with union merge), pull with rebase and a file-by-file replay on conflict (never commits conflict markers), push. v0.22: `core.symlinks=false` before the first pull, and replay never writes through a link. `lock` is re-entrant: a writer holds it around its own edit so a pull can't wipe it (NIWA-8) |
+| `git.py` | `Git` (a runner; v0.22: `.error` keeps the last failure, URL credentials redacted in every log line, `redact()`) and `Mirror` (a read-only clone of an https/ssh/file remote kept up to date; a token travels as a header in git's environment, never in argv or `.git/config`; v0.22: `core.symlinks=false`, and `.failed` says why the last `update()` didn't reach the remote: a caller must not report that as synced) |
+| `websafe.py` | v0.22, the sweep's shared rules: `base_headers()` for every non-HTML answer (nosniff, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`), `asset_headers(name)` for a vault file (sandboxed: an SVG never runs script in the room; anything not an image is a download), `header_value()` (refuses CR/LF/control characters), `location(path)` (a safe local redirect target), `private()` / `vet()` (the private-address rule, the same as smallweb's), `public_opener(allow)` (outside URLs: every connection and redirect vetted at connect time; a credential never follows a redirect) and `token_opener()` (no redirects at all) |
 | `identity.py` | who is calling and what they may do ([identity.md](identity.md)): the read-only TOML identity file, `Identity.resolve` (bearer tokens, Tailscale logins and tagged nodes, a trusted proxy header, the built-in sign-in's session cookie), grants, sign-in and device pairing with throttling, and the CLI `python3 -m vaultkit.identity` |
 | `signin.py` | the built-in sign-in page and its POST, sign-out, Shiori's device pairing (`POST /api/pair`) and per-user preferences (`Prefs`, `GET/PUT /api/prefs`) over `identity.py`, as plain functions a room wires in a few lines |
 | `histerauth.py` | `*_AUTH=hister` ([identity.md](identity.md#hister-sign-in-authhister), [hister-login](services/hister-login.md)): `load_for` with the start-up refusals, `HisterAuth.resolve` (the token, the `machiya_sso` id (renamed by `MACHIYA_SSO_COOKIE`, `sso_cookie_name`), the check against the helper with its cache and health flag, the Tailscale fallback or 503, the loop guard; v0.21: the automatic sign-in through `MACHIYA_SIGNIN_PROVIDER` and the account's shared preferences on `Result.prefs`), `signout` (with the signed-out marker), `forward_prefs` and `prefs_state` (a room's `/api/prefs` is the account's, [contracts/prefs.md](contracts/prefs.md)), `safe_return`, `hister_headers(token_file)` (`Origin: hister://` and the owner's token, re-read on change), default refusal pages; standard library only, tested in `tests/test_histerauth.py` |
@@ -208,6 +209,34 @@ status, headers, out = signin.handle_prefs(prefs, who, self.command, self.header
 These principals are not bearer, so a PUT still needs same-origin with the room's `origins`.
 
 Konbini subclasses `Vault` to plug in its own cache: `key()` returns the board's HEAD + revision, and `source()` returns its timeline's note list.
+
+### Response and fetch safety (`vaultkit.websafe`, v0.22)
+
+What every room does with it (the sweep of 2026-10; the per-room findings are KURA-1, NIWA-1, KONB-2, NIWA-4..6, KONB-7, KONB-10):
+
+```python
+from vaultkit import websafe, shell
+
+# every answer: HTML pages already send shell.security_headers(); everything else (JSON, text, CSS, images, 3xx):
+for k, v in websafe.base_headers(): self.send_header(k, v)
+
+# /a/<file> from the vault: never the room's own headers
+for k, v in websafe.asset_headers(rel): self.send_header(k, v)        # Content-Type included
+
+# a redirect built from the request: percent-encoded, never //host, never a CR/LF
+self.send_header("Location", websafe.location(path))                  # or websafe.header_value(url) for a full URL
+
+# link checkers (outside URLs): public addresses only, on every hop
+with websafe.public_opener().open(req, timeout=10) as r: ...            # raises websafe.Blocked for a private one
+
+# a call that carries a token (Hister, another room): no redirect is ever followed
+with websafe.token_opener().open(req, timeout=10) as r: ...
+
+# a writer: the path to write, or ValueError (a symlink, .., an absolute path)
+path = vaultkit.safe_path(vault_root, rel)
+```
+
+A Mirror's caller checks `m.failed` after `m.update()` and reports it instead of a fresh "synced" (MACH-F-4).
 
 ## Tests
 
