@@ -70,8 +70,11 @@ location / {                                          # the Hister route (as bef
     proxy_hide_header Set-Cookie;                     # Hister re-sends its session cookie on every answer
     # … the existing proxy_pass and websocket lines
 }
-# /kura/ and /konbini/: forward only "Cookie: __Host-machiya_sso_shiori=$machiya_room_sid";
-# Kura and Konbini list both hosts in KURA_AUTH_ACCEPT_ORIGINS / KANBAN_AUTH_ACCEPT_ORIGINS
+# /kura/ and /konbini/: forward the hosted session under THAT ROOM's own cookie name (vaultkit reads only its own
+# room cookie): "Cookie: __Host-machiya_sso_kura=$machiya_room_sid" on /kura/ and
+# "Cookie: __Host-machiya_sso_konbini=$machiya_room_sid" on /konbini/ (the dev stack: its own cookie prefix).
+# Kura and Konbini list both hosts in KURA_AUTH_ACCEPT_ORIGINS / KANBAN_AUTH_ACCEPT_ORIGINS, so either host's session
+# is accepted by both rooms.
 ```
 
 - **The trip:** a page's 401 goes to `…hister…/machiya/signin?return=<page>` as before. The helper sees no state for that host and sends the browser through `<host>/machiya/start`, which sets the state cookie on that host and comes back with it. Then a code goes to `<host>/machiya/callback`, and the room cookie is set there. The pages need no change for this.
