@@ -2,9 +2,10 @@
 `X-Access-Token` from CODE_IMPORT_HISTER_TOKEN_FILE (tokens.py: checked at start, re-read when it changes; while it is
 set a redirect from Hister is never followed).
 
-Three calls: GET /api/document (is this URL known, and whose is it?), POST /api/add (a code document, always with
-`html`: Hister's sensitive-content check reads only `html` for a web document), POST /api/delete (one exact
-`url:"…"`, only for a document whose metadata.source is `code`).
+Four calls: GET /api/document (is this URL known, and whose is it?), HEAD /api/document (the reconcile: is it still
+there? GET from then on if HEAD answers 405 or 501), POST /api/add (a code document, always with `html`: Hister's
+sensitive-content check reads only `html` for a web document), POST /api/delete (one exact `url:"…"`, only for a
+document whose metadata.source is `code`).
 """
 import json
 import urllib.error
@@ -46,12 +47,14 @@ class Hister:
         self.base, self.timeout = base.rstrip("/"), timeout
         self.token = token if token else None
         self.opener = urllib.request.build_opener(tokens.NoRedirect) if self.token else urllib.request.build_opener()
+        self.head_ok = True             # HEAD /api/document works (else GET, for good)
 
     def __repr__(self):                 # never the token
         return "Hister(%s%s)" % (self.base, ", token" if self.token else "")
 
-    def call(self, method, path, body=None):
-        """(status, parsed JSON or text). 4xx come back; 5xx and network errors raise HisterDown."""
+    def call(self, method, path, body=None, passthrough=()):
+        """(status, parsed JSON or text). 4xx come back; 5xx and network errors raise HisterDown, except the statuses
+        in `passthrough`, which come back too."""
         headers = {"Origin": "hister://", "Accept": "application/json"}
         data = None
         if body is not None:
@@ -68,7 +71,7 @@ class Hister:
         except urllib.error.HTTPError as e:
             if self.token is not None and 300 <= e.code < 400:
                 raise HisterDown("%s: a redirect (%d), not followed with the token" % (what, e.code))
-            if e.code >= 500:
+            if e.code >= 500 and e.code not in passthrough:
                 raise HisterDown("%s: HTTP %d" % (what, e.code))
             if e.code == 403:
                 raise HisterDown("%s: 403, no or an invalid token (CODE_IMPORT_HISTER_TOKEN_FILE)" % what)
@@ -88,6 +91,27 @@ class Hister:
         if status != 200 or not isinstance(doc, dict):
             raise HisterDown("Hister GET /api/document: HTTP %d" % status)
         return doc
+
+    def exists(self, url):
+        """The reconcile's question: does Hister still hold this exact URL? True (200) or False (404), by HEAD, or by
+        GET for good once HEAD answers 405 or 501. Anything else (401, 403, 429, 5xx, unreachable, a redirect) raises
+        HisterDown: Hister can't say, so nothing may be taken as missing."""
+        path = "/api/document?url=" + urllib.parse.quote(url, safe="")
+        if self.head_ok:
+            status, _ = self.call("HEAD", path, passthrough=(501,))
+            if status not in (405, 501):
+                return self._present("HEAD", status)
+            self.head_ok = False
+        status, _ = self.call("GET", path)
+        return self._present("GET", status)
+
+    @staticmethod
+    def _present(method, status):
+        if status == 200:
+            return True
+        if status == 404:
+            return False
+        raise HisterDown("Hister %s /api/document: HTTP %d" % (method, status))
 
     def add(self, doc):
         """201 added, 406 refused by a skip rule, 422 sensitive content; any other 4xx is a final refusal."""

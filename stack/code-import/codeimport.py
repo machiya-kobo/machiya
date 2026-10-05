@@ -13,6 +13,9 @@ Every CODE_IMPORT_INTERVAL seconds:
      Hister already holds as somebody else's page (the owner browsed it) is left alone; only documents whose
      metadata.source is `code` are ever replaced or deleted.
 A full run (the first, then every CODE_IMPORT_FULL_INTERVAL) re-reads everything and withdraws what disappeared.
+Each full run of a source (and its first run after a start, when its last check is over a day old) first reconciles:
+every document the state says Hister holds is asked for (HEAD /api/document), and the ones Hister lost (a "delete
+matching documents" on its Rules page, a reset) are forgotten and sent again in the same run.
 No code bodies (phase 2). Nothing is written to a forge: GET only.
 
   python3 codeimport.py               the service: a run every CODE_IMPORT_INTERVAL seconds, status in status.json
@@ -46,7 +49,7 @@ from forges import RETRY_DELAYS, ForgeError, Repo, iso          # noqa: E402
 from github import GitHub                                      # noqa: E402
 from store import Store                                        # noqa: E402
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 DOC_V = 1               # the documents' shape: part of every fingerprint, so a bump re-sends everything once
 FINAL = ("added", "known", "refused", "rejected", "skipped")
 DOC_EXTS = (".md", ".markdown", ".mdown", ".mkd")
@@ -56,6 +59,8 @@ DEFAULT_EXCLUDE = ""                    # none by default (0.1.4): a deployment 
 DEFAULT_DOC_SKIP = tuple(p for d in ("node_modules", "vendor", "third_party", "sample-vault", "tests", "test", "fixtures",
                                      "examples") for p in (d + "/*", "*/" + d + "/*"))
 HOSTS = {"forgejo": "Forgejo", "github": "GitHub"}
+RECONCILE_EVERY = 86400     # at a start, a source whose last complete reconcile is older than this is checked at once
+RECONCILE_LIMIT = 300       # seconds one source's check may take; past it, it stops (the next full run checks again)
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 WINDOW_RE = re.compile(r"^(%s)[a-z]*\s+([01]?\d|2[0-3]):([0-5]\d)\s*-\s*([01]?\d|2[0-3]):([0-5]\d)$" % "|".join(DAYS), re.I)
 
@@ -179,7 +184,7 @@ class Ctx:
 class Importer:
     def __init__(self, forges, store, hister=None, *, rules=None, dry_run=False, secrets="redact",
                  full_interval=21600, max_docs=200, max_doc_bytes=262144, max_text=100000, doc_skip=(), limit=None,
-                 only_repo=None, readme_only=(), out=print, clock=time.time):
+                 only_repo=None, readme_only=(), reconcile_limit=RECONCILE_LIMIT, out=print, clock=time.time):
         self.forges, self.store, self.hister, self.rules = forges, store, hister, rules or Rules()
         self.dry_run, self.secrets, self.full_interval = dry_run, secrets, full_interval
         self.max_docs, self.max_doc_bytes, self.max_text = max_docs, max_doc_bytes, max_text
@@ -189,6 +194,9 @@ class Importer:
         self.out, self.clock = out, clock
         self.stats, self.fresh, self.ctx, self.sources = {}, set(), {}, {}
         self.later, self.touched = None, set()
+        self.reconcile_limit = reconcile_limit
+        self.checked = set()            # the sources whose start-up reconcile is settled (in this process)
+        self.reconciled = {}            # this run's reconciles: source -> (checked, missing, complete)
 
     def log(self, msg):
         self.out("%s %s" % (time.strftime("%Y-%m-%dT%H:%M:%S"), msg))
@@ -479,7 +487,7 @@ class Importer:
         """One pass over every source (an owner on a forge), each on its own: a source that fails (after each call's
         retries) is recorded in self.sources and withdraws nothing, and the others go on. Raises HisterDown (Hister
         is every source's: the run stops; the state is written per document, so the next run resumes)."""
-        self.stats, self.fresh, self.ctx, self.sources = {}, set(), {}, {}
+        self.stats, self.fresh, self.ctx, self.sources, self.reconciled = {}, set(), {}, {}, {}
         now = self.clock()
         srcs = [(f, owner, "%s:%s" % (f.name, owner.lower())) for f in self.forges for owner in f.owner_names()]
         listing = {}
@@ -514,11 +522,13 @@ class Importer:
             except ForgeError as e:
                 held, self.later = len(self.later), None
                 self.fail(key, e, held)
+                self.log_reconcile(key, False)
                 continue
             later, self.later = self.later, None
             for fn in later:
                 fn()
             self.sources[key] = {"ok": True, "repos": n}
+            self.log_reconcile(key, True)
             if not self.dry_run:
                 self.store.meta("last_ok:" + key, int(now))
         if not self.dry_run:
@@ -533,6 +543,14 @@ class Importer:
     def source_pass(self, f, owner, key, repos, decisions, full, now):
         last_full = self.store.meta("last_full:" + key)
         full = full or last_full is None or now - float(last_full) >= self.full_interval
+        if not self.dry_run and self.hister is not None:
+            last = self.last_reconcile(key)
+            stale = last is None or now - last.get("at", 0) >= RECONCILE_EVERY
+            if full or (key not in self.checked and stale):
+                checked, missing, complete = self.reconciled[key] = self.reconcile(f, owner, key, now)
+                if missing and not full:            # an incremental run doesn't read them all: make it a full one
+                    full = True
+            self.checked.add(key)
         current = {r.id for r in repos}
         for row in self.stored(f.name, owner):
             if row["id"] not in current:
@@ -564,6 +582,51 @@ class Importer:
             self.defer(lambda: self.store.meta("last_full:" + key, int(now)))
         return len(included)
 
+    # -- the reconcile ---------------------------------------------------------------------------------------------------
+
+    def reconcile(self, f, owner, key, now):
+        """Does Hister still hold every document the state says this source added? A document it lost is skipped by
+        its fingerprint forever (unchanged), so a lost one is forgotten here and the same run sends it again.
+        Sequential HEADs (~1,000 documents is cheap). Hister failing (401, 403, 429, 5xx, unreachable) raises
+        HisterDown before anything is forgotten: the run stops and the next one (a full one again) checks again. Past
+        reconcile_limit seconds it stops: what it found missing so far is forgotten, but the check isn't recorded as
+        done. -> (checked, missing, complete)"""
+        rows = sorted((d for r in self.stored(f.name, owner) for d in self.store.docs(f.name, r["id"])
+                       if d["status"] == "added"), key=lambda d: d["url"])
+        started, checked, missing, complete = time.monotonic(), 0, [], True
+        for row in rows:
+            if time.monotonic() - started > self.reconcile_limit:
+                complete = False
+                break
+            if not self.hister.exists(row["url"]):
+                missing.append(row["url"])
+            checked += 1
+        for url in missing:
+            self.store.forget(url)
+        self.note(f.name, "reconcile: checked", checked)
+        if missing:
+            self.note(f.name, "reconcile: missing", len(missing))
+        if complete:
+            self.store.meta("reconcile:" + key, json.dumps({"checked": checked, "missing": len(missing), "at": int(now)}))
+        else:
+            self.log("source %s: reconcile stopped after %d s (%d of %d checked): the next full run checks again"
+                     % (key, self.reconcile_limit, checked, len(rows)))
+        return checked, len(missing), complete
+
+    def last_reconcile(self, key):
+        try:
+            return json.loads(self.store.meta("reconcile:" + key) or "null")
+        except ValueError:
+            return None
+
+    def log_reconcile(self, key, ok):
+        if key not in self.reconciled:
+            return
+        checked, missing, complete = self.reconciled[key]
+        what = "" if not missing else ", re-added" if ok else ", re-added on the source's next run"
+        self.log("source %s: reconcile: %d missing%s (%d checked%s)"
+                 % (key, missing, what, checked, "" if complete else ", stopped early"))
+
     def caps(self):
         """The repos over CODE_IMPORT_MAX_DOCS, as the last walk of each saw them (for the owner to decide)."""
         out = []
@@ -578,7 +641,8 @@ class Importer:
         out = {}
         for key, st in self.sources.items():
             out[key] = dict(st, last_success=int(self.store.meta("last_ok:" + key) or 0) or None,
-                            last_full=int(self.store.meta("last_full:" + key) or 0) or None)
+                            last_full=int(self.store.meta("last_full:" + key) or 0) or None,
+                            reconcile=self.last_reconcile(key))
         return out
 
 

@@ -4,7 +4,7 @@ Puts the owner's repos on **Forgejo** and **GitHub** into [Hister](../../docs/se
 
 It is stdlib Python with one sqlite file, it listens on nothing, and it only ever reads from the forges (GET). The service page is [docs/services/code-import.md](../../docs/services/code-import.md).
 
-**Status: phase 1 (0.1.2).** No code bodies yet: those are phase 2.
+**Status: phase 1 (0.1.5).** No code bodies yet: those are phase 2.
 
 ## What a run does
 
@@ -36,6 +36,14 @@ Runs happen every `CODE_IMPORT_INTERVAL` seconds (15 minutes by default).
    - an issue that is gone, on a full run.
 
 **A full run** happens first, then every `CODE_IMPORT_FULL_INTERVAL` (6 hours). It reads every repo and every issue list completely. Only a source that changed is rebuilt: a fingerprint of what each document was built from is kept, so an unchanged one costs no call and no write.
+
+**The reconcile** (0.1.5). Because of the fingerprints, a document that Hister lost would never be sent again. Hister can lose one through its Rules page's "delete matching documents" when a pattern matches the forge's URLs (a skip rule for the tailnet's hosts does), or through a reset.
+- So every full run of a source first asks Hister for every document the state says it added: `HEAD /api/document?url=…` with the token, sequentially. 200 means it is there and 404 means it is gone. If HEAD answers 405 or 501, it uses GET from then on.
+- The gone ones are forgotten and **sent again in the same run**.
+- After a start, a source's first run also checks when its last complete check is over a day old. If anything is missing, that run becomes a full one, so the missing documents are read again.
+- Any other answer (401, 403, 429, 5xx, unreachable) **stops the check and forgets nothing**. The run fails as it does when Hister is down, and the next run is a full one again.
+- A check that takes over 300 s stops. What it found by then is sent again, and the next full run checks again.
+- About 1,000 documents cost about 1,000 HEADs to a local Hister every 6 hours. No forge is called for it.
 
 **Retries.** Every forge call that fails transiently is tried again after 2, 8 and 30 s (`CODE_IMPORT_RETRY_DELAYS`). That covers a TLS, connect or read timeout, a reset connection, a 5xx, a 429 and a secondary rate limit. A `Retry-After` longer than the delay is honoured, up to 120 s; a longer one fails the call. 401, 403 and 404 are never tried again.
 
@@ -130,7 +138,7 @@ Also verified on that Hister:
 
 **`status.json`** holds:
 - `ok`, `running`, `last_success` (the last run where every source succeeded), `failures_in_a_row` and `error` (the failed sources and why);
-- `sources`: per source, `ok`, `error`, `repos`, `last_success` and `last_full`;
+- `sources`: per source, `ok`, `error`, `repos`, `last_success`, `last_full` and `reconcile` (the last complete check: `{"checked": 1012, "missing": 0, "at": 1791200000}`; the log says `source <source>: reconcile: N missing, re-added (M checked)`);
 - `caps`: every repo over `CODE_IMPORT_MAX_DOCS`, named (`{"repo": "github:you/foo", "docs": 3052, "max": 200}`), so the owner can decide;
 - `last_run`: the run's counts, and its calls and retries per forge;
 - `counts`: documents per host, kind and status.
@@ -158,7 +166,7 @@ podman build -f stack/code-import/Dockerfile -t code-import:dev .        # from 
 cd stack/code-import && python3 -m unittest discover -s tests
 ```
 
-The tests need no network. They run against the fake Forgejo and fake GitHub below, and a fake Hister. The fakes record every request, and a test fails if the importer sends a forge anything but GET.
+The tests need no network. They run against the fake Forgejo and fake GitHub below, and a fake Hister. The fake Hister can lose documents, refuse HEAD (405, 501) and answer 401, 429 or 503. The fakes record every request, and a test fails if the importer sends a forge anything but GET.
 
 The synthetic forges hold:
 - a fork, an archived repo, a mirror on each host, an excluded name, a private repo, an empty repo, and twins on both hosts;
@@ -180,7 +188,7 @@ The command-line tests run `codeimport.py` as the image does and check its exit 
 | `forgejo.py`, `github.py` | the two forges |
 | `secretscan.py` | the secret scan and the secret-name rule |
 | `render.py` | a document's HTML (escaped; headings, code blocks, paragraphs) |
-| `hister.py` | the three Hister calls and Hister's URL normalisation |
+| `hister.py` | the Hister calls (look up, the reconcile's HEAD, add, delete) and Hister's URL normalisation |
 | `tokens.py` | token files |
 | `store.py` | the state |
 | `dev/` | the fake forges and their seeds (tests and the dev stack; not in the image) |

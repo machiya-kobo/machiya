@@ -3,8 +3,9 @@
   a fork, an archived repo, a mirror on each host, an excluded name, a private repo, an empty repo, twins on both hosts, a README with an
   invented token, a file named like a secret, hidden, vendored, test, example and sample-vault markdown, issues, PRs (one merged), releases (one a
   draft, one a prerelease). They record every request: the importer may only GET.
-- Hister (/api/document, /api/add, /api/delete), which refuses calls without `Origin: hister://`, answers 422 when
-  the html matches Hister's default sensitive patterns, and records everything.
+- Hister (/api/document by GET and HEAD, /api/add, /api/delete), which refuses calls without `Origin: hister://`,
+  answers 422 when the html matches Hister's default sensitive patterns, can lose documents (a "delete matching
+  documents" on its Rules page), answer HEAD with 405/501 or /api/document with 401/429/503, and records everything.
 
 Run, from stack/code-import: python3 -m unittest discover -s tests
 """
@@ -70,6 +71,8 @@ class H:
     calls = []           # (method, path, body, headers)
     down = False
     reject = ()          # URL substrings answered 400 (a final refusal)
+    head = None          # a status every HEAD gets (405, 501: HEAD not allowed)
+    doc_status = None    # a status every /api/document call gets (401, 429, 503: Hister can't say)
 
 
 class HisterFake(BaseHTTPRequestHandler):
@@ -82,7 +85,8 @@ class HisterFake(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        if self.command != "HEAD":
+            self.wfile.write(data)
 
     def handle_any(self, method):
         u = urlsplit(self.path)
@@ -96,6 +100,10 @@ class HisterFake(BaseHTTPRequestHandler):
             return self.send(403)
         if self.headers.get("X-Access-Token") != HISTER_TOKEN:
             return self.send(403)
+        if method == "HEAD" and H.head:
+            return self.send(H.head)
+        if u.path == "/api/document" and H.doc_status:
+            return self.send(H.doc_status)
         if u.path == "/api/document":
             doc = H.docs.get(parse_qs(u.query)["url"][0])
             return self.send(200, doc) if doc else self.send(404)
@@ -117,6 +125,9 @@ class HisterFake(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self.handle_any("POST")
+
+    def do_HEAD(self):
+        self.handle_any("HEAD")
 
 
 def serve(handler):
@@ -140,7 +151,7 @@ def deletes():
 
 class Base(unittest.TestCase):
     def setUp(self):
-        H.docs, H.calls, H.down, H.reject = {}, [], False, ()
+        H.docs, H.calls, H.down, H.reject, H.head, H.doc_status = {}, [], False, (), None, None
         self.fj = FakeForgejo(copy.deepcopy(FJ_SEED), FJ_TOKEN, FJ_ROOT)
         self.gh = FakeGitHub(copy.deepcopy(GH_SEED), {GH_LANTERN: "lantern", GH_WORKSHOP: "workshop-kobo"}, GH_WEB)
         self.fj_srv, self.fj_api = self.fj.serve()
@@ -630,6 +641,128 @@ class Failures(Base):
         self.assertEqual(deletes(), [])
 
 
+class Reconcile(Base):
+    """Hister lost documents code-import added (the Rules page's "delete matching documents" with a pattern that
+    matches the forge's URLs, as Kura lost 237 notes on 2026-10-02): unchanged, they'd never be sent again."""
+    LOST = {fj_url("/lantern/garden-notes/src/branch/main/README.md"), fj_url("/lantern/garden-notes/pulls/2"),
+            fj_url("/lantern/dotfiles"), gh_url("/workshop-kobo/lamp/releases/tag/v0.1.0")}
+
+    def lose(self):
+        for url in self.LOST:
+            del H.docs[url]
+        H.calls = []
+
+    def heads(self):
+        return [c for c in H.calls if c[0] == "HEAD"]
+
+    def test_a_full_run_re_adds_what_hister_lost(self):
+        self.importer().run()
+        self.lose()
+        self.now += 900                                                           # incremental: no check, no re-add
+        self.importer(full_interval=21600).run()
+        self.assertEqual((adds(), self.heads()), ([], []))
+        self.now += 21600                                                         # full: checked, re-added
+        imp = self.importer()
+        stats = imp.run()
+        self.assertEqual({d["url"] for d in adds()}, self.LOST)
+        self.assertEqual(len(self.heads()), len(EXPECTED))                        # every added document, by HEAD
+        self.assertEqual(stats["forgejo"]["reconcile: missing"] + stats["github"]["reconcile: missing"], len(self.LOST))
+        self.assertEqual(stats["forgejo"]["reconcile: checked"] + stats["github"]["reconcile: checked"], len(EXPECTED))
+        for url in self.LOST:
+            self.assertIn(url, H.docs)
+            self.assertEqual(self.store.doc(url)["status"], "added")
+            self.assertIsNotNone(self.store.doc(url)["src"])
+        st = imp.source_status()
+        self.assertEqual((st["forgejo:lantern"]["reconcile"]["missing"], st["forgejo:lantern"]["reconcile"]["at"]),
+                         (3, self.now))
+        self.assertEqual(st["github:workshop-kobo"]["reconcile"]["missing"], 1)
+        log = "\n".join(self.lines)
+        self.assertIn("source forgejo:lantern: reconcile: 3 missing, re-added (", log)
+        self.assertIn("source github:lantern: reconcile: 0 missing (", log)
+        H.calls = []
+        self.now += 21600                                                         # settled
+        self.importer().run()
+        self.assertEqual(adds(), [])
+
+    def test_at_start_when_the_last_check_is_over_a_day_old(self):
+        imp = self.importer(full_interval=10 * 86400)
+        imp.run()
+        self.lose()
+        self.now += 3600
+        self.importer(full_interval=10 * 86400).run()                            # a restart, checked an hour ago: no
+        self.assertEqual((adds(), self.heads()), ([], []))
+        self.now += 86400
+        imp.run()                                                                 # the same process: not at start
+        self.assertEqual((adds(), self.heads()), ([], []))
+        imp = self.importer(full_interval=10 * 86400)                             # a restart, a day later: checked,
+        imp.run()                                                                 # and the run turns full to re-add
+        self.assertEqual({d["url"] for d in adds()}, self.LOST)
+        self.assertEqual(len(self.heads()), len(EXPECTED))
+        H.calls = []
+        self.now += 900
+        imp.run()                                                                 # once per start
+        self.assertEqual((adds(), self.heads()), ([], []))
+
+    def test_head_not_allowed_falls_back_to_get_for_good(self):
+        for status in (405, 501):
+            with self.subTest(status=status):
+                H.docs, H.head = {}, None
+                self.store.db.execute("DELETE FROM docs")
+                self.store.db.execute("DELETE FROM meta")
+                self.importer().run()
+                self.lose()
+                H.head = status
+                self.now += 21600
+                self.importer().run()
+                self.assertEqual({d["url"] for d in adds()}, self.LOST)
+                self.assertEqual(len(self.heads()), 1)                            # asked once, then GET
+                self.store.db.execute("DELETE FROM http")
+
+    def test_hister_failing_stops_the_check_and_forgets_nothing(self):
+        self.importer().run()
+        self.lose()
+        before = {r["url"]: r["src"] for r in self.store.db.execute("SELECT url, src FROM docs")}
+        marks = dict(self.store.meta_prefix("reconcile:"))
+        for status in (401, 429, 503):
+            with self.subTest(status=status):
+                H.calls, H.doc_status = [], status
+                self.now += 21600
+                with self.assertRaises(histermod.HisterDown) as e:
+                    self.importer().run()
+                self.assertIn("HTTP %d" % status, str(e.exception))
+                self.assertEqual({r["url"]: r["src"] for r in self.store.db.execute("SELECT url, src FROM docs")},
+                                 before)
+                self.assertEqual(dict(self.store.meta_prefix("reconcile:")), marks)
+                self.assertEqual(adds(), [])
+                self.assertEqual(len([c for c in H.calls if c[1] == "/api/document"]), 1)    # stopped at the first
+        H.calls, H.doc_status = [], None
+        self.importer().run()                                                     # Hister answers again: re-added
+        self.assertEqual({d["url"] for d in adds()}, self.LOST)
+
+    def test_hister_unreachable_raises(self):
+        srv, url = serve(HisterFake)
+        srv.shutdown()
+        srv.server_close()
+        with self.assertRaises(histermod.HisterDown):
+            histermod.Hister(url, HISTER_TOKEN).exists(fj_url("/lantern/dotfiles"))
+
+    def test_the_time_cap_stops_the_check(self):
+        self.importer().run()
+        self.lose()
+        marks = dict(self.store.meta_prefix("reconcile:"))
+        self.now += 21600
+        imp = self.importer(reconcile_limit=-1)
+        imp.run()
+        self.assertEqual((adds(), self.heads()), ([], []))
+        now = dict(self.store.meta_prefix("reconcile:"))
+        del now["reconcile:forgejo:workshop"], marks["reconcile:forgejo:workshop"]   # it has nothing to check (twins)
+        self.assertEqual(now, marks)                                              # not recorded as done
+        self.assertIn("source forgejo:lantern: reconcile stopped after -1 s (0 of 12 checked)", "\n".join(self.lines))
+        self.now += 21600
+        self.importer().run()                                                     # the next full run checks again
+        self.assertEqual({d["url"] for d in adds()}, self.LOST)
+
+
 LAMP_ALL = {u for u in EXPECTED if "/workshop-kobo/lamp" in u}
 LAMP_KEPT = {gh_url("/workshop-kobo/lamp"), gh_url("/workshop-kobo/lamp/blob/main/README.md")}
 
@@ -839,6 +972,23 @@ class CommandLine(Base):
         self.assertIsNone(status["error"])
         self.assertEqual(status["version"], codeimport.VERSION)
         self.assertEqual(status["counts"]["github"]["pr"], {"added": 1})
+        for key, src in status["sources"].items():                               # the first run's check: nothing yet
+            self.assertEqual({k: src["reconcile"][k] for k in ("checked", "missing")}, {"checked": 0, "missing": 0}, key)
+        lost = [u for u in H.docs if u.startswith(FJ_ROOT)]
+        for url in lost:                                                         # "delete matching documents"
+            del H.docs[url]
+        H.calls = []
+        p = self.run_cli(["--once", "--full"], self.env())
+        self.assertEqual(p.returncode, 0, p.stderr + p.stdout)
+        self.assertEqual({d["url"] for d in adds()}, set(lost))
+        status = load(os.path.join(self.tmp, "data", "status.json"))
+        rec = status["sources"]["forgejo:lantern"]["reconcile"]
+        self.assertEqual(rec["missing"], len(lost))
+        self.assertEqual(rec["checked"], len([u for u in EXPECTED if u.startswith(FJ_ROOT)]))
+        self.assertGreater(rec["at"], 0)
+        self.assertEqual(status["sources"]["github:lantern"]["reconcile"]["missing"], 0)
+        self.assertIn("source forgejo:lantern: reconcile: %d missing, re-added (%d checked)" % (len(lost), rec["checked"]),
+                      p.stdout)
         for token in (FJ_TOKEN, GH_LANTERN, GH_WORKSHOP, HISTER_TOKEN):
             self.assertNotIn(token, p.stdout + p.stderr)
         self.assertNotIn("Moss", p.stdout + p.stderr)                             # logs carry counts, not text

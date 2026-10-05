@@ -11,7 +11,8 @@ docs:   every document URL, per repo and key (repo, doc:<path>, issue:<n>, relea
                     overwritten or deleted
         - refused   our secret scan refused it (CODE_IMPORT_SECRETS=refuse), or a file named like a secret
         - rejected  Hister refused it (422 sensitive content, another 4xx); tried again when its source changes
-meta:   cursors (issues per scope, the last full run).
+meta:   cursors (issues per scope, the last full run), and per source the last complete reconcile
+        (`reconcile:<source>`: {checked, missing, at}).
 http:   ETag and body per URL for conditional GETs (GitHub's 304s are free); pruned after a week unused.
 """
 import os
@@ -73,6 +74,11 @@ class Store:
             self.db.execute("INSERT INTO docs (url) VALUES (?)", (url,))
         kw["updated"] = int(time.time())
         self.db.execute("UPDATE docs SET %s WHERE url=?" % ", ".join("%s=?" % k for k in kw), list(kw.values()) + [url])
+
+    def forget(self, url):
+        """Forget what a document was built from (the reconcile found it gone from Hister): the next put() of it
+        rebuilds and sends it again."""
+        self.db.execute("UPDATE docs SET src=NULL WHERE url=?", (url,))
 
     def drop_doc(self, url):
         self.db.execute("DELETE FROM docs WHERE url=?", (url,))

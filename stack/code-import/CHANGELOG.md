@@ -1,5 +1,15 @@
 # Changelog: code-import
 
+## 0.1.5
+
+- **A reconcile puts back what Hister lost.** Hister's Rules page offers "delete matching documents", and a skip pattern that refuses the tailnet's hosts still matches a tailnet Forgejo's URLs, so one click could wipe code-import's documents. An unchanged document is skipped by its fingerprint, so they would never come back (Kura lost 237 notes this way on 2026-10-02; its 0.9.1 reconcile restored them). Now:
+  - On every **full run** of a source, before anything else, every document the state says it added is asked for (`HEAD /api/document?url=…` with the token: 200 there, 404 gone; a HEAD answered 405 or 501 switches to GET for good). The gone ones are forgotten and sent again in the same run.
+  - **At a start**, a source whose last complete check is over a day old is checked on its first run. If something is missing, that run becomes a full one, so the missing documents are read and sent again.
+  - Any other answer (401, 403, 429, 5xx, unreachable) stops the check with nothing forgotten, and the run fails as it does when Hister is down. The next run is a full one again and checks again.
+  - A check stops after 300 s. What it found missing by then is sent again, but the check isn't recorded as done, so the next full run checks again.
+  - `status.json`: `sources.<source>.reconcile` is `{checked, missing, at}` for the last complete check. The log says `source <source>: reconcile: N missing, re-added (M checked)`, and the run's counts include `reconcile: checked` and `reconcile: missing`.
+- The fake Hister in the tests answers HEAD. It can lose documents, refuse HEAD (405, 501) and answer `/api/document` with 401, 429 or 503.
+
 ## 0.1.4
 
 - **`CODE_IMPORT_EXCLUDE` is empty by default.** It named three repos (`obsidian`, `pass-store`, `backup`), which were one deployment's choices, not the product's. A deployment that relied on the default must now set it: to keep the old behaviour, `CODE_IMPORT_EXCLUDE=obsidian,pass-store,backup`. Without it those repos, if they exist, are imported on the next run. The setting itself is unchanged (`name` or `owner/name`, any case).
