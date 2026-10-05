@@ -37,9 +37,10 @@
 //     there, with return= this page (API calls are never redirected by the server, so the page has to go itself); and
 //     every Rooms menu gains a "Sign Out" row, a form posting to that path (so 7. applies to it too).
 //  9. pull to refresh (2026-10-05), only in an installed app (display-mode: standalone, or iOS's navigator.standalone),
-//     which has no reload button: at the top of the page, a drag down shows a reload mark under the header, and
-//     letting go past PULL.threshold reloads. Not while a menu, sheet or dialog is open, from inside a scrolling pane, a
-//     field or the tab bar, with text selected, with a second finger, or on a sideways swipe; a gesture another script
+//     which has no reload button: at the top of the page, a drag down brings the content down after the finger, with a
+//     reload mark in the gap under the header; letting go past PULL.threshold holds it open, spinning, and reloads, and
+//     short of that it springs back (the second pass, 2026-10-05: at first only the mark moved). Not while a menu,
+//     sheet or dialog is open, from inside a scrolling pane, a field or the tab bar, with text selected, with a second finger, or on a sideways swipe; a gesture another script
 //     takes over (preventDefault on touchmove, e.g. Konbini's card drag) or [data-no-pull] opts out. Browser tabs keep
 //     their own pull to refresh.
 // Apps can listen for `machiya:setting` events ({detail: {key, value}}) to react to their own settings.
@@ -681,14 +682,26 @@ if ("serviceWorker" in navigator) {
 //   idle --start(ok)--> armed --move past the slop, mostly downward--> pulling --end with d >= threshold--> reload
 //   armed --sideways or upward--> off (until the finger lifts); any move that is no longer ok (scrolled, a menu opened,
 //   a second finger, text selected, another script took the gesture) --> off; end or cancel otherwise --> idle.
-// d is the distance the mark has travelled: the finger's, past the slop, times resist, at most max.
-const PULL = { slop: 10, resist: 0.6, threshold: 70, max: 100 };
+// d is how far the page's content has come down: the finger's travel past the slop, times resist up to the threshold,
+// then stiffer and stiffer (pullDamp), never past max. The installed app doesn't rubber-band (machiya.css), so
+// machiya.js moves the content itself: everything in the page's flow under the header (body's children that aren't the
+// header, the tab bar, a toast, a dialog, a popover or fixed) gets .pull-move, translateY(--pull-y). The header and the
+// tab bar stay put, like an iOS app's bars; the reload mark sits in the gap that opens under the header, growing and
+// turning with the pull, house blue once letting go reloads. Let go short of that and the content springs back
+// (PULL.settle ms); let go past it and the content rests PULL.hold px down with the mark spinning, then the page reloads.
+const PULL = { slop: 10, resist: 0.6, threshold: 70, max: 130, hold: 56, settle: 200 };
 const PULL_IDLE = Object.freeze({ phase: "idle", d: 0 });
+function pullDamp(travel) {
+  const d = Math.max(0, travel) * PULL.resist;
+  if (d <= PULL.threshold) return d;
+  const over = d - PULL.threshold, room = PULL.max - PULL.threshold;
+  return PULL.threshold + room * over / (over + room);                  // past ready: harder to pull, never past max
+}
 function pullStep(s, e) {
   if (s.phase === "reload") return s;                                   // until the page goes (or comes back: pageshow)
   if (e.type === "start") return e.ok ? { phase: "armed", x: e.x, y: e.y, d: 0 } : PULL_IDLE;
   if (e.type === "cancel") return PULL_IDLE;
-  if (e.type === "end") return s.phase === "pulling" && s.d >= PULL.threshold ? { phase: "reload", d: s.d } : PULL_IDLE;
+  if (e.type === "end") return s.phase === "pulling" && s.d >= PULL.threshold ? { phase: "reload", d: PULL.hold } : PULL_IDLE;
   if (s.phase !== "armed" && s.phase !== "pulling") return s;          // idle, off: wait for the next touch
   if (!e.ok) return { phase: "off", d: 0 };
   const dx = e.x - s.x, dy = e.y - s.y;
@@ -696,13 +709,16 @@ function pullStep(s, e) {
     if (Math.abs(dx) < PULL.slop && Math.abs(dy) < PULL.slop) return s;
     if (dy < PULL.slop || dy < 1.5 * Math.abs(dx)) return { phase: "off", d: 0 };   // up, or a sideways swipe
   }
-  return { phase: "pulling", x: s.x, y: s.y, d: Math.min(PULL.max, Math.max(0, (dy - PULL.slop) * PULL.resist)) };
+  return { phase: "pulling", x: s.x, y: s.y, d: Math.min(PULL.max, pullDamp(dy - PULL.slop)) };
 }
 (() => {
   const mq = window.matchMedia ? window.matchMedia("(display-mode: standalone)") : null;
   if (!((mq && mq.matches) || navigator.standalone === true)) return;   // a browser tab: its own pull to refresh
-  document.documentElement.classList.add("pull-refresh");             // machiya.css: no rubber band to compete with it
-  let s = PULL_IDLE, mark = null, top = 0;
+  const html = document.documentElement;
+  html.classList.add("pull-refresh");                                   // machiya.css: no rubber band to compete with it
+  const still = () => { try { return !!window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; } };
+  const later = (fn) => (window.requestAnimationFrame ? requestAnimationFrame(fn) : setTimeout(fn, 16));
+  let s = PULL_IDLE, mark = null, top = 0, moved = [], frame = 0, settling = 0;
   const scrolled = () => (window.scrollY || (document.scrollingElement || {}).scrollTop || 0) > 0;
   const selecting = () => { try { return String(window.getSelection ? getSelection() : "") !== ""; } catch { return false; } };
   const busy = () => openMenus().length > 0 || selecting();
@@ -714,30 +730,56 @@ function pullStep(s, e) {
   };
   const skip = (el) => !el || !el.closest
     || !!el.closest("input, textarea, select, [contenteditable], .tabbar, .update-toast, [data-no-pull]") || pane(el);
-  const draw = () => {
-    if (!mark) {
-      if (s.d === 0 && s.phase !== "reload") return;
-      mark = document.createElement("div");
-      mark.className = "pull";
-      mark.setAttribute("aria-hidden", "true");
-      mark.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"'
-        + ' stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>';
-      document.body.append(mark);
-    }
-    const loading = s.phase === "reload";
-    mark.style.top = top + "px";
-    mark.style.setProperty("--pull", (loading ? PULL.threshold : s.d) + "px");
-    mark.style.setProperty("--turn", Math.round((loading ? PULL.threshold : s.d) / PULL.threshold * 270) + "deg");
-    mark.style.opacity = String(Math.min(1, (loading ? PULL.threshold : s.d) / (PULL.threshold * 0.6)));
-    mark.classList.toggle("ready", loading || s.d >= PULL.threshold);
-    mark.classList.toggle("loading", loading);
-    mark.classList.toggle("held", s.phase === "pulling");          // follows the finger; otherwise it settles back
+  const STAYS = "header.top, .tabbar, .update-toast, .pull, dialog, [popover], script, style, template, link, noscript";
+  const movers = () => [...document.body.children].filter((el) => !el.matches(STAYS)
+    && !/^(fixed|absolute)$/.test(getComputedStyle(el).position || ""));
+  const ensureMark = () => {
+    if (mark) return;
+    mark = document.createElement("div");
+    mark.className = "pull";
+    mark.setAttribute("aria-hidden", "true");
+    mark.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"'
+      + ' stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>';
+    document.body.append(mark);
   };
+  // the page's look for this state: the content's offset, the mark's size, turn and colour; settle = animate there
+  const draw = () => {
+    frame = 0;
+    const loading = s.phase === "reload", d = loading ? PULL.hold : s.d;
+    if (d > 0 && !moved.length) { moved = movers(); for (const el of moved) el.classList.add("pull-move"); }
+    if (!mark && d === 0) return;
+    ensureMark();
+    const settle = loading || s.phase !== "pulling";                   // let go: the content eases to rest
+    html.classList.toggle("pull-settle", settle);
+    html.style.setProperty("--pull-y", Math.round(d) + "px");
+    const k = loading ? 1 : Math.min(1, d / PULL.threshold);
+    mark.style.top = top + "px";
+    mark.style.setProperty("--grow", (0.5 + 0.5 * k).toFixed(2));
+    mark.style.setProperty("--turn", Math.round(k * 270) + "deg");     // three quarters round at ready; the spin goes on from there
+    mark.style.opacity = String(loading ? 1 : Math.round(Math.min(1, d / (PULL.threshold * 0.6)) * 100) / 100);
+    mark.classList.toggle("ready", loading || d >= PULL.threshold);
+    mark.classList.toggle("loading", loading);
+    clearTimeout(settling);
+    if (settle && !loading && d === 0) settling = setTimeout(rest, still() ? 0 : PULL.settle + 20);
+  };
+  const rest = () => {                                  // back at the top: no transform left on the page
+    settling = 0;
+    for (const el of moved) el.classList.remove("pull-move");
+    moved = [];
+    html.classList.remove("pull-settle");
+  };
+  const schedule = () => { if (!frame) frame = later(draw) || 1; };
   const step = (e) => {
     const was = s;
     s = pullStep(s, e);
-    if (s.phase === "reload" && was.phase !== "reload") { draw(); location.reload(); return; }
-    if (s !== was && (s.d !== was.d || s.phase !== was.phase)) draw();
+    if (s.phase === "reload" && was.phase !== "reload") {
+      draw();                                           // at once: the content goes to rest at PULL.hold, the mark spins
+      setTimeout(() => location.reload(), still() ? 50 : PULL.settle);
+      return;
+    }
+    if (s.d !== was.d) {
+      if (s.phase === "pulling") schedule(); else draw();   // follow the finger once a frame; a release shows at once
+    }
   };
   window.addEventListener("touchstart", (ev) => {
     const t = ev.touches[0];
@@ -756,5 +798,11 @@ function pullStep(s, e) {
   }, { passive: true });
   window.addEventListener("touchend", () => step({ type: "end" }), { passive: true });
   window.addEventListener("touchcancel", () => step({ type: "cancel" }), { passive: true });
-  window.addEventListener("pageshow", (ev) => { if (ev.persisted) { s = PULL_IDLE; draw(); } });
+  window.addEventListener("pageshow", (ev) => {        // back from the cache mid-reload: the page as it was, at once
+    if (!ev.persisted) return;
+    s = PULL_IDLE;
+    draw();
+    clearTimeout(settling);
+    rest();
+  });
 })();

@@ -1005,25 +1005,71 @@ class MenusAndPullTest(unittest.TestCase):
         self.assertEqual(m["escape"], [False, False])
         self.assertFalse(m["outside"])
 
-    def test_pull_reloads_once(self):
+    MOVED = "main footer.foot"   # the page's flow; the header, the fixed toast, the dialog, the popover, the tab bar stay
+
+    def mark(self, **kw):
+        return dict({"top": "112px", "grow": "1.00", "turn": "270deg", "opacity": "1", "ready": True, "loading": False}, **kw)
+
+    def test_the_content_follows_the_finger(self):
+        """The owner's report (2026-10-05, iPhone): the pull reloaded but nothing moved. Now the content comes down after
+        the finger (the header and the tab bar stay), with the mark in the gap under the header."""
         p = self.pull
         self.assertTrue(p["htmlClass"])              # machiya.css: no rubber band in the installed app
-        self.assertEqual(p["held"], {"exists": True, "ready": True, "held": True, "top": "112px", "pull": "100px",
-                                     "opacity": "1"})  # under the header, capped at PULL.max
-        self.assertEqual((p["reloads"], p["loading"]), (1, True))
+        self.assertEqual(p["atRest"], {"y": "", "settle": False, "moved": "", "mark": None})
+        self.assertEqual(p["quarter"], {"y": "18px", "settle": False, "moved": self.MOVED, "mark": self.mark(
+            grow="0.63", turn="69deg", opacity="0.43", ready=False)})
+        self.assertEqual(p["sixty"], {"y": "42px", "settle": False, "moved": self.MOVED, "mark": self.mark(
+            grow="0.80", turn="162deg", ready=False)})
+        self.assertEqual(p["held"], {"y": "95px", "settle": False, "moved": self.MOVED, "mark": self.mark()})
+        # once a frame: twenty moves before a frame draw nothing, then one frame draws the last
+        self.assertEqual((p["beforeFrame"], p["framesQueued"]), ("", 1))
+
+    def test_the_travel(self):
+        t = self.pull["track"]
+        self.assertEqual(t, sorted(t))               # never goes back while the finger goes on down
+        self.assertEqual(t[2:13], [6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66])   # 0.6 of the finger up to ready
+        steps = [b - a for a, b in zip(t[13:], t[14:])]
+        self.assertLess(max(steps), 6)               # past ready, stiffer
+        self.assertLess(t[-1], 130)                  # and never past PULL.max (an asymptote)
+
+    def test_pull_reloads_once(self):
+        p = self.pull
+        # let go past ready: at once the content eases to rest 56 px down, the mark spinning; the reload after 200 ms
+        self.assertEqual(p["released"], {"y": "56px", "settle": True, "moved": self.MOVED, "mark": self.mark(loading=True)})
+        self.assertEqual((p["reloadsAt0"], p["reloadsAt199"], p["reloads"]), (0, 0, 1))
         self.assertEqual(p["reloadsAfter"], 1)       # a second touchend or pull while it reloads: nothing
-        self.assertEqual(p["afterRestore"], {"loading": False, "opacity": "0"})
-        self.assertEqual(p["reloadsRestored"], 2)    # back from the cache, a pull works again
-        self.assertEqual(p["short"], {"ready": False, "reloads": 0, "settled": {"held": False, "opacity": "0"}})
+        self.assertEqual(p["whileReloading"], p["released"])
+        # back from the cache: the page as it was, and a pull works again
+        self.assertEqual(p["afterRestore"], {"y": "0px", "settle": False, "moved": "", "mark": self.mark(
+            grow="0.50", turn="0deg", opacity="0", ready=False)})
+        self.assertEqual(p["reloadsRestored"], 2)
         self.assertEqual(p["justPast"], 1)
         self.assertEqual((p["flatPane"], p["iosStandalone"]), (1, 1))
         self.assertTrue(p["passive"])
 
+    def test_short_of_ready_it_springs_back(self):
+        s = self.pull["short"]
+        self.assertFalse(s["ready"])
+        rest = self.mark(grow="0.50", turn="0deg", opacity="0", ready=False)
+        self.assertEqual(s["released"], {"y": "0px", "settle": True, "moved": self.MOVED, "mark": rest})   # easing back
+        self.assertEqual(s["springing"], self.MOVED)                                                    # for 200 ms
+        self.assertEqual(s["settled"], {"y": "0px", "settle": False, "moved": "", "mark": rest})        # no transform left
+        self.assertEqual(s["reloads"], 0)
+        # another script takes the gesture mid-pull (Konbini's card drag): it springs back too
+        t = self.pull["takenMidPull"]
+        self.assertEqual((t["y"], t["settle"], t["reloads"], t["after"]), ("0px", True, 0, ""))
+
+    def test_reduced_motion_snaps(self):
+        self.assertEqual(self.pull["still"], {"restedAt0": True, "reloadsAt49": 0, "reloads": 1})
+
     def test_no_pull_where_it_would_surprise(self):
+        midway = {"menuOpensMidPull", "scrollsMidPull"}       # these began as pulls, and sprang back
         for case in ("scrolled", "menuOpen", "sheetOpen", "popoverOpen", "menuOpensMidPull", "innerPane", "field",
                      "tabbar", "optOut", "selection", "twoFingers", "takenOver", "sideways", "upFirst",
                      "scrollsMidPull", "browserTab"):
-            self.assertEqual(self.pull[case], {"reloads": 0, "mark": False}, case)
+            r = self.pull[case]
+            self.assertEqual((r["reloads"], r["rest"]), (0, True), case)
+            self.assertEqual(r["peak"] > 0, case in midway, case)
 
     def test_browser_tabs_keep_their_own(self):
         self.assertEqual((self.pull["browserListeners"], self.pull["browserClass"]), (0, False))

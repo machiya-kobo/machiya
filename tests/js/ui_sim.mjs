@@ -50,7 +50,8 @@ class El {
   constructor(doc, tag, attrs = {}, kids = []) {
     this.doc = doc; this.tagName = tag.toUpperCase(); this.attrs = new Map(); this.classes = new Set();
     this.children = []; this.parentElement = null; this.listeners = {}; this.dataset = {}; this.events = [];
-    this.scrollHeight = 0; this.clientHeight = 0; this.overflowY = "visible"; this.popoverOpen = false; this.rect = {};
+    this.scrollHeight = 0; this.clientHeight = 0; this.overflowY = "visible"; this.position = "static";
+    this.popoverOpen = false; this.rect = {};
     this.style = { setProperty(k, v) { this[k] = v; } };
     for (const [k, v] of Object.entries(attrs)) this.setAttribute(k, v);
     for (const k of kids) this.append(k);
@@ -89,7 +90,9 @@ class El {
 }
 
 // one page load. build(h) makes the body's children with h(tag, attrs, ...kids); opts: standalone ("media" | "ios" |
-// false), popovers (the browser knows :popover-open), scrollY, selection
+// false), popovers (the browser knows :popover-open), scrollY, selection, still (prefers-reduced-motion). Time is
+// fake: requestAnimationFrame callbacks wait for page.frame() (pull() runs one after each move unless frames: false),
+// setTimeout ones for page.wait(ms).
 async function load(build, opts = {}) {
   const doc = { popovers: opts.popovers !== false };
   const h = (tag, attrs, ...kids) => new El(doc, tag, attrs || {}, kids);
@@ -99,7 +102,8 @@ async function load(build, opts = {}) {
   const reg = (name, el) => { named[name] = el; return el; };
   body.append(...build(h, reg));
   const docListeners = {}, winListeners = {}, winOptions = {};
-  const state = { reloads: 0, scrollY: opts.scrollY || 0, selection: opts.selection || "" };
+  const state = { reloads: 0, scrollY: opts.scrollY || 0, selection: opts.selection || "", now: 0, timers: [], frames: [],
+                  frameNo: 0, timerNo: 0 };
   const all = () => [...root.walk()];
   Object.assign(doc, {
     body, documentElement: root, cookie: "", visibilityState: "visible", scrollingElement: { scrollTop: 0 },
@@ -114,9 +118,14 @@ async function load(build, opts = {}) {
   globalThis.addEventListener = (t, fn, o) => { (winListeners[t] ||= []).push(fn); (winOptions[t] ||= []).push(o); };
   Object.defineProperty(globalThis, "scrollY", { configurable: true, get: () => state.scrollY });
   globalThis.navigator = opts.standalone === "ios" ? { standalone: true } : {};
-  globalThis.matchMedia = (q) => ({ matches: opts.standalone === "media" && q === "(display-mode: standalone)" });
+  globalThis.matchMedia = (q) => ({ matches: (opts.standalone === "media" && q === "(display-mode: standalone)")
+                                             || (!!opts.still && q === "(prefers-reduced-motion: reduce)") });
+  globalThis.requestAnimationFrame = (fn) => { state.frames.push(fn); return ++state.frameNo; };
+  globalThis.setTimeout = (fn, ms = 0) => { const id = ++state.timerNo; state.timers.push({ id, fn, at: state.now + ms }); return id; };
+  globalThis.clearTimeout = (id) => { state.timers = state.timers.filter((t) => t.id !== id); };
   globalThis.getSelection = () => ({ toString: () => state.selection });
-  globalThis.getComputedStyle = (el) => ({ overflowY: (el && el.overflowY) || "visible", getPropertyValue: () => "" });
+  globalThis.getComputedStyle = (el) => ({ overflowY: (el && el.overflowY) || "visible", position: (el && el.position) || "static",
+                                           getPropertyValue: () => "" });
   globalThis.location = { href: "https://kura.example.test/", origin: "https://kura.example.test", pathname: "/",
                           reload() { state.reloads++; } };
   globalThis.localStorage = { getItem: () => null, setItem() {} };
@@ -139,14 +148,40 @@ async function load(build, opts = {}) {
       if (!form) throw new Error("submit: no such form"); return fire(docListeners.submit, event({ target: form, defaultPrevented: prevented })); },
     key(key) { return fire(docListeners.keydown, event({ key, target: body })); },
     win(type, extra = {}) { return fire(winListeners[type], event(extra)); },
-    // a touch gesture: start at pts[0] on target, then each point as a move; end unless keep
-    pull(target, pts, { keep = false, fingers = 1, prevented = false, during } = {}) {
+    // a touch gesture: start at pts[0] on target, then each point as a move (a frame after each unless frames is
+    // false); end unless keep. prevented: true, or the index of the first move another script takes over
+    pull(target, pts, { keep = false, fingers = 1, prevented = false, during, frames = true } = {}) {
       fire(winListeners.touchstart, event({ target, touches: touches(Array(fingers).fill(pts[0])) }));
       pts.slice(1).forEach((p, i) => {
         if (during) during(i);
-        fire(winListeners.touchmove, event({ target, touches: touches(Array(fingers).fill(p)), defaultPrevented: prevented }));
+        const taken = prevented === true || (typeof prevented === "number" && i >= prevented);
+        fire(winListeners.touchmove, event({ target, touches: touches(Array(fingers).fill(p)), defaultPrevented: taken }));
+        if (frames) page.frame();
       });
       if (!keep) fire(winListeners.touchend, event({ target, touches: [] }));
+    },
+    frame() { const fns = state.frames; state.frames = []; fns.forEach((fn) => fn(state.now)); return fns.length; },
+    wait(ms) {                                                  // run the timers due within ms, in order
+      const end = state.now + ms;
+      for (;;) {
+        const due = state.timers.filter((t) => t.at <= end).sort((a, b) => a.at - b.at || a.id - b.id)[0];
+        if (!due) break;
+        state.timers = state.timers.filter((t) => t !== due);
+        state.now = due.at;
+        due.fn();
+      }
+      state.now = end;
+    },
+    // the page's look: <html>'s offset and classes, which body children moved, the mark
+    look() {
+      const m = doc.querySelector("div.pull");
+      return {
+        y: root.style["--pull-y"] || "", settle: root.classes.has("pull-settle"),
+        moved: body.children.filter((el) => el.classes.has("pull-move"))
+          .map((el) => [el.tagName.toLowerCase(), ...[...el.classes].filter((c) => c !== "pull-move")].join(".")).join(" "),
+        mark: m ? { top: m.style.top, grow: m.style["--grow"], turn: m.style["--turn"], opacity: m.style.opacity,
+                    ready: m.classes.has("ready"), loading: m.classes.has("loading") } : null,
+      };
     },
     mark() { return doc.querySelector("div.pull"); },
     menusOpen() { return doc.querySelectorAll("details[open], dialog[open]").length; },
@@ -166,11 +201,15 @@ function roomPage(h, reg) {
       reg("settings" + (where === "header" ? "H" : ""), h("a", { href: "/settings" })),
       reg("signout" + (where === "header" ? "H" : ""), h("form", { class: "signout" }, h("button", {})))));
   const header = reg("header", h("header", { class: "top" }, reg("headerRooms", menu("header"))));
-  header.rect = { bottom: 112 };
+  header.rect = { bottom: 112 }; header.position = "sticky";
   const pane = reg("pane", h("div", { class: "pane" }, reg("paneItem", h("p", {}))));
   pane.overflowY = "auto"; pane.scrollHeight = 900; pane.clientHeight = 300;
   const flat = reg("flat", h("div", {}, reg("flatItem", h("p", {}))));    // overflow auto but nothing to scroll
   flat.overflowY = "auto"; flat.scrollHeight = 100; flat.clientHeight = 100;
+  const toast = reg("toast", h("div", { class: "toast" }));     // a room's own fixed toast (Konbini's): stays put
+  toast.position = "fixed";
+  const tabbar = reg("tabbar", h("nav", { class: "tabbar" }, reg("tab", h("a", { href: "/" })), reg("tabRooms", menu("tab"))));
+  tabbar.position = "fixed";
   return [
     header,
     h("main", {},
@@ -183,7 +222,7 @@ function roomPage(h, reg) {
     reg("sheet", h("dialog", { class: "sheet" }, reg("sheetLink", h("a", { href: "/p/card" })),
                    reg("sheetForm", h("form", {}, h("button", {}))))),
     reg("popover", h("div", { popover: "" }, reg("popoverLink", h("a", { href: "/n/b" })))),
-    h("nav", { class: "tabbar" }, reg("tab", h("a", { href: "/" })), reg("tabRooms", menu("tab"))),
+    toast, reg("foot", h("footer", { class: "foot" })), tabbar,
   ];
 }
 const openAll = (p) => {
@@ -281,34 +320,82 @@ const down = (to, from = 200, x = 100) => {                     // a straight pu
   const r = {};
   let p = await load(roomPage, { standalone: "media" });
   r.htmlClass = p.root.classes.has("pull-refresh");
-  p.pull(p.named.para, down(200), { keep: true });
-  const m = p.mark();
-  r.held = { exists: !!m, ready: m && m.classes.has("ready"), held: m && m.classes.has("held"), top: m && m.style.top,
-             pull: m && m.style["--pull"], opacity: m && m.style.opacity };
+  r.atRest = p.look();                                          // nothing drawn, nothing moved before a pull
+  p.pull(p.named.para, down(40), { keep: true });               // (40-10)*0.6 = 18: a quarter of the way
+  r.quarter = p.look();
+  p = await load(roomPage, { standalone: "media" });
+  p.pull(p.named.para, down(80), { keep: true });
+  r.sixty = p.look();
+  p = await load(roomPage, { standalone: "media" });
+  p.pull(p.named.para, down(200), { keep: true, frames: false });   // twenty moves, no frame yet: nothing drawn
+  r.beforeFrame = p.look().y;
+  r.framesQueued = p.frame();                                   // one frame draws them all, at the last position
+  r.held = p.look();                                            // past ready: stiffer, under the header, max 130
   p.win("touchend", { touches: [] });
-  r.reloads = p.state.reloads;
-  r.loading = !!m && m.classes.has("loading");
+  r.released = p.look();                                        // at once: eases to rest at PULL.hold, spinning
+  r.reloadsAt0 = p.state.reloads;
+  p.wait(199);
+  r.reloadsAt199 = p.state.reloads;
+  p.wait(1);
+  r.reloads = p.state.reloads;                                  // after the settle (200 ms), the page reloads
   p.win("touchend", { touches: [] });                           // a second end (iOS) never reloads twice
   p.pull(p.named.para, down(200));                              // nor does another pull while it reloads
+  p.wait(1000);
   r.reloadsAfter = p.state.reloads;
-  p.win("pageshow", { persisted: true });                       // back from the cache: the mark is gone, pulls work
-  r.afterRestore = { loading: !!m && m.classes.has("loading"), opacity: m && m.style.opacity };
+  r.whileReloading = p.look();                                  // still resting at PULL.hold with the spinner
+  p.win("pageshow", { persisted: true });                       // back from the cache: the page as it was, pulls work
+  r.afterRestore = p.look();
   p.pull(p.named.para, down(200));
+  p.wait(1000);
   r.reloadsRestored = p.state.reloads;
+
+  p = await load(roomPage, { standalone: "media" });            // the travel: linear to ready, then stiffer, never max
+  const track = [];
+  p.pull(p.named.para, down(600), { keep: true, during: () => track.push(parseFloat(p.root.style["--pull-y"] || "0")) });
+  r.track = track;
 
   p = await load(roomPage, { standalone: "media" });
   p.pull(p.named.para, down(80), { keep: true });               // (80-10)*0.6 = 42 < 70: not far enough
-  r.short = { ready: !!p.mark() && p.mark().classes.has("ready") };
+  r.short = { ready: p.look().mark.ready };
   p.win("touchend", { touches: [] });
+  r.short.released = p.look();                                  // springs back: eases to 0, still .pull-move
+  p.wait(219);
+  r.short.springing = p.look().moved;
+  p.wait(1);
+  r.short.settled = p.look();                                   // at rest: no transform left on the page
   r.short.reloads = p.state.reloads;
-  r.short.settled = { held: !!p.mark() && p.mark().classes.has("held"), opacity: p.mark() && p.mark().style.opacity };
   p.pull(p.named.para, down(130));                              // (130-10)*0.6 = 72: just past
+  p.wait(1000);
   r.justPast = p.state.reloads;
 
-  const no = async (name, opts, fn) => {                        // fn(p) makes the pull; -> reloads and whether a mark showed
-    const q = await load(roomPage, { standalone: "media", ...opts });
+  p = await load(roomPage, { standalone: "media" });            // a script takes the gesture mid-pull: springs back
+  p.pull(p.named.para, down(200), { keep: true, prevented: 8 });
+  r.takenMidPull = p.look();
+  p.win("touchend", { touches: [] });
+  p.wait(1000);
+  r.takenMidPull.reloads = p.state.reloads;
+  r.takenMidPull.after = p.look().moved;
+
+  p = await load(roomPage, { standalone: "media", still: true });   // reduced motion: no waiting on an animation
+  p.pull(p.named.para, down(80));
+  p.wait(0);
+  r.still = { restedAt0: p.look().moved === "" && !p.look().settle };
+  p.pull(p.named.para, down(200));
+  p.wait(49);
+  r.still.reloadsAt49 = p.state.reloads;
+  p.wait(1);
+  r.still.reloads = p.state.reloads;
+
+  const no = async (name, opts, fn) => {                        // fn(p) makes the pull; -> reloads, how far the content
+    const q = await load(roomPage, { standalone: "media", ...opts });   // came at most, and the page at the end
+    let peak = 0;
+    const seen = () => { peak = Math.max(peak, parseFloat(q.root.style["--pull-y"] || "0")); };
+    const frame = q.frame;
+    q.frame = () => { const n = frame(); seen(); return n; };
     fn(q);
-    r[name] = { reloads: q.state.reloads, mark: !!q.mark() && q.mark().style.opacity !== "0" };
+    q.wait(1000);
+    const l = q.look();
+    r[name] = { reloads: q.state.reloads, peak, rest: l.moved === "" && !l.settle && (!l.mark || l.mark.opacity === "0") };
   };
   await no("scrolled", { scrollY: 300 }, (q) => q.pull(q.named.para, down(200)));
   await no("menuOpen", {}, (q) => { q.named.tabRooms.open = true; q.pull(q.named.para, down(200)); });
@@ -338,10 +425,12 @@ const down = (to, from = 200, x = 100) => {                     // a straight pu
   // a pane with nothing to scroll is no pane: the pull works there
   p = await load(roomPage, { standalone: "media" });
   p.pull(p.named.flatItem, down(200));
+  p.wait(1000);
   r.flatPane = p.state.reloads;
   // iOS's own flag (no display-mode match needed)
   p = await load(roomPage, { standalone: "ios" });
   p.pull(p.named.para, down(200));
+  p.wait(1000);
   r.iosStandalone = p.state.reloads;
   // a browser tab: no listeners at all, no class
   p = await load(roomPage, { standalone: false });
