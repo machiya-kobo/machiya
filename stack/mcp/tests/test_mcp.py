@@ -915,6 +915,19 @@ class Gate(Base):
         _, base = self.serve(MCP_AUTH="tailscale", MCP_USERS="me@x", MCP_BIND="0.0.0.0", MCP_BIND_BEHIND_PROXY="1")
         self.assertEqual(self.post(base, self.PING, {"Tailscale-User-Login": "me@x"})[0], 200)
 
+    def test_the_header_counts_only_from_the_trusted_proxy(self):
+        # on a network shared with others (Hister's), only the sidecar's address may send the header
+        env = {"MCP_AUTH": "tailscale", "MCP_USERS": "me@x", "MCP_LOG": os.devnull, "MCP_BIND": "0.0.0.0"}
+        mcp.check_bind(mcp.Config(dict(env, MCP_TRUSTED_PROXIES="172.31.250.10/32")))
+        with self.assertRaises(SystemExit):
+            mcp.Config(dict(env, MCP_TRUSTED_PROXIES="not-an-address"))
+        _, base = self.serve(MCP_AUTH="tailscale", MCP_USERS="me@x", MCP_BIND="0.0.0.0",
+                             MCP_TRUSTED_PROXIES="172.31.250.10/32")
+        self.assertEqual(self.post(base, self.PING, {"Tailscale-User-Login": "me@x"})[0], 403)   # 127.0.0.1 isn't it
+        _, base = self.serve(MCP_AUTH="tailscale", MCP_USERS="me@x", MCP_BIND="0.0.0.0",
+                             MCP_TRUSTED_PROXIES="127.0.0.1")
+        self.assertEqual(self.post(base, self.PING, {"Tailscale-User-Login": "me@x"})[0], 200)
+
     def test_a_half_sent_request_times_out(self):
         # sweep MACH-M-6: 200 half-sent requests held 200 threads
         handler = mcp.make_handler(self.server)

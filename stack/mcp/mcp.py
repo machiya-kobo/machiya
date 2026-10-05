@@ -73,6 +73,19 @@ def is_loopback(bind):
         return bind == "localhost"
 
 
+def trusted_proxies(value):
+    """MCP_TRUSTED_PROXIES: comma-separated addresses or CIDRs -> [ip_network]; a bad entry refuses to start."""
+    out = []
+    for item in (value or "").split(","):
+        item = item.strip()
+        if item:
+            try:
+                out.append(ipaddress.ip_network(item, strict=False))
+            except ValueError:
+                raise SystemExit("machiya-mcp: MCP_TRUSTED_PROXIES: %r is not an address or a CIDR" % item)
+    return out
+
+
 def check_bind(config):
     """MCP_AUTH=tailscale trusts the Tailscale-User-Login header, so whoever can reach the port can claim to be the owner
     (sweep MACH-M-5: about twelve containers share the production networks). Without the identity file (which checks
@@ -80,7 +93,8 @@ def check_bind(config):
     says the proxy is the only way in (the server on a network of its own with the Tailscale sidecar). Else it won't start."""
     if config.identity is None and config.auth == "tailscale" and not config.header_trusted:
         raise SystemExit("machiya-mcp: MCP_AUTH=tailscale trusts a login header, so the server must listen on 127.0.0.1 behind "
-                         "the proxy (MCP_BIND), or set MCP_BIND_BEHIND_PROXY=1 when the proxy is the only way in (its own "
+                         "the proxy (MCP_BIND), or name the proxy in MCP_TRUSTED_PROXIES, or set MCP_BIND_BEHIND_PROXY=1 "
+                         "when the proxy is the only way in (its own "
                          "network with the Tailscale sidecar); not on %r" % config.bind)
 
 
@@ -191,7 +205,10 @@ class Config:
         self.auth = auth_mode(env.get("MCP_AUTH"), (env.get("MACHIYA_IDENTITY_FILE") or "").strip())
         self.bind = env.get("MCP_BIND", "0.0.0.0").strip() or "0.0.0.0"
         self.behind_proxy = (env.get("MCP_BIND_BEHIND_PROXY") or "").strip().lower() in ("1", "on", "true", "yes")
-        self.header_trusted = is_loopback(self.bind) or self.behind_proxy     # may Tailscale-User-Login be believed?
+        # 0.8.0: MCP_TRUSTED_PROXIES, the sidecar's address(es): the header counts only from there (a server that must
+        # share a network with others, e.g. Hister's, still can't be driven by a neighbour's forged header)
+        self.trusted = trusted_proxies(env.get("MCP_TRUSTED_PROXIES"))
+        self.header_trusted = is_loopback(self.bind) or self.behind_proxy or bool(self.trusted)   # may the header be believed?
         self.identity = load_identity(env, self.bind)        # None: the MCP_USERS gate, as before
         self.token_gate = load_token_gate(env) if self.identity is None and self.auth != "open" else None
         self.token = room_token(env.get("MCP_TOKEN_FILE"))   # the `mcp` principal's token for the rooms; "" without one
@@ -320,12 +337,22 @@ class Server:
         self.lock = threading.Lock()
 
     # -- identity ------------------------------------------------------------------------------------------------
-    def login(self, headers):
-        """The caller's login, or None when refused. Open mode trusts nothing in the header and says `local`."""
+    def login(self, headers, client=""):
+        """The caller's login, or None when refused. Open mode trusts nothing in the header and says `local`. With
+        MCP_TRUSTED_PROXIES the header counts only from those addresses (`client`: the connection's address)."""
         if self.config.auth == "open":
             return "local"
         if not getattr(self.config, "header_trusted", False):     # check_bind refuses to start like this; fail closed anyway
             return None
+        trusted = getattr(self.config, "trusted", None)
+        if trusted:
+            try:
+                ip = ipaddress.ip_address((client or "").split("%", 1)[0])
+                ip = ip.ipv4_mapped or ip if ip.version == 6 else ip
+            except ValueError:
+                return None
+            if not any(ip.version == n.version and ip in n for n in trusted):
+                return None
         who = (headers.get("Tailscale-User-Login") or "").strip()
         return who if who and who in self.config.users else None
 
@@ -702,7 +729,7 @@ def make_handler(server):
                                                       **({"reason": res.error} if res.error else {})})
                     login = Caller(res.principal.name, "token")
                 else:
-                    login = server.login(self.headers)
+                    login = server.login(self.headers, self.client_address[0] if self.client_address else "")
                 if login is None:
                     return self.json(403, {"error": "not an allowed user"})
             try:
