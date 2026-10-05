@@ -9,6 +9,7 @@
   - a restart that finds the last run unfinished counts it as failed instead of resetting `ok`;
   - `entry_errors` in `status.json` counts the entries that raised.
 - smallweb's `web.decode` (copied in) uses only text encodings: a `charset=base64` page is read as UTF-8.
+- The article HTML sent to Hister comes from smallweb's reader, now an allowlist (smallweb 0.3.1, sweep MACH-F-7): `srcdoc`, `<script/>`, SVG, `data:` URLs, forms, `style` and `class` no longer get through.
 
 ## 0.1.1
 
