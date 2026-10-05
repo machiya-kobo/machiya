@@ -187,6 +187,59 @@ def compose(env, data, *args, check=True, capture=False):
     return r
 
 
+# -- images: pulled once each, one at a time, before anything starts -------------------------------------------------
+# `compose up` pulls every service's image at once, the same image once per service (six use python:3.13-alpine), and a
+# fresh machine then hits public.ecr.aws's anonymous rate limit ("toomanyrequests: Rate exceeded", tv-debian's first
+# fleet run). So `up` pulls each distinct image here first, serially, and waits and tries again when a registry says
+# slow down; compose and the builds then find them all on this machine.
+
+RATE_RE = re.compile(r"toomanyrequests|rate exceeded|too many requests|\b429\b", re.I)
+
+
+def stack_images(env):
+    """Every image the stack needs from a registry, each once: Hister's (init's create-user), compose.yml's `image:`s,
+    and the FROMs of the Dockerfiles it builds (their ARG defaults filled in; stage names and unreadable files left
+    out)."""
+    with open(os.path.join(HERE, "compose.yml")) as f:
+        text = f.read()
+    images = [HISTER_IMAGE] + re.findall(r"^\s+image:\s*(\S+)", text, re.M)
+    for spec in re.findall(r"^\s+build:\s*(.+?)\s*$", text, re.M):
+        m = re.fullmatch(r"\{\s*context:\s*([^,]+?)\s*,\s*dockerfile:\s*([^}]+?)\s*\}", spec)
+        ctx, dockerfile = (m.group(1), m.group(2)) if m else (spec, "Dockerfile")
+        try:
+            with open(os.path.join(HERE, interpolate(ctx, env), dockerfile)) as f:
+                lines = f.read()
+        except OSError:
+            continue
+        args = dict(re.findall(r"^ARG\s+(\w+)=(\S+)", lines, re.M))
+        stages = {s.lower() for s in re.findall(r"^FROM\s+.*\s+AS\s+(\S+)\s*$", lines, re.M | re.I)}
+        for ref in re.findall(r"^FROM\s+(?:--\S+\s+)*(\S+)", lines, re.M):
+            ref = VAR_RE.sub(lambda v: args.get(v.group(1), v.group(0)), ref)
+            if "$" not in ref and ref != "scratch" and ref.lower() not in stages:
+                images.append(ref)
+    return list(dict.fromkeys(images))
+
+
+def pull_images(engine, images, tries=7, sleep=time.sleep, run=subprocess.run):
+    """Pull each image this machine doesn't have yet, one at a time. A failed pull is tried again after a pause that
+    doubles (from 15 s when the registry said too many requests, else 5 s; at most 2 min), `tries` times in all."""
+    for image in images:
+        if run([engine, "image", "inspect", image], capture_output=True).returncode == 0:
+            continue
+        for n in range(tries):
+            r = run([engine, "pull", "-q", image], capture_output=True, text=True)
+            if r.returncode == 0:
+                say("pulled %s" % image)
+                break
+            out = ((r.stderr or "") + (r.stdout or "")).strip()
+            why = out.splitlines()[-1][-200:] if out else "exit %d" % r.returncode
+            if n == tries - 1:
+                die("couldn't pull %s after %d tries: %s" % (image, tries, why))
+            wait = min(120, (15 if RATE_RE.search(out) else 5) * 2 ** n)
+            say("pulling %s failed (%s); again in %ds" % (image, why, wait))
+            sleep(wait)
+
+
 # -- init ------------------------------------------------------------------------------------------------------------
 
 def make_secrets(data):
@@ -399,7 +452,7 @@ def cmd_init(a):
         with open(pointer, "w") as f:
             f.write(data + "\n")
     if engine != "native":
-        subprocess.run([engine, "pull", "-q", HISTER_IMAGE], capture_output=True)
+        pull_images(engine, [HISTER_IMAGE])
     elif not remote and not shutil.which(env.get("HISTER_BIN") or "hister"):
         die("--native needs the hister binary: HISTER_BIN=/path/to/hister or `hister` on PATH, or --remote-hister "
             "(docs/dev-stack.md)")
@@ -466,6 +519,9 @@ def native_plan(env):
     return plan
 
 
+PROCS = {}          # native: the services this `up` started, so a wait can tell one that exited
+
+
 def native_up(env, data):
     run = os.path.join(data, "run")
     os.makedirs(run, exist_ok=True)
@@ -497,9 +553,11 @@ def native_up(env, data):
                              start_new_session=True)
         with open(pidf, "w") as f:
             f.write(str(p.pid))
+        PROCS[name] = p
         say("%s: started (pid %d, log logs/%s.log)" % (name, p.pid, name))
         if name == "vault-mirror":
-            wait_for(lambda: os.path.exists(os.path.join(data, "mirror", "vault", ".git")), 120, "the vault mirror")
+            wait_for(lambda: os.path.exists(os.path.join(data, "mirror", "vault", ".git")), 120, "the vault mirror",
+                     "vault-mirror")
         time.sleep(0.3)
 
 
@@ -518,16 +576,47 @@ def native_down(data):
 
 # -- up, seed --------------------------------------------------------------------------------------------------------
 
-def wait_for(fn, seconds, what):
+CTX = {}           # cmd_up's env and data, for the log of a service a wait gave up on
+
+
+def service_log(service, lines=40):
+    """The last lines of a service's log (the file natively, `compose logs` in containers), or ""."""
+    env, data = CTX.get("env"), CTX.get("data")
+    if not env:
+        return ""
+    try:
+        if env["DEV_ENGINE"] == "native":
+            with open(os.path.join(data, "logs", service + ".log"), "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - 65536))
+                return "\n".join(f.read().decode("utf-8", "replace").splitlines()[-lines:])
+        r = compose(env, data, "logs", "--no-color", "--tail", str(lines), service, check=False, capture=True)
+        return (r.stdout + r.stderr).strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def wait_for(fn, seconds, what, service=None):
+    """Wait until fn() is true. When it isn't in time, or the native process of `service` exits first, fail with that
+    service's log, so a run elsewhere (dev-test, fleet-nightly) shows why without a login on that machine."""
     end = time.time() + seconds
+    why = "timed out waiting for %s" % what
     while time.time() < end:
         try:
             if fn():
                 return True
         except Exception:
             pass
+        p = PROCS.get(service)
+        if p is not None and p.poll() is not None:
+            why = "%s exited (%d) before %s was ready" % (service, p.returncode, what)
+            break
         time.sleep(2)
-    die("timed out waiting for %s" % what)
+    log = service_log(service) if service else ""
+    if log:
+        print("dev: ---- the last lines of %s's log ----\n%s\ndev: ---- end of %s's log ----" % (service, log, service),
+              file=sys.stderr, flush=True)
+    die(why)
 
 
 def http(method, url, data=None, headers=None, form=False, timeout=15):
@@ -586,18 +675,30 @@ def register_room_token(env, data):
 def cmd_up(a):
     data = data_dir(a.data)
     env = load(data)
+    CTX.update(env=env, data=data)
     upgrade(data, env)
     if env["DEV_ENGINE"] == "native":
         native_up(env, data)
     else:
-        say("building the images (log: %s)" % os.path.join(data, "logs", "build.log"))
-        with open(os.path.join(data, "logs", "build.log"), "w") as log:
-            r = subprocess.run(compose_cmd(env, data, "build"), cwd=HERE, env=compose_env(env, data), stdout=log,
-                               stderr=subprocess.STDOUT)
-        if r.returncode:
-            die("the build failed: see %s" % os.path.join(data, "logs", "build.log"))
+        images = stack_images(env)
+        pull_images(env["DEV_ENGINE"], images)
+        build_log = os.path.join(data, "logs", "build.log")
+        say("building the images (log: %s)" % build_log)
+        for attempt in range(3):
+            with open(build_log, "a" if attempt else "w") as log:
+                r = subprocess.run(compose_cmd(env, data, "build"), cwd=HERE, env=compose_env(env, data), stdout=log,
+                                   stderr=subprocess.STDOUT)
+            if not r.returncode:
+                break
+            with open(build_log, errors="replace") as log:
+                tail = log.read()[-4000:]
+            if attempt == 2 or not RATE_RE.search(tail):
+                die("the build failed: see %s" % build_log)
+            say("the build hit a registry's rate limit; again in %ds" % (30 * 2 ** attempt))
+            time.sleep(30 * 2 ** attempt)
         compose(env, data, "up", "-d", "vault-mirror")
-        wait_for(lambda: os.path.exists(os.path.join(data, "mirror", "vault", ".git")), 120, "the vault mirror")
+        wait_for(lambda: os.path.exists(os.path.join(data, "mirror", "vault", ".git")), 120, "the vault mirror",
+                 "vault-mirror")
         for attempt in range(3):
             r = compose(env, data, "up", "-d", check=attempt == 2)
             if r.returncode == 0:
@@ -607,24 +708,29 @@ def cmd_up(a):
             ids = subprocess.run(["podman" if env["DEV_ENGINE"] == "podman" else "docker", "ps", "-aq", "--filter",
                                   "label=com.docker.compose.project=" + project(env), "--filter", "status=created"],
                                  capture_output=True, text=True).stdout.split()
-            say("compose up failed; recreating %d container(s) that never started, again" % len(ids))
+            say("compose up failed; recreating %d container(s) that never started, again in %ds"
+                % (len(ids), 10 * (attempt + 1)))
             if ids:
                 subprocess.run([env["DEV_ENGINE"], "rm", "-f"] + ids, capture_output=True)
+            time.sleep(10 * (attempt + 1))
+            pull_images(env["DEV_ENGINE"], images)    # an image compose failed to pull: serially, with the backoff
     say("waiting for the services")
-    wait_for(lambda: ready(19224, "/health"), 120, "Hister (19224/health)")
-    wait_for(lambda: ready(19204, "/health"), 60, "the front (19204)")
-    wait_for(lambda: ready(19204, "/machiya/healthz", lambda b: b.get("hister") == "ok"), 60, "the helper")
+    wait_for(lambda: ready(19224, "/health"), 120, "Hister (19224/health)",
+             None if env.get("DEV_REMOTE_HISTER") else "hister")
+    wait_for(lambda: ready(19204, "/health"), 60, "the front (19204)", "front")
+    wait_for(lambda: ready(19204, "/machiya/healthz", lambda b: b.get("hister") == "ok"), 60, "the helper",
+             "hister-login")
     register_room_token(env, data)
-    wait_for(lambda: ready(19201, "/api/status", lambda b: b.get("ready")), 180, "Kura")
-    wait_for(lambda: ready(19202, "/api/status", lambda b: b.get("ready")), 180, "Niwa")
-    wait_for(lambda: ready(19203, "/healthz"), 180, "Konbini")
-    wait_for(lambda: ready(19200, "/healthz"), 60, "landing")
+    wait_for(lambda: ready(19201, "/api/status", lambda b: b.get("ready")), 180, "Kura", "kura")
+    wait_for(lambda: ready(19202, "/api/status", lambda b: b.get("ready")), 180, "Niwa", "niwa")
+    wait_for(lambda: ready(19203, "/healthz"), 180, "Konbini", "konbini")
+    wait_for(lambda: ready(19200, "/healthz"), 60, "landing", "landing")
     seed(env, data, quiet=True)
     skip = {"shiori"} | ({"searxng"} if env["DEV_ENGINE"] == "native" else set())       # a client; optional natively
     owner = {"Authorization": "Bearer " + secret(data, "room-token")}       # landing signs in like the rooms
     wait_for(lambda: ready(19200, "/api/status", lambda b: all(
         (v or {}).get("state") == "up" for k, v in b.get("apps", {}).items() if k not in skip), owner), 120,
-        "landing to see every app up")
+        "landing to see every app up", "landing")
     status(env, data)
 
 

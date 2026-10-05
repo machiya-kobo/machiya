@@ -39,6 +39,8 @@ cd machiya/compose/dev
 
 `$DEV_DATA` is `compose/dev/data` unless `--data DIR` or `MACHIYA_DEV_DATA` says otherwise; the first stack made outside the default is remembered in `compose/dev/.data-dir`. Use a disk-backed folder (`/var/tmp/<you>/…`), never `/tmp`. The compose project is `machiya-dev` unless `--project` says otherwise (below). A podman API socket is used for compose (`DOCKER_HOST`, the user's `podman.socket`, or one started under `$DEV_DATA`). After a reboot, `./dev up` again.
 
+`./dev up` pulls each image the stack needs (compose's `image:`s, the FROMs of what it builds, Hister's) once and one at a time before it builds or starts anything, and pulls again after a pause that doubles when a registry says `toomanyrequests` (public.ecr.aws limits anonymous pulls; compose alone pulls `python:3.13-alpine` for six services at once). When a service isn't ready in time, or (natively) its process exits first, `up` prints the last lines of that service's log before it gives up, so a run on another machine (`tools/dev-test`, the fleet) shows why.
+
 **A second stack beside a standing one** (an agent testing a branch while the shared stack keeps running): give it its own project, another loopback address and that address as its base, and its own checkouts:
 
 ```sh

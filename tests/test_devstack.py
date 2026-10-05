@@ -1,7 +1,9 @@
 """The dev stack's own pieces (compose/dev): the front's routing, the fake NewsBlur's answers, the fixture sites, the
 native plan built from compose.yml, and the synthetic-data rule. python3 -m unittest tests.test_devstack (pyyaml)."""
+import contextlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import re
@@ -207,6 +209,85 @@ class SyntheticOnly(unittest.TestCase):
                 self.assertEqual(test_private_names.findings_in(n, text), [], os.path.join(root, n))
                 for url in re.findall(r"https?://([a-z0-9.-]+)", text):
                     self.assertTrue(url.endswith(".example") or url == "localhost", url)
+
+
+class Images(unittest.TestCase):
+    """`up` pulls each distinct image once, serially, with a backoff on a registry's rate limit (tv-debian's first fleet
+    run: compose pulled python:3.13-alpine for six services at once and public.ecr.aws said toomanyrequests)."""
+
+    def setUp(self):
+        self.dev = load("devimages", os.path.join(DEV, "dev"))
+
+    def fake_run(self, have=(), fails=None):
+        calls, fails = [], dict(fails or {})
+
+        class R:
+            def __init__(self, rc, err=""):
+                self.returncode, self.stderr, self.stdout = rc, err, ""
+
+        def run(argv, **kw):
+            calls.append(argv)
+            if argv[1:3] == ["image", "inspect"]:
+                return R(0 if argv[3] in have else 1)
+            if fails.get(argv[-1]):
+                fails[argv[-1]] -= 1
+                return R(1, "Error response from daemon: toomanyrequests: Rate exceeded")
+            return R(0)
+        return run, calls
+
+    def test_each_image_once(self):
+        env = {"KURA_SRC": "/nowhere/kura", "NIWA_SRC": "/nowhere/niwa", "KONBINI_SRC": "/nowhere/konbini"}
+        images = self.dev.stack_images(env)
+        self.assertEqual(len(images), len(set(images)))
+        self.assertEqual(images[0], self.dev.HISTER_IMAGE)
+        for want in ("public.ecr.aws/docker/library/python:3.13-alpine",
+                     "public.ecr.aws/docker/library/python:3.13-slim", "docker.io/searxng/searxng:"):
+            self.assertTrue(any(i.startswith(want) for i in images), want)
+        self.assertFalse([i for i in images if "$" in i or " " in i])
+
+    def test_rate_limit_waits_and_tries_again(self):
+        run, calls = self.fake_run(fails={"img:1": 2})
+        sleeps = []
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.dev.pull_images("docker", ["img:1"], sleep=sleeps.append, run=run)
+        self.assertEqual(sleeps, [15, 30])
+        self.assertEqual([c for c in calls if c[1] == "pull"], [["docker", "pull", "-q", "img:1"]] * 3)
+
+    def test_present_images_are_not_pulled(self):
+        run, calls = self.fake_run(have={"img:1"})
+        self.dev.pull_images("podman", ["img:1"], sleep=lambda s: None, run=run)
+        self.assertEqual(calls, [["podman", "image", "inspect", "img:1"]])
+
+    def test_gives_up(self):
+        run, calls = self.fake_run(fails={"img:1": 99})
+        sleeps = []
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit):
+            self.dev.pull_images("docker", ["img:1"], tries=4, sleep=sleeps.append, run=run)
+        self.assertEqual(sleeps, [15, 30, 60])
+
+
+class Waits(unittest.TestCase):
+    def test_an_exited_native_service_fails_at_once_with_its_log(self):
+        dev = load("devwaits", os.path.join(DEV, "dev"))
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        os.makedirs(os.path.join(tmp.name, "logs"))
+        with open(os.path.join(tmp.name, "logs", "vault-mirror.log"), "w") as f:
+            f.write("old line\nModuleNotFoundError: No module named 'markdown'\n")
+
+        class Exited:
+            returncode = 1
+
+            def poll(self):
+                return 1
+        dev.CTX.update(env={"DEV_ENGINE": "native"}, data=tmp.name)
+        dev.PROCS["vault-mirror"] = Exited()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            dev.wait_for(lambda: False, 600, "the vault mirror", "vault-mirror")
+        self.assertIn("No module named 'markdown'", err.getvalue())
+        self.assertIn("vault-mirror exited (1) before the vault mirror was ready", err.getvalue())
 
 
 class SecondStack(unittest.TestCase):
