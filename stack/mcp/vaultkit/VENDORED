@@ -1,4 +1,4 @@
-# vaultkit v0.21.0-42-g44536da - vendored by vendor.sh; don't edit these files
+# vaultkit v0.22.0 - vendored by vendor.sh; don't edit these files
 f1fd40bb17a311a40d19441a3e661515d499b24587ccc4737bb67a2db0d4ffe3  changelog.py
 5b563e708c9318bba58a413b101d62b037906b1dcd11d38b0aabe3c8e951c488  envfile.py
 457c1710b89fc9b645c7c175070d4001046d12f0e06b3fa14aa63ba936a21647  frontmatter.py
@@ -7,7 +7,7 @@ fe48008228cf938d992334db68879bfa086fc74ee6ff39e26cddf2c2eb1b4d38  git.py
 586b76c36b6b4f0ff8aaa339fd0eae23a4f1facf5d7f2a6dfc9e9aae6f1df9ef  gitsync.py
 eb97fa0a02edd24e010ece147c649f070c78f4ae62fcdcaa0b22a72ab288bcde  histerauth.py
 606c66689bedbaabce7ad7bacc0ab041e80ac963541443ef7c5ee25c968bb533  identity.py
-c2cac06d665122d547f770c9b5f832f448f9a56c5dbe72bd4ed408835db4c706  __init__.py
+030159de230a7cac8807816af05c501c6efcc213d99961e44625373e3df77189  __init__.py
 73317332d2f785f268b7fdcef6c0b3740ebceb18448d40b6b390fc3722fcd347  notes.py
 7c801a1e1faf047d9364768ef1a604fbc87ee153bde299352db7ccc9703a82b5  palettes.py
 f6fabf7e26ecfe98055f5e13be3fe1d987cf816c57f28a28016c0f1a0c2c3c6d  prefs.py
