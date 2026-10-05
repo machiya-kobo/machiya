@@ -38,7 +38,7 @@ Every app is optional. The page polls only what has an address; anything else sh
 | `LANDING_BIND`, `LANDING_PORT` | `0.0.0.0`, `8080` | the listener; `tailscale` mode refuses a non-loopback bind unless `LANDING_BIND_BEHIND_PROXY=1` (the proxy is the only way in) |
 | `LANDING_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | `open` mode answers only these `Host` names |
 | `LANDING_POLL`, `LANDING_TIMEOUT` | `60`, `3` | seconds between polls (15 at least), and per request |
-| `LANDING_TOKEN_FILE` | none | a token sent as `Authorization: Bearer` to Kura, Niwa and Konbini over https only (for rooms with an identity file), for their status and changelog; never to the engines or services |
+| `LANDING_TOKEN_FILE` | none | a token sent as `Authorization: Bearer` to Kura, Niwa and Konbini over https only, never to the engines or services: a room token from hister-login (`mht_…`, 0.5.0) for the owner's reads (Hister's token then never goes to a room; loopback http allowed too), or an identity-file token for their status and changelog |
 | `LANDING_CHANGELOG_POLL` | `900` | seconds between asking each app for its changelog (`GET /api/changelog`); a new version is asked for at once |
 | `LANDING_CHANGELOGS` | none | an override per app, `kura=https://…/CHANGELOG.md,…`, for an app that doesn't serve `/api/changelog` |
 | `LANDING_CHANGELOG_TOKEN_FILE` | none | a read token for the override URLs only (`Authorization: token …`, https only) |

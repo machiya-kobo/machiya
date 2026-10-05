@@ -183,8 +183,10 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 def security_headers(csp=CSP):
     """[(header, value)] for every HTML page (v0.13): the CSP above, no MIME sniffing, the path never leaves the
     room in a Referer. A room adds these to its own (Content-Type, Cache-Control). v0.14: also Accept-CH for the
-    device's colour scheme, so the browser sends Sec-CH-Prefers-Color-Scheme with later requests (the manifest's)."""
-    return [("Content-Security-Policy", csp), ("X-Content-Type-Options", "nosniff"),
+    device's colour scheme, so the browser sends Sec-CH-Prefers-Color-Scheme with later requests (the manifest's).
+    v0.22: X-Frame-Options SAMEORIGIN too (frame-ancestors for browsers that only know the old header). Every other
+    response gets websafe.base_headers(), and vault files websafe.asset_headers(name)."""
+    return [("Content-Security-Policy", csp), ("X-Content-Type-Options", "nosniff"), ("X-Frame-Options", "SAMEORIGIN"),
             ("Referrer-Policy", "same-origin"), ("Accept-CH", COLOR_HINT)]
 
 

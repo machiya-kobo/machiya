@@ -3,6 +3,7 @@ import datetime
 import html
 import os
 import re
+import stat
 
 from .front import FRONT_RE, PHONE_CONFLICT, _str, note_front, tags_of
 
@@ -21,20 +22,60 @@ def e(text):
 
 def read_notes(root):
     """(rel, frontmatter, text) for every .md under root: dot directories and Templates/ skipped, sync-tool conflict copies left out, frontmatter {} when missing. os.walk order, unsorted: the first note seen wins a
-    wikilink name (Vault.by_name), so callers must not reorder it."""
+    wikilink name (Vault.by_name), so callers must not reorder it.
+
+    Symlinks are never followed (v0.22, KURA-2): a symlinked note is skipped (os.walk already doesn't descend into a
+    symlinked folder), and the file is opened with O_NOFOLLOW, so a committed `x.md -> /proc/self/environ` reads
+    nothing."""
     out = []
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in SKIP_DIRS]
         for name in filenames:
             if name.endswith(".md") and PHONE_CONFLICT not in name:
                 full = os.path.join(dirpath, name)
-                try:
-                    with open(full, encoding="utf-8", errors="replace") as f:
-                        text = f.read()
-                except OSError:
+                text = read_file(full)
+                if text is None:
                     continue
                 out.append((os.path.relpath(full, root), note_front(text) or {}, text))
     return out
+
+
+def read_file(path):
+    """A vault file's text, or None when it is a symlink, not a regular file or unreadable (v0.22). Opened with
+    O_NOFOLLOW where the platform has it, and checked again with fstat, so nothing outside the vault is read through
+    a link."""
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode) or os.path.islink(path):
+            return None
+        with os.fdopen(fd, encoding="utf-8", errors="replace") as f:
+            fd = None
+            return f.read()
+    except OSError:
+        return None
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def safe_path(root, rel):
+    """The absolute path for writing `rel` under `root`, or ValueError (v0.22, KURA-2): `rel` must be relative with no
+    `..`, and no part of it under root may be a symlink (the file itself included, when it exists), so a write never
+    lands outside the vault or on a file a link points at. The parent folders may not exist yet."""
+    if not isinstance(rel, str) or not rel or "\0" in rel or os.path.isabs(rel):
+        raise ValueError("not a relative path")
+    parts = rel.replace("\\", "/").split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        raise ValueError("not a plain relative path")
+    path = os.path.realpath(root)
+    for part in parts:
+        path = os.path.join(path, part)
+        if os.path.islink(path):
+            raise ValueError("%s is a symlink" % os.path.relpath(path, os.path.realpath(root)))
+    return path
 
 
 BOARD_STATUSES = ("backlog", "ready", "wip", "blocked", "done", "archived")

@@ -963,6 +963,14 @@ class OwnerToken(Stack):
         for key in ("hister", "searxng", "shiori", "machiya-mcp", "smallweb"):
             self.assertEqual(owner_headers(key, "https://%s.example.ts.net" % key, "", secret), {}, key)
         self.assertEqual(owner_headers("kura", "https://kura.example.ts.net", "", None), {})
+        # 0.5.0: a room token in LANDING_TOKEN_FILE goes instead, and Hister's token never reaches a room then
+        room = "mht_" + "L" * 43
+        self.assertEqual(owner_headers("kura", "https://kura.example.ts.net", room, secret),
+                         {"Authorization": "Bearer " + room})
+        self.assertEqual(owner_headers("konbini", "http://127.0.0.1:8081", room, secret),
+                         {"Authorization": "Bearer " + room})
+        self.assertEqual(owner_headers("kura", "http://kura:8080", room, secret), {})
+        self.assertEqual(owner_headers("hister", "https://hister.example.ts.net", room, secret), {})
         with self.assertRaises(probes.FetchError):
             owner_url("https://kura.example.ts.net", "//evil.example/x")
         self.assertEqual(owner_url("https://kura.example.ts.net/", "/api/vaults"), "https://kura.example.ts.net/api/vaults")
@@ -1411,8 +1419,9 @@ class HisterSignIn(Server):
         self.assertIn("Sign-in is unavailable: kept here", body)
 
     def test_signout_stops_the_automatic_signin(self):
-        """MACHIYA_SIGNIN_PROVIDER: signed out, a page goes through the provider; a deliberate sign-out sets the marker
-        the helper reads (so Sign Out doesn't bounce straight back in)."""
+        """MACHIYA_SIGNIN_PROVIDER: signed out, a page goes through the provider; a deliberate sign-out sets this page's
+        own marker (vaultkit 0.22: host-only; the helper remembers the ended session itself), so Sign Out doesn't
+        bounce straight back in."""
         base = self.serve(**self.hister_env(MACHIYA_SIGNIN_PROVIDER="oidc"))
         import http.client
         conn = http.client.HTTPConnection(urlsplit(base).netloc, timeout=10)
@@ -1425,7 +1434,7 @@ class HisterSignIn(Server):
         r = conn.getresponse()
         r.read()
         conn.close()
-        self.assertIn("machiya_sso_out=1", " ".join(v for k, v in r.getheaders() if k == "Set-Cookie"))
+        self.assertIn("__Host-machiya_sso_landing_out=1", " ".join(v for k, v in r.getheaders() if k == "Set-Cookie"))
 
 
 class Setup(unittest.TestCase):

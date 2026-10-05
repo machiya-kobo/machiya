@@ -36,7 +36,7 @@ Each Today section is left out when its room is missing, down or refuses; nothin
 - **GETs, and one POST.** Hister's version comes from its MCP `initialize` (`POST /mcp`, which changes nothing; [contracts/hister.md](../contracts/hister.md)), at most every 15 minutes. Everything else is a GET.
 - **Hister** gets `Origin: hister://` on every GET (the MCP needs none); its newest-page search leaves the vault notes out.
 - **The owner's token** (`LANDING_HISTER_TOKEN_FILE`, re-read when it changes) goes to Hister, and, when the rooms run `AUTH=hister`, to the rooms' owner reads (Konbini's `/api/health`, whose full view has sync, LiveSync and per-board counts, and its cards; Kura's vaults and recent notes; Niwa's feed): only to Kura, Konbini and Niwa at their configured https address, never across a redirect. The open reads (Kura's and Niwa's `/api/status`, every `/api/changelog`) are sent without it; Konbini's `/api/health` is asked again without it when refused. Without it, or refused, the WIP and vault counts and Today's room sections are left out quietly; Kura's open `vault_count` still shows.
-- **Other tokens.** None by default. `LANDING_TOKEN_FILE` (for rooms with an identity file) goes to Kura, Niwa and Konbini over https only; `LANDING_CHANGELOG_TOKEN_FILE` only to the changelog URLs.
+- **Other tokens.** None by default. `LANDING_TOKEN_FILE` goes to Kura, Niwa and Konbini over https only: a room token from hister-login (`mht_…`, landing 0.5.0, [identity.md](../identity.md#room-tokens)) for the owner's reads, after which Hister's token goes to Hister only; or, for rooms with an identity file, that file's token. `LANDING_CHANGELOG_TOKEN_FILE` only to the changelog URLs.
 
 ## Recent deploys: where they come from
 

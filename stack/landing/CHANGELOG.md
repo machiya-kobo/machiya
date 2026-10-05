@@ -1,5 +1,11 @@
 # Changelog: machiya-landing
 
+## 0.5.0
+
+- **Its own sign-in cookie** (vaultkit 0.22; the owner's decision of 2026-10-05 after the sweep's LEAD-1): landing keeps a host-only `__Host-machiya_sso_landing`, made from a one-time code hister-login sends back to `/machiya/callback`, instead of reading the shared `machiya_sso` on the tailnet's whole domain (still read while hister-login's `HISTER_LOGIN_LEGACY` allows it). One sign-in still covers everything: the first visit makes one silent trip. Sign Out sets landing's own marker; the helper remembers the ended session, so no room signs the browser straight back in.
+- **Room tokens for the owner's reads**: when `LANDING_TOKEN_FILE` holds a room token from hister-login (`mht_…`, scoped to Kura, Niwa and Konbini), it goes to them as `Authorization: Bearer` (over https, or loopback), and Hister's token (`LANDING_HISTER_TOKEN_FILE`) goes to Hister only. Without one, as before until the switch.
+- vaultkit re-vendored.
+
 ## 0.4.1
 
 - **A chunked body is refused** (the 2026-10 sweep, LEAD-2): `PUT /api/prefs` and `POST /signout` read their body with vaultkit's `signin.read_body`, so a `Transfer-Encoding: chunked` body, a duplicate or odd `Content-Length`, an oversized or a short one answers 413 and closes the connection. Before, a chunked body was read as empty and its bytes were parsed as the next request on a kept-alive connection (behind a proxy other than Tailscale Serve).

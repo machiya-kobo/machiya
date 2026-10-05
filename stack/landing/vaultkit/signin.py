@@ -36,7 +36,7 @@ PAGE_HEADERS = [
     ("Content-Type", "text/html; charset=utf-8"),
     ("Cache-Control", "no-store"),
     ("X-Frame-Options", "DENY"),                            # nobody frames the password form (clickjacking)
-    ("Content-Security-Policy", "frame-ancestors 'none'"),
+    ("Content-Security-Policy", shell.CSP.replace("frame-ancestors 'self'", "frame-ancestors 'none'")),   # v0.22
     ("X-Content-Type-Options", "nosniff"),
     ("Referrer-Policy", "same-origin"),
 ]

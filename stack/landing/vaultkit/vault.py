@@ -21,7 +21,7 @@ from urllib.parse import quote
 import markdown
 
 from .git import Git
-from .notes import FRONT_RE, LINK_RE, Note, e, read_notes
+from .notes import FRONT_RE, LINK_RE, Note, e, read_notes, safe_path
 from .sanitize import clean
 
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
@@ -30,6 +30,23 @@ MDIMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 CALLOUT_RE = re.compile(r"^> \[!(\w+)\][+-]?[ \t]*(.*)$", re.M)
 TASK_RE = re.compile(r"<li>(<p>)?\[([ xX])\] ")
 SMALLWEB_AUTOLINK_RE = re.compile(r"<((?:gemini|gopher)://[^\s<>\"']+)>", re.I)   # Markdown autolinks only http(s)
+# v0.22: the oldest Python-Markdown vaultkit runs with. 3.7 to 3.10 on Python 3.13 run out of memory on a note with two
+# unclosed `<!--` in separate paragraphs (their HTML-block preprocessor and the newer html.parser): one note takes a
+# room down. 3.11 renders it in milliseconds.
+MIN_MARKDOWN = (3, 11)
+
+
+def markdown_ok(version):
+    """Is this Python-Markdown version string at least MIN_MARKDOWN?"""
+    parts = re.findall(r"\d+", str(version or ""))[:2]
+    return len(parts) == 2 and tuple(int(p) for p in parts) >= MIN_MARKDOWN
+
+
+if not markdown_ok(getattr(markdown, "__version__", "")):
+    raise ImportError("vaultkit needs Python-Markdown %d.%d or later, found %s: older versions can be driven out of "
+                      "memory by a single note. Install it with pip (pip install 'markdown>=%d.%d'), in a venv if the "
+                      "system's package is older." % (MIN_MARKDOWN + (getattr(markdown, "__version__", "?"),) + MIN_MARKDOWN))
+
 HIDDEN = ("Templates/",)
 IGNORED = ("CLAUDE.md",)            # agent instructions, not notes
 
@@ -68,7 +85,7 @@ class Vault:
         for dirpath, dirnames, filenames in os.walk(self.root):
             dirnames[:] = [d for d in dirnames if not d.startswith(".")]
             for name in filenames:
-                if name.lower().endswith(IMAGE_EXT):
+                if name.lower().endswith(IMAGE_EXT) and not os.path.islink(os.path.join(dirpath, name)):   # v0.22
                     assets.setdefault(name, os.path.relpath(os.path.join(dirpath, name), self.root))
         self.notes, self.by_name, self.assets = notes, by_name, assets
         for n in notes.values():
@@ -90,8 +107,9 @@ class Vault:
         return self.by_name.get(t) or self.by_name.get(t.split("/")[-1])
 
     def tended_dates(self):
-        """{rel: YYYY-MM-DD of the note's latest commit}."""
-        out = self.git("log", "--format=@%as", "--name-only", "--", self.subdir or ".")
+        """{rel: YYYY-MM-DD of the note's latest commit}. v0.22 (KURA-5): core.quotePath=false, so a non-ASCII name
+        (町家.md, café notes.md) isn't printed quoted and octal-escaped, and keeps its date."""
+        out = self.git("-c", "core.quotePath=false", "log", "--format=@%as", "--name-only", "--", self.subdir or ".")
         dates, current = {}, None
         prefix = self.subdir + "/" if self.subdir else ""
         for line in out.splitlines():
@@ -106,11 +124,15 @@ class Vault:
         return self.notes.get(slug + ".md") or self.notes.get(slug)
 
     def asset_path(self, rel):
-        """Absolute path of a vault image, or None (only images the index knows, so no path escapes)."""
+        """Absolute path of a vault image, or None (only images the index knows, so no path escapes; never a symlink,
+        v0.22)."""
         self.index()
         if self.assets.get(os.path.basename(rel)) != rel:
             return None
-        return os.path.join(self.root, rel)
+        try:
+            return safe_path(self.root, rel)
+        except ValueError:
+            return None
 
     # -- rendering -----------------------------------------------------
 

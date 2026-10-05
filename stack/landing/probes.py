@@ -35,7 +35,8 @@ APPS = [
     ("code-import", "code-import", "services", "code into Hister"),
 ]
 NAMES = {k: n for k, n, _, _ in APPS}
-ROOMS_WITH_TOKEN = ("kura", "niwa", "konbini")     # LANDING_TOKEN_FILE goes to these only (never Hister or SearXNG)
+ROOMS_WITH_TOKEN = ("kura", "niwa", "konbini")
+ROOM_TOKEN_RE = re.compile(r"mht_[A-Za-z0-9_-]{43}\Z")      # a room token from hister-login (0.5.0)     # LANDING_TOKEN_FILE goes to these only (never Hister or SearXNG)
 
 # Freshness, in seconds: (behind, broken). "Behind" is drawn calm (a yellow dot); only "broken" is drawn as an alert.
 FRESH = {
@@ -595,17 +596,24 @@ def is_loopback_host(host):
 
 
 def owner_headers(key, target, token="", secret=None):
-    """The owner's credential for a room's owner-only reads (0.2.3: the rooms run AUTH=hister): LANDING_TOKEN_FILE's
-    Bearer as auth_headers says, plus the owner's Hister token (LANDING_HISTER_TOKEN_FILE, re-read when it changes) as
-    X-Access-Token, ONLY for Kura, Konbini and Niwa at their configured address (`target`, from MACHIYA_ROOMS,
-    LANDING_APPS or LANDING_PROBES), over https (or loopback, for tests and a local stack). Callers send it only to
-    URLs under `target` (owner_url), and fetch never follows a redirect, so it can't leave that origin. The open
-    reads (/api/status, /api/health, /api/changelog) never get it."""
+    """The owner's credential for a room's owner-only reads (0.2.3: the rooms run AUTH=hister), ONLY for Kura, Konbini
+    and Niwa at their configured address (`target`, from MACHIYA_ROOMS, LANDING_APPS or LANDING_PROBES), over https (or
+    loopback, for tests and a local stack):
+      - 0.5.0: when LANDING_TOKEN_FILE holds a room token (`mht_…`, from hister-login, scoped to those rooms) it goes as
+        `Authorization: Bearer`, and Hister's token never goes to a room (the owner's 2026-10-05 decision: rooms stop
+        taking Hister's raw token);
+      - otherwise (until the switch): LANDING_TOKEN_FILE's Bearer as auth_headers says, plus the owner's Hister token
+        (LANDING_HISTER_TOKEN_FILE, re-read when it changes) as X-Access-Token.
+    Callers send it only to URLs under `target` (owner_url), and fetch never follows a redirect, so it can't leave that
+    origin. The open reads (/api/status, /api/health, /api/changelog) never get it."""
+    parts = urlsplit(target or "")
+    reachable = key in ROOMS_WITH_TOKEN and parts.netloc and (parts.scheme == "https" or (
+        parts.scheme == "http" and is_loopback_host(parts.hostname)))
+    if token and ROOM_TOKEN_RE.match(token):
+        return {"Authorization": "Bearer " + token} if reachable else {}
     h = auth_headers(key, target, token)
     value = secret.get() if hasattr(secret, "get") else (secret or "")
-    parts = urlsplit(target or "")
-    if value and key in ROOMS_WITH_TOKEN and parts.netloc and (parts.scheme == "https" or (
-            parts.scheme == "http" and is_loopback_host(parts.hostname))):
+    if value and reachable:
         h["X-Access-Token"] = value
     return h
 
