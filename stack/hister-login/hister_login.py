@@ -149,12 +149,9 @@ class Settings:
             p = urlsplit(o)
             hosts.append(p.hostname + ("" if p.port in (None, 443) else ":%d" % p.port))
         self.return_hosts = sorted(set(hosts) | {own})
-        # the rooms by name (token scopes: "kura" -> its origin), from MACHIYA_ROOMS; machiya = landing
-        self.rooms = {}
-        for key, url in shell.rooms(env).items():
-            o = histerauth.origin_of(url)
-            if o and key not in ("hister", "searxng") and o != self.origin:
-                self.rooms[key] = o
+        # the rooms by name (token scopes: "kura" -> its origin), from MACHIYA_ROOMS (machiya = landing) and
+        # HISTER_LOGIN_TOKEN_SERVICES (machiya-mcp, smallweb: services with a gate of their own that take room tokens)
+        self.rooms = {k: o for k, o in token_rooms(env).items() if o != self.origin}
         self.app_schemes = [s.strip().lower() for s in (env.get("HISTER_LOGIN_APP_SCHEMES") or "shiori").split(",")
                             if s.strip()]
         self.cookie_domain = (env.get("MACHIYA_COOKIE_DOMAIN") or "").strip().lstrip(".")
@@ -168,6 +165,22 @@ class Settings:
         self.providers = [p.strip().lower() for p in (env.get("HISTER_LOGIN_PROVIDERS") or "").split(",")
                           if p.strip()]
         self.oidc_label = (env.get("HISTER_LOGIN_OIDC_LABEL") or "Tailscale").strip()
+
+
+def token_rooms(env):
+    """{name: origin} a room token may be scoped to: MACHIYA_ROOMS (minus hister, searxng and shiori: Shiori is a
+    client) and HISTER_LOGIN_TOKEN_SERVICES (name=url, comma-separated: machiya-mcp, smallweb)."""
+    out = {}
+    for key, url in shell.rooms(env).items():
+        o = histerauth.origin_of(url)
+        if o and key not in ("hister", "searxng", "shiori"):
+            out[key] = o
+    for item in (env.get("HISTER_LOGIN_TOKEN_SERVICES") or "").split(","):
+        key, _, url = item.strip().partition("=")
+        o = histerauth.origin_of(url.strip())
+        if key.strip() and o:
+            out[key.strip()] = o
+    return out
 
 
 def prefs_path(env):
@@ -933,7 +946,8 @@ def message_page(headers, heading, text, actions=()):
     return render(headers, heading + " · Machiya", shell.message(heading, text, actions))
 
 
-ROOM_NAMES = {"kura": "Kura", "niwa": "Niwa", "konbini": "Konbini", "machiya": "Machiya", "shiori": "Shiori"}
+ROOM_NAMES = {"kura": "Kura", "niwa": "Niwa", "konbini": "Konbini", "machiya": "Machiya", "shiori": "Shiori",
+              "machiya-mcp": "machiya-mcp", "smallweb": "smallweb"}
 
 
 def room_name(s, origin):
@@ -1819,7 +1833,7 @@ def token_cli(argv, env=None, out=sys.stdout):
     a = ap.parse_args(argv)
     say = lambda *x: print(*x, file=out)                    # noqa: E731
     store = Store((env.get("HISTER_LOGIN_DB") or "/data/hister-login.sqlite3").strip())
-    named = {k: histerauth.origin_of(u) for k, u in shell.rooms(env).items()}
+    named = token_rooms(env)
     if a.what == "list":
         for t in store.tokens_of():
             say("%s  %-12s %-28s %s  made %s  last used %s%s" % (

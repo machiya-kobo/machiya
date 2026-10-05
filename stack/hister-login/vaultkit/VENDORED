@@ -1,11 +1,11 @@
-# vaultkit v0.21.0-33-g2603dcb - vendored by vendor.sh; don't edit these files
+# vaultkit v0.21.0-35-gb403f9d - vendored by vendor.sh; don't edit these files
 f1fd40bb17a311a40d19441a3e661515d499b24587ccc4737bb67a2db0d4ffe3  changelog.py
 5b563e708c9318bba58a413b101d62b037906b1dcd11d38b0aabe3c8e951c488  envfile.py
 457c1710b89fc9b645c7c175070d4001046d12f0e06b3fa14aa63ba936a21647  frontmatter.py
 97103661884266e3cad0b9aa4b06219095f831a897bb92553db5e6fba4697675  front.py
 fe48008228cf938d992334db68879bfa086fc74ee6ff39e26cddf2c2eb1b4d38  git.py
 586b76c36b6b4f0ff8aaa339fd0eae23a4f1facf5d7f2a6dfc9e9aae6f1df9ef  gitsync.py
-b9c2c0000930ee0c5ed1ab411bed3baf8bdcc5de6a62352440e16842926c7769  histerauth.py
+927607832e32ea2f70bd32757a57adbe445a21929f5e20f20c219c2445b003eb  histerauth.py
 606c66689bedbaabce7ad7bacc0ab041e80ac963541443ef7c5ee25c968bb533  identity.py
 c2cac06d665122d547f770c9b5f832f448f9a56c5dbe72bd4ed408835db4c706  __init__.py
 73317332d2f785f268b7fdcef6c0b3740ebceb18448d40b6b390fc3722fcd347  notes.py
