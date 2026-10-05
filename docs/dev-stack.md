@@ -168,7 +168,7 @@ These are upstream's Dockerfile steps without its Linux-only static linking (`-l
 
 | Service | Natively |
 |---|---|
-| the rooms, landing, hister-login, machiya-mcp, smallweb, feed-import, code-import, vault-mirror, the stub OIDC provider, the fixtures, the fake NewsBlur, Forgejo and GitHub, the front | Python 3.11+ with `markdown` and `pyyaml`, plus `git` and `openssl` |
+| the rooms, landing, hister-login, machiya-mcp, smallweb, feed-import, code-import, vault-mirror, the stub OIDC provider, the fixtures, the fake NewsBlur, Forgejo and GitHub, the front | Python 3.11+ with `markdown` 3.11+ and `pyyaml`, plus `git` and `openssl` |
 | Hister | a `hister` binary for the OS (`HISTER_BIN=…` at init, or on `PATH`). It is Go with cgo (SQLite, sqlite-vec): build it with Go 1.26 and a C compiler. Upstream ships Linux (amd64, arm64), macOS and Windows binaries; the Linux ones work for `--hister-bin` (tested on arm64) |
 | SearXNG | left out; run it yourself from a checkout with `SEARXNG_SETTINGS_PATH=compose/dev/config/searxng.yml` on `127.0.0.1:19237` if you need it |
 
@@ -182,7 +182,7 @@ Haiku has no Docker or Podman, so the dev stack runs there with `--native`. What
 
   ```sh
   pkgman install -y python3.14 git openssl3
-  python3 -m ensurepip --altinstall && python3 -m pip install markdown pyyaml tzdata
+  python3 -m ensurepip --altinstall && python3 -m pip install 'markdown>=3.11' pyyaml tzdata
   ```
 
   **Proven 2026-10-05** on `tv-haiku` (R1/beta6 x86_64), and again on a fresh VM in the docs review (hrev59866): `tools/dev-test tv-haiku --packages --native --hister-via tv-debian` = 16/16 (SearXNG skipped). `pkgman install` is a no-op on a fresh R1/beta6 (all preinstalled); pip warns about running as root, which is harmless (Haiku's `user` is uid 0), and a plain `python3 -m venv` works too. Haiku quirks:

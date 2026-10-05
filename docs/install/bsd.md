@@ -28,15 +28,15 @@ The apps trust the `Tailscale-User-Login` header to know the owner. `tailscale s
 
 | | FreeBSD | NetBSD | OpenBSD |
 |---|---|---|---|
-| install | `pkg install -y python312 py312-sqlite3 py312-markdown py312-pyyaml git-lite curl` | `pkg_add python313 py313-markdown py313-yaml git-base curl daemonize` with `PKG_PATH` set (below) | `pkg_add python%3 py3-markdown py3-yaml git curl` |
+| install | `pkg install -y python312 py312-sqlite3 py312-pip py312-pyyaml git-lite curl` | `pkg_add python313 py313-pip py313-yaml git-base curl daemonize` with `PKG_PATH` set (below) | `pkg_add python%3 py3-pip py3-yaml git curl` |
 | Python | `/usr/local/bin/python3.12` (no `python3` name) | `/usr/pkg/bin/python3.13` (no `python3` name) | `/usr/local/bin/python3` |
 | note | **`py312-sqlite3` is separate**: FreeBSD splits `sqlite3` out of Python | sqlite3 is inside `python313` | sqlite3 is inside the Python package |
 
 - **A clean FreeBSD or NetBSD has no `python3` name**, only `python3.12` or `python3.13`. Make one (the Quickstarts do): `sudo ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3` on FreeBSD, `sudo ln -sf /usr/pkg/bin/python3.13 /usr/pkg/bin/python3` on NetBSD (then `/usr/pkg/bin` must be on the service's PATH; the rc.d scripts set it).
-- **A clean NetBSD has no `pkgin`** (it is a separate package), so install with `pkg_add` and point it at the binary repository first: `sudo env PKG_PATH="https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -p)/$(uname -r | cut -d_ -f1)/All" pkg_add python313 py313-markdown py313-yaml git-base curl daemonize`. If you prefer `pkgin`, add it the same way (`pkg_add pkgin`) and configure its repository first.
+- **A clean NetBSD has no `pkgin`** (it is a separate package), so install with `pkg_add` and point it at the binary repository first: `sudo env PKG_PATH="https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -p)/$(uname -r | cut -d_ -f1)/All" pkg_add python313 py313-pip py313-yaml git-base curl daemonize`. If you prefer `pkgin`, add it the same way (`pkg_add pkgin`) and configure its repository first.
 - A clean FreeBSD, NetBSD or Debian also has no `git` or `curl`: they are in the lists above. Run the privileged commands as root (`su -`), or through `sudo` or `doas` once one is set up: a fresh FreeBSD or NetBSD has no `sudo` (install it as root: `pkg install sudo`, or `pkg_add sudo` with `PKG_PATH` as above, then allow your user with `visudo`), and a fresh OpenBSD has `doas` but no `/etc/doas.conf` (as root: `echo 'permit persist :wheel' > /etc/doas.conf`).
-- The apps need `markdown` 3.7 or later; every package listed ships 3.7–3.10.
-- They need `pyyaml` 6, and nothing from pip.
+- The apps need `markdown` **3.11 or later** (vaultkit refuses to start with an older one: 3.7–3.10 on Python 3.13 can be driven out of memory by a single note). The BSDs' packages ship 3.7–3.10, so install it with pip as root after the packages, once the `python3` link below exists: `python3 -m pip install 'markdown>=3.11'`. If pip refuses to touch the system Python, make a venv (`python3 -m venv --system-site-packages /usr/local/lib/machiya-venv`, then its `bin/pip install 'markdown>=3.11'`) and use its `bin/python3` wherever this guide says `python3`.
+- They need `pyyaml` 6 (the package is fine), and nothing else from pip.
 - Niwa and Konbini also call the `openssl` CLI. It's in base everywhere; on OpenBSD it's LibreSSL.
 - FreeBSD's quarterly branch moves the default Python now and then. After an upgrade, `pkg install` the matching `py3NN-*` packages again.
 

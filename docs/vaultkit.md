@@ -211,7 +211,7 @@ Konbini subclasses `Vault` to plug in its own cache: `key()` returns the board's
 
 ## Tests
 
-`python3 -m unittest discover -s tests`, run in any service image (it needs `markdown` and `pyyaml`, which a bare host may lack):
+`python3 -m unittest discover -s tests`, run in any service image (it needs `markdown` 3.11 or later and `pyyaml`, which a bare host may lack; since v0.22 vaultkit refuses to import with an older markdown, which can run out of memory on one note):
 
 ```sh
 docker run --rm --user 1000:1000 -e HOME=/tmp -v "$PWD":/v -w /v --entrypoint python3 <registry>/konbini:<tag> -m unittest discover -s tests

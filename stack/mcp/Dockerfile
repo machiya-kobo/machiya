@@ -4,7 +4,7 @@
 FROM public.ecr.aws/docker/library/python:3.13-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client ca-certificates tzdata \
  && rm -rf /var/lib/apt/lists/* \
- && pip install --no-cache-dir "markdown>=3.7" pyyaml==6.0.3 \
+ && pip install --no-cache-dir "markdown>=3.11" pyyaml==6.0.3 \
  && useradd --uid 1000 --home-dir /data --no-create-home --shell /usr/sbin/nologin mcp
 WORKDIR /app
 COPY mcp.py backend.py envelope.py textver.py notes_writer.py CHANGELOG.md /app/

@@ -4,10 +4,10 @@ Thanks for helping. This is the umbrella repository of [Machiya](README.md): the
 
 ## Tests
 
-Python 3.11 or later, plus `markdown` (3.7 or later) and `pyyaml`. No build step.
+Python 3.11 or later, plus `markdown` (3.11 or later: older versions can run out of memory on one note) and `pyyaml`. No build step.
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install 'markdown>=3.7' pyyaml
+python3 -m venv .venv && .venv/bin/pip install 'markdown>=3.11' pyyaml
 .venv/bin/python -m unittest discover -s tests          # vaultkit, identity, sign-in, the dev stack's pieces
 for s in mcp landing hister-login smallweb feed-import code-import; do
   ( cd stack/$s && ../../.venv/bin/python -m unittest discover -s tests ) || echo "FAILED: $s"

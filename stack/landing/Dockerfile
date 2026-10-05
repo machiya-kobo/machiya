@@ -4,7 +4,7 @@
 FROM public.ecr.aws/docker/library/python:3.13-slim
 RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
  && rm -rf /var/lib/apt/lists/* \
- && pip install --no-cache-dir "markdown>=3.7" pyyaml==6.0.3 \
+ && pip install --no-cache-dir "markdown>=3.11" pyyaml==6.0.3 \
  && useradd --uid 1000 --home-dir /data --no-create-home --shell /usr/sbin/nologin landing \
  && mkdir -p /data && chown 1000:1000 /data
 WORKDIR /app
