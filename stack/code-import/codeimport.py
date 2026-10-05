@@ -1,8 +1,8 @@
 """code-import: the owner's repos on Forgejo and GitHub, searchable in Hister (Machiya, stack/code-import).
 
 Every CODE_IMPORT_INTERVAL seconds:
-  1. every forge lists every repo of its owners; forks, archived repos, mirrors, CODE_IMPORT_EXCLUDE (obsidian, pass-store,
-     backup) and the losing half of a twin (a repo on both forges, CODE_IMPORT_TWINS) are left out, and a repo that
+  1. every forge lists every repo of its owners; forks, archived repos, mirrors, the names in CODE_IMPORT_EXCLUDE (none
+     by default) and the losing half of a twin (a repo on both forges, CODE_IMPORT_TWINS) are left out, and a repo that
      was imported before and is now left out, gone, renamed or moved has its documents withdrawn;
   2. per repo: a card (name, description, topics); when the repo changed (its push stamp), on its first run and on a
      full run, the README and the markdown docs of the default branch and the releases;
@@ -46,12 +46,12 @@ from forges import RETRY_DELAYS, ForgeError, Repo, iso          # noqa: E402
 from github import GitHub                                      # noqa: E402
 from store import Store                                        # noqa: E402
 
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 DOC_V = 1               # the documents' shape: part of every fingerprint, so a bump re-sends everything once
 FINAL = ("added", "known", "refused", "rejected", "skipped")
 DOC_EXTS = (".md", ".markdown", ".mdown", ".mkd")
 README_RE = re.compile(r"^readme(\.(md|markdown|mdown|mkd|txt|rst|org))?$", re.I)
-DEFAULT_EXCLUDE = "obsidian,pass-store,backup"
+DEFAULT_EXCLUDE = ""                    # none by default (0.1.4): a deployment names its own
 # Vendored, sample and test trees (owner, 2026-10-05): READMEs, docs/ and the other markdown stay. Any depth.
 DEFAULT_DOC_SKIP = tuple(p for d in ("node_modules", "vendor", "third_party", "sample-vault", "tests", "test", "fixtures",
                                      "examples") for p in (d + "/*", "*/" + d + "/*"))

@@ -1,5 +1,9 @@
 # Changelog: code-import
 
+## 0.1.4
+
+- **`CODE_IMPORT_EXCLUDE` is empty by default.** It named three repos (`obsidian`, `pass-store`, `backup`), which were one deployment's choices, not the product's. A deployment that relied on the default must now set it: to keep the old behaviour, `CODE_IMPORT_EXCLUDE=obsidian,pass-store,backup`. Without it those repos, if they exist, are imported on the next run. The setting itself is unchanged (`name` or `owner/name`, any case).
+
 ## 0.1.3
 
 - **The secret scan catches more formats** (the 2026-10 sweep, MACH-F-6):

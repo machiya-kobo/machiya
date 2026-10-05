@@ -107,7 +107,7 @@ Also verified on that Hister:
 | `CODE_IMPORT_GITHUB_TOKEN_FILES` | — | `owner=/path/to/token,…`: one **fine-grained, read-only** token per resource owner (Metadata, Contents, Issues, Pull requests: read), e.g. `you=/secrets/github-you-token,your-org=/secrets/github-your-org-token`; unset: no GitHub. Never a classic token: its `repo` scope can write |
 | `CODE_IMPORT_GITHUB_API` | `https://api.github.com` | |
 | `CODE_IMPORT_TWINS` | — | `github:your-org=forgejo:your-org,forgejo:you=github:you`: a right-hand repo whose name matches a left-hand one is the same repo, indexed once, on the left |
-| `CODE_IMPORT_EXCLUDE` | `obsidian,pass-store,backup` | repo names (`name` or `owner/name`) never imported |
+| `CODE_IMPORT_EXCLUDE` | — | comma list of repo names (`name` or `owner/name`, any case) never imported, e.g. `notes,password-store,backup`: a repo whose text must never reach Hister (a vault, a password store). Empty by default (0.1.4; it named three repos before). Adding a name withdraws that repo's documents on its source's next completed run |
 | `CODE_IMPORT_HISTER_URL` | — | `http://hister:4433` (required, except for `--dry-run`) |
 | `CODE_IMPORT_HISTER_TOKEN_FILE` | — | the owner's Hister token, sent as `X-Access-Token` on every Hister call ([contracts/hister.md](../../docs/contracts/hister.md)) |
 | `CODE_IMPORT_SECRETS` | `redact` | `refuse`: a document with a likely secret isn't sent at all |

@@ -33,7 +33,7 @@ import tokens                                                   # noqa: E402
 from fake_forgejo import FakeForgejo                            # noqa: E402
 from fake_github import FakeGitHub                              # noqa: E402
 from forgejo import Forgejo                                     # noqa: E402
-from forges import Client, ForgeError                           # noqa: E402
+from forges import Client, ForgeError, Repo                     # noqa: E402
 from github import GitHub                                       # noqa: E402
 from store import Store                                         # noqa: E402
 
@@ -41,6 +41,7 @@ FJ_TOKEN, GH_LANTERN, GH_WORKSHOP, HISTER_TOKEN = "fj-test-token", "gh-lantern-t
 FJ_ROOT = "https://forgejo.example.ts.net"
 GH_WEB = "https://github.example"
 TWINS = "github:workshop-kobo=forgejo:workshop,forgejo:lantern=github:lantern"
+EXCLUDE = "obsidian,backup"            # the seeds' excluded names (CODE_IMPORT_EXCLUDE is empty by default)
 
 
 def load(path):
@@ -160,7 +161,7 @@ class Base(unittest.TestCase):
                   GitHub(self.gh_api, [("lantern", GH_LANTERN), ("workshop-kobo", GH_WORKSHOP)], gap=0, cache=store,
                          **client)]
         h = histermod.Hister(H_URL, HISTER_TOKEN) if hister else None
-        return codeimport.Importer(forges, store, h, rules=codeimport.Rules(twins=codeimport.parse_twins(TWINS)),
+        return codeimport.Importer(forges, store, h, rules=codeimport.Rules(EXCLUDE, twins=codeimport.parse_twins(TWINS)),
                                    dry_run=dry_run, out=self.lines.append, clock=lambda: self.now, **kw)
 
     def fj_repo(self, name):
@@ -202,6 +203,15 @@ class Units(unittest.TestCase):
         self.assertEqual(codeimport.repo_key("owner", "Dot--Files"), "owner__dot_files")
         for owner, name in (("machiya-kobo", "kura"), ("a.b", "c:d"), ("x", "2048-game")):
             self.assertRegex(codeimport.repo_key(owner, name), r"^[a-z0-9_]+$")
+
+    def test_exclude_is_empty_by_default(self):
+        """0.1.4: no repo name is excluded unless CODE_IMPORT_EXCLUDE names it (`name` or `owner/name`, any case)."""
+        repos = [Repo("forgejo", str(i), "lantern", n, "https://f.example/lantern/" + n)
+                 for i, n in enumerate(("obsidian", "pass-store", "backup", "Notes"))]
+        self.assertEqual(codeimport.DEFAULT_EXCLUDE, "")
+        self.assertTrue(all(ok for ok, _, _ in codeimport.Rules().decide(repos).values()))
+        left = codeimport.Rules(" notes , lantern/BACKUP ").decide(repos)
+        self.assertEqual({k[1]: why for k, (ok, why, _) in left.items() if not ok}, {"2": "excluded", "3": "excluded"})
 
     def test_twins_setting(self):
         self.assertEqual(codeimport.parse_twins(TWINS), [(("github", "workshop-kobo"), ("forgejo", "workshop")),
@@ -810,7 +820,7 @@ class CommandLine(Base):
                "CODE_IMPORT_FORGEJO_URL": self.fj_api, "CODE_IMPORT_FORGEJO_TOKEN_FILE": files["fj"],
                "CODE_IMPORT_FORGEJO_OWNERS": "lantern,workshop", "CODE_IMPORT_GITHUB_API": self.gh_api,
                "CODE_IMPORT_GITHUB_TOKEN_FILES": "lantern=%s,workshop-kobo=%s" % (files["ghl"], files["ghw"]),
-               "CODE_IMPORT_TWINS": TWINS, "CODE_IMPORT_GAP": "0", "CODE_IMPORT_HISTER_URL": H_URL,
+               "CODE_IMPORT_TWINS": TWINS, "CODE_IMPORT_EXCLUDE": EXCLUDE, "CODE_IMPORT_GAP": "0", "CODE_IMPORT_HISTER_URL": H_URL,
                "CODE_IMPORT_RETRY_DELAYS": "0.01,0.01,0.01",
                "CODE_IMPORT_HISTER_TOKEN_FILE": files["hister"]}
         env.update(kw)

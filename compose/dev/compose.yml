@@ -488,6 +488,7 @@ services:
       CODE_IMPORT_GITHUB_API: http://fake-github:8080
       CODE_IMPORT_GITHUB_TOKEN_FILES: lantern=/secrets/github-lantern-token,workshop-kobo=/secrets/github-workshop-token
       CODE_IMPORT_TWINS: github:workshop-kobo=forgejo:workshop,forgejo:lantern=github:lantern
+      CODE_IMPORT_EXCLUDE: obsidian,backup                    # the seeds' excluded names (none by default)
       CODE_IMPORT_HISTER_URL: http://hister:4433
       CODE_IMPORT_HISTER_TOKEN_FILE: /secrets/owner-token
       CODE_IMPORT_INTERVAL: "300"

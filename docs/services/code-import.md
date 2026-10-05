@@ -92,7 +92,7 @@ The machiya plugin's skills and machiya-mcp's query suffix gain ` -metadata.sour
     - `CODE_IMPORT_FORGEJO_OWNERS=you,your-org`
     - `CODE_IMPORT_GITHUB_TOKEN_FILES=you=/secrets/github-you-token,your-org=/secrets/github-your-org-token`
     - `CODE_IMPORT_TWINS=github:your-org=forgejo:your-org` (a repo on both is indexed once, from the left-hand forge)
-    - `CODE_IMPORT_EXCLUDE=…` (repos never to index)
+    - `CODE_IMPORT_EXCLUDE=notes,password-store` (repos never to index, such as the vault itself or a password store; none by default since code-import 0.1.4)
     - `CODE_IMPORT_HISTER_URL=http://hister:4433`, `CODE_IMPORT_HISTER_TOKEN_FILE`
     - `CODE_IMPORT_PAUSE`: Hister's backup window, as feed-import has it.
 - **Hister's aliases:** add `@code` = `metadata.source:code`, and change `@pages` to `* -label:vault -metadata.source:vault -metadata.source:code` ([contracts/hister.md](../contracts/hister.md#aliases)).
