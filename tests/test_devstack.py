@@ -290,6 +290,17 @@ class Waits(unittest.TestCase):
         self.assertIn("vault-mirror exited (1) before the vault mirror was ready", err.getvalue())
 
 
+class DevTestPackages(unittest.TestCase):
+    def test_debian_native_gets_a_venv_not_docker(self):
+        dt = load("devtest", os.path.join(ROOT, "tools", "dev-test"))
+        native, docker = dt.package_recipes(True)["debian"], dt.package_recipes(False)["debian"]
+        self.assertIn("python3-venv", native)
+        self.assertIn("'markdown>=3.11'", native)
+        self.assertNotIn("docker", native)
+        self.assertIn("docker.io", docker)
+        self.assertEqual(dt.package_recipes(True)["FreeBSD"], dt.PACKAGES["FreeBSD"])
+
+
 class SecondStack(unittest.TestCase):
     """A second stack beside a standing one: its own compose project and loopback address."""
 
