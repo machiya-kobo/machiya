@@ -9,7 +9,10 @@
 # app reads them itself (--env-file, or KURA_ENV_FILE). Change the flags with `rcctl set kura flags ...`.
 # The user _kura has HOME=/var/db/kura (useradd -d), which is also its data directory.
 
+# The venv of docs/install/bsd.md §2 (markdown 3.11; OpenBSD's pip refuses the system Python, PEP 668) when it
+# exists, else the system python3. rcctl can't change `daemon`: edit these lines for another interpreter.
 daemon="/usr/local/bin/python3"
+[ -x /usr/local/lib/machiya-venv/bin/python3 ] && daemon="/usr/local/lib/machiya-venv/bin/python3"
 daemon_flags="-u /usr/local/share/kura/kura.py --env-file /etc/kura.env"
 daemon_user="_kura"
 daemon_logger="daemon.info"
