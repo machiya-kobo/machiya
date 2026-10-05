@@ -1322,3 +1322,24 @@ class VendoredTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JournalTest(unittest.TestCase):
+    """WAL everywhere but Haiku, whose SQLite can't share a WAL file between the server and the token CLI."""
+
+    def mode(self, platform):
+        d = tempfile.mkdtemp(dir=os.environ.get("TMPDIR", "/var/tmp"))
+        self.addCleanup(shutil.rmtree, d, True)
+        real = sys.platform
+        sys.platform = platform
+        try:
+            store = hl.Store(os.path.join(d, "h.sqlite3"))
+        finally:
+            sys.platform = real
+        return store.db.execute("PRAGMA journal_mode").fetchone()[0]
+
+    def test_wal_on_linux(self):
+        self.assertEqual(self.mode("linux"), "wal")
+
+    def test_rollback_journal_on_haiku(self):
+        self.assertEqual(self.mode("haiku1"), "delete")

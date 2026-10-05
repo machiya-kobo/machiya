@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.3.1
+
+- **Haiku:** the store keeps SQLite's rollback journal there instead of WAL. Haiku's SQLite can't share a WAL file between processes, so `hister_login.py token mint` failed with "locking protocol" while the server ran (found by the fleet run's Haiku leg). Everywhere else it stays WAL.
+
 ## 0.3.0
 
 - **A cookie per room, host-only** (decided 2026-10-05, after the sweep's LEAD-1/KONB-2). The helper's own session is now `__Host-machiya_sso` on Hister's host only, and each room keeps a `__Host-machiya_sso_<room>` of its own (vaultkit `histerauth`, the rooms only re-vendor):

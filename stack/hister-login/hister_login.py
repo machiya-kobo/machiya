@@ -61,7 +61,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -348,7 +348,9 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.lock = threading.Lock()
         with self.lock:
-            if path != ":memory:":
+            # WAL lets the token CLI read while the server runs. Haiku's SQLite can't share WAL between
+            # processes ("locking protocol" when the CLI opens a WAL file), so there it keeps the rollback journal.
+            if path != ":memory:" and not sys.platform.startswith("haiku"):
                 self.db.execute("PRAGMA journal_mode=WAL")
             self.db.execute("PRAGMA busy_timeout=3000")
             self.db.executescript(SCHEMA)
