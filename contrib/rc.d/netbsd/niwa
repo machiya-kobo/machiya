@@ -14,7 +14,8 @@
 #   niwa_config  [/etc/niwa.env]           its settings, KEY=VALUE lines (read by the app: NIWA_ENV_FILE)
 #   niwa_dir     [/var/db/niwa]            its data directory and HOME (owned by niwa_runas)
 #   niwa_code    [/usr/pkg/share/niwa]     the app directory (owned by root)
-#   niwa_python  [/usr/pkg/bin/python3.13]   (pkgsrc installs python3.13, no python3 link)
+#   niwa_python  [/usr/local/lib/machiya-venv/bin/python3 when it is executable (the venv of docs/install/bsd.md §2,
+#                markdown 3.11), else /usr/pkg/bin/python3.13]
 
 $_rc_subr_loaded . /etc/rc.subr
 
@@ -26,7 +27,11 @@ load_rc_config $name
 : ${niwa_config:=/etc/niwa.env}
 : ${niwa_dir:=/var/db/niwa}
 : ${niwa_code:=/usr/pkg/share/niwa}
-: ${niwa_python:=/usr/pkg/bin/python3.13}
+if [ -x /usr/local/lib/machiya-venv/bin/python3 ]; then
+    : ${niwa_python:=/usr/local/lib/machiya-venv/bin/python3}
+else
+    : ${niwa_python:=/usr/pkg/bin/python3.13}
+fi
 
 pidfile="/var/run/${name}/${name}.pid"
 logfile="/var/log/${name}/${name}.log"

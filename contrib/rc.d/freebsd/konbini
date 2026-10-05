@@ -14,7 +14,8 @@
 #   konbini_config  [/usr/local/etc/konbini.env]     its settings, KEY=VALUE lines (read by the app: KANBAN_ENV_FILE)
 #   konbini_dir     [/var/db/konbini]                its data directory and HOME (owned by konbini_runas)
 #   konbini_code    [/usr/local/share/konbini]       the app directory (owned by root)
-#   konbini_python  [/usr/local/bin/python3.12]
+#   konbini_python  [/usr/local/lib/machiya-venv/bin/python3 when it is executable (the venv of docs/install/bsd.md §2,
+#                   markdown 3.11), else /usr/local/bin/python3.12]
 #
 # Not konbini_user or konbini_env_file: rc.subr would su on top of daemon -u, and would source the settings file as
 # shell (expanding $ and breaking on values with spaces). The app reads the file itself, literally.
@@ -30,7 +31,11 @@ load_rc_config $name
 : ${konbini_config:=/usr/local/etc/konbini.env}
 : ${konbini_dir:=/var/db/konbini}
 : ${konbini_code:=/usr/local/share/konbini}
-: ${konbini_python:=/usr/local/bin/python3.12}
+if [ -x /usr/local/lib/machiya-venv/bin/python3 ]; then
+    : ${konbini_python:=/usr/local/lib/machiya-venv/bin/python3}
+else
+    : ${konbini_python:=/usr/local/bin/python3.12}
+fi
 
 pidfile=/var/run/${name}.pid
 procname=/usr/sbin/daemon

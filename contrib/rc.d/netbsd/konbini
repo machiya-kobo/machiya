@@ -14,7 +14,8 @@
 #   konbini_config  [/etc/konbini.env]           its settings, KEY=VALUE lines (read by the app: KANBAN_ENV_FILE)
 #   konbini_dir     [/var/db/konbini]            its data directory and HOME (owned by konbini_runas)
 #   konbini_code    [/usr/pkg/share/konbini]     the app directory (owned by root)
-#   konbini_python  [/usr/pkg/bin/python3.13]   (pkgsrc installs python3.13, no python3 link)
+#   konbini_python  [/usr/local/lib/machiya-venv/bin/python3 when it is executable (the venv of docs/install/bsd.md §2,
+#                   markdown 3.11), else /usr/pkg/bin/python3.13]
 
 $_rc_subr_loaded . /etc/rc.subr
 
@@ -26,7 +27,11 @@ load_rc_config $name
 : ${konbini_config:=/etc/konbini.env}
 : ${konbini_dir:=/var/db/konbini}
 : ${konbini_code:=/usr/pkg/share/konbini}
-: ${konbini_python:=/usr/pkg/bin/python3.13}
+if [ -x /usr/local/lib/machiya-venv/bin/python3 ]; then
+    : ${konbini_python:=/usr/local/lib/machiya-venv/bin/python3}
+else
+    : ${konbini_python:=/usr/pkg/bin/python3.13}
+fi
 
 pidfile="/var/run/${name}/${name}.pid"
 logfile="/var/log/${name}/${name}.log"

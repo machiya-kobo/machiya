@@ -14,7 +14,8 @@
 #   niwa_config  [/usr/local/etc/niwa.env]     its settings, KEY=VALUE lines (read by the app: NIWA_ENV_FILE)
 #   niwa_dir     [/var/db/niwa]                its data directory and HOME (owned by niwa_runas)
 #   niwa_code    [/usr/local/share/niwa]       the app directory (owned by root)
-#   niwa_python  [/usr/local/bin/python3.12]
+#   niwa_python  [/usr/local/lib/machiya-venv/bin/python3 when it is executable (the venv of docs/install/bsd.md §2,
+#                markdown 3.11), else /usr/local/bin/python3.12]
 #
 # Not niwa_user or niwa_env_file: rc.subr would su on top of daemon -u, and would source the settings file as
 # shell (expanding $ and breaking on values with spaces). The app reads the file itself, literally.
@@ -30,7 +31,11 @@ load_rc_config $name
 : ${niwa_config:=/usr/local/etc/niwa.env}
 : ${niwa_dir:=/var/db/niwa}
 : ${niwa_code:=/usr/local/share/niwa}
-: ${niwa_python:=/usr/local/bin/python3.12}
+if [ -x /usr/local/lib/machiya-venv/bin/python3 ]; then
+    : ${niwa_python:=/usr/local/lib/machiya-venv/bin/python3}
+else
+    : ${niwa_python:=/usr/local/bin/python3.12}
+fi
 
 pidfile=/var/run/${name}.pid
 procname=/usr/sbin/daemon

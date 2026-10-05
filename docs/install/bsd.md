@@ -2,7 +2,7 @@
 
 Native installs, packages only, no ports. Covers FreeBSD 14/15, NetBSD 10 and OpenBSD 7.7–7.9. The rc.d scripts are in [`contrib/rc.d/`](../../contrib/rc.d/).
 
-**Tested on** (2026-10-04/05, clean test VMs, amd64): FreeBSD 15.1 (Kura as an rc.d service; all three rooms natively), NetBSD 11.0 and OpenBSD 7.9 (Kura and Niwa as rc.d services), with this guide. OpenBSD's Python has no `hashlib.scrypt`: the apps start there from vaultkit v0.21.0 (Kura 0.7.0, Niwa 0.5.0, Konbini 0.12.0), and only the identity file's password features refuse. The rooms' own BSD Quickstarts and the [dev stack](../dev-stack.md) ran on all three. Again from vaultkit v0.22.0 (Kura 0.8.0, Niwa 0.6.0, Konbini 0.13.0, 2026-10-05), which needs `markdown` 3.11: Kura as an rc.d service on FreeBSD 15.1 and NetBSD 11.0 (with the system pip, and with the venv through `kura_python`) and on OpenBSD 7.9 (the venv, with the script's `daemon=` on the venv's python3), and the dev stack 22/22 on all three.
+**Tested on** (2026-10-04/05, clean test VMs, amd64): FreeBSD 15.1 (Kura as an rc.d service; all three rooms natively), NetBSD 11.0 and OpenBSD 7.9 (Kura and Niwa as rc.d services), with this guide. OpenBSD's Python has no `hashlib.scrypt`: the apps start there from vaultkit v0.21.0 (Kura 0.7.0, Niwa 0.5.0, Konbini 0.12.0), and only the identity file's password features refuse. The rooms' own BSD Quickstarts and the [dev stack](../dev-stack.md) ran on all three. Again with vaultkit v0.22, which needs `markdown` 3.11 (Kura 0.9.0, Niwa 0.6.1, Konbini 0.13.0, 2026-10-05): this guide as written on FreeBSD 15.1, NetBSD 11.0 and OpenBSD 7.9, from the packages and the venv (§2) to Kura, Niwa and Konbini as rc.d services that found the venv by themselves, each on 127.0.0.1 only behind the owner gate; and the dev stack 22/22 on all three.
 
 **Needs** apps that read `<APP>_BIND` and an env file (`<APP>_ENV_FILE` or `--env-file`, from vaultkit's `envfile`):
 
@@ -42,7 +42,7 @@ The apps trust the `Tailscale-User-Login` header to know the owner. `tailscale s
   /usr/local/lib/machiya-venv/bin/pip install 'markdown>=3.11'
   ```
 
-  Then use `/usr/local/lib/machiya-venv/bin/python3` wherever this guide runs an app or its tools (§4, §10, §11), and point the services at it (§7: `<app>_python` on FreeBSD and NetBSD; OpenBSD's scripts use it by themselves when it exists). A package upgrade that changes Python's version (FreeBSD's quarterly branch moving the default, say) needs the venv made again.
+  Then use `/usr/local/lib/machiya-venv/bin/python3` wherever this guide runs an app or its tools (§4, §10, §11). The rc.d scripts (§7) run the apps with it by themselves whenever it exists, so make it before the first start. A package upgrade that changes Python's version (FreeBSD's quarterly branch moving the default, say) needs the venv made again.
 - They need `pyyaml` 6 (the package is fine), and nothing else from pip.
 - Niwa and Konbini also call the `openssl` CLI. It's in base everywhere; on OpenBSD it's LibreSSL.
 - FreeBSD's quarterly branch moves the default Python now and then. After an upgrade, `pkg install` the matching `py3NN-*` packages again.
@@ -178,10 +178,10 @@ Copy the script for your BSD from `contrib/rc.d/<bsd>/<app>`, mode `0555`.
 | start | `service <app> start` | `service <app> start` | `rcctl start <app>` |
 | runs as | `daemon(8) -u <app>`, restarted if it dies | `daemonize -u <app>` | `daemon_user=_<app>` |
 | log | syslog, tag `<app>` | `/var/log/<app>/<app>.log` (not rotated: daemonize keeps it open; restart the service after rotating) | syslog `daemon.info` → `/var/log/daemon` |
-| python | `sysrc <app>_python=/usr/local/lib/machiya-venv/bin/python3` | `<app>_python=/usr/local/lib/machiya-venv/bin/python3` in `/etc/rc.conf` | the script's `daemon=`: the venv's python3 when it exists, else `/usr/local/bin/python3` (rcctl can't change it; edit the script) |
+| python | the venv's python3 when it exists, else `/usr/local/bin/python3.12`; another with `sysrc <app>_python=…` | the venv's python3 when it exists, else `/usr/pkg/bin/python3.13`; another with `<app>_python=…` in `/etc/rc.conf` | the script's `daemon=`: the venv's python3 when it exists, else `/usr/local/bin/python3` (rcctl can't change it; edit the script) |
 | settings | `<app>_config`, `_dir`, `_code`, `_python`, `_runas` in rc.conf | the same | `rcctl set <app> flags …` |
 
-Set the python row before the first start: the FreeBSD and NetBSD scripts default to the system Python (`/usr/local/bin/python3.12`, `/usr/pkg/bin/python3.13`), whose markdown is too old. The app then exits at once with vaultkit's "needs Python-Markdown 3.11" error, and FreeBSD's daemon(8) restarts it in a loop while `service <app> status` says it is running (look in syslog); NetBSD's says it is not running.
+All three scripts look for the venv of §2 (`/usr/local/lib/machiya-venv/bin/python3`) each time they run, so nothing needs setting. Without the venv they fall back to the system Python, whose markdown is missing or too old: the app then exits at once (`No module named 'markdown'`, or vaultkit's "needs Python-Markdown 3.11"), and FreeBSD's daemon(8) restarts it in a loop while `service <app> status` says it is running (look in syslog); NetBSD's says it is not running, and OpenBSD's `rcctl start` says `failed`.
 
 The scripts pass `--env-file` to the app. They don't use rc.subr's own environment support: FreeBSD's `<name>_env_file` sources the file as shell, which expands `$` and breaks on values with spaces such as `GIT_SSH_COMMAND`.
 

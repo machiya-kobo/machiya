@@ -14,7 +14,8 @@
 #   kura_config  [/usr/local/etc/kura.env]     its settings, KEY=VALUE lines (read by the app: KURA_ENV_FILE)
 #   kura_dir     [/var/db/kura]                its data directory and HOME (owned by kura_runas)
 #   kura_code    [/usr/local/share/kura]       the app directory (owned by root)
-#   kura_python  [/usr/local/bin/python3.12]
+#   kura_python  [/usr/local/lib/machiya-venv/bin/python3 when it is executable (the venv of docs/install/bsd.md §2,
+#                markdown 3.11), else /usr/local/bin/python3.12]
 #
 # Not kura_user or kura_env_file: rc.subr would su on top of daemon -u, and would source the settings file as
 # shell (expanding $ and breaking on values with spaces). The app reads the file itself, literally.
@@ -30,7 +31,11 @@ load_rc_config $name
 : ${kura_config:=/usr/local/etc/kura.env}
 : ${kura_dir:=/var/db/kura}
 : ${kura_code:=/usr/local/share/kura}
-: ${kura_python:=/usr/local/bin/python3.12}
+if [ -x /usr/local/lib/machiya-venv/bin/python3 ]; then
+    : ${kura_python:=/usr/local/lib/machiya-venv/bin/python3}
+else
+    : ${kura_python:=/usr/local/bin/python3.12}
+fi
 
 pidfile=/var/run/${name}.pid
 procname=/usr/sbin/daemon
