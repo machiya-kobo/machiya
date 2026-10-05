@@ -35,6 +35,7 @@ secrets. Standard library only; needs ssh and tar here.
 import argparse
 import io
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -98,6 +99,10 @@ def main():
         if not os.path.isdir(os.path.join(repos[r], ".git")):
             sys.exit("dev-test: no %s checkout in %s (--siblings)" % (r, a.siblings))
     d = a.dir.rstrip("/")
+    # it goes unquoted into remote shell lines, `rm -rf` among them (sweep MACH-M-13): a plain absolute path, two levels
+    # deep at least, or nothing
+    if not re.fullmatch(r"/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+", d) or "/../" in d + "/" or "/./" in d + "/":
+        sys.exit("dev-test: --dir must be a plain absolute path like /var/tmp/machiya-dev-test, not %r" % a.dir)
     dev = "%s/machiya/compose/dev/dev --data %s/data" % (d, d)
     init = dev + " init" + (" --native" if a.native else "")
     if a.hister_via:
