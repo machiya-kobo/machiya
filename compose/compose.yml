@@ -211,7 +211,9 @@ services:
       - TZ=${TZ:-UTC}
     volumes:
       - ${SMALLWEB_DATA:-./data/smallweb}:/data
-    networks: [smallweb, default]
+    networks:                                     # pinned: a dynamic address could take .2 (the sidecar's) first on a restart
+      smallweb: {ipv4_address: 172.31.250.3}
+      default: {}
     ports: ["127.0.0.1:${SMALLWEB_PORT:-8090}:8080"]
     mem_limit: 128m
     restart: unless-stopped
@@ -232,14 +234,16 @@ services:
       - TZ=${TZ:-UTC}
     volumes:
       - ${MCP_DATA:-./data/mcp}:/data
-    networks: [machiya-mcp, default]
+    networks:                                     # pinned: a dynamic address could take .10 (the sidecar's) first on a restart
+      machiya-mcp: {ipv4_address: 172.31.250.11}
+      default: {}
     ports: ["127.0.0.1:${MCP_PORT:-8091}:8080"]
     mem_limit: 256m
     restart: unless-stopped
 
 networks:
   default: {}
-  smallweb:                                         # smallweb and its proxy only; .2 is the sidecar's address
+  smallweb:                                         # smallweb (.3) and its proxy only; .2 is the sidecar's: pin every member
     ipam: {config: [{subnet: 172.31.250.0/29}]}
-  machiya-mcp:                                      # machiya-mcp and its proxy only; .10 is the sidecar's address
+  machiya-mcp:                                      # machiya-mcp (.11) and its proxy only; .10 is the sidecar's: pin every member
     ipam: {config: [{subnet: 172.31.250.8/29}]}

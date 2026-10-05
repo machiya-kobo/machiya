@@ -157,11 +157,11 @@ The shared Hister network is an external Docker network created by the Hister st
 
 **A service that believes `Tailscale-User-Login` never shares its listening network with strangers** (the owner's rule, 2026-10-05; sweep MACH-M-5, MACH-F-9). Any container on the same Docker network can send that header. So:
 
-- machiya-mcp and smallweb each get a network of their own, shared only with their Tailscale sidecar, and the sidecar has a fixed address there.
+- machiya-mcp and smallweb each get a network of their own, shared only with their Tailscale sidecar. **Every member of that network has a pinned address**, the sidecar and the app alike: an app with a dynamic address can take the sidecar's address first when the stack restarts, and the sidecar then fails to start ("Address already in use"; a 3 h outage on 2026-10-05).
 - They name that address in `MCP_TRUSTED_PROXIES` / `SMALLWEB_TRUSTED_PROXIES`, so the header counts only from the sidecar, even though each also joins Hister's network (and smallweb the proxy's) to make its own calls.
 - In `tailscale` mode, a non-loopback bind without a trusted proxy (or `*_BIND_BEHIND_PROXY=1`) refuses to start.
 
-The rooms do the same through vaultkit's `check_bind` (`<P>_BIND_BEHIND_PROXY`). The reference compose ([`compose/compose.yml`](../compose/compose.yml), profiles `smallweb` and `mcp`) shows the networks and the addresses: `smallweb` is 172.31.250.0/29 with the sidecar at .2, and `machiya-mcp` is 172.31.250.8/29 with the sidecar at .10.
+The rooms do the same through vaultkit's `check_bind` (`<P>_BIND_BEHIND_PROXY`). The reference compose ([`compose/compose.yml`](../compose/compose.yml), profiles `smallweb` and `mcp`) shows the networks and the addresses: `smallweb` is 172.31.250.0/29 with the sidecar at .2 and smallweb at .3, and `machiya-mcp` is 172.31.250.8/29 with the sidecar at .10 and machiya-mcp at .11.
 
 ## Service summary
 
