@@ -529,7 +529,13 @@ class Symlinks(Base):
         self.push_link("Inbox/Alias.md", "../Notes/Idea.md")
         self.w.ready()
         for rel in ("Inbox/Link.md", "Inbox/Alias.md"):
-            self.refused(lambda rel=rel: self.update(rel, "append", text="Through the link."), "symlink")
+            # vaultkit 0.22 checks a committed link out as a plain file (core.symlinks=false, KURA-2): the write then
+            # lands in that file, never through it; with a real symlink in the clone it is refused
+            try:
+                self.update(rel, "append", text="Through the link.")
+                self.assertFalse(os.path.islink(os.path.join(self.repo, "personal", rel)))
+            except ToolError as e:
+                self.assertIn("symlink", e.message.lower())
         self.assertEqual(self.read("Templates/Note.md"), template)
         self.assertNotIn("Through the link", self.read("Notes/Idea.md"))
 

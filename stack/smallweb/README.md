@@ -8,6 +8,7 @@ Machiya's gateway to the small web: Gemini and Gopher search for Shiori, and the
 |---|---|---|
 | `SMALLWEB_AUTH` | `tailscale` | `tailscale`: every page and API call needs a `Tailscale-User-Login` in `SMALLWEB_USERS`. `open`: no identity check (a startup warning), for localhost or a trusted LAN only. Anything else refuses to start |
 | `SMALLWEB_USERS` | — | allowed logins; `*` = anyone the tailnet lets through; unset = nobody (`/api/status` is open) |
+| `SMALLWEB_AUTH_URL` | — | hister-login's internal address (`http://hister-login:8081`): callers may also send a **room token** (`Authorization: Bearer mht_…`) made for smallweb, beside the Tailscale header (0.3.0). A bad one is refused, never passed over. Needs `SMALLWEB_PUBLIC_URL` (the address the token names) and `SMALLWEB_HISTER_USERS` (the Hister usernames it may act as, never `*`) |
 | `SMALLWEB_BIND`, `SMALLWEB_PORT` | `0.0.0.0`, `8080` | the listener. A native install behind `tailscale serve` binds `127.0.0.1` |
 | `SMALLWEB_SOCKS` | — | `socks5h://proxy:1080`: every connection goes through it. Gemini/gopher names are resolved by the proxy; an http(s) save resolves the name itself, checks the addresses and asks the proxy for the checked address. Unset = direct from the host (the startup line says so) |
 | `SMALLWEB_HISTER_URL` | — | `http://hister:4433`: pages read are saved there. Unset = no saves |

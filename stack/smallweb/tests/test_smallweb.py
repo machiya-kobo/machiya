@@ -1000,5 +1000,49 @@ class HisterToken(unittest.TestCase):
         finally:
             shutil.rmtree(folder)
 
+class RoomTokenTest(unittest.TestCase):
+    """0.3.0: a room token (Bearer mht_) hister-login issued for smallweb, beside the Tailscale header."""
+
+    def setUp(self):
+        good = self.good = "mht_" + "G" * 43
+        seen = self.seen = []
+
+        class Helper(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                seen.append((self.headers.get("X-Machiya-Session"), self.headers.get("X-Machiya-Room")))
+                ok = self.headers.get("X-Machiya-Session") == good and \
+                    self.headers.get("X-Machiya-Room") == "https://smallweb.test"
+                body = json.dumps({"username": "owner", "kind": "token"} if ok else {"reason": "wrong-room"}).encode()
+                self.send_response(200 if ok else 401)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        self.helper = ThreadingHTTPServer(("127.0.0.1", 0), Helper)
+        threading.Thread(target=self.helper.serve_forever, daemon=True).start()
+        self.saved = (smallweb.AUTH_URL, smallweb.HISTER_USERS)
+        smallweb.AUTH_URL = "http://127.0.0.1:%d" % self.helper.server_address[1]
+        smallweb.HISTER_USERS = {"owner"}
+        smallweb._ROOM_TOKENS.clear()
+
+    def tearDown(self):
+        smallweb.AUTH_URL, smallweb.HISTER_USERS = self.saved
+        smallweb._ROOM_TOKENS.clear()
+        self.helper.shutdown()
+        self.helper.server_close()
+
+    def test_room_token(self):
+        self.assertEqual(get("/api/status", user=None, headers={"Authorization": "Bearer " + self.good})[0], 200)
+        st = get("/search?q=x", user=None, headers={"Authorization": "Bearer " + self.good})[0]
+        self.assertNotEqual(st, 403)
+        self.assertEqual(self.seen[-1], (self.good, "https://smallweb.test"))
+        bad = "mht_" + "B" * 43
+        self.assertEqual(get("/search?q=x", user=None, headers={"Authorization": "Bearer " + bad})[0], 403)
+        self.assertEqual(get("/search?q=x", user="user@test", headers={"Authorization": "Bearer " + bad})[0], 403)
+        self.assertEqual(get("/search?q=x", user="user@test")[0] != 403, True)       # no token: the header
+
+
 if __name__ == "__main__":
     unittest.main()

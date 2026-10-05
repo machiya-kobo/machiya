@@ -97,6 +97,19 @@ def load_identity(env, bind):
         raise SystemExit("machiya-mcp: identity: %s" % e)
 
 
+def load_token_gate(env):
+    """MCP_AUTH_URL (hister-login's internal address; 0.8.0) turns on room tokens beside the Tailscale header: an agent
+    on a tagged machine (no Tailscale login) sends `Authorization: Bearer mht_…`, a room token hister-login issued for
+    MCP_PUBLIC_URL's origin, acting as one of MCP_HISTER_USERS. Never Hister's raw token. None without the setting."""
+    if not (env.get("MCP_AUTH_URL") or "").strip():
+        return None
+    from vaultkit import histerauth, identity      # vendored beside this file
+    try:
+        return histerauth.token_gate_for("machiya-mcp", "MCP", env)
+    except identity.IdentityError as e:
+        raise SystemExit("machiya-mcp: room tokens: %s" % e)
+
+
 def room_token(path):
     """MCP_TOKEN_FILE: the `mcp` principal's own token, sent to Kura, Konbini and Niwa as Authorization (never to
     Hister). Unset: no token, as before. Set but missing, empty or not a token: refuse to start. Never logged."""
@@ -180,6 +193,7 @@ class Config:
         self.behind_proxy = (env.get("MCP_BIND_BEHIND_PROXY") or "").strip().lower() in ("1", "on", "true", "yes")
         self.header_trusted = is_loopback(self.bind) or self.behind_proxy     # may Tailscale-User-Login be believed?
         self.identity = load_identity(env, self.bind)        # None: the MCP_USERS gate, as before
+        self.token_gate = load_token_gate(env) if self.identity is None and self.auth != "open" else None
         self.token = room_token(env.get("MCP_TOKEN_FILE"))   # the `mcp` principal's token for the rooms; "" without one
         self.hister_token = hister_token(env.get("HISTER_TOKEN_FILE"))   # the owner's, for Hister only; None without
         self.port = int(env.get("MCP_PORT", "8080"))
@@ -650,7 +664,8 @@ def make_handler(server):
             if path in ("/healthz", "/api/status"):
                 return self.json(200, {"ok": True, "version": VERSION, "vaultkit": VAULTKIT, "auth": server.config.auth,
                                        "rooms": sorted(server.backends), "tools": len(server.tools),
-                                       "hister_token": getattr(server.config, "hister_token", None) is not None})
+                                       "hister_token": getattr(server.config, "hister_token", None) is not None,
+                                       "room_tokens": getattr(server.config, "token_gate", None) is not None})
             if path == "/api/changelog":                # open, like /api/status: this server's own CHANGELOG.md
                 from vaultkit import changelog          # vendored beside this file (imported here, like identity)
                 code, body, headers = changelog.handle(server.changelog, self.headers)
@@ -678,7 +693,16 @@ def make_handler(server):
                     return self.json(403, {"error": "not allowed to use machiya-mcp"})
                 login = Caller(principal.name, principal.via, principal.limits)
             else:
-                login = server.login(self.headers)
+                res = server.config.token_gate.resolve(self.headers) if server.config.token_gate else None
+                if res is not None:                   # a room token (Bearer mht_): it decides, never the header
+                    if not res:
+                        self.close_connection = True
+                        return self.json(res.status, {"error": {401: "room token refused", 403: "not an allowed user"}
+                                                      .get(res.status, "sign-in is unavailable"),
+                                                      **({"reason": res.error} if res.error else {})})
+                    login = Caller(res.principal.name, "token")
+                else:
+                    login = server.login(self.headers)
                 if login is None:
                     return self.json(403, {"error": "not an allowed user"})
             try:
@@ -718,8 +742,11 @@ def main():
             config.identity.path, config.auth, "; open mode admits anyone without a token as the owner" if config.auth == "open" else ""))
     elif config.auth == "open":
         sys.stderr.write("machiya-mcp: MCP_AUTH=open, no identity check: use it on localhost or a trusted LAN only\n")
-    elif not config.users:
+    elif not config.users and config.token_gate is None:
         sys.stderr.write("machiya-mcp: MCP_USERS is empty, so every request will be refused\n")
+    if config.token_gate is not None:
+        sys.stderr.write("machiya-mcp: room tokens from hister-login for %s (as %s) beside the Tailscale header\n" % (
+            config.token_gate.origin, ",".join(sorted(config.token_gate.users))))
     if config.token:
         sys.stderr.write("machiya-mcp: calling Kura, Konbini and Niwa with MCP_TOKEN_FILE's token\n")
     server = Server(config)

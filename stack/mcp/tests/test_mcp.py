@@ -863,6 +863,42 @@ class Gate(Base):
         self.assertEqual(self.post(base, self.PING, {"Tailscale-User-Login": "evil@x"})[0], 403)
         self.assertEqual(self.post(base, self.PING, {"Tailscale-User-Login": "you@x"})[0], 200)
 
+    def test_room_tokens_beside_the_header(self):
+        """0.8.0: an agent on a tagged machine (no Tailscale login) sends a room token hister-login issued for this
+        service; it decides (a bad one is never passed over for the header); Hister's raw token is no room token."""
+        from http.server import BaseHTTPRequestHandler
+        good, other = "mht_" + "G" * 43, "mht_" + "O" * 43
+        seen = []
+
+        class Helper(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                seen.append((self.headers.get("X-Machiya-Session"), self.headers.get("X-Machiya-Room")))
+                cred = self.headers.get("X-Machiya-Session")
+                ok = cred == good and self.headers.get("X-Machiya-Room") == "https://mcp.example.ts.net"
+                body = json.dumps({"username": "owner", "kind": "token"} if ok else {"reason": "wrong-room"}).encode()
+                self.send_response(200 if ok else 401)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        helper = ThreadingHTTPServer(("127.0.0.1", 0), Helper)
+        threading.Thread(target=helper.serve_forever, args=(0.02,), daemon=True).start()
+        self.addCleanup(lambda: (helper.shutdown(), helper.server_close()))
+        _, base = self.serve(MCP_AUTH="tailscale", MCP_USERS="me@x", MCP_AUTH_URL="http://127.0.0.1:%d"
+                             % helper.server_address[1], MCP_PUBLIC_URL="https://mcp.example.ts.net/mcp",
+                             MCP_HISTER_USERS="owner")
+        self.assertEqual(self.post(base, self.PING, {"Authorization": "Bearer " + good})[0], 200)
+        self.assertEqual(seen[-1], (good, "https://mcp.example.ts.net"))
+        self.assertEqual(self.post(base, self.PING, {"Authorization": "Bearer " + other})[0], 401)
+        self.assertEqual(self.post(base, self.PING, {"Authorization": "Bearer " + other,
+                                                     "Tailscale-User-Login": "me@x"})[0], 401)     # never passed over
+        self.assertEqual(self.post(base, self.PING, {"Authorization": "Bearer tok-owner-hister"})[0], 403)
+        self.assertEqual(self.post(base, self.PING, {"Tailscale-User-Login": "me@x"})[0], 200)       # the header still
+        with self.assertRaises(SystemExit):
+            mcp.Config({"MCP_AUTH": "tailscale", "MCP_AUTH_URL": "http://h:8081", "MCP_LOG": os.devnull})
+
     def test_a_login_header_is_believed_only_behind_the_proxy(self):
         # sweep MACH-M-5: on 0.0.0.0 any neighbouring container could send Tailscale-User-Login and be the owner
         env = {"MCP_AUTH": "tailscale", "MCP_USERS": "me@x", "MCP_LOG": os.devnull}
@@ -938,7 +974,8 @@ class Gate(Base):
             self.assertEqual(d["version"], mcp.VERSION)
             self.assertRegex(d["vaultkit"], r"^v\d+\.\d+\.\d+")
         import vaultkit
-        self.assertEqual(mcp.VAULTKIT, "v" + vaultkit.__version__)       # the manifest and the package agree
+        self.assertTrue(mcp.VAULTKIT == "v" + vaultkit.__version__        # the manifest and the package agree (a tag,
+                        or mcp.VAULTKIT.startswith("v" + vaultkit.__version__ + "-"), mcp.VAULTKIT)   # or after it)
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(mcp.vaultkit_version(d), "")                 # no manifest: no claim
 

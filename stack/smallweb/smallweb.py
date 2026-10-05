@@ -35,7 +35,7 @@ import smolnet   # noqa: E402
 import web       # noqa: E402
 from store import Store   # noqa: E402
 
-VERSION = "0.2.3"
+VERSION = "0.3.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -72,6 +72,70 @@ DATA = os.environ.get("SMALLWEB_DATA", "/data")
 # here: host names (exact) and CIDRs. Unset = nothing private.
 FETCH_ALLOW = web.parse_allow(os.environ.get("SMALLWEB_FETCH_ALLOW"))
 USER_AGENT = "smallweb/%s (Machiya; saves a page its owner asked for)" % VERSION
+# Room tokens (0.3.0): with SMALLWEB_AUTH_URL (hister-login's internal address) a caller may also send
+# `Authorization: Bearer mht_…`, a room token hister-login issued for SMALLWEB_PUBLIC_URL's origin, acting as one of
+# SMALLWEB_HISTER_USERS: an agent on a tagged machine has no Tailscale login, and never gets Hister's raw token.
+AUTH_URL = (os.environ.get("SMALLWEB_AUTH_URL") or "").strip().rstrip("/")
+HISTER_USERS = set(filter(None, (u.strip() for u in os.environ.get("SMALLWEB_HISTER_USERS", "").split(","))))
+RTOKEN_RE = re.compile(r"mht_[A-Za-z0-9_-]{43}\Z")
+_ROOM_TOKENS = {}                       # sha256(token) -> (expires, username or None); 30 s good, 5 s refused
+_ROOM_TOKENS_LOCK = threading.Lock()
+
+
+def own_origin(url):
+    """scheme://host[:port] of SMALLWEB_PUBLIC_URL, as hister-login writes origins (lowercase, no default port)."""
+    try:
+        u = urlsplit(url)
+        port = None if u.port in (None, {"https": 443, "http": 80}.get(u.scheme)) else u.port
+        return "%s://%s%s" % (u.scheme.lower(), (u.hostname or "").lower(), "" if port is None else ":%d" % port)
+    except ValueError:
+        return ""
+
+
+if AUTH_URL and (not PUBLIC_URL.startswith(("https://", "http://")) or not HISTER_USERS or "*" in HISTER_USERS):
+    raise SystemExit("smallweb: SMALLWEB_AUTH_URL (room tokens) needs SMALLWEB_PUBLIC_URL and SMALLWEB_HISTER_USERS "
+                     "(never *)")
+
+
+def room_token_user(headers):
+    """-> (presented, Hister username or None). A request without a room token isn't one (presented False: the
+    Tailscale header decides); a bad, revoked or other service's token is refused and never passed over."""
+    import http.client
+    values = headers.get_all("Authorization") or []
+    if not values:
+        return False, None
+    scheme, _, value = values[0].strip().partition(" ")
+    value = value.strip()
+    if len(values) == 1 and not (scheme.lower() == "bearer" and value.startswith("mht_")):
+        return False, None
+    if not AUTH_URL or len(values) > 1 or not RTOKEN_RE.match(value):
+        return True, None
+    key = hashlib.sha256(value.encode("ascii")).hexdigest()
+    with _ROOM_TOKENS_LOCK:
+        hit = _ROOM_TOKENS.get(key)
+    if hit and hit[0] > time.monotonic():
+        return True, hit[1]
+    user, ttl = None, 5
+    u = urlsplit(AUTH_URL)
+    conn = (http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection)(
+        u.hostname, u.port, timeout=2)
+    try:
+        conn.request("GET", u.path.rstrip("/") + "/v1/check", headers={
+            "X-Machiya-Session": value, "X-Machiya-Room": own_origin(PUBLIC_URL), "Accept": "application/json"})
+        r = conn.getresponse()
+        data = json.loads(r.read(1 << 16) or b"null")
+        if r.status == 200 and isinstance(data, dict) and data.get("kind") == "token" \
+                and data.get("username") in HISTER_USERS:
+            user, ttl = data["username"], 30
+    except (OSError, http.client.HTTPException, ValueError):
+        pass
+    finally:
+        conn.close()
+    with _ROOM_TOKENS_LOCK:
+        if len(_ROOM_TOKENS) > 1024:
+            _ROOM_TOKENS.clear()
+        _ROOM_TOKENS[key] = (time.monotonic() + ttl, user)
+    return True, user
 
 SEARCH_TTL, PAGE_TTL, ROBOTS_TTL = 3600, 600, 86400
 PER_HOUR = int(os.environ.get("SMALLWEB_PER_HOUR", "30"))     # searches per engine per hour
@@ -642,7 +706,12 @@ class Handler(BaseHTTPRequestHandler):
             sys.stderr.write("smallweb %s %s\n" % (self.headers.get("Tailscale-User-Login", "-"), fmt % args))
 
     def allowed(self):
-        return AUTH == "open" or "*" in USERS or self.headers.get("Tailscale-User-Login", "") in USERS
+        if AUTH == "open":
+            return True
+        presented, user = room_token_user(self.headers)     # 0.3.0: a room token decides when there is one
+        if presented:
+            return user is not None
+        return "*" in USERS or self.headers.get("Tailscale-User-Login", "") in USERS
 
     def public_url(self):
         if PUBLIC_URL:

@@ -1,5 +1,9 @@
 # Changelog: smallweb
 
+## 0.3.0
+
+- **Room tokens beside the Tailscale header** (the owner's decisions of 2026-10-05: tools stop taking Hister's raw token; the agents' VM is a tagged node with no Tailscale login). With `SMALLWEB_AUTH_URL` (hister-login's internal address), `SMALLWEB_PUBLIC_URL` and `SMALLWEB_HISTER_USERS`, a caller may send `Authorization: Bearer mht_…`, a room token hister-login issued for this service, acting as that Hister user (cached 30 s). A bad, revoked or other service's token is refused and never falls back to the header; without one the header decides as before.
+
 ## 0.2.3
 
 - **Keep-alive (security):** a request body smallweb didn't read (a refused caller's 403, a GET's) stayed on the

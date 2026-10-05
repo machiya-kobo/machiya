@@ -11,6 +11,7 @@ import hashlib
 import html
 import json
 import os
+import re
 from urllib.parse import unquote
 
 from . import palettes
@@ -23,9 +24,9 @@ ROOMS = [   # (key, name, seal, what it is) front to back through the house, the
 ]
 NEIGHBOURS = [("hister", "Hister", "pages"), ("searxng", "SearXNG", "the web")]
 # The house itself: the stack's front door and status page (stack/landing). Not a room in the order above: with
-# MACHIYA_ROOMS naming `machiya=<url>`, every Rooms menu ends with a "Machiya · status" row and the footer's
+# MACHIYA_ROOMS naming `machiya=<url>`, every Rooms menu ends with a "Machiya · home" row (v0.19.1) and the footer's
 # "Part of Machiya" links there; without it, nothing changes.
-HOUSE = ("machiya", "Machiya", "町", "status")
+HOUSE = ("machiya", "Machiya", "町", "home")
 THEMES = [("system", "System"), ("day", "Light"), ("night", "Dark")]     # the appearance (setting `theme`)
 PALETTES = palettes.CHOICES                                              # the theme (setting `palette`, v0.15)
 TEXT_SIZES = [("xsmall", "Extra Small"), ("small", "Small"), ("standard", "Standard"), ("large", "Large"),
@@ -83,13 +84,19 @@ def rooms(env=None):
 
 
 class Prefs:
-    """Per-device settings the server needs for the first render (cookies written by machiya.js)."""
+    """The settings the server needs for the first render (cookies written by machiya.js). `text` is the size the page
+    shows: the device's own (`text_device`, "Use This Device's Size") when it has one, else the shared one
+    (`text_shared`, which Settings' Shared section shows)."""
 
-    def __init__(self, theme="system", text="standard", extra=None, palette=palettes.DEFAULT):
+    def __init__(self, theme="system", text="standard", extra=None, palette=palettes.DEFAULT, text_device=""):
         self.theme = theme if theme in ("system", "night", "day") else "system"
         self.text = text if text in dict(TEXT_SIZES) else "standard"
         self.palette = palette if palette in palettes.PALETTES else palettes.DEFAULT
         self.extra = extra or {}
+        self.text_shared = self.text
+        self.text_device = text_device if text_device in dict(TEXT_SIZES) else ""
+        if self.text_device:
+            self.text = self.text_device
 
 
 COOKIE_DOMAIN = os.environ.get("MACHIYA_COOKIE_DOMAIN", "").strip().lstrip(".")   # e.g. example.ts.net
@@ -97,13 +104,16 @@ SHARED_PREFIX = "machiya_"      # shared cookies (Domain=COOKIE_DOMAIN): machiya
 
 
 def is_shared(key):
-    """Settings one choice of which covers every room on the device (with MACHIYA_COOKIE_DOMAIN set)."""
-    return key in ("theme", "palette", "textSize") or key.startswith("show_")
+    """Settings one choice of which covers every room on the device (with MACHIYA_COOKIE_DOMAIN set). textSizeDevice
+    is this device's own text size: shared by the rooms on the device, never sent to the account."""
+    return key in ("theme", "palette", "textSize", "textSizeDevice") or key.startswith("show_")
 
 
-def prefs(cookie_header):
+def prefs(cookie_header, account=None):
     """The first render's settings. A shared cookie (machiya_<key>, written for every room when MACHIYA_COOKIE_DOMAIN
-    is set) wins over the room's own cookie of the same key."""
+    is set) wins over the room's own cookie of the same key. account (v0.21): the account's shared preferences (a
+    fresh browser has no cookies yet: histerauth's Result.prefs, {"theme", "palette", "text_size", "apps_hidden"}),
+    used for whatever the cookies don't say."""
     jar = {}
     for part in (cookie_header or "").split(";"):
         if "=" in part:
@@ -111,10 +121,18 @@ def prefs(cookie_header):
             jar[k.strip()] = unquote(v.strip())
     for k in [k for k in jar if k.startswith(SHARED_PREFIX)]:
         jar[k[len(SHARED_PREFIX):]] = jar.pop(k)
+    if isinstance(account, dict):
+        for key, local in (("theme", "theme"), ("palette", "palette"), ("text_size", "textSize")):
+            if local not in jar and isinstance(account.get(key), str):
+                jar[local] = account[key]
+        hidden = account.get("apps_hidden")
+        if isinstance(hidden, str):
+            for app in [a for a in hidden.split(",") if a]:
+                jar.setdefault("show_" + app, "false")
     theme = jar.get("theme", "system")
     return Prefs("system" if theme == "auto" else theme, jar.get("textSize", "standard"),
-                 {k: v for k, v in jar.items() if k not in ("theme", "textSize", "palette")},
-                 jar.get("palette", palettes.DEFAULT))
+                 {k: v for k, v in jar.items() if k not in ("theme", "textSize", "palette", "textSizeDevice")},
+                 jar.get("palette", palettes.DEFAULT), jar.get("textSizeDevice", ""))
 
 
 def search_box(q="", action="/search", placeholder="Search", label="Search"):
@@ -165,8 +183,10 @@ CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 def security_headers(csp=CSP):
     """[(header, value)] for every HTML page (v0.13): the CSP above, no MIME sniffing, the path never leaves the
     room in a Referer. A room adds these to its own (Content-Type, Cache-Control). v0.14: also Accept-CH for the
-    device's colour scheme, so the browser sends Sec-CH-Prefers-Color-Scheme with later requests (the manifest's)."""
-    return [("Content-Security-Policy", csp), ("X-Content-Type-Options", "nosniff"),
+    device's colour scheme, so the browser sends Sec-CH-Prefers-Color-Scheme with later requests (the manifest's).
+    v0.22: X-Frame-Options SAMEORIGIN too (frame-ancestors for browsers that only know the old header). Every other
+    response gets websafe.base_headers(), and vault files websafe.asset_headers(name)."""
+    return [("Content-Security-Policy", csp), ("X-Content-Type-Options", "nosniff"), ("X-Frame-Options", "SAMEORIGIN"),
             ("Referrer-Policy", "same-origin"), ("Accept-CH", COLOR_HINT)]
 
 
@@ -363,11 +383,43 @@ def footer(room, status=None, links=(), house=None):
 
 def prefs_meta(url):
     """<meta name="machiya-prefs" content="/api/prefs">: this page's viewer has server-side preferences there, so
-    machiya.js syncs theme and text size with it. Only a local path ("/...", not "//..."); anything else is ""."""
+    machiya.js syncs the shared settings (and the room's APP_PREFS) with it. Only a local path ("/...", not "//...");
+    anything else is ""."""
     if not isinstance(url, str) or not url.startswith("/") or url[1:2] in ("/", "\\") \
             or any(c.isspace() or ord(c) < 32 for c in url):
         return ""
     return '<meta name="machiya-prefs" content="%s">\n' % e(url)
+
+
+# A room's own settings that follow the person (docs/contracts/prefs.md, per-app keys), set once by the room:
+# {local key: {"type": "bool" | "choice" | "text", "values": [...] (choice), "cookie": True when the server reads it
+# for the first render}}. The account keeps each as "<room>.<snake_case(local key)>" (previewPane -> kura.preview_pane);
+# "bool" travels as "on"/"off". machiya.js applies only values that pass (a choice in `values`, on/off for a bool).
+APP_PREFS = {}
+
+
+def account_key(room, local):
+    """kura + previewPane -> kura.preview_pane."""
+    return "%s.%s" % (room, re.sub(r"(?<!^)([A-Z])", r"_\1", local).lower())
+
+
+def app_prefs_meta(room, spec=None):
+    """<meta name="machiya-app-prefs" content="{json}">: the room's APP_PREFS, with each one's account key."""
+    spec = APP_PREFS if spec is None else spec
+    out = {}
+    for local, d in (spec or {}).items():
+        if not isinstance(local, str) or not local.isalnum() or not isinstance(d, dict):
+            continue
+        kind = d.get("type") if d.get("type") in ("bool", "choice", "text") else "text"
+        item = {"key": account_key(room, local), "type": kind}
+        if kind == "choice":
+            item["values"] = [str(v) for v in d.get("values") or ()]
+        if d.get("cookie"):
+            item["cookie"] = True
+        out[local] = item
+    if not out:
+        return ""
+    return '<meta name="machiya-app-prefs" content="%s">\n' % e(json.dumps(out, separators=(",", ":"), sort_keys=True))
 
 
 def page(ctx, room, title, body, tabs=(), current="", links=None, head="", stylesheets=(), scripts=(), manifest=True,
@@ -406,7 +458,8 @@ def page(ctx, room, title, body, tabs=(), current="", links=None, head="", style
         '</head>\n<body class="theme-%s%s room-%s" data-room="%s" data-text="%s"%s>\n%s\n%s\n</body>\n</html>\n'
     ) % (e(title), scheme, colors,
          '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">\n' if manifest else "",
-         room, room, "default" if theme == "day" else "black-translucent", e(name), prefs_meta(prefs_url) if prefs_url else "", css, js, head, theme,
+         room, room, "default" if theme == "day" else "black-translucent", e(name),
+         (prefs_meta(prefs_url) + app_prefs_meta(room)) if prefs_url else "", css, js, head, theme,
          "" if palette == palettes.DEFAULT else " palette-" + palette, room, room, e(text),
          (' data-cookie-domain="%s"' % e(COOKIE_DOMAIN)) if COOKIE_DOMAIN else "", body,
          tabbar(tabs, current, room, links, icons, who) if tabs else "")
@@ -415,10 +468,10 @@ def page(ctx, room, title, body, tabs=(), current="", links=None, head="", style
 # -- /settings ----------------------------------------------------------------------------------------------------
 
 def appearance_section(ctx, synced=False):
-    """Display: the theme (palette, v0.15), its appearance (System follows the device; Light, Dark) and the text
-    size. synced (v0.13): the page has a prefs_url, so they also follow the person to other devices."""
+    """Display (before v0.21; kept for one release): the theme, its appearance and the text size. New pages use
+    shared_section, which also holds Apps and says where the choices are kept."""
     theme = getattr(ctx, "theme", "system")
-    text = getattr(ctx, "text", "standard")
+    text = getattr(ctx, "text_shared", getattr(ctx, "text", "standard"))
     palette = getattr(ctx, "palette", palettes.DEFAULT)
     return ("Display", [
         select("Theme", "palette", PALETTES, palette, cookie=True),
@@ -447,15 +500,96 @@ def row(label, value):
     return '<div class="item"><span>%s</span><span class="value">%s</span></div>' % (e(label), value)
 
 
-def apps_section(room, links, shown):
-    """Which rooms and neighbours appear on this device; addresses stay on the server (MACHIYA_ROOMS)."""
+def _app_rows(room, links, shown):
     items = [toggle(name, "show_" + key, shown.get(key, True)) for key, name, _, _ in ROOMS if key != room and key in links]
     items += [toggle(name, "show_" + key, shown.get(key, True)) for key, name, _ in NEIGHBOURS if key in links]
     if HOUSE[0] in links and room != HOUSE[0]:
         items.append(toggle(HOUSE[1], "show_" + HOUSE[0], shown.get(HOUSE[0], True)))
+    return items
+
+
+def apps_section(room, links, shown):
+    """Apps on its own (before v0.21; kept for one release): shared_section holds the same rows."""
+    items = _app_rows(room, links, shown)
     if not items:
         return None
     return ("Apps", items, "Which rooms appear in the switcher on this device. Their addresses are set on the server.")
+
+
+# Where the Shared section's choices are kept right now (shell.shared_section's `state`, docs/contracts/prefs.md).
+PREFS_STATES = ("account", "signed-out", "unavailable", "standalone", "room")
+SHARED_NOTE = "Follows you on every Machiya app when signed in."
+UNAVAILABLE_LINE = "Sign-in is unavailable: kept here, and saved to your account when it's back."
+
+
+def shown_of(ctx):
+    """{room: False} for the Apps switched off, from the show_* cookies shell.prefs() read."""
+    extra = getattr(ctx, "extra", {}) or {}
+    return {k[5:]: False for k, v in extra.items() if k.startswith("show_") and v in ("false", False)}
+
+
+def state_line(state, who="", signin="", room=""):
+    """The line under the Shared section: where the choices are kept (HTML, escaped)."""
+    if state == "account":
+        return ("Signed in as %s. Saved to your account." % e(who)) if who else "Saved to your account."
+    if state == "signed-out":
+        link = (' <a href="%s">Sign In</a>' % e(signin)) if signin else ""
+        return "Not signed in: kept in this browser.%s" % link
+    if state == "unavailable":
+        return e(UNAVAILABLE_LINE)
+    if state == "room":
+        _, name, _, _ = room_info(room)
+        return "%sSaved for you in %s%s." % (("Signed in as %s. " % e(who)) if who else "", e(name),
+                                              ", and kept for every room in this browser" if COOKIE_DOMAIN else "")
+    return "Covers every room in this browser." if COOKIE_DOMAIN else "Kept in this browser."
+
+
+def shared_section(ctx, room, links=None, state="standalone", who="", signin=""):
+    """Settings' first section (v0.21, docs/ui.md "Settings"): Theme, Appearance, Text Size and Apps, the same rows in
+    the same order in every app, with "Follows you on every Machiya app when signed in." and a state line saying
+    where the choices are kept now: `state` is
+      account      signed in, saved to the account (hister-login's store): "Signed in as <who>. Saved to your account."
+      signed-out   a sign-in exists, nobody is signed in: "Not signed in: kept in this browser. Sign In" (signin= link)
+      unavailable  the account can't be reached (the helper or Hister down, the Tailscale fallback)
+      standalone   no account here: "Covers every room in this browser." (a shared cookie domain), else "Kept in
+                   this browser."; the "Follows you…" line is dropped
+      room         a room's own store (identity file): "Saved for you in <Room>".
+    machiya.js keeps the line current (unavailable when the account doesn't answer). -> (title, rows, note, extra)."""
+    links = links if links is not None else rooms()
+    state = state if state in PREFS_STATES else "standalone"
+    theme = getattr(ctx, "theme", "system")
+    text = getattr(ctx, "text_shared", getattr(ctx, "text", "standard"))
+    palette = getattr(ctx, "palette", palettes.DEFAULT)
+    apps = _app_rows(room, links, shown_of(ctx))
+    items = [
+        select("Theme", "palette", PALETTES, palette, cookie=True),
+        select("Appearance", "theme", THEMES, theme, cookie=True),
+        select("Text Size", "textSize", TEXT_SIZES, text, cookie=True),
+    ] + (['<div class="item subhead"><span>Apps</span><small class="value">in the Rooms menu</small></div>'] + apps
+         if apps else [])
+    note = SHARED_NOTE if state in ("account", "signed-out", "unavailable") else ""
+    extra = '<p class="footnote prefs-state" data-prefs-state="%s" data-unavailable="%s">%s</p>' % (
+        state, e(UNAVAILABLE_LINE), state_line(state, who, signin, room))
+    return ("Shared", items, note, extra)
+
+
+def device_section(ctx, rows=(), note=""):
+    """Settings' This Device section (v0.21): "Use This Device's Size" (this browser's own text size, which the shared
+    one then doesn't change here; the owner's one exception, 2026-10-05), then the room's own device rows (Offline
+    Copies, Kura's Obsidian Vault, …). Nothing here leaves the device."""
+    device = getattr(ctx, "text_device", "")
+    current = device or getattr(ctx, "text_shared", getattr(ctx, "text", "standard"))
+    opts = "".join('<option value="%s"%s>%s</option>' % (e(v), " selected" if v == current else "", e(t))
+                   for v, t in TEXT_SIZES)
+    items = [
+        '<label class="item"><span>Use This Device\'s Size</span><input type="checkbox" role="switch" class="switch" '
+        'data-device-size%s></label>' % (" checked" if device else ""),
+        '<label class="item device-size"%s><span>Text Size on This Device</span><select data-device-size-value>%s'
+        '</select></label>' % ("" if device else " hidden", opts),
+    ] + [r for r in rows if r]
+    text = ("Only on this device. With Use This Device's Size on, this browser keeps its own text size and the "
+            "shared one still follows you everywhere else.")
+    return ("This Device", items, (text + " " + note) if note else text)
 
 
 def about_section(room, version, status_text="", vaultkit=""):
@@ -473,14 +607,18 @@ def about_section(room, version, status_text="", vaultkit=""):
 
 
 def settings_page(sections, room):
-    """sections: [(title, [row html…], footnote or "")]; None entries are skipped. machiya.js saves every change."""
+    """sections: [(title, [row html…], footnote or "")], or (title, rows, footnote, extra html) for a section with a
+    line of its own under the footnote (shared_section's state line); None entries are skipped. machiya.js saves every
+    change."""
     out = ['<main class="settings" data-settings-room="%s"><h1 class="sechead" style="display:none">Settings</h1>' % e(room)]
     for sec in sections:
         if not sec:
             continue
-        title, items, note = sec
-        out.append('<h2 id="%s">%s</h2><div class="group">%s</div>%s' % (e(title.lower().replace(" ", "-")), e(title), "".join(items),
-                                                                ('<p class="footnote">%s</p>' % e(note)) if note else ""))
+        title, items, note = sec[:3]
+        extra = sec[3] if len(sec) > 3 else ""
+        out.append('<h2 id="%s">%s</h2><div class="group">%s</div>%s%s' % (
+            e(title.lower().replace(" ", "-")), e(title), "".join(items),
+            ('<p class="footnote">%s</p>' % e(note)) if note else "", extra or ""))
     out.append("</main>")
     return "".join(out)
 

@@ -7,7 +7,7 @@ returns `(status, [(header, value), ...], body bytes)`, so a room's handler stay
     POST /signin      handle_post(ident, headers, body, client)      same-origin form post -> session cookie
     POST /signout     handle_signout(ident, headers)                 same-origin -> cookie cleared
     POST /api/pair    handle_pair(ident, headers, body, client)      {"code", "device"} -> {"token"}; no cookie involved
-    GET/PUT /api/prefs  handle_prefs(prefs, principal, method, headers, body, secure)
+    GET/PUT /api/prefs  handle_prefs(prefs, principal, method, headers, body, secure)   (docs/contracts/prefs.md)
 
 The rules, all failing closed: a post that changes state on the strength of a cookie (sign-in, sign-out, a prefs PUT
 made with a cookie) must be same-origin (Origin, else Referer, naming the request's own Host; neither is a refusal);
@@ -23,19 +23,20 @@ import time
 from contextlib import closing
 from urllib.parse import parse_qs, quote, urlsplit
 
+from . import prefs as vprefs
 from . import shell
 from .identity import Identity
 
 MAX_FORM = 4096                 # name + password (<= 1024) + next, urlencoded
 MAX_PAIR = 1024                 # {"code": ..., "device": ...}
-MAX_PREFS = 512 * 1024          # a PUT of every key at its largest, with room for JSON escapes
+MAX_PREFS = 512 * 1024          # a PUT of every key at its largest, with room for JSON escapes (prefs.MAX_BODY)
 MAX_NEXT = 2048
 
 PAGE_HEADERS = [
     ("Content-Type", "text/html; charset=utf-8"),
     ("Cache-Control", "no-store"),
     ("X-Frame-Options", "DENY"),                            # nobody frames the password form (clickjacking)
-    ("Content-Security-Policy", "frame-ancestors 'none'"),
+    ("Content-Security-Policy", shell.CSP.replace("frame-ancestors 'self'", "frame-ancestors 'none'")),   # v0.22
     ("X-Content-Type-Options", "nosniff"),
     ("Referrer-Policy", "same-origin"),
 ]
@@ -288,47 +289,24 @@ def handle_pair(identity, headers, body, client=""):
 
 KEY_RE = re.compile(r"[a-z0-9_.-]{1,64}\Z")
 MAX_VALUE = 4096                # bytes of UTF-8
-MAX_KEYS = 100                  # per principal
+MAX_KEYS = vprefs.MAX_KEYS      # per principal
+PrefsError = vprefs.PrefsError
 
 
-class PrefsError(ValueError):
-    """A PUT the limits refuse; the message is safe to show."""
-
-
-class Prefs:
-    """A principal's preferences in the room's own SQLite file: table prefs(principal, key, value, updated), keyed by
-    the principal's id (Principal.uid), so a name deleted and added again starts empty. Keys match
-    KEY_RE, values are strings of at most MAX_VALUE bytes, at most MAX_KEYS keys per principal. Nothing here decides who
-    the principal is: the room passes the name `resolve` gave it."""
-
-    def __init__(self, path):
-        self.path, self.lock = path, threading.Lock()
-        try:                            # 0600: other local users don't read anyone's preferences
-            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
-        except FileExistsError:
-            pass                        # already there (or another process just made it): keep it as it is
-        with self.lock, closing(self._db()) as db, db:
-            db.execute("CREATE TABLE IF NOT EXISTS prefs (principal TEXT NOT NULL, key TEXT NOT NULL, "
-                       "value TEXT NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY (principal, key))")
-
-    def _db(self):
-        # autocommit (put() begins its own); a short wait, since the lock below is held meanwhile
-        return sqlite3.connect(self.path, timeout=2, isolation_level=None)
-
-    @staticmethod
-    def _principal(principal):
-        if not isinstance(principal, str) or not principal or len(principal) > 64:
-            raise PrefsError("no principal")
-        return principal
+class Prefs(vprefs.Store):
+    """A principal's preferences in the room's own SQLite file (a room without the account store: identity-file,
+    Tailscale or open mode, docs/contracts/prefs.md): table prefs(principal, key, value, updated), keyed by the
+    principal's id (Principal.uid), so a name deleted and added again starts empty, plus a revision per principal
+    (vaultkit.prefs.Store). handle_prefs validates against the schema; get_all/put are the older calls (any key
+    matching KEY_RE, values of at most MAX_VALUE bytes, at most MAX_KEYS keys). Nothing here decides who the
+    principal is: the room passes the id `resolve` gave it."""
 
     def get_all(self, principal):
-        principal = self._principal(principal)
-        with self.lock, closing(self._db()) as db:
-            return dict(db.execute("SELECT key, value FROM prefs WHERE principal = ? ORDER BY key", (principal,)))
+        return self.snapshot(principal)[1]
 
     def put(self, principal, changes):
         """Set each key to its string value, or remove it when the value is None; all or nothing. -> get_all."""
-        principal = self._principal(principal)
+        self._principal(principal)
         if not isinstance(changes, dict):
             raise PrefsError("prefs must be an object of key: string")
         if len(changes) > MAX_KEYS:
@@ -346,28 +324,7 @@ class Prefs:
                 raise PrefsError("%s: not valid text" % k)
             if size > MAX_VALUE:
                 raise PrefsError("%s: a value is at most %d bytes" % (k, MAX_VALUE))
-        t = int(time.time())
-        with self.lock, closing(self._db()) as db:
-            db.execute("BEGIN IMMEDIATE")
-            try:
-                for k, v in changes.items():
-                    if v is None:
-                        db.execute("DELETE FROM prefs WHERE principal = ? AND key = ?", (principal, k))
-                    else:
-                        db.execute("INSERT INTO prefs (principal, key, value, updated) VALUES (?, ?, ?, ?) "
-                                   "ON CONFLICT (principal, key) DO UPDATE SET value = excluded.value, "
-                                   "updated = excluded.updated", (principal, k, v, t))
-                count = db.execute("SELECT COUNT(*) FROM prefs WHERE principal = ?", (principal,)).fetchone()[0]
-                if count > MAX_KEYS:
-                    raise PrefsError("at most %d keys" % MAX_KEYS)
-                db.execute("COMMIT")
-            except BaseException:
-                try:
-                    db.execute("ROLLBACK")
-                except sqlite3.Error:
-                    pass                # the original error matters, not a failed rollback
-                raise
-            return dict(db.execute("SELECT key, value FROM prefs WHERE principal = ? ORDER BY key", (principal,)))
+        return self.write(principal, changes)[1]
 
 
 def bearer(principal):
@@ -377,34 +334,61 @@ def bearer(principal):
     return (getattr(principal, "via", "") or "").startswith(("token:", "device:"))
 
 
+def prefs_answer(status, rev, values, updated):
+    """(status, headers, body) for a prefs GET or PUT: the contract's JSON with its ETag (rev)."""
+    return _json(status, vprefs.answer(rev, values, updated), [("ETag", vprefs.etag(rev))])
+
+
+def not_modified(rev):
+    return 304, [("Cache-Control", "no-store"), ("ETag", vprefs.etag(rev))], b""
+
+
+def parse_put(headers, body):
+    """A prefs PUT's body -> (the validated changes, None) or (None, an error answer). Shared by the rooms' own store
+    and the account store (hister-login), so both refuse the same things the same way."""
+    if body is None or len(body) > MAX_PREFS:
+        return None, _json(413, {"error": "request body too large"})
+    if _media(headers) != "application/json":
+        return None, _json(415, {"error": "send JSON"})
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except (ValueError, RecursionError):
+        return None, _json(400, {"error": "unreadable JSON"})
+    if not isinstance(data, dict) or set(data) != {"prefs"}:
+        return None, _json(400, {"error": "send {\"prefs\": {key: value}}"})
+    try:
+        return vprefs.validate(data["prefs"]), None
+    except PrefsError as e:
+        return None, _json(400, {"error": str(e)})
+
+
 def handle_prefs(prefs, principal, method, headers, body=b"", secure=True, origins=()):
-    """GET /api/prefs -> {"prefs": {key: value}}; PUT /api/prefs with JSON {"prefs": {key: value or null}} merges
-    (null removes) and answers the same shape. `principal` is what the room's resolve gave (None: 401). A PUT not made
-    with a token must be same-origin (403); `secure` is the room's (identity.secure). The room calls this only after
-    its own gate (the principal's read grant in the room): a principal with no grants here stores nothing."""
+    """GET /api/prefs -> {"v": 1, "rev": n, "prefs": {key: value}, "updated": {key: time}} with ETag "<rev>"
+    (If-None-Match: 304); PUT /api/prefs with JSON {"prefs": {key: value or null}} merges only the keys sent (null
+    removes; the schema in vaultkit.prefs decides what is accepted, else 400) and answers like GET.
+    `principal` is what the room's resolve gave (None: 401). A PUT not made with a token must be same-origin (403);
+    `secure` is the room's (identity.secure). The room calls this only after its own gate (the principal's read grant
+    in the room): a principal with no grants here stores nothing. In AUTH=hister mode with the helper the room
+    forwards instead (histerauth.HisterAuth.forward_prefs)."""
     if principal is None:
         return _json(401, {"error": "sign in first"})
     if method == "GET":
         try:
-            return _json(200, {"prefs": prefs.get_all(principal.uid)})  # by id: a reused name starts empty
+            rev, values, updated = prefs.snapshot(principal.uid)        # by id: a reused name starts empty
         except sqlite3.Error:
             return _json(503, {"error": "preferences unavailable"})      # locked, full or read-only: never a crash
+        if vprefs.matches(headers.get("If-None-Match"), rev):
+            return not_modified(rev)
+        return prefs_answer(200, rev, values, updated)
     if method != "PUT":
         return _json(405, {"error": "GET or PUT"}, [("Allow", "GET, PUT")])
     if not bearer(principal) and not same_origin(headers, secure, origins):
         return _json(403, {"error": "cross-site write refused"})
-    if body is None or len(body) > MAX_PREFS:
-        return _json(413, {"error": "request body too large"})
-    if _media(headers) != "application/json":
-        return _json(415, {"error": "send JSON"})
+    changes, refused = parse_put(headers, body)
+    if refused:
+        return refused
     try:
-        data = json.loads(body.decode("utf-8"))
-    except (ValueError, RecursionError):
-        return _json(400, {"error": "unreadable JSON"})
-    if not isinstance(data, dict) or set(data) != {"prefs"}:
-        return _json(400, {"error": "send {\"prefs\": {key: value}}"})
-    try:
-        return _json(200, {"prefs": prefs.put(principal.uid, data["prefs"])})
+        return prefs_answer(200, *prefs.write(principal.uid, changes))
     except PrefsError as e:
         return _json(400, {"error": str(e)})
     except sqlite3.Error:

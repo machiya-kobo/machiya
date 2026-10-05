@@ -21,7 +21,7 @@ from urllib.parse import quote
 import markdown
 
 from .git import Git
-from .notes import FRONT_RE, LINK_RE, Note, e, read_notes
+from .notes import FRONT_RE, LINK_RE, Note, e, read_notes, safe_path
 from .sanitize import clean
 
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
@@ -68,7 +68,7 @@ class Vault:
         for dirpath, dirnames, filenames in os.walk(self.root):
             dirnames[:] = [d for d in dirnames if not d.startswith(".")]
             for name in filenames:
-                if name.lower().endswith(IMAGE_EXT):
+                if name.lower().endswith(IMAGE_EXT) and not os.path.islink(os.path.join(dirpath, name)):   # v0.22
                     assets.setdefault(name, os.path.relpath(os.path.join(dirpath, name), self.root))
         self.notes, self.by_name, self.assets = notes, by_name, assets
         for n in notes.values():
@@ -90,8 +90,9 @@ class Vault:
         return self.by_name.get(t) or self.by_name.get(t.split("/")[-1])
 
     def tended_dates(self):
-        """{rel: YYYY-MM-DD of the note's latest commit}."""
-        out = self.git("log", "--format=@%as", "--name-only", "--", self.subdir or ".")
+        """{rel: YYYY-MM-DD of the note's latest commit}. v0.22 (KURA-5): core.quotePath=false, so a non-ASCII name
+        (町家.md, café notes.md) isn't printed quoted and octal-escaped, and keeps its date."""
+        out = self.git("-c", "core.quotePath=false", "log", "--format=@%as", "--name-only", "--", self.subdir or ".")
         dates, current = {}, None
         prefix = self.subdir + "/" if self.subdir else ""
         for line in out.splitlines():
@@ -106,11 +107,15 @@ class Vault:
         return self.notes.get(slug + ".md") or self.notes.get(slug)
 
     def asset_path(self, rel):
-        """Absolute path of a vault image, or None (only images the index knows, so no path escapes)."""
+        """Absolute path of a vault image, or None (only images the index knows, so no path escapes; never a symlink,
+        v0.22)."""
         self.index()
         if self.assets.get(os.path.basename(rel)) != rel:
             return None
-        return os.path.join(self.root, rel)
+        try:
+            return safe_path(self.root, rel)
+        except ValueError:
+            return None
 
     # -- rendering -----------------------------------------------------
 
