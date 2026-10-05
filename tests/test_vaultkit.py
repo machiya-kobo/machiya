@@ -299,6 +299,82 @@ class MirrorTest(unittest.TestCase):
         self.assertEqual(vaultkit.auth_env(""), {})
 
 
+class SymlinkTest(unittest.TestCase):
+    """KURA-2 (sweep 2026-10): a symlink committed to the vault is never followed: not read as a note, not indexed as an
+    image, not written through, and not even checked out by a Mirror or a GitSync clone."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.secret = os.path.join(self.tmp, "secret.txt")
+        with open(self.secret, "w") as f:
+            f.write("TOKEN-OUTSIDE-THE-VAULT\n")
+        self.src = os.path.join(self.tmp, "src")
+        os.makedirs(self.src)
+        make_repo(self.src)
+        base = os.path.join(self.src, "personal")
+        os.symlink(self.secret, os.path.join(base, "leak.md"))
+        os.symlink(self.secret, os.path.join(base, "Attachments", "leak.png"))
+        os.makedirs(os.path.join(self.tmp, "outside"))
+        with open(os.path.join(self.tmp, "outside", "Far.md"), "w") as f:
+            f.write("TOKEN-OUTSIDE-THE-VAULT\n")
+        os.symlink(os.path.join(self.tmp, "outside"), os.path.join(base, "Linked"))
+        sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "add", "-A", cwd=self.src)
+        sh("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "links", cwd=self.src)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_read_notes_and_index_skip_links(self):
+        rels = [r for r, _, _ in vaultkit.read_notes(os.path.join(self.src, "personal"))]
+        self.assertNotIn("leak.md", rels)
+        self.assertFalse([r for r in rels if r.startswith("Linked")])
+        self.assertIn("Loose.md", rels)
+        v = vaultkit.Vault(self.src, "personal")
+        v.revision = "r"
+        v.index()
+        self.assertNotIn("leak.png", v.assets)
+        self.assertIn("pic.png", v.assets)
+        self.assertIsNone(v.asset_path("Attachments/leak.png"))
+        self.assertIsNone(vaultkit.read_file(os.path.join(self.src, "personal", "leak.md")))
+        self.assertIn("Widget", vaultkit.read_file(os.path.join(self.src, "personal", "Projects", "Widget.md")))
+
+    def test_safe_path_refuses_links_and_escapes(self):
+        root = os.path.join(self.src, "personal")
+        self.assertEqual(vaultkit.safe_path(root, "Inbox/New.md"), os.path.join(os.path.realpath(root), "Inbox", "New.md"))
+        for bad in ("leak.md", "Linked/Far.md", "Linked/New.md", "../x.md", "a/../../x.md", "/etc/passwd", "", "a//b.md",
+                    "a/\0.md"):
+            with self.assertRaises(ValueError, msg=bad):
+                vaultkit.safe_path(root, bad)
+
+    def test_mirror_never_checks_out_links(self):
+        copy = os.path.join(self.tmp, "copy")
+        vaultkit.Mirror("file://" + self.src, copy).update()
+        self.assertFalse(os.path.islink(os.path.join(copy, "personal", "leak.md")))
+        with open(os.path.join(copy, "personal", "leak.md")) as f:
+            self.assertNotIn("TOKEN", f.read())                    # the link's target name, not the file
+        texts = [t for _, _, t in vaultkit.read_notes(os.path.join(copy, "personal"))]
+        self.assertFalse([t for t in texts if "TOKEN-OUTSIDE" in t])
+
+    def test_an_existing_clone_with_links_is_switched_over(self):
+        copy = os.path.join(self.tmp, "old")
+        sh("git", "-c", "core.symlinks=true", "clone", "-q", self.src, copy, cwd=self.tmp)     # made before v0.22
+        self.assertTrue(os.path.islink(os.path.join(copy, "personal", "leak.md")))
+        vaultkit.Mirror("file://" + self.src, copy).update()
+        self.assertFalse(os.path.islink(os.path.join(copy, "personal", "leak.md")))
+        self.assertFalse(os.path.islink(os.path.join(copy, "personal", "Linked")))
+
+    def test_gitsync_clone_drops_links_and_replay_never_writes_through_one(self):
+        remote = os.path.join(self.tmp, "remote.git")
+        sh("git", "clone", "-q", "--bare", self.src, remote, cwd=self.tmp)
+        ours = os.path.join(self.tmp, "ours")
+        sh("git", "-c", "core.symlinks=true", "clone", "-q", remote, ours, cwd=self.tmp)
+        sync = vaultkit.GitSync(ours, ("t", "t@t"), ["personal"])
+        self.assertTrue(sync.pull())
+        self.assertFalse(os.path.islink(os.path.join(ours, "personal", "leak.md")))
+        with open(self.secret) as f:
+            self.assertEqual(f.read(), "TOKEN-OUTSIDE-THE-VAULT\n")
+
+
 class MigrationNamesTest(unittest.TestCase):
     """Legacy and current field names are both read (docs/frontmatter.md); the current ones win."""
 

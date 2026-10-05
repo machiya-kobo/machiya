@@ -17,6 +17,7 @@ import time
 
 from .front import CONFLICT_RE
 from .frontmatter import merge_note
+from .notes import safe_path
 
 
 class GitSync:
@@ -44,6 +45,20 @@ class GitSync:
             print("git %s failed: %s" % (" ".join(a for a in args if not a.startswith("user.")),
                                          (getattr(e, "stderr", "") or str(e)).strip()), flush=True)
             return ""
+
+    def no_symlinks(self):
+        """core.symlinks=false (v0.22, KURA-2): a link committed upstream is checked out as a plain file, so no write
+        (ours or replay's) goes through it to a file outside the vault. Set once per process."""
+        if getattr(self, "_no_symlinks", False):
+            return
+        if self.run("config", "--get", "--default", "", "core.symlinks").strip() != "false":
+            self.run("config", "core.symlinks", "false")
+        for entry in self.run("ls-files", "-s", "-z").split("\0"):
+            meta, _, rel = entry.partition("\t")
+            if meta.startswith("120000 ") and os.path.islink(os.path.join(self.repo, rel)):
+                os.unlink(os.path.join(self.repo, rel))
+                self.run("checkout", "-q", "--", rel)
+        self._no_symlinks = True
 
     def git(self, *args):
         return self.run("-c", "user.name=%s" % self.author[0], "-c", "user.email=%s" % self.author[1],
@@ -128,6 +143,7 @@ class GitSync:
 
     def pull(self):
         with self.lock:
+            self.no_symlinks()
             if self.dirty():
                 self.commit(force=True)
             if self.dirty() or self.rebasing():
@@ -189,8 +205,13 @@ class GitSync:
                 else:
                     merged[rel] = text
         self.git("reset", "-q", "--hard", upstream)
-        for rel, text in merged.items():
-            path = os.path.join(self.repo, rel)
+        for rel, text in list(merged.items()):
+            try:
+                path = safe_path(self.repo, rel)
+            except ValueError as e:
+                notes.append("%s: not written (%s)" % (rel, e))
+                del merged[rel]
+                continue
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
                 f.write(text)

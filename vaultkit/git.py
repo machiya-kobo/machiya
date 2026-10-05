@@ -59,17 +59,33 @@ class Mirror(Git):
         self.env = auth_env(token, user)
 
     def update(self):
-        """Clone or fetch; returns (HEAD, changed?)."""
+        """Clone or fetch; returns (HEAD, changed?).
+
+        Symlinks are never checked out (v0.22, KURA-2): the clone has core.symlinks=false, so a committed link is a
+        small plain file holding its target's name, and an existing clone is switched over (its links replaced) on the
+        next update."""
         before = self.head() if os.path.isdir(os.path.join(self.repo, ".git")) else ""
         if not before:
             os.makedirs(self.repo, exist_ok=True)
-            args = ["clone", "-q"] + (["-b", self.branch] if self.branch else []) + ["--", self.url, "."]
+            args = ["clone", "-q", "-c", "core.symlinks=false"] + (["-b", self.branch] if self.branch else []) \
+                + ["--", self.url, "."]
             self.run(*args, timeout=1800)
         else:
+            self.no_symlinks()
             self.run("fetch", "-q", "--prune", "origin")
             self.run("reset", "-q", "--hard", "origin/" + self.branch if self.branch else "@{upstream}")
         after = self.head()
         return after, bool(after) and after != before
+
+    def no_symlinks(self):
+        """Set core.symlinks=false and replace every symlink git checked out with its plain-file form (v0.22)."""
+        if self.run("config", "--get", "--default", "", "core.symlinks").strip() != "false":
+            self.run("config", "core.symlinks", "false")
+        for entry in self.run("ls-files", "-s", "-z").split("\0"):
+            meta, _, rel = entry.partition("\t")
+            if meta.startswith("120000 ") and os.path.islink(os.path.join(self.repo, rel)):
+                os.unlink(os.path.join(self.repo, rel))
+                self.run("checkout", "-q", "--", rel)
 
 
 def borrow(repo, reference, sparse=(), timeout=1800):
