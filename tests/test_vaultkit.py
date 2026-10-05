@@ -407,6 +407,33 @@ class SymlinkTest(unittest.TestCase):
             self.assertEqual(f.read(), "TOKEN-OUTSIDE-THE-VAULT\n")
 
 
+class MarkdownFloorTest(unittest.TestCase):
+    """markdown 3.7-3.10 on Python 3.13 ran out of memory (2 GB+, 30-45 s) on a real note with two unclosed `<!--` in
+    separate paragraphs. vaultkit refuses those versions, and such a note renders within a small bound."""
+
+    def test_versions(self):
+        from vaultkit.vault import markdown_ok
+        for good in ("3.11", "3.11.1", "3.12", "4.0"):
+            self.assertTrue(markdown_ok(good), good)
+        for bad in ("3.7", "3.8.2", "3.10.2", "", None, "x"):
+            self.assertFalse(markdown_ok(bad), bad)
+
+    def test_unclosed_comments_render_within_bounds(self):
+        script = ("import resource, sys; resource.setrlimit(resource.RLIMIT_AS, (1 << 30, 1 << 30)); "
+                  "sys.path.insert(0, sys.argv[1]); import vaultkit; "
+                  "v = vaultkit.Vault(sys.argv[2]); v.revision = 'r'; "
+                  "n = vaultkit.Note('a.md', {}, sys.stdin.read()); v.index(); print(len(v.render(n, '', mode='all')))")
+        text = "".join("Para %d: a `<!--` here and <!-- there, `/home/` too.\n\n" % i for i in range(40))
+        tmp = tempfile.mkdtemp()
+        try:
+            r = subprocess.run([sys.executable, "-c", script, ROOT, tmp], input=text, capture_output=True, text=True,
+                               timeout=30)
+        finally:
+            shutil.rmtree(tmp)
+        self.assertEqual(r.returncode, 0, r.stderr[-500:])
+        self.assertGreater(int(r.stdout.split()[-1]), 1000)
+
+
 class TendedNamesTest(unittest.TestCase):
     def test_non_ascii_names_keep_their_dates(self):
         """KURA-5 (sweep 2026-10): git quoted non-ASCII paths, so these notes had no date."""
