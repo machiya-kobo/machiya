@@ -12,6 +12,8 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.join(HERE, "..", "..", "..", "plugins", "machiya")
 HEADERS = os.path.join(PLUGIN, "bin", "hister-headers")
+MACHIYA_HEADERS = os.path.join(PLUGIN, "bin", "machiya-headers")
+ROOM_TOKEN = "mht_" + "R" * 43
 INSTALL = os.path.join(PLUGIN, "install.sh")
 PROD, DEV = "ProductionOwnerToken123", "DevStackToken456"
 
@@ -80,6 +82,57 @@ class HisterHeaders(Scratch):
         with open(self.token_file, "w") as f:
             f.write('bad"token\n')
         self.assertEqual(self.headers(HISTER_TOKEN_FILE=self.token_file, HISTER_MCP_URL="https://h.example/mcp"), {})
+
+
+class MachiyaHeaders(Scratch):
+    """plugin 0.4.0: machiya-mcp gets a room token from MACHIYA_TOKEN_FILE only, never Hister's token, never pass."""
+
+    def headers(self, **kw):
+        r = subprocess.run([sys.executable, MACHIYA_HEADERS], capture_output=True, text=True, env=self.env(**kw),
+                           timeout=30)
+        self.assertEqual((r.returncode, r.stderr), (0, ""))
+        return json.loads(r.stdout)
+
+    def room_file(self, value=ROOM_TOKEN):
+        path = os.path.join(self.dir, "room-token")
+        with open(path, "w") as f:
+            f.write(value + "\n")
+        return path
+
+    def test_a_room_token_to_https_or_loopback(self):
+        f = self.room_file()
+        want = {"Authorization": "Bearer " + ROOM_TOKEN}
+        self.assertEqual(self.headers(MACHIYA_TOKEN_FILE=f, MACHIYA_MCP_URL="https://mcp.example.ts.net/mcp"), want)
+        self.assertEqual(self.headers(MACHIYA_TOKEN_FILE=f, MACHIYA_MCP_URL="http://127.0.0.1:19226/mcp"), want)
+        self.assertEqual(self.headers(MACHIYA_TOKEN_FILE=f, MACHIYA_MCP_URL="http://mcp.example.ts.net/mcp"), {})
+        self.assertEqual(self.headers(MACHIYA_TOKEN_FILE=f, MACHIYA_MCP_URL="https://x/mcp",
+                                      CLAUDE_CODE_MCP_SERVER_URL="http://evil.example/mcp"), {})
+
+    def test_never_hister_never_pass(self):
+        self.assertEqual(self.headers(MACHIYA_MCP_URL="https://mcp.example.ts.net/mcp"), {})          # no file: none
+        self.assertEqual(self.headers(MACHIYA_TOKEN_FILE=self.token_file,                           # a Hister token
+                                      MACHIYA_MCP_URL="https://mcp.example.ts.net/mcp"), {})
+        self.assertEqual(self.headers(MACHIYA_TOKEN_FILE=os.path.join(self.dir, "gone"),
+                                      MACHIYA_MCP_URL="https://mcp.example.ts.net/mcp"), {})
+
+    def test_the_plugin_uses_it_and_install_saves_the_path_only(self):
+        with open(os.path.join(PLUGIN, ".mcp.json")) as f:
+            server = json.load(f)["mcpServers"]["machiya"]
+        self.assertEqual(server["headersHelper"], "${CLAUDE_PLUGIN_ROOT}/bin/machiya-headers")
+        os.makedirs(os.path.join(self.dir, ".claude"))
+        with open(os.path.join(self.dir, ".claude", "settings.json"), "w") as fh:
+            fh.write("{}")
+        f = self.room_file()
+        r = subprocess.run(["bash", INSTALL, "hister-remove"], capture_output=True, text=True, timeout=60,
+                           env=self.env(MACHIYA_TOKEN_FILE=f))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(os.path.join(self.dir, ".claude", "settings.json")) as fh:
+            text = fh.read()
+        self.assertEqual(json.loads(text)["env"]["MACHIYA_TOKEN_FILE"], f)
+        self.assertNotIn(ROOM_TOKEN, text)
+        subprocess.run(["bash", INSTALL, "uninstall"], capture_output=True, text=True, timeout=60, env=self.env())
+        with open(os.path.join(self.dir, ".claude", "settings.json")) as fh:
+            self.assertNotIn("MACHIYA_TOKEN_FILE", json.load(fh)["env"])
 
 
 class Install(Scratch):

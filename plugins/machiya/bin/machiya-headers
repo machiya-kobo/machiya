@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""The headers for machiya-mcp (plugin 0.4.0): a room token, `Authorization: Bearer mht_…`, printed as JSON for a Claude
+Code `headersHelper`. machiya-mcp takes one beside the Tailscale header (machiya-mcp 0.8.0): an agent on a tagged machine
+(the claude VM) has no Tailscale login. The token is one hister-login made for machiya-mcp (its sessions page, Room
+Tokens, or `hister_login.py token mint --rooms machiya-mcp`); it opens machiya-mcp only, never Hister or a room.
+
+Where the token may come from and go (the lesson of sweep MACH-M-1):
+- only from $MACHIYA_TOKEN_FILE (its first line), whose path install.sh saves; never from pass, never a fallback;
+- only a room token (mht_ and 43 characters): Hister's raw token is never sent, whatever the file holds;
+- only to the address Claude Code connects to ($CLAUDE_CODE_MCP_SERVER_URL, else $MACHIYA_MCP_URL), over https, or
+  over plain http to loopback (the dev stack's 127.0.0.1:19226).
+Anything else prints {}: no header (the Tailscale identity alone, as before). Never prints anything but the JSON.
+"""
+import ipaddress
+import json
+import os
+import re
+import sys
+from urllib.parse import urlsplit
+
+ROOM_TOKEN = re.compile(r"^mht_[A-Za-z0-9_-]{43}$")
+
+
+def allowed(url):
+    try:
+        u = urlsplit((url or "").strip())
+        host = (u.hostname or "").lower().rstrip(".")
+    except ValueError:
+        return False
+    if not host or u.username is not None or u.password is not None:
+        return False
+    if u.scheme == "https":
+        return True
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host == "localhost" or host.endswith(".localhost")
+    return u.scheme == "http" and loopback
+
+
+def token(env):
+    path = env.get("MACHIYA_TOKEN_FILE") or ""
+    if not path or not allowed(env.get("CLAUDE_CODE_MCP_SERVER_URL") or env.get("MACHIYA_MCP_URL") or ""):
+        return ""
+    try:
+        with open(path, encoding="utf-8") as f:
+            value = f.readline().strip()
+    except (OSError, UnicodeError):
+        return ""
+    return value if ROOM_TOKEN.match(value) else ""
+
+
+def main():
+    tok = token(os.environ)
+    sys.stdout.write((json.dumps({"Authorization": "Bearer " + tok}) if tok else "{}") + "\n")
+
+
+if __name__ == "__main__":
+    main()

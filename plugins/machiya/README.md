@@ -27,6 +27,16 @@ claude plugin install machiya@machiya
 
 Set `MACHIYA_MCP_URL` if the server isn't at `https://machiya-mcp.example.ts.net/mcp`, and `MACHIYA_AGENT` (for example `claude@laptop`) so the board's history says who acted. The client has to be on the tailnet. Suggested permissions (reads allowed, most writes ask): see the service doc, which names the tools `mcp__machiya__<tool>` (the server added with `claude mcp add machiya …`). Through this plugin the same tools are `mcp__plugin_machiya_machiya__<tool>`: use that prefix in the permission rules. Use one or the other on a machine, not both.
 
+## A machine with no Tailscale login: a room token (plugin 0.4.0)
+
+machiya-mcp knows a person by the Tailscale login its sidecar passes on. A tagged machine (the claude VM is `tag:dev`) has none, so machiya-mcp (0.8.0) also takes a **room token**: `Authorization: Bearer mht_…`, which hister-login makes for machiya-mcp and which opens machiya-mcp only, never Hister or a room ([identity.md](../../docs/identity.md#room-tokens)). Make one on hister-login's sessions page (Room Tokens, tick machiya-mcp) or where the helper runs (`hister_login.py token mint --user <owner> --label "claude VM" --rooms machiya-mcp --out FILE`), keep it in pass (`pass:hosts/<host>/machiya-mcp-room-token`), write it to a 0600 file on the machine, and install with its path:
+
+```
+MACHIYA_TOKEN_FILE=~/.config/machiya/mcp-room-token plugins/machiya/install.sh
+```
+
+The settings keep the path, never the token. `bin/machiya-headers` (the plugin's `headersHelper`) sends it only when the file holds a room token (`mht_…`: Hister's token is never sent, whatever the file holds), only to the address Claude Code connects to, over https or plain http to loopback (the dev stack), and never falls back to anything: no file, no header, and the Tailscale identity decides as before. `install.sh check` makes its test call with the same header.
+
 ## `bin/hister-headers`
 
 No longer used by the plugin (it connects no Hister MCP), kept for a person who adds Hister's MCP by hand for their own use (never for an AI client). It prints the header that carries the owner's Hister token, and refuses to send a production token anywhere it shouldn't go (sweep MACH-M-1): with `HISTER_TOKEN_FILE` set it uses that file only (missing or unreadable: no header, never a fallback), and that token goes over plain http only to loopback; the `hpass` fallback (`$HISTER_TOKEN_PASS`, else a per-host entry) applies only when `HISTER_MCP_URL` is an https address that is not loopback and not on a dev-stack port (19200–19226). Anything else prints `{}`: no header.
