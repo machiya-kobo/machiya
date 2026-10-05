@@ -138,13 +138,13 @@ tools/dev-test tv-debian --keep && \
   tools/dev-test tv-haiku --packages --native --hister-via tv-debian      # no Hister there: borrow tv-debian's
 ```
 
-`--packages` installs what the stack needs with the machine's package manager (Debian's Docker; on the BSDs the packages of [install/bsd.md](install/bsd.md); on Haiku the line below). The checks are the HTTP ones. The vault's commit hash comes out the same on every machine.
+`--packages` installs what the stack needs with the machine's package manager (Debian's Docker; on the BSDs the packages of [install/bsd.md](install/bsd.md) and a venv, `DIR/venv` with `--system-site-packages` and pip's `markdown>=3.11`, which every run puts first on `PATH` when it exists: every BSD's markdown package is 3.10 and OpenBSD's pip refuses the system Python; on Haiku the line below). The checks are the HTTP ones. The vault's commit hash comes out the same on every machine.
 
-Proven (2026-10-04/05, the counts have since grown to 17 Docker and 16 native checks): `tv-debian` with Docker 17/17; `tv-arm64` (Debian 13 aarch64) with Docker 17/17 and natively with upstream's linux_arm64 Hister binary 16/16; `tv-freebsd` natively with `--hister-via tv-debian` 15/15 (every Python service on FreeBSD 15.1, Hister on Debian through the tunnels). SearXNG is left out natively.
+Proven (2026-10-04/05, the counts have since grown to 17 Docker and 16 native checks): `tv-debian` with Docker 17/17; `tv-arm64` (Debian 13 aarch64) with Docker 17/17 and natively with upstream's linux_arm64 Hister binary 16/16; `tv-freebsd` natively with `--hister-via tv-debian` 15/15 (every Python service on FreeBSD 15.1, Hister on Debian through the tunnels). Again on 2026-10-05 with vaultkit 0.22 (markdown 3.11): `tv-debian` with Docker 23/23; natively `tv-freebsd` 22/22 with `--hister-bin`, and `tv-netbsd` and `tv-openbsd` 22/22 with `--hister-via tv-debian` (FreeBSD and NetBSD with markdown from the system pip, OpenBSD with it preinstalled; the venv step above replaced the system pip after that run). SearXNG is left out natively.
 
 ### A Hister borrowed from another machine (`--hister-via`)
 
-For an OS with no Hister (Haiku today, any BSD until a binary is built). The layout, all ssh from the machine that runs `tools/dev-test`:
+For an OS with no Hister: Haiku, and NetBSD and OpenBSD until a binary is built there (FreeBSD's builds, below). The layout, all ssh from the machine that runs `tools/dev-test`:
 
 ```
  HOST2 (a dev stack, e.g. tools/dev-test HOST2 --keep)       this machine                 HOST (--native)
