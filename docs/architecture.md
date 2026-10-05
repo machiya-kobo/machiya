@@ -106,8 +106,8 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    who["browser · Shiori"] -->|"machiya_sso cookie or Bearer mhs_…"| room["room"]
-    room -->|"GET /v1/check (internal)"| hl["hister-login"]
+    who["browser · Shiori · agents"] -->|"the room's own __Host- cookie, Bearer mhs_… or a room token mht_…"| room["room"]
+    room -->|"POST /v1/redeem (a one-time code), GET /v1/check + X-Machiya-Room (internal)"| hl["hister-login"]
     hl -->|"GET /api/profile"| h[("Hister")]
     room -->|"signed in / 401 / unavailable: Tailscale fallback or 503"| ok{{"200 / 401 / 503"}}
 ```

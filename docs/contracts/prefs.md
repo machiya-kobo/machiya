@@ -42,8 +42,8 @@ Anything else is **400**. At most 100 keys per person, and a body of at most 512
 | Endpoint | Who calls it | Credential |
 |---|---|---|
 | `GET`, `PUT /api/prefs` on each room and landing | `machiya.js` | the room's own gate. In `AUTH=hister` mode with the helper it **forwards** (below); otherwise it is the room's own store |
-| `GET`, `PUT /v1/prefs` on hister-login's internal port (8081) | the rooms and landing, forwarding | exactly one of `X-Machiya-Session: mhs_…` or `X-Access-Token: <Hister token>`, as for `/v1/check`; anything else is 400 |
-| `GET`, `PUT /machiya/api/prefs` on hister-login's public port (8080, on Hister's host) | Shiori's apps (`Authorization: Bearer mhs_…`), extensions, Linux and scripts (`X-Access-Token`, or `Authorization: Bearer <Hister token>`), the hosted pages (the sign-in cookie, through their nginx) | one credential; a `PUT` carried by the cookie must have an `Origin` among the helper's return hosts. There is no CORS: no other site's page may read or write it |
+| `GET`, `PUT /v1/prefs` on hister-login's internal port (8081) | the rooms and landing, forwarding | exactly one of `X-Machiya-Session: mhs_…|mhr_…|mht_…` (with the room's `X-Machiya-Room`) or `X-Access-Token: <Hister token>`, as for `/v1/check`; anything else is 400 |
+| `GET`, `PUT /machiya/api/prefs` on hister-login's public port (8080, on Hister's host) | Shiori's apps (`Authorization: Bearer mhs_…`), extensions, Linux and scripts (a room token `Authorization: Bearer mht_…`, or a Hister token: `X-Access-Token` or `Bearer`; this is Hister's own host), the hosted pages (their own room cookie, through their nginx, hister-login 0.3.0) | one credential; a `PUT` carried by the cookie must have an `Origin` among the helper's return hosts. There is no CORS: no other site's page may read or write it |
 
 **GET** answers `200` with `Cache-Control: no-store` and `ETag: "<rev>"`; with a matching `If-None-Match` it answers `304`:
 
@@ -79,7 +79,7 @@ Anything else is **400**. At most 100 keys per person, and a body of at most 512
 
 | Caller | Account preferences? |
 |---|---|
-| a Hister sign-in (browser session, an app's `mhs_` id) or the owner's Hister token | yes |
+| a Hister sign-in (a room's own cookie, an app's `mhs_` id), a room token, or (legacy, and on the helper's own host) the owner's Hister token | yes |
 | the Tailscale fallback, `open` mode | no: 503 or the room's own store |
 | a room with no helper (identity file, Tailscale, open, or hister mode without `*_AUTH_URL`) | the room's own store, with the same API and the same client rules |
 
@@ -89,7 +89,7 @@ Anything else is **400**. At most 100 keys per person, and a body of at most 512
 
 A room keeps its same-origin `/api/prefs`, so `machiya.js`, the page's `<meta name="machiya-prefs">` and the service worker's bypass don't change. In hister mode with the helper (`*_AUTH_URL` set), `vaultkit.histerauth.HisterAuth.forward_prefs(result, method, headers, body, origins)` does this:
 
-1. It passes the request to `/v1/prefs` with the **caller's own credential**: the `machiya_sso` cookie's id as `X-Machiya-Session`, or the caller's Hister token as `X-Access-Token`. It never sends a user id.
+1. It passes the request to `/v1/prefs` with the **caller's own credential** and the room's origin (`X-Machiya-Room`): the room's own cookie (a room session, vaultkit 0.22), an app's id or a room token as `X-Machiya-Session`, or (legacy) the caller's Hister token as `X-Access-Token`. It never sends a user id.
 2. A `PUT` carried by the cookie must be same-origin with the room (`origins`: its public address), else 403. One with `Authorization` or `X-Access-Token` is a client's.
 3. `If-None-Match` goes along, and the helper's answer comes back as it is: 200 with its `ETag`, 304, 400.
 4. The helper unreachable or failing gives 503. Signed out at the helper gives 401 with the sign-in address.
