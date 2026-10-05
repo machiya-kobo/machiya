@@ -111,7 +111,7 @@ Every app keeps its own clone under its data directory.
   ```
 
   - **Niwa** clones by itself at first start (`NIWA_REPO_URL`).
-  - **Konbini** expects an existing clone at `KANBAN_REPO`. Clone it once as the service user: `su -m konbini -c 'git clone ssh://git@git.example.net/owner/vault.git /var/db/konbini/repo'`.
+  - **Konbini** expects an existing clone at `KANBAN_REPO`. Clone it once as the service user, before the first start: `su -m konbini -c 'git clone ssh://git@git.example.net/owner/vault.git /var/db/konbini/repo'` (OpenBSD: `_konbini`).
 
 ## 6. The env file
 
@@ -155,6 +155,7 @@ KANBAN_BIND=127.0.0.1
 KANBAN_AUTH=tailscale                       # the default; open only on a LAN without tailscale serve (§1)
 KANBAN_TAILNET_USERS=you@example.com
 KANBAN_REPO=/var/db/konbini/repo
+KANBAN_REPO_SUBDIR=personal                 # the notes' folder in the repo, as Kura's and Niwa's
 KANBAN_DB=/var/db/konbini/kanban.sqlite3
 GIT_SSH_COMMAND=ssh -i /var/db/konbini/.ssh/deploy_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/var/db/konbini/.ssh/known_hosts
 # optional
