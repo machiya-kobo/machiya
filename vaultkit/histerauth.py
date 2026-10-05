@@ -617,13 +617,15 @@ class HisterAuth:
     def respond(self, result, is_page=True, ctx=None):
         """(status, [(header, value)], body) for a refused `result`: a 302 to the helper, or a short page in the
         shared shell (401 with a "Sign In" link, 403, 503), or JSON for an API call."""
-        headers = [("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff")]
-        headers += [("Set-Cookie", c) for c in result.cookies]
+        from . import shell, websafe
+        headers = [("Cache-Control", "no-store")] + websafe.base_headers()          # v0.22: on every answer
+        headers += [("Set-Cookie", websafe.header_value(c)) for c in result.cookies]
         if not is_page:
             return result.status, headers + [("Content-Type", "application/json")], json.dumps(result.json()).encode()
         if result.location:
-            return 302, headers + [("Location", result.location)], b""
-        from . import shell
+            return 302, headers + [("Location", websafe.header_value(result.location))], b""
+        headers = [h for h in headers if h[0] not in ("X-Frame-Options", "Referrer-Policy", "X-Content-Type-Options")] \
+            + shell.security_headers()
         _, name, _, _ = shell.room_info(self.room)
         if result.status == 401:
             body = shell.message("Sign In", "%s is private. Sign in to continue." % name,
