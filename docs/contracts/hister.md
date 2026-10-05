@@ -124,7 +124,7 @@ With `app.user_handling: true` Hister has users, and [hister-login](../services/
 
 ## What callers must never do
 
-- **Hister's per-post social extractors stay off** (`extractors.twitter`, `mastodon` and `bluesky` `enable: false`, [config/hister/config.yml](../../config/hister/config.yml)). This holds at least until Shiori's SHIO-1 fix ships (its hosted search page turns a stored `javascript:` address into a link). The Mastodon extractor stores permalinks exactly as a page wrote them, so turning it on would make that finding a high one. Decided by the owner, 2026-10-05.
+- **Hister's per-post social extractors are on, behind the skip rules** (`extractors.twitter`, `mastodon` and `bluesky` `enable: true`, [config/hister/config.yml](../../config/hister/config.yml)). X, Bluesky and the main Mastodon servers stay in the skip rules, so automatic history never reaches an extractor; an explicit save reaches one with `metadata.ignore_skip_rules: true` (Shiori's share sheet, Shortcuts, Linux `shiori save`; never automatic capture). They stayed off until Shiori 0.5.7 stopped linking stored `javascript:` addresses (sweep SHIO-1): the Mastodon extractor stores permalinks exactly as a page wrote them, so every client must keep refusing non-web schemes. Decided by the owner, 2026-10-05.
 
 - SearXNG never queries Hister.
 - No Hister result, copy or `private_url` appears on gemini, gopher or the public garden export. Those read only `archive_url` (Wayback).

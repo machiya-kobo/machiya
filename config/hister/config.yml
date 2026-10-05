@@ -27,14 +27,15 @@ crawler:
   delay: 1
 extractors:
   # Per-post social extractors split a feed into one document per post scrolled past, and on a re-add they
-  # REPLACE a document's text and metadata. X, Mastodon and Bluesky are skip-listed anyway, so the
-  # extractors would only do damage. They also store permalinks exactly as a page wrote them, a `javascript:` one
-  # included, which Shiori's hosted page would link (sweep SHIO-1): they stay OFF at least until Shiori's fix ships
-  # (the owner, 2026-10-05; docs/contracts/hister.md).
+  # REPLACE a document's text and metadata. They are on, but X, Mastodon's main servers and Bluesky stay in the
+  # skip rules, so automatic history never reaches them (that once made 66 documents in 90 s); an explicit save
+  # reaches an extractor with `metadata.ignore_skip_rules: true`. They were off until Shiori 0.5.7 stopped linking
+  # stored `javascript:` addresses (sweep SHIO-1). The owner, 2026-10-05; docs/contracts/hister.md.
+  # Turn one off if a bookmark loses its text.
   twitter:
-    enable: false
+    enable: true
   mastodon:
-    enable: false
+    enable: true
   bluesky:
-    enable: false
+    enable: true
   # ytdlp stays at its default (off): browsing YouTube must never make the server contact YouTube.
