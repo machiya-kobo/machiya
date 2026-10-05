@@ -8,7 +8,7 @@ import re
 
 import yaml
 
-from .front import FRONT_RE, note_front, tags_of
+from .front import FRONT_RE, load_yaml, note_front, tags_of
 
 
 class EditError(Exception):
@@ -68,7 +68,10 @@ def edit_front(text, scalars=None, tags=None):
         else:
             lines[1:1] = block
     inner = "\n".join(lines)
-    fm = yaml.safe_load(inner)
+    try:
+        fm = load_yaml(inner)                              # v0.22: no aliases, at most MAX_FRONT
+    except yaml.YAMLError:
+        raise EditError(422, "frontmatter can't be edited: invalid YAML, aliases or too large")
     if not isinstance(fm, dict):
         raise EditError(500, "frontmatter edit produced invalid YAML")
     start = text.index(m.group(1))
