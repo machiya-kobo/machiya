@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Machiya 町家: self-hosted rooms around your notes</title>
-<meta name="description" content="Machiya is a stack of small, standalone, self-hosted services around one vault of Markdown notes in a Git repository: a reader and search, a published garden, a project board, and a search client.">
+<title>Machiya: your own search for what you read, write and build</title>
+<meta name="description" content="Machiya is self-hosted search built on Hister, your own index of the pages you read, together with your Obsidian vault, the web and your code repositories.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#e1e2e7" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1a1b26" media="(prefers-color-scheme: dark)">
@@ -36,15 +36,19 @@
   <section aria-labelledby="title">
     <div class="wrap hero">
     <div>
-      <h1 id="title">Machiya <span class="seal" lang="ja">町家</span></h1>
-      <p class="lede">A stack of small self-hosted rooms around your notes: one vault of Markdown in a Git repository, and your own index of the pages you read.</p>
-      <p class="prose muted">A machiya is a Kyoto townhouse: a shop at the street front, a small inner garden and a storehouse at the back, all under one roof. Machiya the software is built the same way. Each room is its own service with its own job, and any of them runs without the others. An Obsidian vault works as is.</p>
+      <h1 id="title"><img class="title-mark" src="icons/machiya.svg" alt="" width="44" height="44">Machiya</h1>
+      <p class="lede">Your own search for everything you read, write and build, on your own server.</p>
+      <ul class="prose focus">
+        <li><strong>Hister</strong> keeps your own index of every page you visit and save, so you can find any of them again.</li>
+        <li><strong>Your Obsidian vault</strong> is searched alongside it, read in Kura, published in Niwa's garden and planned on Konbini's board.</li>
+        <li><strong>The web</strong> comes from SearXNG and the small web, in the same search, without sharing your history.</li>
+        <li><strong>Your code repositories</strong> on Forgejo and GitHub: READMEs, docs, issues, pull requests and releases.</li>
+      </ul>
       <div class="actions">
         <a class="button primary" href="https://github.com/machiya-kobo/machiya#quickstart">Quickstart</a>
         <a class="button secondary" href="https://github.com/machiya-kobo/machiya">Source on GitHub</a>
       </div>
     </div>
-    <img class="hero-mark" src="icons/machiya.svg" alt="The Machiya icon: a townhouse front with a lattice upper floor, a tiled eave and a three-panel noren in orange, green and magenta" width="176" height="176">
     </div>
   </section>
 
@@ -59,7 +63,7 @@
             <img src="icons/kura.svg" alt="" width="40" height="40">
             <div>
               <h3 id="kura-title">Kura</h3>
-              <p class="meaning"><span class="seal" lang="ja">蔵</span> the storehouse</p>
+              <p class="meaning">the storehouse</p>
             </div>
           </header>
           <p>Every note in the vault, with working links.</p>
@@ -77,7 +81,7 @@
             <img src="icons/niwa.svg" alt="" width="40" height="40">
             <div>
               <h3 id="niwa-title">Niwa</h3>
-              <p class="meaning"><span class="seal" lang="ja">庭</span> the garden</p>
+              <p class="meaning">the garden</p>
             </div>
           </header>
           <p>The published garden, grown from the vault.</p>
@@ -95,7 +99,7 @@
             <img src="icons/konbini.svg" alt="" width="40" height="40">
             <div>
               <h3 id="konbini-title">Konbini</h3>
-              <p class="meaning"><span class="seal" lang="ja">コンビニ</span> the shop</p>
+              <p class="meaning">the shop</p>
             </div>
           </header>
           <p>The project board, built from the vault's project notes.</p>
@@ -113,7 +117,7 @@
             <img src="icons/shiori.svg" alt="" width="40" height="40">
             <div>
               <h3 id="shiori-title">Shiori</h3>
-              <p class="meaning"><span class="seal" lang="ja">栞</span> the bookmark</p>
+              <p class="meaning">the bookmark</p>
             </div>
           </header>
           <p>The search front door: your pages, your notes and the web, in one search.</p>

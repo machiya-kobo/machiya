@@ -93,7 +93,10 @@ main > section:last-child { border-bottom: 0; }
 /* hero */
 .hero { display: grid; gap: var(--sp-5); align-items: center; padding-block: var(--sp-3); }
 .hero h1 { font-size: clamp(32px, 7vw, 44px); margin-bottom: var(--sp-4); }
-.hero h1 .seal { color: var(--fg2); font-weight: 500; margin-left: .25em; }
+.hero h1 { display: flex; align-items: center; gap: var(--sp-3); }
+.title-mark { width: 1em; height: 1em; flex: none; }
+.focus { padding-left: 1.1em; }
+.focus li + li { margin-top: var(--sp-2); }
 .hero-mark { display: none; width: 176px; height: auto; }
 @media (min-width: 720px) {
   .hero { grid-template-columns: 1fr auto; }
