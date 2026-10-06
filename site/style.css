@@ -18,8 +18,9 @@
   --shadow: 0 2px 4px rgba(55,96,191,.10), 0 18px 48px rgba(55,96,191,.18);
 }
 
+/* Dark (Tokyo Night): the system's choice unless the theme button picked one (data-theme on <html>). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     /* Tokyo Night */
     --bg: #1a1b26; --surface: #24283b; --line: #292e42; --line2: #3b4261;
     --fg: #c0caf5; --fg2: #a9b1d6;
@@ -28,8 +29,26 @@
     --pill-pages: #7aa2f7; --pill-notes: #ff9e64; --pill-web: #e0af68; --pill-smallweb: #1abc9c; --pill-code: #f7768e;
     --on-blue: #1a1b26;
     --shadow: 0 2px 4px rgba(0,0,0,.4), 0 18px 48px rgba(0,0,0,.45);
+    color-scheme: dark;
   }
+  :root:not([data-theme="light"]) .only-light { display: none !important; }
+  :root:not([data-theme="light"]) .only-dark { display: block !important; }
 }
+:root[data-theme="dark"] {
+  /* Tokyo Night */
+  --bg: #1a1b26; --surface: #24283b; --line: #292e42; --line2: #3b4261;
+  --fg: #c0caf5; --fg2: #a9b1d6;
+  --blue: #7aa2f7; --orange: #ff9e64; --green: #9ece6a; --magenta: #bb9af7; --cyan: #7dcfff;
+  /* Shiori's pill colours (Tokyo Night) */
+  --pill-pages: #7aa2f7; --pill-notes: #ff9e64; --pill-web: #e0af68; --pill-smallweb: #1abc9c; --pill-code: #f7768e;
+  --on-blue: #1a1b26;
+  --shadow: 0 2px 4px rgba(0,0,0,.4), 0 18px 48px rgba(0,0,0,.45);
+  color-scheme: dark;
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] .only-light { display: none !important; }
+:root[data-theme="dark"] .only-dark { display: block !important; }
+.only-dark { display: none !important; }
 
 @media (min-width: 720px) { :root { --gutter: 32px; } }
 
@@ -64,7 +83,14 @@ p { margin: 0; text-wrap: pretty; }
 .wrap { max-width: var(--width); margin: 0 auto; padding: 0 var(--gutter); }
 
 /* header */
-.site-header .wrap { padding-block: 18px; }
+.site-header .wrap { padding-block: 18px; display: flex; align-items: center; justify-content: space-between; }
+.theme-toggle {
+  display: inline-grid; place-items: center; width: 38px; height: 38px; padding: 0; cursor: pointer;
+  border: 1px solid var(--line2); border-radius: var(--r-pill); background: transparent; color: var(--fg2);
+}
+.theme-toggle:hover { color: var(--fg); border-color: var(--fg2); }
+.theme-toggle[hidden] { display: none; }
+.theme-toggle svg.only-dark, .theme-toggle svg.only-light { display: block; }
 .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--fg); text-decoration: none; font-weight: 700; font-size: 18px; }
 .brand img { width: 28px; height: 28px; }
 

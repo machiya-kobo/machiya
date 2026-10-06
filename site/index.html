@@ -13,6 +13,7 @@
 <link rel="icon" href="icons/machiya.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="stylesheet" href="style.css">
+<script>try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -20,6 +21,10 @@
 <header class="site-header">
   <div class="wrap">
     <a class="brand" href="./"><img src="icons/machiya.svg" alt="" width="28" height="28"><span>Machiya</span></a>
+    <button class="theme-toggle" type="button" hidden aria-label="Switch theme">
+      <svg class="only-light" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M21 14.5A8.5 8.5 0 0 1 9.5 3a8.5 8.5 0 1 0 11.5 11.5Z"/></svg>
+      <svg class="only-dark" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+    </button>
   </div>
 </header>
 
@@ -35,11 +40,13 @@
         </div>
       </div>
       <div class="hero-shot">
-        <picture>
-          <source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="img/hero-phone-dark.webp" width="780" height="1688">
+        <picture class="only-light">
           <source media="(max-width: 640px)" srcset="img/hero-phone-light.webp" width="780" height="1688">
-          <source media="(prefers-color-scheme: dark)" srcset="img/hero-dark.webp" width="2560" height="1600">
           <img src="img/hero-light.webp" width="2560" height="1600" decoding="async" fetchpriority="high" alt="Shiori, the Machiya search app, with results for washi. A saved page, Washi grades for lantern skins, and a note, Washi paper tests, are listed together with a web result. The saved page is open on the right.">
+        </picture>
+        <picture class="only-dark">
+          <source media="(max-width: 640px)" srcset="img/hero-phone-dark.webp" width="780" height="1688">
+          <img src="img/hero-dark.webp" width="2560" height="1600" decoding="async" fetchpriority="high" alt="Shiori, the Machiya search app, with results for washi. A saved page, Washi grades for lantern skins, and a note, Washi paper tests, are listed together with a web result. The saved page is open on the right.">
         </picture>
       </div>
     </div>
@@ -53,9 +60,11 @@
         <p>Browse as usual: Hister's <a href="https://hister.org/docs/browser-extension">official extensions</a> save what you read in Firefox and Chrome, and <a href="https://github.com/nburns/hister-safari">hister-safari</a> does it in Safari on the Mac. Shiori also comes with its own Safari extension for your iPhone, iPad and Mac.</p>
       </div>
       <figure class="feature-shot">
-        <picture>
-          <source media="(prefers-color-scheme: dark)" srcset="img/pages-dark.webp">
+        <picture class="only-light">
           <img src="img/pages-light.webp" width="1215" height="1080" loading="lazy" decoding="async" alt="Shiori's Pages tab for the search lantern: saved pages about washi grades and autumn lantern festivals in Kyoto, each with its labels and a link to the saved copy.">
+        </picture>
+        <picture class="only-dark">
+          <img src="img/pages-dark.webp" width="1215" height="1080" loading="lazy" decoding="async" alt="Shiori's Pages tab for the search lantern: saved pages about washi grades and autumn lantern festivals in Kyoto, each with its labels and a link to the saved copy.">
         </picture>
       </figure>
     </div>
@@ -69,9 +78,11 @@
         <p>Search results from SearXNG and Hister appear side by side: the web next to the pages you've read. The search engines see your query, never your history.</p>
       </div>
       <figure class="feature-shot">
-        <picture>
-          <source media="(prefers-color-scheme: dark)" srcset="img/web-dark.webp">
+        <picture class="only-light">
           <img src="img/web-light.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="Shiori with results for kyoto lanterns: web results, a saved page about autumn lantern festivals in Kyoto, and an info box about paper lanterns.">
+        </picture>
+        <picture class="only-dark">
+          <img src="img/web-dark.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="Shiori with results for kyoto lanterns: web results, a saved page about autumn lantern festivals in Kyoto, and an info box about paper lanterns.">
         </picture>
       </figure>
     </div>
@@ -85,9 +96,11 @@
         <p>Connect Forgejo or GitHub. READMEs, issues, pull requests and releases from your repositories get a Code tab of their own.</p>
       </div>
       <figure class="feature-shot">
-        <picture>
-          <source media="(prefers-color-scheme: dark)" srcset="img/code-dark.webp">
+        <picture class="only-light">
           <img src="img/code-light.webp" width="1215" height="990" loading="lazy" decoding="async" alt="Shiori's Code tab for the search flicker: an open GitHub issue, Flicker at 10% brightness, and an open Forgejo issue, The prompt flickers in tmux.">
+        </picture>
+        <picture class="only-dark">
+          <img src="img/code-dark.webp" width="1215" height="990" loading="lazy" decoding="async" alt="Shiori's Code tab for the search flicker: an open GitHub issue, Flicker at 10% brightness, and an open Forgejo issue, The prompt flickers in tmux.">
         </picture>
       </figure>
     </div>
@@ -101,13 +114,17 @@
         <p>Point Kura at your Obsidian vaults and your notes show up next to your pages, code and search results. Publish the ones you want to share to a digital garden that grows with your projects.</p>
       </div>
       <figure class="feature-shot pair">
-        <picture class="wide">
-          <source media="(prefers-color-scheme: dark)" srcset="img/notes-kura-dark.webp">
+        <picture class="wide only-light">
           <img src="img/notes-kura-light.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="Kura showing the note Washi paper: its tags, a table of paper weights and handling steps, beside a list of recently changed notes.">
         </picture>
-        <picture class="phone">
-          <source media="(prefers-color-scheme: dark)" srcset="img/notes-niwa-phone-dark.webp">
+        <picture class="wide only-dark">
+          <img src="img/notes-kura-dark.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="Kura showing the note Washi paper: its tags, a table of paper weights and handling steps, beside a list of recently changed notes.">
+        </picture>
+        <picture class="phone only-light">
           <img src="img/notes-niwa-phone-light.webp" width="780" height="1688" loading="lazy" decoding="async" alt="Niwa on a phone: the published notes, with topic maps for crafts and travel and recently tended notes marked Seedling, Budding or Evergreen.">
+        </picture>
+        <picture class="phone only-dark">
+          <img src="img/notes-niwa-phone-dark.webp" width="780" height="1688" loading="lazy" decoding="async" alt="Niwa on a phone: the published notes, with topic maps for crafts and travel and recently tended notes marked Seedling, Budding or Evergreen.">
         </picture>
       </figure>
     </div>
@@ -176,5 +193,22 @@
     </div>
   </div>
 </footer>
+<script>
+(function () {
+  var root = document.documentElement, button = document.querySelector(".theme-toggle");
+  var system = matchMedia("(prefers-color-scheme: dark)");
+  function current() { return root.dataset.theme || (system.matches ? "dark" : "light"); }
+  function label() { button.setAttribute("aria-label", current() === "dark" ? "Switch to light theme" : "Switch to dark theme"); }
+  button.hidden = false;
+  label();
+  button.addEventListener("click", function () {
+    var next = current() === "dark" ? "light" : "dark";
+    root.dataset.theme = next;
+    try { localStorage.setItem("theme", next); } catch (e) {}
+    label();
+  });
+  system.addEventListener("change", label);
+})();
+</script>
 </body>
 </html>
