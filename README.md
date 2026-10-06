@@ -7,7 +7,7 @@ Machiya is a set of small self-hosted apps for finding what you've read: your pa
 A machiya (町家) is a Kyoto townhouse: a shop at the front, a small garden inside, a storehouse at the back, all under one roof.
 
 <p align="center">
-<a href="https://machiya-kobo.github.io/machiya/">Website</a> · <a href="#apps">Apps</a> · <a href="#architecture-diagram">Architecture Diagram</a> · <a href="#quickstart">Quickstart</a> · <a href="#try-it-with-the-sample-vault">Sample vault</a> · <a href="#use-your-own-vault">Your own vault</a> · <a href="#whats-in-this-repo">What's in this repo</a> · <a href="#status">Status</a> · <a href="#licence">Licence</a>
+<a href="https://machiya-kobo.github.io/machiya/">Website</a> · <a href="#apps">Apps</a> · <a href="#architecture-diagram">Architecture Diagram</a> · <a href="#quickstart">Quickstart</a> · <a href="#try-it-with-the-sample-vault">Sample vault</a> · <a href="#use-your-own-vault">Your own vault</a> · <a href="#whats-in-this-repo">What's in this repo</a> · <a href="#status">Status</a> · <a href="#license">License</a>
 </p>
 
 <p><a href="site/img/hero-dark.webp"><img src="site/img/hero-dark.webp" alt="Shiori searching for washi: a saved page, a note and a web result in one list, with the saved page open on the right" width="100%"></a></p>
@@ -278,7 +278,7 @@ Wherever you put it. Each app can be its own compose project, with its own Tails
 
 Pre-1.0, so expect change. Each app runs on its own and keeps working when the others are down. The APIs are in [docs/contracts/](docs/contracts/) and the vault conventions in [docs/frontmatter.md](docs/frontmatter.md). Issues and pull requests are welcome; see each repository's `CONTRIBUTING.md`.
 
-## Licence
+## License
 
 Copyright (C) 2026 Micheal Waltz and Machiya contributors.
 

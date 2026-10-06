@@ -18,6 +18,7 @@ Plain, short and confident, with a wink. Say what you can do, name the real thin
 - **Credit other projects.** Say what we build on ("Powered by Hister, SearXNG and Obsidian") and point to others' work where it fits (Hister's official extensions, hister-safari). Never read as if we replace them.
 - **Accurate first.** Every claim matches what ships today. "Coming soon" is said as such. When the short version would be wrong, find a different short version.
 - **No internal words for newcomers.** room, owner, shell, vaultkit, gate: only after they're explained, and never in an intro.
+- **American English.** License, color, center, behavior, labeled, canceled.
 - **Japanese once.** A name's characters appear once, at its first mention, with the meaning in English: "Kura (蔵, storehouse)". Not in headings, tables of features, or diagrams.
 - **Show, then tell.** Screenshots right after the intro; the words after that don't describe what the pictures already show.
 
