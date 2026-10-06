@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.4.1
+
+- The sign-in page has no `<form>`, as Hister's own sign-in page: the button's click or Enter signs in, and nothing on the page can post to the helper. A password manager that submits the form from its extension (0.4.0's `form.submit` catch never sees that) no longer lands on "Press Sign In" or loops; one that only ever submits a form now leaves the fields filled for a click. `dev/signin_check.py` drives typed, Enter, manager-fill, auto-submit and submit-only sign-ins in Chromium, WebKit and Firefox.
+
 ## 0.4.0
 
 - The sign-in page names the app you're signing in to ("Sign In to Shiori", "Sign In to Kura"…), from the return address, and its header says Machiya.

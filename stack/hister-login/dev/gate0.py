@@ -118,9 +118,9 @@ def context(browser, **kw):
 
 def password_signin(page):
     page.wait_for_selector("#hister-signin")
-    page.fill("input[name=username]", "owner")
-    page.fill("input[name=password]", PASSWORD)
-    page.click("#hister-signin button[type=submit]")
+    page.fill("#signin-username", "owner")
+    page.fill("#signin-password", PASSWORD)
+    page.click("#hister-signin button")
 
 
 def who(page):

@@ -61,7 +61,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -916,22 +916,23 @@ def signin_page(s, headers, ret, app, error="", state=""):
     alert = '<p class="signin-error" role="alert" data-error%s>%s</p>' % ("" if error else " hidden", e(error))
     target = signin_target(s, ret, app)
     heading = "Sign In to %s" % target if target else "Sign In"
-    # The fields have ids, not names: the script reads them and sends the password to Hister's /api/login, and a
-    # direct submit (a password manager's auto-submit skips the script) posts no fields at all, so the password
-    # never reaches this helper; that POST comes back here with "Press Sign In" (signin_post).
+    # No <form>, as Hister's own sign-in page: the script reads the fields (ids, no names) on the button's click or
+    # Enter and sends the password to Hister's /api/login, so nothing on this page can post anything to the helper,
+    # and a password manager's auto-submit (a form.submit() from its own script world, which no page script sees)
+    # has no form to submit: it clicks the button or presses Enter, as on Hister's page.
     body = (
         '<main class="signin"><h1>%s</h1>%s'
-        '<form class="group" id="hister-signin" method="post" action="%s" data-next="%s">'
+        '<div class="group" id="hister-signin" data-next="%s">'
         '<label class="item"><span>Name</span><input id="signin-username" required maxlength="64" autofocus '
         'autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"></label>'
         '<label class="item"><span>Password</span><input id="signin-password" type="password" required '
         'maxlength="1024" autocomplete="current-password"></label>'
-        '<button type="submit">Sign In</button></form>'
+        '<button type="button">Sign In</button></div>'
         '<div class="empty">%s</div>'
         '<p class="footnote">One sign-in for Hister and every Machiya app on this device, until you sign out.</p>'
         '<noscript><p class="signin-error">The password form needs JavaScript.</p></noscript>'
         '</main>'
-    ) % (e(heading), alert, e(nxt + ("&" if "?" in nxt else "?") + "direct=1"), e(nxt), oauth)
+    ) % (e(heading), alert, e(nxt), oauth)
     return render(headers, heading + " · Machiya", body, ["/static/signin.js?v=%s" % VERSION])
 
 
@@ -1622,8 +1623,8 @@ class Public(Handler):
         except (ValueError, UnicodeError):
             return self.json(400, {"error": "unreadable form"})
         if form.get("app") != "1":
-            # the password form submitted directly (a password manager's auto-submit skips the page's script): it
-            # carries no fields (signin_page), so show the form again, same return address, with what to do
+            # a password form posted here: the 0.4.0 page's direct submit (a cached copy; today's page has no form). It
+            # carries no fields, so show the page again, same return address, with what to do
             q = self.query()
             ret = self.login.safe(q.get("return"), False)
             state = q.get("state") or ""

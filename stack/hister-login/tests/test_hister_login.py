@@ -138,12 +138,16 @@ class HelperTest(HelperBase):
         self.assertIn(b'autocomplete="current-password"', body)
         self.assertNotIn(b'name="password"', body)                      # a direct submit can't carry it
         self.assertNotIn(b'name="username"', body)
+        self.assertNotIn(b"<form", body)                                # nothing on the page posts to the helper
+        self.assertIn(b'<div class="group" id="hister-signin" data-next="', body)
+        self.assertIn(b'<button type="button">Sign In</button>', body)
+        self.assertNotIn(b"direct=1", body)
         _, _, plain = self.public("GET", "/machiya/signin")
         self.assertIn(b"<h1>Sign In</h1>", plain)                       # no return: no app named
 
     def test_a_direct_submit_comes_back_to_the_form(self):
-        # a password manager's auto-submit skips the script: the POST has no fields, and the form comes back with
-        # what to do, the return address kept, instead of a dead end
+        # the 0.4.0 page's direct submit (a cached copy; today's page has no form): the POST has no fields, and the
+        # page comes back with what to do, the return address kept, instead of a dead end
         path = "/machiya/signin?" + urlencode({"return": KURA, "direct": "1"})
         status, headers, body = self.public("POST", path, {"Origin": PUBLIC,
                                                             "Content-Type": "application/x-www-form-urlencoded"}, b"")
@@ -995,6 +999,78 @@ class RoomSessionTest(HelperBase):
         status, headers, _ = self.public("GET", "/machiya/start?return=%2F",
                                          dict(host, Cookie="__Host-machiya_sso_shiori_out=1"))
         self.assertNotIn("provider", dict(headers)["Location"])
+
+    def test_proxied_origin_password_path_as_a_browser(self):
+        """A hosted page's 401, the helper's page, the password to Hister's own /api/login, then every redirect with a
+        cookie jar per host (host-only cookies) and the Sec-Fetch-Site a browser sends: back on the page, signed in."""
+        jar = {}
+
+        def go(method, url, site, body=None, extra=None):
+            u = urlsplit(url)
+            h = {"Host": u.hostname, "Sec-Fetch-Site": site}
+            if jar.get(u.hostname):
+                h["Cookie"] = "; ".join("%s=%s" % kv for kv in jar[u.hostname].items())
+            if body is not None:
+                h["Content-Length"] = str(len(body))
+            h.update(extra or {})
+            target = u.path + ("?" + u.query if u.query else "")
+            if u.hostname == "hister.example.test" and not target.startswith("/machiya/"):
+                status, headers, out = self.req(int(self.fake.url.rsplit(":", 1)[1]), method, target, h, body)
+            else:
+                status, headers, out = self.public(method, target, h, body)
+            for c in cookies_of(headers):
+                name, _, rest = c.partition("=")
+                value = rest.split(";", 1)[0]
+                if name.startswith("__Host-"):
+                    self.assertNotIn("Domain=", c)
+                if value and "Max-Age=0" not in c:
+                    jar.setdefault(u.hostname, {})[name] = value
+                else:
+                    jar.get(u.hostname, {}).pop(name, None)
+            return status, dict(headers), out
+
+        page = SEARCH_O + "/search?q=x"
+        status, _, body = go("GET", PUBLIC + "/machiya/signin?" + urlencode({"return": page}), "same-site")
+        self.assertEqual(status, 200)
+        nxt = body.split(b'data-next="')[1].split(b'"')[0].decode().replace("&amp;", "&")
+        login = json.dumps({"username": "owner", "password": "correct horse"}).encode()
+        status, _, _ = go("POST", PUBLIC + "/api/login", "same-origin", login,
+                          {"Origin": PUBLIC, "Content-Type": "application/json"})
+        self.assertEqual(status, 200)
+        url, site, hops = PUBLIC + nxt, "same-origin", []
+        for _ in range(6):
+            status, headers, _ = go("GET", url, site)
+            hops.append((urlsplit(url).hostname, urlsplit(url).path, status))
+            if status not in (302, 303):
+                break
+            url, site = headers["Location"], "same-site"        # a chain through two hosts is same-site from here
+        self.assertEqual(hops, [("hister.example.test", "/machiya/signin", 303),
+                                ("search.example.test", "/machiya/start", 302),
+                                ("hister.example.test", "/machiya/signin", 303),
+                                ("search.example.test", "/machiya/callback", 302),
+                                ("search.example.test", "/search", 404)])     # the page itself isn't the helper's
+        self.assertEqual(url, page)
+        rs = jar["search.example.test"]["__Host-machiya_sso_shiori"]
+        status, headers, _ = self.internal("GET", "/v1/nginx", {"X-Machiya-Session": rs, "X-Machiya-Room": SEARCH_O})
+        self.assertEqual(status, 200)
+        self.assertEqual(dict(headers)["X-Hister-Cookie"], "hister=" + jar["hister.example.test"]["hister"])
+        self.assertNotIn("__Host-machiya_sso_shiori_state", jar["search.example.test"])
+
+    def test_signin_page_has_no_password_path_to_the_helper(self):
+        """No <form> (as Hister's own page): the fields have no names, the button only runs the script, and the script
+        signs in on its click or Enter, never with a form submission (the browsers themselves: dev/signin_check.py)."""
+        status, _, body = self.public("GET", "/machiya/signin?" + urlencode({"return": SEARCH_O + "/"}))
+        self.assertEqual(status, 200)
+        box = body.split(b'id="hister-signin"')[1].split(b"</div>")[0]
+        self.assertNotIn(b"name=", box)
+        self.assertIn(b'<button type="button">', box)
+        self.assertNotIn(b"<form", body)
+        with open(os.path.join(HERE, "..", "static", "signin.js")) as f:
+            script = f.read()
+        for want in ('button.addEventListener("click"', 'ev.key === "Enter"', 'fetch("/api/login"'):
+            self.assertIn(want, script)
+        for gone in ("requestSubmit", "form.submit", '"submit"', '"formdata"'):
+            self.assertNotIn(gone, script)
 
     # keep-alive and smuggling on the new endpoints
 
