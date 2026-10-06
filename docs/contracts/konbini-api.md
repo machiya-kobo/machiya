@@ -77,6 +77,8 @@ Sections come in a fixed order: `wip` (WIP over the area's limit; 3 per area by 
 | `POST /api/order` | ranks within a column |
 | `POST /api/garden/suggest` | answers 308 to Niwa's `/api/suggest` (`pm suggest` posts to Niwa directly) |
 
+**`client_id` (Konbini 0.15.1, optional, additive):** the card form (`POST /p/<slug>`), `POST /api/cards` and `POST /api/cards/<slug>/events` accept `client_id`, 8-64 characters of `[A-Za-z0-9-]` (anything else is ignored). The board keeps it on the event it makes; a repeat with the same id answers with what was already done (the same card for a create, no second note) instead of doing it twice. Konbini's offline outbox sends one with every queued create and note; other callers may leave it out.
+
 **`dependsOn` in a PATCH:** a list of names, or one string of names separated by commas; each is a card's slug or title, or a note name (`[[X]]` is accepted too). It's stored as a block list of quoted links to the note's file name (`dependsOn:\n  - "[[Kura]]"`, the frontmatter schema), compared by the card each name points to, so re-sending the same dependencies changes nothing. `""` or `[]` removes the field. A card that depends on itself → 422. `pm dep <slug> +x -y` builds on it.
 
 **`stream` in a PATCH:** the card's workstream, a string (a name, or a `[[link]]` kept as written); `""` removes the field. Written as the `stream:` scalar (the frontmatter schema) and logged as a change. `pm stream <slug> <name|->` sets or clears it.
