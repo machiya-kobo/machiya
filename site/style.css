@@ -102,8 +102,8 @@ p { margin: 0; text-wrap: pretty; }
 .hero h1 { font-size: clamp(34px, 8vw, 60px); font-weight: 800; }
 /* The heading's word flips like a split-flap sign: the page, the note, the phlog, the capsule, the code, 1.5 s each,
    then "everything" for 8 s, and round again: one loop is 15.5 s (CSS only). "everything" wears the five pill colours in
-   the order the words flipped (Pages, Notes, Small Web, Web, Code), blended, and they slide across it exactly once
-   while it shows, like a marquee. With reduced motion it's "everything", still. "Find" and the word are the first line,
+   the order the words flipped (Pages, Notes, Small Web, Web, Code), blended, and they drift back and forth across it,
+   as Hister's own title does. With reduced motion it's "everything", still. "Find" and the word are the first line,
    in a slot as wide as the widest word with the word set left in it, so nothing moves while the words change; the
    spare room falls at the line's end. The h1's aria-label reads the whole sentence. */
 .hero h1 .line1, .hero h1 .line2 { display: block; }
@@ -119,10 +119,12 @@ p { margin: 0; text-wrap: pretty; }
 @supports ((background-clip: text) or (-webkit-background-clip: text)) {
   .spin .all {
     /* one loop of the five colours, back to blue, so it tiles without a seam */
+    /* Hister's title moves the same way (indigo, coral, teal on a 300% gradient, 6 s each way, eased, back and
+       forth); ours keeps Machiya's five pill colours in flip order */
     background: linear-gradient(90deg, var(--pill-pages), var(--pill-notes), var(--pill-smallweb),
-      var(--pill-web), var(--pill-code), var(--pill-pages)) 0 0 / 12em 100% repeat-x;
+      var(--pill-web), var(--pill-code), var(--pill-pages)) 0% 50% / 300% 100%;
     -webkit-background-clip: text; background-clip: text; color: transparent;
-    animation: flip-all 15.5s ease-in-out 7.5s infinite both, marquee 15.5s linear 7.5s infinite both;
+    animation: flip-all 15.5s ease-in-out 7.5s infinite both, drift 6s cubic-bezier(.37, 0, .63, 1) infinite alternate;
   }
 }
 /* A word holds 1.5 s of the 15.5 s loop (9.68%); "everything" holds 8 s (51.61%) and the colours cross it once. */
@@ -138,9 +140,9 @@ p { margin: 0; text-wrap: pretty; }
   50.06% { opacity: 1; transform: rotateX(0); }
   51.61%, 100% { opacity: 0; transform: rotateX(90deg); }
 }
-@keyframes marquee {
-  0% { background-position: 0 0; }
-  51.61%, 100% { background-position: -12em 0; }
+@keyframes drift {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
 }
 @media (prefers-reduced-motion: reduce) {
   .spin .w { animation: none; }
