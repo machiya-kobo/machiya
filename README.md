@@ -6,7 +6,7 @@ Machiya is a set of small self-hosted apps for finding what you've read: your pa
 
 A machiya (町家) is a Kyoto townhouse: a shop at the front, a small garden inside, a storehouse at the back, all under one roof.
 
-<p><a href="site/img/hero-dark.webp"><picture><source media="(prefers-color-scheme: light)" srcset="site/img/hero-light.webp"><img src="site/img/hero-dark.webp" alt="Shiori searching for washi: a saved page, a note and a web result in one list, with the saved page open on the right" width="100%"></picture></a></p>
+<p><a href="site/img/hero-light.webp"><img src="site/img/hero-light.webp" alt="Shiori searching for washi: a saved page, a note and a web result in one list, with the saved page open on the right" width="100%"></a></p>
 
 <p>
   <a href="docs/screenshots/kura-home-light.png"><img src="docs/screenshots/kura-home-light.png" alt="Kura, light: the vault's folders and notes, with a note open" width="28%"></a>
@@ -17,6 +17,16 @@ A machiya (町家) is a Kyoto townhouse: a shop at the front, a small garden ins
 
 Every screenshot uses the same invented vault: a paper-lantern workshop and a trip to Kyoto.
 
+**Contents**
+
+- [Apps](#apps)
+- [Architecture Diagram](#architecture-diagram)
+- [Quickstart](#quickstart): [the sample vault](#try-it-with-the-sample-vault), [one shared copy of the vault](#one-shared-copy-of-the-vault), [your own vault](#use-your-own-vault), [Shiori](#the-other-half-shiori)
+- [What's in this repo](#whats-in-this-repo)
+- [Where it runs](#where-it-runs) · [Status](#status) · [Licence](#licence)
+
+## Apps
+
 | App | Meaning | What it does | Repo |
 |---|---|---|---|
 | **Shiori** | 栞<br>bookmark | Search everything: your pages, your notes, the web and your code. iPhone, iPad, Mac, Linux, Haiku and the web. | [machiya-kobo/shiori](https://github.com/machiya-kobo/shiori) |
@@ -26,7 +36,7 @@ Every screenshot uses the same invented vault: a paper-lantern workshop and a tr
 
 Powered by [Hister](https://github.com/asciimoo/hister) (every page you've read, plus your notes) and [SearXNG](https://github.com/searxng/searxng) (the web). Their reference config is in [config/](config/).
 
-## How it works
+## Architecture Diagram
 
 Each app runs on its own. They share one vault of Markdown notes in git, and an Obsidian vault works as is. More diagrams: [docs/architecture.md](docs/architecture.md).
 
