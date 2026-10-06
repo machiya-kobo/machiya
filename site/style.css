@@ -174,6 +174,7 @@ p { margin: 0; }
 /* footer */
 .site-footer { background: var(--surface); border-top: 1px solid var(--line); padding: 40px 0 32px; font-size: 15px; color: var(--fg2); }
 .footer-cols { display: grid; gap: 28px 40px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
+.footer-stack nav + nav { margin-top: 28px; }
 .site-footer h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--fg); margin-bottom: 10px; }
 .site-footer ul { list-style: none; margin: 0; padding: 0; }
 .site-footer li + li { margin-top: 6px; }
