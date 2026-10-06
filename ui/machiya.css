@@ -362,7 +362,8 @@ a { color: var(--house); text-decoration: none; }
 a:hover { text-decoration: underline; text-underline-offset: 2px; }
 :focus-visible { outline: 2px solid var(--house); outline-offset: 2px; border-radius: 4px; }
 h1, h2, h3 { font-weight: 600; }
-code { background: var(--dark); padding: 1px 5px; border-radius: 5px; font-size: var(--fs-s); }
+code { background: var(--dark); color: var(--menu-fg, var(--fg)); padding: 1px 5px; border-radius: 5px; font-size: var(--fs-s); }
+a code { color: inherit; }   /* code in a link keeps the link's colour */
 .muted { color: var(--muted); }
 
 /* ---- header: seal, wordmark, nav, tools (switcher, gear) --------------------------------------------------- */
@@ -599,7 +600,7 @@ main form.search input { width: 100%; font-size: var(--fs-l); padding: 9px 12px;
 form.search.searchbar { display: block; max-width: 720px; }
 form.search.searchbar .field { position: relative; }
 form.search.searchbar input { width: 100%; max-width: none; height: auto; padding: 10px 44px 10px 16px; border-radius: 999px;
-  border: 1px solid var(--line2); background: var(--dark); color: var(--fg); font: inherit; font-size: var(--fs-l);
+  border: 1px solid var(--line2); background: var(--dark); color: var(--menu-fg, var(--fg)); font: inherit; font-size: var(--fs-l);
   box-shadow: var(--shadow-1); transition: none; }
 form.search.searchbar input::placeholder { color: var(--muted); opacity: .9; }
 form.search.searchbar input:focus { outline: none; border-color: var(--room); }
