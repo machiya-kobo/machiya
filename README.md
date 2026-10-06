@@ -4,14 +4,14 @@
 
 Machiya is a set of small self-hosted apps for finding what you've read: your pages (Hister), the web (SearXNG), your notes (an Obsidian vault in git) and your code.
 
-The name: a machiya (町家) is a Kyoto townhouse, with a shop at the street front, a small inner garden and a storehouse at the back, all under one roof. Each app runs on its own, and they share one vault of Markdown notes in a git repository (an Obsidian vault works as is):
+The name: a machiya is a Kyoto townhouse, with a shop at the street front, a small inner garden and a storehouse at the back, all under one roof. Each app runs on its own, and they share one vault of Markdown notes in a git repository (an Obsidian vault works as is):
 
-| Service | | Job | Repo |
+| Service | Means | Job | Repo |
 |---|---|---|---|
-| **Kura** | 蔵 storehouse | every note: the reader, full-text search, a JSON API, and the push into Hister | [machiya-kobo/kura](https://github.com/machiya-kobo/kura) |
-| **Niwa** | 庭 garden | the published garden: web, Gemini, Gopher, the publish buttons | [machiya-kobo/niwa](https://github.com/machiya-kobo/niwa) |
-| **Konbini** | コンビニ shop | the project board built from the vault's project notes | [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini) |
-| **Shiori** | 栞 bookmark | the search app (iPhone, iPad, Mac, Linux, Haiku, the web, and a Safari extension): your pages, your notes, the web and your code | [machiya-kobo/shiori](https://github.com/machiya-kobo/shiori) |
+| **Kura** | storehouse | every note: the reader, full-text search, a JSON API, and the push into Hister | [machiya-kobo/kura](https://github.com/machiya-kobo/kura) |
+| **Niwa** | garden | the published garden: web, Gemini, Gopher, the publish buttons | [machiya-kobo/niwa](https://github.com/machiya-kobo/niwa) |
+| **Konbini** | convenience store | the project board built from the vault's project notes | [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini) |
+| **Shiori** | bookmark | the search app (iPhone, iPad, Mac, Linux, Haiku, the web, and a Safari extension): your pages, your notes, the web and your code | [machiya-kobo/shiori](https://github.com/machiya-kobo/shiori) |
 
 Two services it builds on:
 
@@ -23,10 +23,10 @@ Two services it builds on:
 ```mermaid
 flowchart LR
     vault[("Markdown vault<br/>in a Git repository")]
-    kura["Kura 蔵<br/>reader · search · API"]
-    niwa["Niwa 庭<br/>published garden"]
-    konbini["Konbini コンビニ<br/>project board"]
-    shiori["Shiori 栞<br/>search app"]
+    kura["Kura<br/>reader · search · API"]
+    niwa["Niwa<br/>published garden"]
+    konbini["Konbini<br/>project board"]
+    shiori["Shiori<br/>search app"]
     hister[("Hister<br/>pages + notes index")]
     searx[("SearXNG<br/>web")]
 
@@ -46,10 +46,10 @@ The same invented vault in every app (a paper-lantern workshop and a trip to Kyo
 
 | | Light | Dark |
 |---|---|---|
-| **Kura** 蔵: every note, with backlinks and search | [![Kura, light](docs/screenshots/kura-home-light.png)](docs/screenshots/kura-home-light.png) | [![Kura, dark](docs/screenshots/kura-note-dark.png)](docs/screenshots/kura-note-dark.png) |
-| **Niwa** 庭: the published garden | [![Niwa, light](docs/screenshots/niwa-garden-light.png)](docs/screenshots/niwa-garden-light.png) | [![Niwa, dark](docs/screenshots/niwa-garden-dark.png)](docs/screenshots/niwa-garden-dark.png) |
-| **Konbini** コンビニ: the project board | [![Konbini, light](docs/screenshots/konbini-board-light.png)](docs/screenshots/konbini-board-light.png) | [![Konbini, dark](docs/screenshots/konbini-review-dark.png)](docs/screenshots/konbini-review-dark.png) |
-| **Shiori** 栞: search across pages, notes and the web | [![Shiori, light](docs/screenshots/shiori-library-light.png)](docs/screenshots/shiori-library-light.png) | [![Shiori, dark](docs/screenshots/shiori-search-dark.png)](docs/screenshots/shiori-search-dark.png) |
+| **Kura**: every note, with backlinks and search | [![Kura, light](docs/screenshots/kura-home-light.png)](docs/screenshots/kura-home-light.png) | [![Kura, dark](docs/screenshots/kura-note-dark.png)](docs/screenshots/kura-note-dark.png) |
+| **Niwa**: the published garden | [![Niwa, light](docs/screenshots/niwa-garden-light.png)](docs/screenshots/niwa-garden-light.png) | [![Niwa, dark](docs/screenshots/niwa-garden-dark.png)](docs/screenshots/niwa-garden-dark.png) |
+| **Konbini**: the project board | [![Konbini, light](docs/screenshots/konbini-board-light.png)](docs/screenshots/konbini-board-light.png) | [![Konbini, dark](docs/screenshots/konbini-review-dark.png)](docs/screenshots/konbini-review-dark.png) |
+| **Shiori**: search across pages, notes and the web | [![Shiori, light](docs/screenshots/shiori-library-light.png)](docs/screenshots/shiori-library-light.png) | [![Shiori, dark](docs/screenshots/shiori-search-dark.png)](docs/screenshots/shiori-search-dark.png) |
 
 ## Quickstart
 
@@ -78,7 +78,7 @@ Start it, choosing the rooms with profiles (leave one out and the others carry o
 docker compose --profile engines --profile kura --profile niwa --profile konbini up -d --build --wait
 ```
 
-| Kura 蔵 | Niwa 庭 | Konbini コンビニ | Hister | SearXNG |
+| Kura | Niwa | Konbini | Hister | SearXNG |
 |---|---|---|---|---|
 | http://localhost:8083/ | http://localhost:8082/ | http://localhost:8081/ | http://localhost:4433/ | http://localhost:8888/ |
 
@@ -168,9 +168,9 @@ Open them in a browser (the header's **Rooms** menu moves between them):
 
 | | Address | What you see |
 |---|---|---|
-| **Kura** 蔵 | http://localhost:8083/ | all 27 notes: folders, tags, backlinks, full-text search (try `bamboo`) |
-| **Niwa** 庭 | http://localhost:8082/ | the garden: the 9 published notes, growth stages, and a gemini capsule on `gemini://localhost:1965/` |
-| **Konbini** コンビニ | http://localhost:8081/ | the board: 10 cards across every column, plus Review, Plan and Calendar |
+| **Kura** | http://localhost:8083/ | all 27 notes: folders, tags, backlinks, full-text search (try `bamboo`) |
+| **Niwa** | http://localhost:8082/ | the garden: the 9 published notes, growth stages, and a gemini capsule on `gemini://localhost:1965/` |
+| **Konbini** | http://localhost:8081/ | the board: 10 cards across every column, plus Review, Plan and Calendar |
 | **Hister** | http://localhost:4433/ | the pages-and-notes index; Kura has pushed the notes into it (search `bamboo`) |
 | **SearXNG** | http://localhost:8888/ | web search (it needs the internet to answer) |
 
