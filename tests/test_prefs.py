@@ -356,45 +356,66 @@ class ShellTest(unittest.TestCase):
 
     def test_shared_section_first_rows_and_state(self):
         ctx = shell.prefs("machiya_show_hister=false; textSize=small; textSizeDevice=xlarge")
-        title, items, note, extra = shell.shared_section(ctx, "kura", self.LINKS, "account", "owner")
+        sec = shell.shared_section(ctx, "kura", self.LINKS, "account", "owner")
+        title, items, note, extra = sec
         html = "".join(items)
-        self.assertEqual(title, "Shared")
+        self.assertEqual(title, "Appearance")                                   # v0.23 (was "Shared")
         self.assertLess(html.index('data-set="palette"'), html.index('data-set="theme"'))
         self.assertLess(html.index('data-set="theme"'), html.index('data-set="textSize"'))
+        self.assertLess(html.index('data-set="textSize"'), html.index("Use This Device's Size"))   # under its parent
+        self.assertIn("data-device-size checked", html)
         self.assertIn('<option value="small" selected>', html)                  # the shared size, not the device's
-        self.assertIn('data-set="show_hister">', html)                          # off: no "checked"
-        self.assertNotIn("show_kura", html)                                     # not the room itself
+        self.assertNotIn("show_", html)                                         # the apps are their own section
+        rooms = "".join(sec.then[1])
+        self.assertEqual(sec.then[0], "Rooms")
+        self.assertIn('data-set="show_hister">', rooms)                         # off: no "checked"
+        self.assertNotIn("show_kura", rooms)                                    # not the room itself
+        self.assertIsNone(shell.shared_section(ctx, "kura", self.LINKS, "account", apps=False).then)
+        self.assertIsNone(shell.rooms_section(ctx, "kura", {}))
         self.assertEqual(note, "Follows you on every Machiya app when signed in.")
-        self.assertIn("Signed in as owner. Saved to your account.", extra)
+        self.assertIn(">Saved to your account.</p>", extra)
         self.assertIn('data-prefs-state="account"', extra)
         lines = {s: shell.shared_section(ctx, "kura", self.LINKS, s, "owner", "https://h/machiya/signin")
                  for s in shell.PREFS_STATES}
-        self.assertIn('Not signed in: kept in this browser. <a href="https://h/machiya/signin">Sign In</a>',
-                      lines["signed-out"][3])
-        self.assertIn("Sign-in is unavailable: kept here", lines["unavailable"][3])
+        self.assertIn('Kept in this browser. <a href="https://h/machiya/signin">Sign In</a>', lines["signed-out"][3])
+        self.assertIn(">Kept here until sign-in is back.</p>", lines["unavailable"][3])
         self.assertEqual(lines["standalone"][2], "")                             # nothing to follow
         self.assertIn("Kept in this browser.", lines["standalone"][3])
-        self.assertIn("Saved for you in Kura", lines["room"][3])
-        self.assertIn("&lt;b&gt;", shell.shared_section(ctx, "kura", self.LINKS, "account", "<b>")[3])
+        self.assertIn("Saved for you in Kura.", lines["room"][3])
+        self.assertNotIn("&lt;b&gt;", shell.shared_section(ctx, "kura", self.LINKS, "account", "<b>")[3])
+        self.assertIn("&lt;b&gt;", shell.shared_section(ctx, "kura", self.LINKS, "signed-out", "", "/s?<b>")[3])
 
     def test_device_section_and_page_order(self):
         ctx = shell.prefs("textSizeDevice=large")
         title, items, note = shell.device_section(ctx, [shell.offline_row()])
         html = "".join(items)
         self.assertEqual(title, "This Device")
-        self.assertIn("Use This Device's Size", html)
-        self.assertIn("data-device-size checked", html)
-        self.assertIn('<option value="large" selected>', html)
+        self.assertNotIn("Use This Device's Size", html)                        # v0.23: under Text Size
         self.assertIn("offline-copies", html)
-        self.assertTrue(note.startswith("Only on this device."))
-        off = "".join(shell.device_section(shell.prefs(""))[1])
+        self.assertEqual(note, "Only on this device.")
+        self.assertIsNone(shell.device_section(ctx))                             # no rows: no section
+        self.assertIsNone(shell.device_section(ctx, [""]))
+        off = "".join(shell.shared_section(shell.prefs(""), "kura", self.LINKS)[1])
         self.assertIn('class="item device-size" hidden', off)
-        page = shell.settings_page([shell.shared_section(ctx, "kura", self.LINKS, "account", "owner"),
-                                    ("Reading", ["<x>"], "Kura only."), shell.device_section(ctx),
-                                    shell.about_section("kura", "1.0")], "kura")
-        heads = re.findall(r'<h2 id="([a-z-]+)">', page)
-        self.assertEqual(heads, ["shared", "reading", "this-device", "about"])
-        self.assertIn('<p class="footnote prefs-state"', page)
+        on = "".join(shell.shared_section(ctx, "kura", self.LINKS)[1])
+        self.assertIn('<option value="large" selected>', on.split("data-device-size-value")[1])
+        account = ("Account", ["<a>"], "")
+        # the rooms' call (v0.21 order) and a scrambled one give the same page
+        calls = ([shell.shared_section(ctx, "kura", self.LINKS, "account", "owner"), ("Reading", ["<x>"], "Kura only."),
+                  ("Sync", ["<y>"], ""), shell.device_section(ctx, [shell.offline_row()]), account,
+                  shell.about_section("kura", "1.0")],
+                 [shell.about_section("kura", "1.0"), account, shell.device_section(ctx, [shell.offline_row()]), None,
+                  ("Reading", ["<x>"], "Kura only."), shell.shared_section(ctx, "kura", self.LINKS, "account", "owner"),
+                  ("Sync", ["<y>"], "")])
+        pages = [shell.settings_page(c, "kura") for c in calls]
+        self.assertEqual(pages[0], pages[1])
+        heads = re.findall(r'<h2 id="([a-z-]+)">', pages[0])
+        self.assertEqual(heads, ["appearance", "reading", "sync", "rooms", "this-device", "account", "about"])
+        self.assertIn('<p class="footnote prefs-state"', pages[0])
+        lone = shell.settings_page([shell.shared_section(ctx, "kura", {}), shell.device_section(ctx),
+                                    ("Reading", ["<x>", shell.offline_row()], "")], "kura")
+        self.assertEqual(re.findall(r'<h2 id="([a-z-]+)">', lone), ["appearance", "reading"])   # folded into its own
+        self.assertEqual(shell.kind_of(("Shared", [], "")), "appearance")                       # an older room's
 
     def test_app_prefs_meta(self):
         old = dict(shell.APP_PREFS)

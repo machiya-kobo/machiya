@@ -14,8 +14,9 @@ This is how the web rooms (Kura, Niwa, Konbini) put the [design language](design
    - `room` is `kura`, `niwa` or `konbini`: it sets the seal, the wordmark and `--room`.
    - Nav labels are Title Case. Up to four phone tabs, plus the automatic Rooms tab, whose menu ends in Settings.
 4. **Theme**: keep `/theme?set=` working as a no-JavaScript fallback (set the `theme` cookie, accept `system` and `auto`), but link the header to `/settings`, not the old night/day/auto links.
-5. **`/settings`** (v0.21: the same order in every app, [Settings](#settings-shared-per-app-this-device) below):
+5. **`/settings`** (v0.21: the same order in every app, [Settings](#settings-appearance-per-app-this-device) below):
    `shell.settings_page([shell.shared_section(ctx, room, links, state, who, signin), <your section>, shell.device_section(ctx, [shell.offline_row(), …]), <account>, shell.about_section(room, VERSION, status_text, vaultkit)], room)`.
+   `settings_page` puts the sections in the house order (below) whatever order they come in, so this call needs no change.
    - Build your section with `shell.toggle`, `shell.select` and `shell.text_field` rows, plus a footnote written in Shiori's style: name each setting and say what on and off do, and end it "Follows you to your other devices when signed in." for settings in `APP_PREFS`.
    - `state` says where the Shared choices are kept: in hister mode `HISTER.prefs_state(result)` (`account`, or `unavailable` in the fallback); a room's own store (identity file) `room`; no store `standalone`.
    - Each room's settings are kept in localStorage under `<room>Settings`, plus a cookie for anything marked `cookie=True` that the server needs for the first render. The ones that follow the person are declared once in `shell.APP_PREFS`.
@@ -24,25 +25,28 @@ This is how the web rooms (Kura, Niwa, Konbini) put the [design language](design
 6. **CSS**: load machiya.css first, then your own. Delete your copies of the tokens, base, header, tab bar, chips, settings and footer rules, and keep only the room's own layout (Kura's three columns, Niwa's garden, Konbini's lanes). Use the tokens (`--room`, `--house`, `--fs-*`, `--sp-*`, `--r-*`) and the `.is-note` / `.is-card` / `.is-garden` classes with `.thing`, so things wear their room's colour.
 7. **Verify**: take screenshots before and after (desktop and phone, both themes). Check no page is wider than the viewport at 390px, and that there are no console errors.
 
-## Settings: Shared, per-app, This Device
+## Settings: Appearance, per-app, This Device
 
 The owner's rule (2026-10-05): settings that affect every app follow the signed-in person to every app and every device. The contract (schema, API, conflict rule, migration) is [contracts/prefs.md](contracts/prefs.md); this is the web rooms' side.
 
-**Every Settings page has the same order:**
-1. **Shared**: Theme, Appearance, Text Size, Apps (`shell.shared_section`). It ends with "Follows you on every Machiya app when signed in." and a state line:
+**Every Settings page has the same order** (v0.23, the lead's decision on the owner's "flow logically and not be overwhelming", 2026-10-05): everyday choices first, connections and rare things later; a dependent setting directly under its parent; short Title Case headers. `shell.settings_page` sorts the sections into this order (`shell.ORDER`); the keys and cookies never changed, only placement and names.
+1. **Appearance** (`shell.shared_section`, titled "Shared" in v0.21–0.22): Theme, Appearance, Text Size, and **Use This Device's Size** directly under Text Size (with its size row while it is on; this browser's own size, a cookie the rooms of this browser share, `machiya_textSizeDevice`, never sent). Footnote "Follows you on every Machiya app when signed in." (only where an account exists), then a state line of a few words:
 
    | `state` | The line |
    |---|---|
-   | `account` | "Signed in as <who>. Saved to your account." |
-   | `signed-out` | "Not signed in: kept in this browser. Sign In" |
-   | `unavailable` | "Sign-in is unavailable: kept here, and saved to your account when it's back." (machiya.js also switches to it when the account stops answering) |
-   | `standalone` | "Covers every room in this browser." with a shared cookie domain, else "Kept in this browser." (no "Follows you…" line) |
-   | `room` | "Saved for you in <Room>…" (a room's own store, identity file) |
+   | `account` | "Saved to your account." (the Account section names the person) |
+   | `signed-out` | "Kept in this browser. Sign In" |
+   | `unavailable` | "Kept here until sign-in is back." (machiya.js also switches to it when the account stops answering) |
+   | `standalone` | "Kept for every room in this browser." with a shared cookie domain, else "Kept in this browser." |
+   | `room` | "Saved for you in <Room>." (a room's own store, identity file) |
 
-2. The room's own section.
-3. **This Device** (`shell.device_section(ctx, rows)`): **Use This Device's Size** first (the one Shared setting a device may override, as a cookie the rooms of this browser share, `machiya_textSizeDevice`, never sent), then the room's device rows (Offline Copies, Kura's Obsidian Vault). Footnote: "Only on this device."
-4. Account.
-5. About.
+2. **The room's own sections**, in the order the room passes them (Kura's Reading, Niwa's Garden, Konbini's Board). A device-only row may sit here (Kura's Obsidian Vault): machiya.js keeps every row in this browser unless the room declared it in `APP_PREFS`.
+3. **Rooms**: which apps the Rooms menu shows (`show_<app>`, the account's `apps_hidden`). `shared_section` brings it along; pass `apps=False` and place `shell.rooms_section(ctx, room, links)` yourself if you must.
+4. **This Device** (`shell.device_section(ctx, rows, note="")`): device-only rows (Offline Copies). Footnote "Only on this device." No rows, no section; a room with a single device row may fold it into its own section instead.
+5. **Account**: who is signed in, Sessions, Sign Out (the room's own section titled "Account").
+6. **About**: version, What's New, Source (`shell.about_section`).
+
+**Copy** (the owner, 2026-10-05: "Reduce it to a sentence or two"): a footnote is at most two short sentences saying only what the person needs to decide (no internals, history or cross-references); a tooltip is a few words; an empty state or alert is one sentence plus at most a short hint.
 
 **One choice covers every room in this browser.**
 - Set `MACHIYA_COOKIE_DOMAIN` in the stack's compose (for a tailnet: `<tailnet>.ts.net`). `shell.page` puts it on `<body data-cookie-domain>`.
@@ -159,7 +163,7 @@ unpublished or owner-only things (Niwa's `/queue` and `/stream`).
 | Konbini | Board | Group By (Area / Family; `konbini.group`), Done Cards (5 / 10 / All; `konbini.done_cards`) | Offline Copies |
 | landing | none | | |
 
-All rooms get Shared (Theme: the ten palettes; Appearance: System / Light / Dark; Text Size; Apps), This Device, Account and About. The page's `<body>` carries `theme-<appearance>` and, for any palette but Tokyo Night, `palette-<key>`; machiya.css's palette section is generated from `vaultkit/palettes.py` (`python3 -m vaultkit.palettes`), and machiya.js sets the browser bar to the new palette's `--dark` when the theme changes on the page.
+All rooms get Appearance (Theme: the ten palettes; Appearance: System / Light / Dark; Text Size; Use This Device's Size), Rooms, This Device (when they have device rows), Account and About. The page's `<body>` carries `theme-<appearance>` and, for any palette but Tokyo Night, `palette-<key>`; machiya.css's palette section is generated from `vaultkit/palettes.py` (`python3 -m vaultkit.palettes`), and machiya.js sets the browser bar to the new palette's `--dark` when the theme changes on the page.
 
 ## The source link (AGPL section 13)
 

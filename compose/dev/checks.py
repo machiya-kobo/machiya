@@ -673,7 +673,7 @@ def prefs_checks(pw, U, signin, shots, denv, tok):
         p.wait_for_timeout(300)
         return body_state(p)
 
-    # the Shared section, as the owner sees it (the account's defaults: theme System, so the shots follow the scheme)
+    # the Appearance section, as the owner sees it (the account's defaults: theme System, so the shots follow the scheme)
     for vw, name, extra in (({"width": 1280, "height": 1100}, "desktop", {}),
                             ({"width": 390, "height": 844}, "phone", {"device_scale_factor": 2, "is_mobile": True,
                                                                       "has_touch": True})):
@@ -684,11 +684,11 @@ def prefs_checks(pw, U, signin, shots, denv, tok):
             p.wait_for_timeout(300)
             p.screenshot(path=os.path.join(shots, "shared-section-%s-%s.png" % (name, scheme)), full_page=True)
         html = p.content()
-        record("[prefs] landing's Settings starts with Shared (%s): the rows, 'Follows you on every Machiya app when "
-               "signed in.', the state line, then This Device" % name,
-               html.find('id="shared"') < html.find('id="this-device"') < html.find('id="account"')
-               and html.find('id="shared"') > 0 and "Follows you on every Machiya app when signed in." in html
-               and "Signed in as owner. Saved to your account." in html and "Use This Device" in html,
+        first = max(html.find('id="appearance"'), html.find('id="shared"'))     # "Shared" before vaultkit 0.23
+        record("[prefs] landing's Settings starts with Appearance (%s): the rows with Use This Device's Size, "
+               "'Follows you on every Machiya app when signed in.', the state line, then Account" % name,
+               0 < first < html.find('id="account"') and "Follows you on every Machiya app when signed in." in html
+               and "Saved to your account." in html and "Use This Device" in html,
                "shots/shared-section-%s-{light,dark}.png" % name)
         ctx.close()
 

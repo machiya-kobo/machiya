@@ -469,7 +469,7 @@ def page(ctx, room, title, body, tabs=(), current="", links=None, head="", style
 
 def appearance_section(ctx, synced=False):
     """Display (before v0.21; kept for one release): the theme, its appearance and the text size. New pages use
-    shared_section, which also holds Apps and says where the choices are kept."""
+    shared_section."""
     theme = getattr(ctx, "theme", "system")
     text = getattr(ctx, "text_shared", getattr(ctx, "text", "standard"))
     palette = getattr(ctx, "palette", palettes.DEFAULT)
@@ -508,18 +508,45 @@ def _app_rows(room, links, shown):
     return items
 
 
+ROOMS_NOTE = "Which apps the Rooms menu shows."
+
+
 def apps_section(room, links, shown):
-    """Apps on its own (before v0.21; kept for one release): shared_section holds the same rows."""
+    """Apps on its own (before v0.21; kept for one release): rooms_section is the same rows."""
     items = _app_rows(room, links, shown)
     if not items:
         return None
-    return ("Apps", items, "Which rooms appear in the switcher on this device. Their addresses are set on the server.")
+    return ("Apps", items, ROOMS_NOTE)
 
 
-# Where the Shared section's choices are kept right now (shell.shared_section's `state`, docs/contracts/prefs.md).
+# -- the Settings order (v0.23, docs/ui.md "Settings") ------------------------------------------------------------
+# Every Settings page: Appearance, the room's own sections, Rooms, This Device, Account, About. settings_page puts the
+# sections in this order whatever order they are passed in; a section without a kind is the room's own.
+ORDER = ("appearance", "", "rooms", "device", "account", "about")
+_KIND_OF_TITLE = {"Shared": "appearance", "Display": "appearance", "Appearance": "appearance", "Apps": "rooms",
+                  "Rooms": "rooms", "This Device": "device", "Account": "account", "About": "about"}
+
+
+class Section(tuple):
+    """A Settings section, (title, rows, footnote) or (title, rows, footnote, extra html), that knows its place in
+    ORDER (`kind`). `then`: a section that goes with it in its own place (shared_section's Rooms)."""
+
+    def __new__(cls, items, kind="", then=None):
+        sec = tuple.__new__(cls, items)
+        sec.kind, sec.then = kind, then
+        return sec
+
+
+def kind_of(sec):
+    """A section's place in ORDER: its own kind, else known by its title (a room's Account), else the room's own."""
+    kind = getattr(sec, "kind", None)
+    return kind if kind in ORDER else _KIND_OF_TITLE.get(sec[0], "")
+
+
+# Where the Appearance section's choices are kept right now (shell.shared_section's `state`, docs/contracts/prefs.md).
 PREFS_STATES = ("account", "signed-out", "unavailable", "standalone", "room")
 SHARED_NOTE = "Follows you on every Machiya app when signed in."
-UNAVAILABLE_LINE = "Sign-in is unavailable: kept here, and saved to your account when it's back."
+UNAVAILABLE_LINE = "Kept here until sign-in is back."
 
 
 def shown_of(ctx):
@@ -529,67 +556,83 @@ def shown_of(ctx):
 
 
 def state_line(state, who="", signin="", room=""):
-    """The line under the Shared section: where the choices are kept (HTML, escaped)."""
+    """The line under the Appearance section: where the choices are kept, in a few words (HTML, escaped). `who` is
+    accepted for older callers; the Account section names the person."""
     if state == "account":
-        return ("Signed in as %s. Saved to your account." % e(who)) if who else "Saved to your account."
+        return "Saved to your account."
     if state == "signed-out":
         link = (' <a href="%s">Sign In</a>' % e(signin)) if signin else ""
-        return "Not signed in: kept in this browser.%s" % link
+        return "Kept in this browser.%s" % link
     if state == "unavailable":
         return e(UNAVAILABLE_LINE)
     if state == "room":
         _, name, _, _ = room_info(room)
-        return "%sSaved for you in %s%s." % (("Signed in as %s. " % e(who)) if who else "", e(name),
-                                              ", and kept for every room in this browser" if COOKIE_DOMAIN else "")
-    return "Covers every room in this browser." if COOKIE_DOMAIN else "Kept in this browser."
+        return "Saved for you in %s." % e(name)
+    return "Kept for every room in this browser." if COOKIE_DOMAIN else "Kept in this browser."
 
 
-def shared_section(ctx, room, links=None, state="standalone", who="", signin=""):
-    """Settings' first section (v0.21, docs/ui.md "Settings"): Theme, Appearance, Text Size and Apps, the same rows in
-    the same order in every app, with "Follows you on every Machiya app when signed in." and a state line saying
-    where the choices are kept now: `state` is
-      account      signed in, saved to the account (hister-login's store): "Signed in as <who>. Saved to your account."
-      signed-out   a sign-in exists, nobody is signed in: "Not signed in: kept in this browser. Sign In" (signin= link)
+def device_size_rows(ctx):
+    """"Use This Device's Size" (this browser's own text size, which the shared one then doesn't change here; the
+    owner's one exception, 2026-10-05) and its size, shown only while it is on: under Text Size, its parent."""
+    device = getattr(ctx, "text_device", "")
+    current = device or getattr(ctx, "text_shared", getattr(ctx, "text", "standard"))
+    opts = "".join('<option value="%s"%s>%s</option>' % (e(v), " selected" if v == current else "", e(t))
+                   for v, t in TEXT_SIZES)
+    return [
+        '<label class="item"><span>Use This Device\'s Size</span><input type="checkbox" role="switch" class="switch" '
+        'data-device-size%s></label>' % (" checked" if device else ""),
+        '<label class="item device-size"%s><span>Text Size on This Device</span><select data-device-size-value>%s'
+        '</select></label>' % ("" if device else " hidden", opts),
+    ]
+
+
+def rooms_section(ctx, room, links=None):
+    """Rooms: which apps the Rooms menu shows (`show_<app>`, the account's apps_hidden). None when there are none."""
+    links = links if links is not None else rooms()
+    items = _app_rows(room, links, shown_of(ctx))
+    return Section(("Rooms", items, ROOMS_NOTE), "rooms") if items else None
+
+
+def shared_section(ctx, room, links=None, state="standalone", who="", signin="", apps=True):
+    """Settings' first section (v0.23, docs/ui.md "Settings"): Theme, Appearance, Text Size and, under it, Use This
+    Device's Size, the same rows in the same order in every app. The footnote, "Follows you on every Machiya app when
+    signed in.", is there when an account exists; the state line says where the choices are kept now: `state` is
+      account      signed in, saved to the account (hister-login's store): "Saved to your account."
+      signed-out   a sign-in exists, nobody is signed in: "Kept in this browser. Sign In" (signin= link)
       unavailable  the account can't be reached (the helper or Hister down, the Tailscale fallback)
-      standalone   no account here: "Covers every room in this browser." (a shared cookie domain), else "Kept in
-                   this browser."; the "Follows you…" line is dropped
-      room         a room's own store (identity file): "Saved for you in <Room>".
-    machiya.js keeps the line current (unavailable when the account doesn't answer). -> (title, rows, note, extra)."""
+      standalone   no account here: "Kept for every room in this browser." (a shared cookie domain), else "Kept in
+                   this browser."
+      room         a room's own store (identity file): "Saved for you in <Room>."
+    machiya.js keeps the line current (unavailable when the account doesn't answer). Titled "Appearance" since
+    v0.23 ("Shared" in v0.21-0.22); the keys never changed. apps: the Rooms section goes with it (settings_page
+    places it after the room's own sections); False leaves it to the room (rooms_section).
+    -> Section (title, rows, note, extra)."""
     links = links if links is not None else rooms()
     state = state if state in PREFS_STATES else "standalone"
     theme = getattr(ctx, "theme", "system")
     text = getattr(ctx, "text_shared", getattr(ctx, "text", "standard"))
     palette = getattr(ctx, "palette", palettes.DEFAULT)
-    apps = _app_rows(room, links, shown_of(ctx))
     items = [
         select("Theme", "palette", PALETTES, palette, cookie=True),
         select("Appearance", "theme", THEMES, theme, cookie=True),
         select("Text Size", "textSize", TEXT_SIZES, text, cookie=True),
-    ] + (['<div class="item subhead"><span>Apps</span><small class="value">in the Rooms menu</small></div>'] + apps
-         if apps else [])
+    ] + device_size_rows(ctx)
     note = SHARED_NOTE if state in ("account", "signed-out", "unavailable") else ""
     extra = '<p class="footnote prefs-state" data-prefs-state="%s" data-unavailable="%s">%s</p>' % (
         state, e(UNAVAILABLE_LINE), state_line(state, who, signin, room))
-    return ("Shared", items, note, extra)
+    return Section(("Appearance", items, note, extra), "appearance", rooms_section(ctx, room, links) if apps else None)
+
 
 
 def device_section(ctx, rows=(), note=""):
-    """Settings' This Device section (v0.21): "Use This Device's Size" (this browser's own text size, which the shared
-    one then doesn't change here; the owner's one exception, 2026-10-05), then the room's own device rows (Offline
-    Copies, Kura's Obsidian Vault, …). Nothing here leaves the device."""
-    device = getattr(ctx, "text_device", "")
-    current = device or getattr(ctx, "text_shared", getattr(ctx, "text", "standard"))
-    opts = "".join('<option value="%s"%s>%s</option>' % (e(v), " selected" if v == current else "", e(t))
-                   for v, t in TEXT_SIZES)
-    items = [
-        '<label class="item"><span>Use This Device\'s Size</span><input type="checkbox" role="switch" class="switch" '
-        'data-device-size%s></label>' % (" checked" if device else ""),
-        '<label class="item device-size"%s><span>Text Size on This Device</span><select data-device-size-value>%s'
-        '</select></label>' % ("" if device else " hidden", opts),
-    ] + [r for r in rows if r]
-    text = ("Only on this device. With Use This Device's Size on, this browser keeps its own text size and the "
-            "shared one still follows you everywhere else.")
-    return ("This Device", items, (text + " " + note) if note else text)
+    """Settings' This Device section: the room's device-only rows (Offline Copies, …). Nothing here leaves the
+    device. None without rows (Use This Device's Size moved to Appearance in v0.23): a room with a single device row
+    may put it in its own section instead, and pass nothing here."""
+    items = [r for r in rows if r]
+    if not items:
+        return None
+    text = "Only on this device."
+    return Section(("This Device", items, (text + " " + note) if note else text), "device")
 
 
 def about_section(room, version, status_text="", vaultkit=""):
@@ -603,17 +646,24 @@ def about_section(room, version, status_text="", vaultkit=""):
         items.append(row("Source code", '<a href="%s" rel="noopener">%s</a>' % (e(src), e(src))))
         items.append(row("Licence", "GNU AGPL-3.0-or-later"))
     _, name, seal, _ = room_info(room)
-    return ("About", items, "%s (%s) is part of Machiya. Install it from the browser's menu (Add to Home Screen)." % (name, seal))
+    return Section(("About", items, "%s (%s) is part of Machiya. Install it from the browser's menu (Add to Home Screen)."
+                    % (name, seal)), "about")
 
 
 def settings_page(sections, room):
     """sections: [(title, [row html…], footnote or "")], or (title, rows, footnote, extra html) for a section with a
-    line of its own under the footnote (shared_section's state line); None entries are skipped. machiya.js saves every
-    change."""
-    out = ['<main class="settings" data-settings-room="%s"><h1 class="sechead" style="display:none">Settings</h1>' % e(room)]
+    line of its own under the footnote (appearance's state line); None entries are skipped. The sections are shown in
+    ORDER (Appearance, the room's own in the order given, Rooms, This Device, Account, About), so a room may pass
+    them in any order. machiya.js saves every change."""
+    flat = []
     for sec in sections:
-        if not sec:
-            continue
+        if sec:
+            flat.append(sec)
+            if getattr(sec, "then", None):
+                flat.append(sec.then)
+    flat.sort(key=lambda sec: ORDER.index(kind_of(sec)))          # stable: a room's own keep their order
+    out = ['<main class="settings" data-settings-room="%s"><h1 class="sechead" style="display:none">Settings</h1>' % e(room)]
+    for sec in flat:
         title, items, note = sec[:3]
         extra = sec[3] if len(sec) > 3 else ""
         out.append('<h2 id="%s">%s</h2><div class="group">%s</div>%s%s' % (

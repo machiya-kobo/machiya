@@ -92,7 +92,7 @@ Sign in as `owner` with the password in `$DEV_DATA/secrets/owner-password`. One 
 With `--browser`, it also checks that each room's cookie in a real browser is `__Host-…_<room>` on the host alone, Secure, HttpOnly and Lax, and that no shared `machiya_sso` exists after the switch.
 
 **The settings checks** (`check --browser`, [contracts/prefs.md](contracts/prefs.md)):
-- screenshots of landing's Shared section (desktop and phone, light and dark);
+- screenshots of landing's Appearance section (desktop and phone, light and dark);
 - Theme and Appearance changed in Kura's Settings send one key each, and show in Konbini, Niwa and landing on the next load, and in a second browser (another device);
 - Use This Device's Size stays in its browser;
 - with hister-login stopped (the checks stop and start the `<project>-hister-login-1` container), Niwa, Konbini and landing keep working on their cookies through the Tailscale fallback, and a change made meanwhile waits and lands in the account when the helper is back.

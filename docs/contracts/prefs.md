@@ -108,7 +108,7 @@ A room keeps its same-origin `/api/prefs`, so `machiya.js`, the page's `<meta na
    This rule is the fix for the revert of 2026-10-05: one room's stale copy undid a theme picked in another room.
 4. **Fill the blanks.** A value this client has that the account doesn't have yet is sent, once. It never overwrites a value the account already has. When the account no longer has a key the client saw before, it was removed: the client goes back to the default.
 5. **Unknown values are never applied.** The schema's lists decide for the shared keys, and the app's own spec for its keys.
-6. **Failures are silent.** The cookies (web) and the App Group copy (Shiori) stay the first-paint and offline path. The Shared section's state line says "Sign-in is unavailable…" instead.
+6. **Failures are silent.** The cookies (web) and the App Group copy (Shiori) stay the first-paint and offline path. The Appearance section's state line says "Kept here until sign-in is back." instead.
 
 A change made offline can override a newer one from another device when it lands. For settings, that is the expected "the last thing I did wins".
 
