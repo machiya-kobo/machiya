@@ -73,7 +73,7 @@ p { margin: 0; }
 .hero-text { text-align: center; max-width: 780px; margin: 0 auto; }
 .hero h1 { font-size: clamp(34px, 8vw, 60px); font-weight: 800; }
 /* "everything" wears the five pill colours in the order the words flipped (Pages, Notes, Small Web, Web, Code),
-   blended smoothly, so cool and warm alternate instead of running like a rainbow.
+   blended smoothly and sliding left like a marquee once it lands (still, with reduced motion), so cool and warm alternate instead of running like a rainbow.
    the heading's word flips like a split-flap sign: the page, the note, the phlog, the capsule, the code, every 1.5 s,
    then lands on "everything" and stays (CSS only, plays once). "Find" and the word are the first line, in a slot as
    wide as the widest word with the word set left in it, so nothing moves while the words change; the spare room
@@ -91,9 +91,11 @@ p { margin: 0; }
 .spin .all { font-weight: 900; color: var(--fg); animation: flip-in .4s ease-out 7.5s forwards; }
 @supports ((background-clip: text) or (-webkit-background-clip: text)) {
   .spin .all {
-    background: linear-gradient(90deg, var(--pill-pages) 5%, var(--pill-notes) 28%, var(--pill-smallweb) 50%,
-      var(--pill-web) 72%, var(--pill-code) 95%);
+    /* one loop of the five colours, back to blue, so it tiles without a seam; slid left forever: a marquee */
+    background: linear-gradient(90deg, var(--pill-pages), var(--pill-notes), var(--pill-smallweb),
+      var(--pill-web), var(--pill-code), var(--pill-pages)) 0 0 / 12em 100% repeat-x;
     -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: flip-in .4s ease-out 7.5s forwards, marquee 8s linear 7.5s infinite;
   }
 }
 @keyframes flip {
@@ -102,6 +104,7 @@ p { margin: 0; }
   84% { opacity: 1; transform: rotateX(0); }
   100% { opacity: 0; transform: rotateX(90deg); }
 }
+@keyframes marquee { to { background-position: -12em 0; } }
 @keyframes flip-in {
   0% { opacity: 0; transform: rotateX(-90deg); }
   100% { opacity: 1; transform: rotateX(0); }
