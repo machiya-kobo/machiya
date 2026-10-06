@@ -8,10 +8,10 @@ The name: a machiya is a Kyoto townhouse, with a shop at the street front, a sma
 
 | Service | Means | Job | Repo |
 |---|---|---|---|
-| **Kura** | storehouse | every note: the reader, full-text search, a JSON API, and the push into Hister | [machiya-kobo/kura](https://github.com/machiya-kobo/kura) |
-| **Niwa** | garden | the published garden: web, Gemini, Gopher, the publish buttons | [machiya-kobo/niwa](https://github.com/machiya-kobo/niwa) |
-| **Konbini** | convenience store | the project board built from the vault's project notes | [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini) |
-| **Shiori** | bookmark | the search app (iPhone, iPad, Mac, Linux, Haiku, the web, and a Safari extension): your pages, your notes, the web and your code | [machiya-kobo/shiori](https://github.com/machiya-kobo/shiori) |
+| **Kura** | 蔵<br>storehouse | every note: the reader, full-text search, a JSON API, and the push into Hister | [machiya-kobo/kura](https://github.com/machiya-kobo/kura) |
+| **Niwa** | 庭<br>garden | the published garden: web, Gemini, Gopher, the publish buttons | [machiya-kobo/niwa](https://github.com/machiya-kobo/niwa) |
+| **Konbini** | コンビニ<br>convenience store | the project board built from the vault's project notes | [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini) |
+| **Shiori** | 栞<br>bookmark | the search app (iPhone, iPad, Mac, Linux, Haiku, the web, and a Safari extension): your pages, your notes, the web and your code | [machiya-kobo/shiori](https://github.com/machiya-kobo/shiori) |
 
 Two services it builds on:
 
