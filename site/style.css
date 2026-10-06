@@ -176,4 +176,3 @@ p { margin: 0; }
 .site-footer li span { display: block; font-size: 14px; }
 .site-footer a { color: var(--blue); }
 .footer-legal { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 14px; }
-.footer-legal p + p { margin-top: 6px; }
