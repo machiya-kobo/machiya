@@ -84,7 +84,7 @@ The machiya plugin's skills and machiya-mcp's query suffix gain ` -metadata.sour
   - a Forgejo (or Gitea) token of the account that owns the repos, scopes `read:repository`, `read:issue`, `read:user`, `read:organization`;
   - one fine-grained GitHub token per resource owner (a user or an org), with Metadata, Contents, Issues and Pull requests set to read, and an expiry. Never a classic token;
   - the owner's Hister token, as for feed-import.
-- **Compose:** a `code-import` service beside Hister (and feed-import):
+- **Compose:** the reference compose has it as the `code` profile ([compose/compose.yml](../../compose/compose.yml); token files in `compose/secrets/`, settings in `.env`). By hand, a `code-import` service beside Hister (and feed-import):
   - the image built from `stack/code-import/Dockerfile` (context: the repo root), a non-root user, a small memory limit, a `/data` volume, no ports;
   - Hister's network;
   - egress to your Forgejo and `api.github.com`;

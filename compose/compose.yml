@@ -5,7 +5,8 @@
 #   docker compose up -d --build --wait
 #
 # `docker compose` works the same as `podman compose`. Profiles choose what runs (COMPOSE_PROFILES in .env, or
-# --profile on the command line): engines (hister, searxng + valkey), kura, niwa, konbini, smallweb, mcp, and proxy (an optional SOCKS5
+# --profile on the command line): engines (hister, searxng + valkey), kura, niwa, konbini, smallweb, mcp, code (code-import: your repos for
+# Shiori's Code view), and proxy (an optional SOCKS5
 # egress proxy for SearXNG, off by default; see the `proxy` service below and config/searxng/settings.yml).
 # Ports: every published port is a variable (HISTER_PORT, SEARXNG_PORT, KURA_PORT, NIWA_PORT, NIWA_GEMINI_PORT, NIWA_GOPHER_PORT,
 # KONBINI_PORT, SMALLWEB_PORT, MCP_PORT) for when one is taken; change the matching *_PUBLIC_URL and MACHIYA_ROOMS with it.
@@ -238,6 +239,27 @@ services:
       machiya-mcp: {ipv4_address: 172.31.250.11}
       default: {}
     ports: ["127.0.0.1:${MCP_PORT:-8091}:8080"]
+    mem_limit: 256m
+    restart: unless-stopped
+
+  code-import:                                      # your Forgejo and GitHub repos into Hister: Shiori's Code view (docs/services/code-import.md)
+    profiles: [code]
+    <<: *room
+    build: {context: .., dockerfile: stack/code-import/Dockerfile}
+    environment:
+      - CODE_IMPORT_FORGEJO_URL=${CODE_IMPORT_FORGEJO_URL:-}               # e.g. https://forgejo.example.com; empty: no Forgejo
+      - CODE_IMPORT_FORGEJO_OWNERS=${CODE_IMPORT_FORGEJO_OWNERS:-}         # you,your-org
+      - CODE_IMPORT_FORGEJO_TOKEN_FILE=${CODE_IMPORT_FORGEJO_TOKEN_FILE:-} # e.g. /secrets/forgejo-token (a file in CODE_IMPORT_SECRETS_DIR)
+      - CODE_IMPORT_GITHUB_TOKEN_FILES=${CODE_IMPORT_GITHUB_TOKEN_FILES:-} # you=/secrets/github-you-token,your-org=/secrets/github-org-token
+      - CODE_IMPORT_TWINS=${CODE_IMPORT_TWINS:-}
+      - CODE_IMPORT_EXCLUDE=${CODE_IMPORT_EXCLUDE:-}                       # repos that must never reach Hister: your vault, a password store
+      - CODE_IMPORT_HISTER_URL=${CODE_IMPORT_HISTER_URL:-http://hister:4433}
+      - CODE_IMPORT_HISTER_TOKEN_FILE=${CODE_IMPORT_HISTER_TOKEN_FILE:-}   # only when Hister has an access token
+      - CODE_IMPORT_DATA=/data
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${CODE_IMPORT_DATA:-./data/code-import}:/data
+      - ${CODE_IMPORT_SECRETS_DIR:-./secrets}:/secrets:ro                  # the token files, one per line-1 token; never in .env
     mem_limit: 256m
     restart: unless-stopped
 

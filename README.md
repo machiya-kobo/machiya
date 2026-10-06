@@ -82,6 +82,7 @@ docker compose --profile engines --profile kura --profile niwa --profile konbini
 
 - **Run just one room:** each has its own Quickstart, no stack needed: [Kura](https://github.com/machiya-kobo/kura#quickstart), [Niwa](https://github.com/machiya-kobo/niwa#quickstart), [Konbini](https://github.com/machiya-kobo/konbini#quickstart), [Shiori](https://github.com/machiya-kobo/shiori#quickstart).
 - **Try it first with a sample vault:** the walkthrough below sets everything up with one script.
+- **Search your code:** fill in the Code lines of `.env` (your Forgejo and GitHub owners, and read-only tokens in files under `secrets/`), `mkdir -p data/code-import secrets`, and add `--profile code`. Shiori's Code view then lists your repos, their READMEs and docs, issues, pull requests and releases ([stack/code-import](stack/code-import/README.md)).
 - **Add people, agents or sign-in:** [docs/identity.md](docs/identity.md).
 
 ### Try it with the sample vault
