@@ -241,8 +241,8 @@ def not_found(room, what=""):
 def offline(room):
     """The body of the precached /offline page: no status line, no claims about the network the person uses."""
     _, name, _, _ = room_info(room)
-    return message("Offline", "%s can't be reached right now. Pages you've opened before are still here; "
-                              "this one isn't yet." % name, [("/", "Try Again")])
+    return message("Offline", "%s can't be reached. Pages you've opened before still work." % name,
+                   [("/", "Try Again")])
 
 
 # -- header, tabs, footer ----------------------------------------------------------------------------------------

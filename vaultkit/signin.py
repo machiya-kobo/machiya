@@ -189,8 +189,7 @@ def needed(room, next="/", ctx=None, signin=True):
         body = shell.message("Sign In", "%s is private. Sign in to continue." % name,
                              [("/signin?next=" + quote(safe_next(next), safe=""), "Sign In")])
     else:
-        body = shell.message("Who Are You?", "%s is private and doesn't know who you are. Open it through Tailscale "
-                                             "or the sign-in proxy it trusts." % name)
+        body = shell.message("Who Are You?", "%s is private. Open it through Tailscale or its sign-in proxy." % name)
     return shell.page(ctx, room, shell.title(room, "Sign In"), shell.header(room, [], "", {}, settings=False) + body,
                       links={}, manifest=False)
 

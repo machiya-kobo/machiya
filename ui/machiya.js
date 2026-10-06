@@ -559,7 +559,7 @@ if (offlineRow) {
   const show = async () => {
     const s = await askWorker({ type: "OFFLINE_STATS" });
     if (!s) {                                              // no worker yet (a first visit) vs. no support at all
-      count.textContent = navigator.serviceWorker ? "Nothing saved yet" : "not available here";
+      count.textContent = navigator.serviceWorker ? "Nothing saved yet" : "Not available here";
       button.disabled = true;
       return;
     }
