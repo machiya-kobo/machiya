@@ -61,7 +61,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -936,8 +936,8 @@ def confirm_page(headers, ret, provider=""):
     fields = [("return", ret), ("app", "1")] + ([("provider", provider)] if provider else [])
     body = (
         '<main class="signin"><h1>Sign In to the App?</h1>'
-        '<p>An app on this device (%s) asked to sign in to Hister and Machiya as you. Continue only if you just started '
-        'signing in from that app.</p>'
+        '<p>An app on this device (%s) wants to sign in to Hister and Machiya as you. '
+        'Continue only if you just started this.</p>'
         '<form class="group" method="post" action="/machiya/signin">%s<button type="submit">Continue</button></form>'
         '<p class="footnote">Didn\'t start a sign-in? Close this page.</p></main>'
     ) % (e(ret.split(":", 1)[0]), "".join('<input type="hidden" name="%s" value="%s">' % (e(k), e(v)) for k, v in fields))
@@ -994,20 +994,17 @@ def sessions_page(s, headers, me, rows, done="", tokens=(), new_token=None):
                     % (e(ROOM_NAMES.get(k, k.capitalize())), e(k)) for k in sorted(s.rooms))
     body = (
         '<main class="settings sessions"><h1 class="sechead">Signed In as %s</h1>%s'
-        '<h2>Sessions</h2><div class="group">%s</div>'
-        '<p class="footnote">Every browser and app signed in through Hister, and the rooms each browser has opened. '
-        'Signing one out ends it in Hister and in every room within a minute.</p>'
+        '<h2>Sessions</h2><div class="group">%s<div class="item"><span>All Sessions</span>'
+        '<form method="post" action="/machiya/sessions"><button type="submit" name="do" value="all">'
+        'Sign&nbsp;Out Everywhere</button></form></div></div>'
+        '<p class="footnote">Signing out ends a session in Hister and every room within a minute.</p>'
         '<h2>Room Tokens</h2>%s<div class="group">%s</div>'
-        '<p class="footnote">For scripts, agents and extensions: each opens only the rooms it names, never Hister. '
-        'Send it as <code>Authorization: Bearer</code>.</p>'
+        '<p class="footnote">For scripts and agents. Each opens only the rooms it names, never Hister.</p>'
         '<form class="group" method="post" action="/machiya/sessions">'
         '<label class="item"><span>Name</span><input name="label" required maxlength="80" '
         'placeholder="pm on the laptop"></label>%s'
         '<div class="item"><span></span><button type="submit" name="do" value="token-new">New Token</button></div>'
         '</form>'
-        '<h2>Everywhere</h2><div class="group"><div class="item"><span>Sign out every session above</span>'
-        '<form method="post" action="/machiya/sessions"><button type="submit" name="do" value="all">'
-        'Sign&nbsp;Out Everywhere</button></form></div></div>'
         '</main>'
     ) % (e(me["username"]), note, "".join(items) or '<div class="item"><span>None</span></div>', shown,
          "".join(toks) or '<div class="item"><span>None</span></div>', boxes)

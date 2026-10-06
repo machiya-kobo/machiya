@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.3.2
+
+- Shorter copy (the owner's copy-editing pass, 2026-10-05): the app sign-in's Continue page and the sessions page's footnotes are a sentence each; Sign Out Everywhere is the last row of Sessions instead of its own section. Same forms, same behaviour.
+
 ## 0.3.1
 
 - **Haiku:** the store keeps SQLite's rollback journal there instead of WAL. Haiku's SQLite can't share a WAL file between processes, so `hister_login.py token mint` failed with "locking protocol" while the server ran (found by the fleet run's Haiku leg). Everywhere else it stays WAL.
