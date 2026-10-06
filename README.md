@@ -6,7 +6,7 @@ Machiya is a set of small self-hosted apps for finding what you've read: your pa
 
 The name: a machiya (町家) is a Kyoto townhouse, with a shop at the street front, a small inner garden and a storehouse at the back, all under one roof. Each app runs on its own, and they share one vault of Markdown notes in a git repository (an Obsidian vault works as is):
 
-| Service | Means | Job | Repo |
+| Service | Meaning | Job | Repo |
 |---|---|---|---|
 | **Kura** | 蔵<br>storehouse | every note: the reader, full-text search, a JSON API, and the push into Hister | [machiya-kobo/kura](https://github.com/machiya-kobo/kura) |
 | **Niwa** | 庭<br>garden | the published garden: web, Gemini, Gopher, the publish buttons | [machiya-kobo/niwa](https://github.com/machiya-kobo/niwa) |
