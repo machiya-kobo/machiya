@@ -1401,11 +1401,11 @@ class HisterSignIn(Server):
         cookie = {"Cookie": "machiya_sso=" + SID, "Accept": "text/html"}
         code, _, body = self.get(base + "/settings", cookie)
         heads = re.findall(r'<h2 id="([a-z-]+)">', body)
-        self.assertEqual(heads, ["shared", "this-device", "account", "about"])
+        self.assertEqual(heads, ["appearance", "rooms", "account", "about"])          # vaultkit 0.23: one house order
         self.assertIn("Follows you on every Machiya app when signed in.", body)
         self.assertIn('data-prefs-state="account"', body)
-        self.assertIn("Signed in as owner. Saved to your account.", body)
-        self.assertIn("Use This Device&#x27;s Size", body)
+        self.assertIn("Saved to your account.", body)                              # vaultkit 0.23: shorter state line
+        self.assertIn("Use This Device's Size", body)
 
     def test_fallback_has_no_account_prefs(self):
         self.helper.close()
@@ -1416,7 +1416,7 @@ class HisterSignIn(Server):
         self.assertEqual(code, 503)
         code, _, body = self.get(base + "/settings", dict(who, Accept="text/html"))
         self.assertIn('data-prefs-state="unavailable"', body)
-        self.assertIn("Sign-in is unavailable: kept here", body)
+        self.assertIn("Kept here until sign-in is back.", body)                  # vaultkit 0.23: shorter state line
 
     def test_signout_stops_the_automatic_signin(self):
         """MACHIYA_SIGNIN_PROVIDER: signed out, a page goes through the provider; a deliberate sign-out sets this page's

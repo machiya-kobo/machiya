@@ -833,8 +833,8 @@ class HisterAuth:
         elif result.status == 403:
             body = shell.message("No Access", "This account can't open %s." % name)
         else:
-            body = shell.message("Sign-In Is Unavailable", "%s needs sign-in, and it can't be reached right now. "
-                                 "Try again in a minute." % name, [("/", "Try Again")])
+            body = shell.message("Sign-In Is Unavailable", "Sign-in can't be reached right now. Try again in a minute.",
+                                 [("/", "Try Again")])
         html = shell.page(ctx or shell.Prefs(), self.room, "%s · %s" % (name, "Sign In"),
                           shell.header(self.room, [], "", {}, settings=False) + body, links={}, manifest=False)
         return result.status, headers + [("Content-Type", "text/html; charset=utf-8")], html.encode()

@@ -31,7 +31,7 @@ SHARED = {
     "palette": {"label": "Theme", "values": list(palettes.PALETTES), "default": palettes.DEFAULT},
     "text_size": {"label": "Text Size", "values": list(TEXT_SIZES), "default": "standard"},
     "apps_hidden": {"label": "Apps", "list_of": list(APPS), "default": ""},
-    # Shiori's pill row (order and hidden), the same on every Shiori surface (the owner, 2026-10-05); the rooms have
+    # Shiori's pill row (order and hidden), the same on every Shiori surface (decided 2026-10-05); the rooms have
     # no pills. JSON {"order": [pill id, ...], "hidden": [pill id, ...]}: the store checks the shape, Shiori the ids
     "pills": {"label": "Pills", "json": {"order": "[pill id]", "hidden": "[pill id]"}, "default": ""},
 }

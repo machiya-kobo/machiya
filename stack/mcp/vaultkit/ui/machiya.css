@@ -562,18 +562,26 @@ main.live-loading { opacity: .6; transition: opacity .15s .1s; }
 @media (max-width: 760px) { .update-toast { bottom: calc(84px + env(safe-area-inset-bottom)); } }
 
 /* ---- pull to refresh (2026-10-05; machiya.js, installed apps only) --------------------------------------------- */
-/* The page doesn't rubber-band in an installed app, so iOS's bounce never competes with the pull; the reload mark comes
-   out from under the header (it sits just below it, one level lower) and turns house blue once letting go reloads. */
+/* The page doesn't rubber-band in an installed app, so iOS's bounce never competes with the pull: machiya.js moves the
+   content itself. While a finger pulls, the page's flow under the header (.pull-move, set by machiya.js) follows it by
+   --pull-y (on <html>); the header and the tab bar stay put, like an iOS app's bars. The reload mark sits in the gap that
+   opens under the header (its top is the header's bottom, one level lower, so it comes out from under it), centred in
+   the gap, growing and turning with the pull, house blue once letting go reloads. On release, .pull-settle eases the
+   content back to the top, or to where it rests while the page reloads; the global reduced-motion rule makes both a
+   snap and stops the spin. */
 html.pull-refresh, html.pull-refresh body { overscroll-behavior-y: none; }
+.pull-move { transform: translate3d(0, var(--pull-y, 0px), 0); }
+html.pull-settle .pull-move { transition: transform .2s cubic-bezier(.25, .8, .3, 1); }
 .pull { position: fixed; left: 50%; z-index: 9; width: 36px; height: 36px; margin-left: -18px; display: grid; place-items: center;
   border-radius: 50%; background: var(--dark); border: 1px solid var(--line2); box-shadow: var(--shadow-1); color: var(--muted);
-  pointer-events: none; opacity: 0; transform: translateY(calc(var(--pull, 0px) - 40px));
-  transition: transform .2s ease, opacity .2s ease, color .15s ease; }
-.pull.held { transition: color .15s ease; }
+  pointer-events: none; opacity: 0; transform: translateY(calc(var(--pull-y, 0px) / 2 - 18px)) scale(var(--grow, .5));
+  transition: color .15s ease, border-color .15s ease; }
+html.pull-settle .pull { transition: transform .2s cubic-bezier(.25, .8, .3, 1), opacity .2s ease, color .15s ease,
+  border-color .15s ease; }
 .pull.ready { color: var(--house); border-color: color-mix(in srgb, var(--house) 45%, var(--line2)); }
 .pull svg { width: 20px; height: 20px; transform: rotate(var(--turn, 0deg)); }
 .pull.loading svg { animation: pull-spin .8s linear infinite; }
-@keyframes pull-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes pull-spin { from { transform: rotate(270deg); } to { transform: rotate(630deg); } }
 
 /* ---- Hister sign-in (vaultkit/histerauth.py, v0.18): the fallback banner and the Rooms menu's Sign Out row ------- */
 .machiya-banner { margin: var(--sp-3) 0; padding: 8px 12px; border-radius: 8px; font-size: var(--fs-s); line-height: 1.45;
