@@ -4,21 +4,31 @@
 
 Machiya is a set of small self-hosted apps for finding what you've read: your pages (Hister), the web (SearXNG), your notes (an Obsidian vault in git) and your code.
 
-The name: a machiya (町家) is a Kyoto townhouse, with a shop at the street front, a small inner garden and a storehouse at the back, all under one roof. Each app runs on its own, and they share one vault of Markdown notes in a git repository (an Obsidian vault works as is):
+A machiya (町家) is a Kyoto townhouse: a shop at the front, a small garden inside, a storehouse at the back, all under one roof.
 
-| Service | Meaning | Job | Repo |
+<p><a href="site/img/hero-dark.webp"><picture><source media="(prefers-color-scheme: light)" srcset="site/img/hero-light.webp"><img src="site/img/hero-dark.webp" alt="Shiori searching for washi: a saved page, a note and a web result in one list, with the saved page open on the right" width="100%"></picture></a></p>
+
+<p>
+  <a href="docs/screenshots/kura-home-light.png"><img src="docs/screenshots/kura-home-light.png" alt="Kura, light: the vault's folders and notes, with a note open" width="28%"></a>
+  <a href="docs/screenshots/niwa-garden-dark.png"><img src="docs/screenshots/niwa-garden-dark.png" alt="Niwa, dark: the published garden with topic maps and recently tended notes" width="28%"></a>
+  <a href="docs/screenshots/konbini-board-light.png"><img src="docs/screenshots/konbini-board-light.png" alt="Konbini, light: a kanban board of project cards" width="28%"></a>
+  <a href="site/img/hero-phone-dark.webp"><img src="site/img/hero-phone-dark.webp" alt="Shiori on a phone, dark: search results for washi" width="8%"></a>
+</p>
+
+Every screenshot uses the same invented vault: a paper-lantern workshop and a trip to Kyoto.
+
+| App | Meaning | What it does | Repo |
 |---|---|---|---|
-| **Kura** | 蔵<br>storehouse | every note: the reader, full-text search, a JSON API, and the push into Hister | [machiya-kobo/kura](https://github.com/machiya-kobo/kura) |
-| **Niwa** | 庭<br>garden | the published garden: web, Gemini, Gopher, the publish buttons | [machiya-kobo/niwa](https://github.com/machiya-kobo/niwa) |
-| **Konbini** | コンビニ<br>convenience store | the project board built from the vault's project notes | [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini) |
-| **Shiori** | 栞<br>bookmark | the search app (iPhone, iPad, Mac, Linux, Haiku, the web, and a Safari extension): your pages, your notes, the web and your code | [machiya-kobo/shiori](https://github.com/machiya-kobo/shiori) |
+| **Shiori** | 栞<br>bookmark | Search everything: your pages, your notes, the web and your code. iPhone, iPad, Mac, Linux, Haiku and the web. | [machiya-kobo/shiori](https://github.com/machiya-kobo/shiori) |
+| **Kura** | 蔵<br>storehouse | Read your notes, with full-text search and a JSON API. | [machiya-kobo/kura](https://github.com/machiya-kobo/kura) |
+| **Niwa** | 庭<br>garden | Grow your digital garden on the Web, Gemini and Gopher. | [machiya-kobo/niwa](https://github.com/machiya-kobo/niwa) |
+| **Konbini** | コンビニ<br>convenience store | Manage your projects on a board made from your notes. | [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini) |
 
-Two services it builds on:
+Powered by [Hister](https://github.com/asciimoo/hister) (every page you've read, plus your notes) and [SearXNG](https://github.com/searxng/searxng) (the web). Their reference config is in [config/](config/).
 
-| Engine | Job | Here |
-|---|---|---|
-| **[Hister](https://github.com/asciimoo/hister)** | full-text index of every page you visited or saved (and, via Kura, your notes) | [config](config/hister/), [docs](docs/services/hister.md) |
-| **[SearXNG](https://github.com/searxng/searxng)** | web search, engines optionally reached through a SOCKS proxy | [config](config/searxng/), [docs](docs/services/searxng.md) |
+## How it works
+
+Each app runs on its own. They share one vault of Markdown notes in git, and an Obsidian vault works as is. More diagrams: [docs/architecture.md](docs/architecture.md).
 
 ```mermaid
 flowchart LR
@@ -40,20 +50,9 @@ flowchart LR
     hister -. "web fallback" .-> searx
 ```
 
-## What it looks like
-
-The same invented vault in every app (a paper-lantern workshop and a trip to Kyoto), light and dark; click a picture for the full size. Each app's own README has more.
-
-| | Light | Dark |
-|---|---|---|
-| **Kura**: every note, with backlinks and search | [![Kura, light](docs/screenshots/kura-home-light.png)](docs/screenshots/kura-home-light.png) | [![Kura, dark](docs/screenshots/kura-note-dark.png)](docs/screenshots/kura-note-dark.png) |
-| **Niwa**: the published garden | [![Niwa, light](docs/screenshots/niwa-garden-light.png)](docs/screenshots/niwa-garden-light.png) | [![Niwa, dark](docs/screenshots/niwa-garden-dark.png)](docs/screenshots/niwa-garden-dark.png) |
-| **Konbini**: the project board | [![Konbini, light](docs/screenshots/konbini-board-light.png)](docs/screenshots/konbini-board-light.png) | [![Konbini, dark](docs/screenshots/konbini-review-dark.png)](docs/screenshots/konbini-review-dark.png) |
-| **Shiori**: search across pages, notes and the web | [![Shiori, light](docs/screenshots/shiori-library-light.png)](docs/screenshots/shiori-library-light.png) | [![Shiori, dark](docs/screenshots/shiori-search-dark.png)](docs/screenshots/shiori-search-dark.png) |
-
 ## Quickstart
 
-The whole stack on one machine, on your own vault, every room bound to `127.0.0.1` with nothing to sign in to. You need `git` and Docker with Compose 2.20+ (or Podman: `podman compose`).
+The whole stack on one machine, on your own vault. Everything listens on `127.0.0.1` only, so there's nothing to sign in to. You need `git` and Docker with Compose 2.20+, or Podman (`podman compose`).
 
 ```bash
 mkdir machiya-stack && cd machiya-stack
@@ -72,7 +71,7 @@ Edit `.env`:
 | `SEARXNG_SECRET` | `openssl rand -hex 32` |
 | `MACHIYA_UID`, `MACHIYA_GID` | `id -u`, `id -g` |
 
-Start it, choosing the rooms with profiles (leave one out and the others carry on):
+Start it. Profiles pick the apps; leave one out and the others carry on:
 
 ```bash
 docker compose --profile engines --profile kura --profile niwa --profile konbini up -d --build --wait
@@ -82,16 +81,16 @@ docker compose --profile engines --profile kura --profile niwa --profile konbini
 |---|---|---|---|---|
 | http://localhost:8083/ | http://localhost:8082/ | http://localhost:8081/ | http://localhost:4433/ | http://localhost:8888/ |
 
-- **Run just one room:** each has its own Quickstart, no stack needed: [Kura](https://github.com/machiya-kobo/kura#quickstart), [Niwa](https://github.com/machiya-kobo/niwa#quickstart), [Konbini](https://github.com/machiya-kobo/konbini#quickstart), [Shiori](https://github.com/machiya-kobo/shiori#quickstart).
-- **Try it first with a sample vault:** the walkthrough below sets everything up with one script.
-- **Search your code:** fill in the Code lines of `.env` (your Forgejo and GitHub owners, and read-only tokens in files under `secrets/`), `mkdir -p data/code-import secrets`, and add `--profile code`. Shiori's Code view then lists your repos, their READMEs and docs, issues, pull requests and releases ([stack/code-import](stack/code-import/README.md)).
+- **Run one app on its own:** each has its own Quickstart: [Kura](https://github.com/machiya-kobo/kura#quickstart), [Niwa](https://github.com/machiya-kobo/niwa#quickstart), [Konbini](https://github.com/machiya-kobo/konbini#quickstart), [Shiori](https://github.com/machiya-kobo/shiori#quickstart).
+- **Try it on invented notes first:** [the sample vault](#try-it-with-the-sample-vault), set up by one script.
+- **Search your code:** fill in the Code lines of `.env` (your Forgejo and GitHub owners; read-only tokens go in files under `secrets/`), run `mkdir -p data/code-import secrets`, and add `--profile code`. Shiori's Code view then shows your repos, READMEs, docs, issues, pull requests and releases ([stack/code-import](stack/code-import/README.md)).
 - **Add people, agents or sign-in:** [docs/identity.md](docs/identity.md).
 
 ### Try it with the sample vault
 
-The whole stack with a small invented vault (a paper-lantern workshop and a trip to Kyoto), in about ten minutes. Every block below marked `quickstart:` is run by [`tools/quickstart-test`](tools/quickstart-test) on a fresh clone, so these are exactly the commands that were tested.
+The whole stack on the invented vault, in about ten minutes. [`tools/quickstart-test`](tools/quickstart-test) runs every block marked `quickstart:` on a fresh clone, so these are exactly the commands that were tested.
 
-**You need:** `git`, `curl`, and a container engine with Compose: **Docker Engine 24+ with Compose 2.20+**, or rootless **Podman 4.9+** with the `docker-compose` plugin and its API socket on (`systemctl --user enable --now podman.socket`; then use `podman compose` wherever the commands say `docker compose`). It runs on amd64 and arm64 (every image, the rooms' builds included, is native on both; tested on Debian 13 arm64). About 2 GB of disk for the images, and these ports free on `127.0.0.1`: 8081, 8082, 8083, 4433, 8888, 1965 and 7070 (the compose can move any of them: [`compose/.env.example`](compose/.env.example)).
+**You need:** `git`, `curl`, and a container engine with Compose: **Docker Engine 24+ with Compose 2.20+**, or rootless **Podman 4.9+** with the `docker-compose` plugin and its API socket on (`systemctl --user enable --now podman.socket`; then use `podman compose` wherever the commands say `docker compose`). Native on amd64 and arm64 (tested on Debian 13 arm64). About 2 GB of disk, and these ports free on `127.0.0.1`: 8081, 8082, 8083, 4433, 8888, 1965 and 7070 ([`compose/.env.example`](compose/.env.example) moves any of them).
 
 **Debian and Ubuntu** (a clean machine has none of these): install them, then log out and back in so that your user is in the `docker` group (or run `newgrp docker`):
 
@@ -115,7 +114,7 @@ git clone https://github.com/machiya-kobo/niwa.git
 git clone https://github.com/machiya-kobo/konbini.git
 ```
 
-**2. Set the demo up.** `demo-init` turns the sample vault into a git repository (the services clone it like any other vault), makes Konbini's own clone of it, and writes a `.env` for this machine: your user and group ids, a fresh SearXNG secret, open access on localhost (no login, so only because every port binds `127.0.0.1`), every service on.
+**2. Set the demo up.** `demo-init` makes the sample vault a git repository, gives Konbini its own clone, and writes a `.env` for this machine: your user and group ids, a fresh SearXNG secret, no login (safe only because every port binds `127.0.0.1`), every app on.
 
 <!-- quickstart: init -->
 ```bash
@@ -164,7 +163,7 @@ OK
 <title>Konbini
 ```
 
-Open them in a browser (the header's **Rooms** menu moves between them):
+Open them in a browser (the **Rooms** menu in each header moves between them):
 
 | | Address | What you see |
 |---|---|---|
@@ -208,7 +207,7 @@ rm -rf data .env
 
 ### One shared copy of the vault
 
-By default every service keeps its own copy of the vault. Add `mirror.yml` and one extra service, `vault-mirror`, keeps a single clone that Kura reads and that Niwa and Konbini borrow git objects from (they keep only their own commits and check out only the notes folder). It is how the stack runs for real, and one flag away from the steps above:
+By default every app keeps its own copy of the vault. With `mirror.yml`, one `vault-mirror` service keeps a single clone: Kura reads it, and Niwa and Konbini borrow its git objects. That's how the stack runs for real, one flag away:
 
 <!-- quickstart: mirror -->
 ```bash
@@ -232,40 +231,45 @@ rm -rf data .env
 
 ### Use your own vault
 
-Copy `compose/.env.example` to a file called `.env` beside it (instead of running `demo-init`), make the `data/` folders yourself as in the [Quickstart](#quickstart), and set `VAULT_REPO_URL` (an https, ssh or `file://` URL), `VAULT_SUBDIR` (the folder in the repository that holds the notes, if it is not the root), and Konbini's own clone in `KONBINI_REPO`. Niwa pushes the garden's fields back to the vault, so it needs write access (an ssh deploy key; Kura only reads). To reach the rooms from other devices, put a proxy that sets a `Tailscale-User-Login` header in front (a Tailscale sidecar does, and terminates TLS), switch `KURA_AUTH`, `NIWA_AUTH` and `KONBINI_AUTH` from `open` to `tailscale`, list your login in the `*_USERS`, and set the `*_BIND_BEHIND_PROXY=1` lines in `.env` (the rooms refuse a header mode on a non-loopback bind without them). Other ways in: people, agents, passwords or your own auth proxy (`*_AUTH=header`) from an identity file ([docs/identity.md](docs/identity.md)); the compose passes those settings through. Hister's users as the one sign-in (`*_AUTH=hister`, [hister-login](docs/services/hister-login.md)) needs the hister-login helper beside Hister, which this compose doesn't run yet; the [dev stack](docs/dev-stack.md) shows it wired up. The compose's header comments and the [service docs](docs/services/) cover the rest. Native installs (no containers): each room's own Quickstart (Debian or Ubuntu, other systems under its "More ways to run it"), and [docs/install/bsd.md](docs/install/bsd.md) for running them as services on FreeBSD, NetBSD and OpenBSD.
+Copy `compose/.env.example` to `.env` (instead of running `demo-init`), make the `data/` folders as in the [Quickstart](#quickstart), and set:
+
+- `VAULT_REPO_URL`: an https, ssh or `file://` URL. Niwa writes the garden's fields back, so it needs write access (an ssh deploy key); Kura only reads.
+- `VAULT_SUBDIR`: the folder that holds the notes, if it isn't the repository's root.
+- `KONBINI_REPO`: Konbini's own clone.
+
+To reach the apps from other devices, put a proxy in front that sets `Tailscale-User-Login` (a Tailscale sidecar does, and adds TLS). Then switch `KURA_AUTH`, `NIWA_AUTH` and `KONBINI_AUTH` to `tailscale`, list your login in the `*_USERS`, and set the `*_BIND_BEHIND_PROXY=1` lines. People, agents, passwords or your own auth proxy: [docs/identity.md](docs/identity.md). Hister's users as the one sign-in needs [hister-login](docs/services/hister-login.md), which this compose doesn't run yet; the [dev stack](docs/dev-stack.md) has it wired up.
+
+Without containers: [docs/install/](docs/install/) (Linux, FreeBSD, NetBSD, OpenBSD, one app at a time).
 
 ### The other half: Shiori
 
-Shiori is a client, not a service: the search app for iPhone, iPad, Mac, Linux, Haiku and the web. It talks to Hister, Kura, Konbini and SearXNG at the addresses above. Its [Quickstart](https://github.com/machiya-kobo/shiori#quickstart) builds the web and Linux apps against this stack.
+Shiori is the search app, not a service: iPhone, iPad, Mac, Linux, Haiku and the web. It talks to Hister, Kura, Konbini and SearXNG at the addresses above. Its [Quickstart](https://github.com/machiya-kobo/shiori#quickstart) builds the web and Linux apps against this stack.
 
 ## What's in this repo
 
-- **[docs/](docs/)**: how it fits together:
-  - [architecture](docs/architecture.md): diagrams for components, data flow, identity and the network
-  - [principles](docs/principles.md): what "standalone" means for every service
-  - the [service docs](docs/services/) (the four services, the Hister and SearXNG engines, and the MCP server), their [API contracts](docs/contracts/), the [frontmatter schema](docs/frontmatter.md), the [design language](docs/design.md) and its [shared UI](docs/ui.md)
-  - install guides ([docs/install/](docs/install/)) and the contracts between the services ([docs/contracts/](docs/contracts/))
-- **[vaultkit/](vaultkit/)**: the shared vault core (frontmatter, notes, wikilink resolution, the Markdown renderer, a git mirror). Services vendor it at a tag; see [docs/vaultkit.md](docs/vaultkit.md).
-- **[ui/](ui/)**: the shared stylesheet and script of the web rooms (themes, tab bar, rooms switcher, offline shell), vendored with vaultkit; see [docs/ui.md](docs/ui.md).
-- **[stack/](stack/)**: small services that run beside the rooms:
-  - `mcp/` (machiya-mcp, one MCP endpoint for the rooms: board, notes, page labels and collections, garden; pages themselves are read with Hister's own MCP; [docs/services/mcp.md](docs/services/mcp.md))
-  - `landing/` (the stack's front door at `/` and its status page at `/status`: every app's state, version, sync freshness and recent deploys; [docs/services/landing.md](docs/services/landing.md))
-  - `hister-login/` (Hister's users as the one sign-in for every room, `*_AUTH=hister`; [docs/services/hister-login.md](docs/services/hister-login.md))
-  - `smallweb/` (Gemini and Gopher search for Shiori, and saving the pages Shiori asks for, http(s) ones too, to Hister)
-  - `feed-import/` (what you read and star in a feed reader, into Hister) and `code-import/` (your Forgejo and GitHub repos, into Hister as Shiori's Code area; [docs/services/code-import.md](docs/services/code-import.md))
-  - `vault-mirror/` (one shared clone of the vault for the readers)
-- **[plugins/machiya/](plugins/machiya/)**: a Claude Code plugin: one MCP connection (machiya-mcp: the board, notes, and saved pages through `pages_search` and `pages_read`) and cross-room skills (backlog, weekly review, recall, garden suggestions, tidying saved-page labels).
-- **[compose/](compose/)**: a reference compose file for the engines, Kura, Niwa and Konbini (Shiori is a client and not in it), and [compose/dev/](compose/dev/), the **dev stack**: every service with Hister's sign-in, on synthetic data only, in containers or as plain processes ([docs/dev-stack.md](docs/dev-stack.md)).
-- **[config/](config/)**: reference configuration for Hister and SearXNG, as they run in this stack.
-- **[sample-vault/](sample-vault/)**: a small demo vault, to run the stack without real notes.
+- **[docs/](docs/)**: [architecture](docs/architecture.md), [principles](docs/principles.md), [voice](docs/voice.md), the [service docs](docs/services/), [API contracts](docs/contracts/), the [frontmatter schema](docs/frontmatter.md), the [design](docs/design.md) and its [shared UI](docs/ui.md), and [install guides](docs/install/).
+- **[vaultkit/](vaultkit/)**: the shared vault core (frontmatter, notes, wikilinks, the Markdown renderer, a git mirror). Each app vendors it at a tag: [docs/vaultkit.md](docs/vaultkit.md).
+- **[ui/](ui/)**: the web apps' shared stylesheet and script (themes, tab bar, Rooms menu, offline shell): [docs/ui.md](docs/ui.md).
+- **[stack/](stack/)**: small services beside the apps:
+  - `mcp/`: one MCP server for the board, notes, saved pages, labels, collections and the garden ([docs](docs/services/mcp.md))
+  - `landing/`: the stack's front page and its `/status` page ([docs](docs/services/landing.md))
+  - `hister-login/`: Hister's users as the one sign-in for every app ([docs](docs/services/hister-login.md))
+  - `smallweb/`: Gemini and Gopher search for Shiori, and saving the pages Shiori asks for into Hister
+  - `feed-import/`: what you read and star in a feed reader, into Hister
+  - `code-import/`: your Forgejo and GitHub repos, into Hister for Shiori's Code view ([docs](docs/services/code-import.md))
+  - `vault-mirror/`: one shared clone of the vault
+- **[plugins/machiya/](plugins/machiya/)**: a Claude Code plugin: the MCP server plus skills for the backlog, the weekly review, recall, garden suggestions and tidying labels.
+- **[compose/](compose/)**: the reference compose, and [compose/dev/](compose/dev/), the dev stack on synthetic data ([docs/dev-stack.md](docs/dev-stack.md)).
+- **[config/](config/)**: reference config for Hister and SearXNG.
+- **[sample-vault/](sample-vault/)**: the invented vault.
 
 ## Where it runs
 
-A deployment can run each service as its own stack (compose project), optionally with its own Tailscale sidecar and `*.ts.net` name, all owner-only. This repo is the product; a deployment is yours to make: start from [`compose/`](compose/) and [`config/`](config/).
+Wherever you put it. Each app can be its own compose project, with its own Tailscale sidecar and `*.ts.net` name if you like. Start from [`compose/`](compose/) and [`config/`](config/).
 
 ## Status
 
-Machiya is pre-1.0, so expect change. The services are standalone (each runs without the others; links between them are optional, and each one keeps working when the others are down), their APIs are documented in [docs/contracts/](docs/contracts/), and the vault conventions in [docs/frontmatter.md](docs/frontmatter.md). Issues and pull requests are welcome; see each repository's `CONTRIBUTING.md`.
+Pre-1.0, so expect change. Each app runs on its own and keeps working when the others are down. The APIs are in [docs/contracts/](docs/contracts/) and the vault conventions in [docs/frontmatter.md](docs/frontmatter.md). Issues and pull requests are welcome; see each repository's `CONTRIBUTING.md`.
 
 ## Licence
 
