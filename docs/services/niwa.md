@@ -26,6 +26,12 @@ Niwa commits the garden fields only (`publish`, `growth`, `confidence`, `garden_
 
 Niwa serves the garden itself: the web pages, plus **gemini** (port 1965) and **gopher** (port 7070) listeners of its own, which are the only "mirrors". It publishes nothing to any other host; what you put on a public site is up to you. The pages show only notes with `publish: true`. The gemini and gopher `/stream` pages are a **public surface**: they list garden events about notes that are published now and never the Konbini board (no cards, no next steps, no blocked-by text, nothing from an unpublished note). The owner's web stream may add the board half and the reading line.
 
+## Public garden (optional, off by default)
+
+Since Niwa 0.8.0. Set `NIWA_PUBLIC_PORT` (for example `8081`) and `NIWA_GARDEN_URL` (its public origin, like `https://garden.example`), and publish that port through a TLS proxy (Caddy, Tailscale Funnel). Keep the owner's `NIWA_PORT` on the tailnet as before. The public site serves the published notes, their tags and images, the stream of garden events, search and `/feed.xml`. It has no queue, settings, sign-in or writes, and nothing from Konbini, Kura or Hister. `NIWA_PUBLIC_NOINDEX=1` keeps search engines out, and `NIWA_PUBLIC_BIND` binds it somewhere other than `NIWA_BIND`. In a compose stack, map the public port separately from the owner's (for example `127.0.0.1:8081:8081`, behind the proxy). How it treats identity: [identity.md](../identity.md#security-notes).
+
+Before turning it on: published notes whose scan has errors are held back on every channel (web, public, Gemini, Gopher, feed) until the owner acknowledges them on the note's page. Notes published with "Publish anyway" before 0.8.0 need acknowledging once more (Queue, Held Back). Add `NIWA_SCAN_DENY` with any names that must never appear publicly. Since 0.8.0, `NIWA_ARCHIVE` defaults to `wayback`: every external link in a published note keeps its original address and gets an "archive.org" link beside it, so the published notes' links go to archive.org; set `NIWA_ARCHIVE=none` to turn that off.
+
 ## Settings
 
 `NIWA_REPO_URL` (ssh, read-write; `GIT_SSH_COMMAND` for the key), `NIWA_REPO_SUBDIR`, `NIWA_POLL`, `NIWA_AUTH` (`tailscale`, `open`, `header` or `hister`, as [Kura's](kura.md#settings)), `NIWA_USERS`, `NIWA_BIND_BEHIND_PROXY`, `NIWA_PUBLIC_URL`, `NIWA_HOST`, `NIWA_KONBINI_URL`, `NIWA_KURA_URL`, `NIWA_HISTER_URL`/`NIWA_HISTER_TOKEN_FILE`/`NIWA_HISTER_PUBLIC`/`NIWA_COLD_MAP`, `NIWA_ARCHIVE` (`wayback` | `none`), `NIWA_DB`. Full table: machiya-kobo/niwa README.
