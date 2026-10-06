@@ -8,6 +8,10 @@ function show(text) {
   alertBox.hidden = false;
 }
 if (form) {
+  // a password manager's auto-submit calls form.submit(), which skips the submit event: send it through it
+  form.submit = () => form.requestSubmit();
+  const username = document.getElementById("signin-username");
+  const password = document.getElementById("signin-password");
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const button = form.querySelector("button");
@@ -18,7 +22,7 @@ if (form) {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ username: form.username.value.trim(), password: form.password.value }),
+        body: JSON.stringify({ username: username.value.trim(), password: password.value }),
       });
       if (res.ok) {
         location.replace(form.dataset.next || "/machiya/signin");

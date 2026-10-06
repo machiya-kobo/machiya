@@ -131,6 +131,28 @@ class HelperBase(unittest.TestCase):
 class HelperTest(HelperBase):
     # -- sign-in
 
+    def test_signin_page_names_the_app_and_never_names_the_password(self):
+        _, _, body = self.public("GET", "/machiya/signin?" + urlencode({"return": KURA}))
+        self.assertIn(b"<h1>Sign In to Kura</h1>", body)
+        self.assertIn(b'<span class="word">Machiya</span>', body)       # the header is Machiya's, not Hister's
+        self.assertIn(b'autocomplete="current-password"', body)
+        self.assertNotIn(b'name="password"', body)                      # a direct submit can't carry it
+        self.assertNotIn(b'name="username"', body)
+        _, _, plain = self.public("GET", "/machiya/signin")
+        self.assertIn(b"<h1>Sign In</h1>", plain)                       # no return: no app named
+
+    def test_a_direct_submit_comes_back_to_the_form(self):
+        # a password manager's auto-submit skips the script: the POST has no fields, and the form comes back with
+        # what to do, the return address kept, instead of a dead end
+        path = "/machiya/signin?" + urlencode({"return": KURA, "direct": "1"})
+        status, headers, body = self.public("POST", path, {"Origin": PUBLIC,
+                                                            "Content-Type": "application/x-www-form-urlencoded"}, b"")
+        self.assertEqual(status, 200)
+        self.assertIn(b'id="hister-signin"', body)
+        self.assertIn(b"Press Sign In to finish signing in.", body)
+        self.assertIn(b"<h1>Sign In to Kura</h1>", body)
+        self.assertNotIn(b"Only an app", body)
+
     def test_signin_page_when_not_signed_in(self):
         status, headers, body = self.public("GET", "/machiya/signin?" + urlencode({"return": KURA}))
         self.assertEqual(status, 200)

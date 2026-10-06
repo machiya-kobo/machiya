@@ -61,7 +61,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.3.2"
+VERSION = "0.4.0"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -901,7 +901,7 @@ e = shell.e
 
 def render(headers, title, body, scripts=()):
     ctx = shell.prefs(headers.get("Cookie"))
-    page = shell.page(ctx, "hister", title, shell.header("hister", [], "", {}, subtitle="Machiya", settings=False)
+    page = shell.page(ctx, "machiya", title, shell.header("machiya", [], "", {}, settings=False)
                       + body, links={}, manifest=False, scripts=scripts)
     return page.replace('"/static/', '"/machiya/static/').encode()
 
@@ -914,20 +914,43 @@ def signin_page(s, headers, ret, app, error="", state=""):
         oauth = ('<p class="actions"><a class="button" href="/api/oauth?provider=oidc">Sign in with %s</a></p>'
                  % e(s.oidc_label))
     alert = '<p class="signin-error" role="alert" data-error%s>%s</p>' % ("" if error else " hidden", e(error))
+    target = signin_target(s, ret, app)
+    heading = "Sign In to %s" % target if target else "Sign In"
+    # The fields have ids, not names: the script reads them and sends the password to Hister's /api/login, and a
+    # direct submit (a password manager's auto-submit skips the script) posts no fields at all, so the password
+    # never reaches this helper; that POST comes back here with "Press Sign In" (signin_post).
     body = (
-        '<main class="signin"><h1>Sign In</h1>%s'
-        '<form class="group" id="hister-signin" method="post" action="/machiya/signin" data-next="%s">'
-        '<label class="item"><span>Name</span><input name="username" required maxlength="64" autofocus '
+        '<main class="signin"><h1>%s</h1>%s'
+        '<form class="group" id="hister-signin" method="post" action="%s" data-next="%s">'
+        '<label class="item"><span>Name</span><input id="signin-username" required maxlength="64" autofocus '
         'autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"></label>'
-        '<label class="item"><span>Password</span><input type="password" name="password" required maxlength="1024" '
-        'autocomplete="current-password"></label>'
+        '<label class="item"><span>Password</span><input id="signin-password" type="password" required '
+        'maxlength="1024" autocomplete="current-password"></label>'
         '<button type="submit">Sign In</button></form>'
         '<div class="empty">%s</div>'
-        '<p class="footnote">One sign-in for Hister and every Machiya room on this device, until you sign out.</p>'
+        '<p class="footnote">One sign-in for Hister and every Machiya app on this device, until you sign out.</p>'
         '<noscript><p class="signin-error">The password form needs JavaScript.</p></noscript>'
         '</main>'
-    ) % (alert, e(nxt), oauth)
-    return render(headers, "Sign In · Machiya", body, ["/static/signin.js?v=%s" % VERSION])
+    ) % (e(heading), alert, e(nxt + ("&" if "?" in nxt else "?") + "direct=1"), e(nxt), oauth)
+    return render(headers, heading + " · Machiya", body, ["/static/signin.js?v=%s" % VERSION])
+
+
+def signin_target(s, ret, app):
+    """The app a sign-in returns to, by name, for the heading: an app's scheme (shiori:) is Shiori; else the room or
+    hosted pages the return address belongs to; '' when unknown or none."""
+    if not ret:
+        return ""
+    if app:
+        return "Shiori"
+    origin = histerauth.origin_of(ret)
+    if not origin:
+        return ""
+    for key, o in s.rooms.items():
+        if o == origin:
+            return ROOM_NAMES.get(key, key.capitalize())
+    if origin in s.proxied:
+        return "Shiori"
+    return ""
 
 
 def confirm_page(headers, ret, provider=""):
@@ -1599,7 +1622,14 @@ class Public(Handler):
         except (ValueError, UnicodeError):
             return self.json(400, {"error": "unreadable form"})
         if form.get("app") != "1":
-            return self.page(400, message_page(self.headers, "Can't Sign In", "Only an app's sign-in is confirmed here."))
+            # the password form submitted directly (a password manager's auto-submit skips the page's script): it
+            # carries no fields (signin_page), so show the form again, same return address, with what to do
+            q = self.query()
+            ret = self.login.safe(q.get("return"), False)
+            state = q.get("state") or ""
+            state = state if histerauth.NONCE_RE.match(state) else ""
+            return self.page(200, signin_page(self.login.s, self.headers, ret, False, state=state,
+                                              error="Press Sign In to finish signing in."))
         return self.signin(form)
 
     def signout(self):

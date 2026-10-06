@@ -1,5 +1,10 @@
 # Changelog: hister-login
 
+## 0.4.0
+
+- The sign-in page names the app you're signing in to ("Sign In to Shiori", "Sign In to Kura"…), from the return address, and its header says Machiya.
+- A password manager's auto-submit works: it skipped the page's script, posted the form straight to the helper and ended on "Only an app's sign-in is confirmed here". The script now catches `form.submit()`, and the fields have no names, so a direct submit carries no password; it comes back to the form with "Press Sign In to finish signing in."
+
 ## 0.3.2
 
 - Shorter copy (the owner's copy-editing pass, 2026-10-05): the app sign-in's Continue page and the sessions page's footnotes are a sentence each; Sign Out Everywhere is the last row of Sessions instead of its own section. Same forms, same behaviour.
