@@ -81,6 +81,7 @@ p { margin: 0; }
   .spin .w { animation: none; }
   .spin .page { opacity: 1; }
 }
+.lede a { color: inherit; text-decoration-color: var(--blue); }
 .lede { margin-top: 18px; font-size: clamp(18px, 2.4vw, 21px); color: var(--fg2); }
 .actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px 28px; margin-top: 28px; }
 .button {
