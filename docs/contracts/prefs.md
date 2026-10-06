@@ -12,7 +12,7 @@ Changes to this contract go through the lead, as for the Kura and Konbini APIs. 
 
 | Kind | Settings | Where they live |
 |---|---|---|
-| **Shared** | Theme (`palette`), Appearance (`theme`), Text Size (`text_size`), Apps (`apps_hidden`: which rooms the switcher shows), and Shiori's Pills (`pills`) | the account; every app shows them first, in the same order, under **Shared** (Apps only where there is a switcher, Pills only in Shiori) |
+| **Shared** | Theme (`palette`), Mode (`theme`), Text Size (`text_size`), Apps (`apps_hidden`: which rooms the menu shows), and Shiori's Pills (`pills`) | the account; every app shows Theme, Mode and Text Size first, under **Appearance**, and Apps under **Rooms** (only where there is a Rooms menu; Pills only in Shiori) |
 | **Per-app** | Kura's Preview Pane, Niwa's Link Previews, Konbini's Group By and Done Cards, Shiori's search and result options, … | the account too, as `<app>.<key>`; the app that reads a key validates its value |
 | **This Device** | "Use This Device's Size" (the one Shared setting a device may override), Kura's Obsidian Vault, Offline Copies, Shiori's addresses and Dock icon, every sign-in and token, Shiori's AI settings | the device only; never sent |
 
@@ -24,7 +24,7 @@ The schema lives in [`vaultkit/prefs.py`](../../vaultkit/prefs.py) and is export
 
 | Key | Values | Label |
 |---|---|---|
-| `theme` | `system`, `day`, `night` (`auto` is stored as `system`) | Appearance |
+| `theme` | `system`, `day`, `night` (`auto` is stored as `system`) | Mode |
 | `palette` | the ten keys of `vaultkit/palettes.py` (`tokyo-night` … `ayu`) | Theme |
 | `text_size` | `xsmall`, `small`, `standard`, `large`, `xlarge` (the house's five steps; Shiori maps its own through `HOUSE_STEPS`) | Text Size |
 | `apps_hidden` | a comma list from `shiori, konbini, niwa, kura, hister, searxng, machiya`, stored in that order without repeats; empty = all shown | Apps |
