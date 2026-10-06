@@ -1,15 +1,17 @@
-# Machiya 町家
+# Machiya
 
 <img src="icons/png/machiya-128.png" alt="Machiya: a townhouse front with a three-panel noren" width="96" height="96" align="right">
 
-A machiya is a Kyoto townhouse: a shop at the street front, a small inner garden, and a storehouse at the back, all under one roof. **Machiya** is the stack of standalone services built around one vault of Markdown notes in a Git repository (an Obsidian vault works as is):
+Machiya is a set of small self-hosted apps for finding what you've read: your pages (Hister), the web (SearXNG), your notes (an Obsidian vault in git) and your code.
+
+The name: a machiya (町家) is a Kyoto townhouse, with a shop at the street front, a small inner garden and a storehouse at the back, all under one roof. Each app runs on its own, and they share one vault of Markdown notes in a git repository (an Obsidian vault works as is):
 
 | Service | | Job | Repo |
 |---|---|---|---|
 | **Kura** | 蔵 storehouse | every note: the reader, full-text search, a JSON API, and the push into Hister | [machiya-kobo/kura](https://github.com/machiya-kobo/kura) |
-| **Niwa** | 庭 garden | the published garden: web, gemini, gopher, the publish buttons | [machiya-kobo/niwa](https://github.com/machiya-kobo/niwa) |
+| **Niwa** | 庭 garden | the published garden: web, Gemini, Gopher, the publish buttons | [machiya-kobo/niwa](https://github.com/machiya-kobo/niwa) |
 | **Konbini** | コンビニ shop | the project board built from the vault's project notes | [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini) |
-| **Shiori** | 栞 bookmark | the search front door (iPhone, iPad, Mac, Safari extension, web): your pages, your notes, the web | [machiya-kobo/shiori](https://github.com/machiya-kobo/shiori) |
+| **Shiori** | 栞 bookmark | the search app (iPhone, iPad, Mac, Linux, Haiku, the web, and a Safari extension): your pages, your notes, the web and your code | [machiya-kobo/shiori](https://github.com/machiya-kobo/shiori) |
 
 Two services it builds on:
 
@@ -24,7 +26,7 @@ flowchart LR
     kura["Kura 蔵<br/>reader · search · API"]
     niwa["Niwa 庭<br/>published garden"]
     konbini["Konbini コンビニ<br/>project board"]
-    shiori["Shiori 栞<br/>search front door"]
+    shiori["Shiori 栞<br/>search app"]
     hister[("Hister<br/>pages + notes index")]
     searx[("SearXNG<br/>web")]
 
@@ -234,28 +236,28 @@ Copy `compose/.env.example` to a file called `.env` beside it (instead of runnin
 
 ### The other half: Shiori
 
-Shiori is a client, not a service: the search front door for iPhone, iPad, Mac, Linux and the web. It talks to Hister, Kura, Konbini and SearXNG at the addresses above. Its [Quickstart](https://github.com/machiya-kobo/shiori#quickstart) builds the web and Linux apps against this stack.
+Shiori is a client, not a service: the search app for iPhone, iPad, Mac, Linux, Haiku and the web. It talks to Hister, Kura, Konbini and SearXNG at the addresses above. Its [Quickstart](https://github.com/machiya-kobo/shiori#quickstart) builds the web and Linux apps against this stack.
 
 ## What's in this repo
 
-- **[docs/](docs/)** — how it fits together:
+- **[docs/](docs/)**: how it fits together:
   - [architecture](docs/architecture.md): diagrams for components, data flow, identity and the network
   - [principles](docs/principles.md): what "standalone" means for every service
   - the [service docs](docs/services/) (the four services, the Hister and SearXNG engines, and the MCP server), their [API contracts](docs/contracts/), the [frontmatter schema](docs/frontmatter.md), the [design language](docs/design.md) and its [shared UI](docs/ui.md)
   - install guides ([docs/install/](docs/install/)) and the contracts between the services ([docs/contracts/](docs/contracts/))
-- **[vaultkit/](vaultkit/)** — the shared vault core (frontmatter, notes, wikilink resolution, the Markdown renderer, a git mirror). Services vendor it at a tag; see [docs/vaultkit.md](docs/vaultkit.md).
-- **[ui/](ui/)** — the shared stylesheet and script of the web rooms (themes, tab bar, rooms switcher, offline shell), vendored with vaultkit; see [docs/ui.md](docs/ui.md).
-- **[stack/](stack/)** — small services that run beside the rooms:
+- **[vaultkit/](vaultkit/)**: the shared vault core (frontmatter, notes, wikilink resolution, the Markdown renderer, a git mirror). Services vendor it at a tag; see [docs/vaultkit.md](docs/vaultkit.md).
+- **[ui/](ui/)**: the shared stylesheet and script of the web rooms (themes, tab bar, rooms switcher, offline shell), vendored with vaultkit; see [docs/ui.md](docs/ui.md).
+- **[stack/](stack/)**: small services that run beside the rooms:
   - `mcp/` (machiya-mcp, one MCP endpoint for the rooms: board, notes, page labels and collections, garden; pages themselves are read with Hister's own MCP; [docs/services/mcp.md](docs/services/mcp.md))
   - `landing/` (the stack's front door at `/` and its status page at `/status`: every app's state, version, sync freshness and recent deploys; [docs/services/landing.md](docs/services/landing.md))
   - `hister-login/` (Hister's users as the one sign-in for every room, `*_AUTH=hister`; [docs/services/hister-login.md](docs/services/hister-login.md))
   - `smallweb/` (Gemini and Gopher search for Shiori, and saving the pages Shiori asks for, http(s) ones too, to Hister)
   - `feed-import/` (what you read and star in a feed reader, into Hister) and `code-import/` (your Forgejo and GitHub repos, into Hister as Shiori's Code area; [docs/services/code-import.md](docs/services/code-import.md))
   - `vault-mirror/` (one shared clone of the vault for the readers)
-- **[plugins/machiya/](plugins/machiya/)** — a Claude Code plugin: two MCP connections (machiya-mcp, and Hister's own MCP for searching and reading saved pages, with its history tool denied) and cross-room skills (backlog, weekly review, recall, garden suggestions, tidying saved-page labels).
-- **[compose/](compose/)** — a reference compose file for the engines, Kura, Niwa and Konbini (Shiori is a client and not in it), and [compose/dev/](compose/dev/), the **dev stack**: every service with Hister's sign-in, on synthetic data only, in containers or as plain processes ([docs/dev-stack.md](docs/dev-stack.md)).
-- **[config/](config/)** — reference configuration for Hister and SearXNG, as they run in this stack.
-- **[sample-vault/](sample-vault/)** — a small demo vault, to run the stack without real notes.
+- **[plugins/machiya/](plugins/machiya/)**: a Claude Code plugin: one MCP connection (machiya-mcp: the board, notes, and saved pages through `pages_search` and `pages_read`) and cross-room skills (backlog, weekly review, recall, garden suggestions, tidying saved-page labels).
+- **[compose/](compose/)**: a reference compose file for the engines, Kura, Niwa and Konbini (Shiori is a client and not in it), and [compose/dev/](compose/dev/), the **dev stack**: every service with Hister's sign-in, on synthetic data only, in containers or as plain processes ([docs/dev-stack.md](docs/dev-stack.md)).
+- **[config/](config/)**: reference configuration for Hister and SearXNG, as they run in this stack.
+- **[sample-vault/](sample-vault/)**: a small demo vault, to run the stack without real notes.
 
 ## Where it runs
 
@@ -263,7 +265,7 @@ A deployment can run each service as its own stack (compose project), optionally
 
 ## Status
 
-Machiya is pre-1.0, so expect change. The services are standalone (each runs without the others; links between them are optional HTTP integrations that degrade gracefully), their APIs are documented in [docs/contracts/](docs/contracts/), and the vault conventions in [docs/frontmatter.md](docs/frontmatter.md). Issues and pull requests are welcome; see each repository's `CONTRIBUTING.md`.
+Machiya is pre-1.0, so expect change. The services are standalone (each runs without the others; links between them are optional, and each one keeps working when the others are down), their APIs are documented in [docs/contracts/](docs/contracts/), and the vault conventions in [docs/frontmatter.md](docs/frontmatter.md). Issues and pull requests are welcome; see each repository's `CONTRIBUTING.md`.
 
 ## Licence
 
