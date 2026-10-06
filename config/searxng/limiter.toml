@@ -3,8 +3,10 @@
 # Hister + SearXNG search use the JSON API (format=json) without 429s.
 [botdetection]
 # Requests arrive through a Tailscale sidecar (docker network): take the client IP from its
-# X-Forwarded-For header instead of seeing every client as the sidecar.
-trusted_proxies = ['127.0.0.0/8', '::1', '172.16.0.0/12']
+# X-Forwarded-For header instead of seeing every client as the sidecar. Trust every private range Docker can
+# hand out: its address pool is configurable (server's moved to 10.220.0.0/16 on 2026-10-04), and a sidecar
+# outside these ranges makes every client look like one and the limiter answers 429 to all (2026-10-06).
+trusted_proxies = ['127.0.0.0/8', '::1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
 
 [botdetection.ip_lists]
 # Tailscale CGNAT + ULA ranges: every client of a tailnet-only instance is on the tailnet.
