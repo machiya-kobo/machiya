@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Machiya: your own search for what you read, write and build</title>
-<meta name="description" content="Machiya is self-hosted search built on Hister, your own index of the pages you read, together with your Obsidian vault, the web and your code repositories.">
+<title>Machiya: find the page you read last month</title>
+<meta name="description" content="Machiya saves every page you visit to a server you run, so you can search them later. Your Obsidian notes and your code come up in the same search.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#e1e2e7" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1a1b26" media="(prefers-color-scheme: dark)">
@@ -19,239 +19,154 @@
 
 <header class="site-header">
   <div class="wrap">
-    <a class="brand" href="./"><img src="icons/machiya.svg" alt="" width="32" height="32"><span>Machiya</span></a>
-    <nav class="site-nav" aria-label="Sections">
-      <ul>
-        <li><a href="#rooms">Rooms</a></li>
-        <li><a href="#screenshots">Screenshots</a></li>
-        <li><a href="#principles">Principles</a></li>
-        <li><a href="#start">Get Started</a></li>
-        <li><a href="#source">Source</a></li>
-      </ul>
-    </nav>
+    <a class="brand" href="./"><img src="icons/machiya.svg" alt="" width="28" height="28"><span>Machiya</span></a>
   </div>
 </header>
 
 <main id="main">
-  <section aria-labelledby="title">
-    <div class="wrap hero">
-    <div>
-      <h1 id="title"><img class="title-mark" src="icons/machiya.svg" alt="" width="44" height="44">Machiya</h1>
-      <p class="lede">Your own search for everything you read, write and build, on your own server.</p>
-      <ul class="prose focus">
-        <li><strong>Hister</strong> keeps your own index of every page you visit and save, so you can find any of them again.</li>
-        <li><strong>Your Obsidian vault</strong> is searched alongside it, read in Kura, published in Niwa's garden and planned on Konbini's board.</li>
-        <li><strong>The web</strong> comes from SearXNG and the small web, in the same search, without sharing your history.</li>
-        <li><strong>Your code repositories</strong> on Forgejo and GitHub: READMEs, docs, issues, pull requests and releases.</li>
-      </ul>
-      <div class="actions">
-        <a class="button primary" href="https://github.com/machiya-kobo/machiya#quickstart">Quickstart</a>
-        <a class="button secondary" href="https://github.com/machiya-kobo/machiya">Source on GitHub</a>
-      </div>
-    </div>
-    </div>
-  </section>
-
-  <section id="rooms" aria-labelledby="rooms-title">
+  <section class="hero" aria-labelledby="title">
     <div class="wrap">
-      <h2 id="rooms-title">The Rooms</h2>
-      <p class="prose">Four services, each in its own repository with its own image. Links between them are optional: leave one out and the others carry on.</p>
-
-      <div class="grid">
-        <article class="room kura" aria-labelledby="kura-title">
-          <header>
-            <img src="icons/kura.svg" alt="" width="40" height="40">
-            <div>
-              <h3 id="kura-title">Kura</h3>
-              <p class="meaning">the storehouse</p>
-            </div>
-          </header>
-          <p>Every note in the vault, with working links.</p>
-          <ul>
-            <li>A reader: folders, tags, backlinks and a preview pane</li>
-            <li>Full-text search</li>
-            <li>A JSON API for notes</li>
-            <li>Pushes every note into Hister, so your notes and your pages are searched together</li>
-          </ul>
-          <p class="repo"><a href="https://github.com/machiya-kobo/kura">machiya-kobo/kura</a></p>
-        </article>
-
-        <article class="room niwa" aria-labelledby="niwa-title">
-          <header>
-            <img src="icons/niwa.svg" alt="" width="40" height="40">
-            <div>
-              <h3 id="niwa-title">Niwa</h3>
-              <p class="meaning">the garden</p>
-            </div>
-          </header>
-          <p>The published garden, grown from the vault.</p>
-          <ul>
-            <li>A note is in the garden when its frontmatter says <code>publish: true</code>, set from Niwa's own Publish button</li>
-            <li>Growth stages, backlinks, topic maps and a stream of what changed</li>
-            <li>A check before publishing for addresses, keys and tokens</li>
-            <li>Served on the web, and over Gemini and Gopher</li>
-          </ul>
-          <p class="repo"><a href="https://github.com/machiya-kobo/niwa">machiya-kobo/niwa</a></p>
-        </article>
-
-        <article class="room konbini" aria-labelledby="konbini-title">
-          <header>
-            <img src="icons/konbini.svg" alt="" width="40" height="40">
-            <div>
-              <h3 id="konbini-title">Konbini</h3>
-              <p class="meaning">the shop</p>
-            </div>
-          </header>
-          <p>The project board, built from the vault's project notes.</p>
-          <ul>
-            <li>Backlog, ready, WIP, blocked, done; lanes, priorities, next actions and blockers</li>
-            <li>Review, plan, calendar and roundups for the day, week, month and year</li>
-            <li>The notes are the source of truth: a board edit is a frontmatter line, committed to git</li>
-            <li><code>pm</code>, a one-file command line for the board</li>
-          </ul>
-          <p class="repo"><a href="https://github.com/machiya-kobo/konbini">machiya-kobo/konbini</a></p>
-        </article>
-
-        <article class="room shiori" aria-labelledby="shiori-title">
-          <header>
-            <img src="icons/shiori.svg" alt="" width="40" height="40">
-            <div>
-              <h3 id="shiori-title">Shiori</h3>
-              <p class="meaning">the bookmark</p>
-            </div>
-          </header>
-          <p>The search front door: your pages, your notes and the web, in one search.</p>
-          <ul>
-            <li>Apps for iPhone, iPad and Mac, a Safari extension, a Linux app and a web app</li>
-            <li>Searches Hister, Kura and SearXNG at once</li>
-            <li>A note opens in Kura to read, or in Obsidian to edit</li>
-          </ul>
-          <p class="repo"><a href="https://github.com/machiya-kobo/shiori">machiya-kobo/shiori</a></p>
-        </article>
+      <div class="hero-text">
+        <h1 id="title">Find the page you read last month.</h1>
+        <p class="lede">Machiya saves every page you visit to a server you run, so you can search them later.</p>
+        <div class="actions">
+          <a class="button" href="https://github.com/machiya-kobo/machiya#quickstart">Install</a>
+          <a class="quiet" href="https://github.com/machiya-kobo/machiya">Source</a>
+        </div>
       </div>
-
-      <div class="engines prose">
-        <h3>The Engines</h3>
-        <p>Machiya builds on two open-source search services, run as their upstream images with reference configuration in the <a href="https://github.com/machiya-kobo/machiya/tree/main/config">machiya repository</a>:</p>
-        <ul>
-          <li><a href="https://github.com/asciimoo/hister">Hister</a> indexes every page you visit or save, and, through Kura, your notes.</li>
-          <li><a href="https://github.com/searxng/searxng">SearXNG</a> searches the web, optionally through a SOCKS proxy. It never queries Hister: SearXNG can be shared, and your history stays yours.</li>
-        </ul>
-      </div>
-
-      <div class="beside prose">
-        <h3>Beside the Rooms</h3>
-        <p class="small">The machiya repository also holds the stack's smaller pieces: a landing and status page, an MCP server and a Claude Code plugin for the rooms, importers that bring feeds and code repositories into Hister, and <a href="https://github.com/machiya-kobo/machiya/tree/main/vaultkit">vaultkit</a>, the shared vault core every room vendors at a tag.</p>
+      <div class="hero-shot">
+        <picture>
+          <source media="(max-width: 640px) and (prefers-color-scheme: dark)" srcset="img/hero-phone-dark.webp" width="780" height="1688">
+          <source media="(max-width: 640px)" srcset="img/hero-phone-light.webp" width="780" height="1688">
+          <source media="(prefers-color-scheme: dark)" srcset="img/hero-dark.webp" width="2560" height="1600">
+          <img src="img/hero-light.webp" width="2560" height="1600" decoding="async" fetchpriority="high" alt="Shiori, the Machiya search app, with results for washi. A saved page, Washi grades for lantern skins, and a note, Washi paper tests, are listed together with a web result. The saved page is open on the right.">
+        </picture>
       </div>
     </div>
   </section>
 
-  <section id="flows" aria-labelledby="flows-title">
+  <section class="feature" aria-labelledby="f-pages">
     <div class="wrap">
-      <h2 id="flows-title">How It Fits Together</h2>
-      <ul class="flows prose">
-        <li><strong>The vault is the source of truth.</strong> Each room clones it and keeps the clone current; run together, they can share one mirror. Anything a room stores besides that can be rebuilt from git.</li>
-        <li><strong>Kura only reads.</strong> Niwa writes only the garden fields (<code>publish</code>, <code>growth</code>, <code>confidence</code>, <code>garden_pin</code>). Konbini writes only board fields and new stub notes, and never edits a note's body.</li>
-        <li><strong>Kura pushes notes into Hister</strong>, labelled <code>vault</code>, so a search for pages finds notes too.</li>
-        <li><strong>Shiori asks the others</strong>: Hister for pages, Kura for notes, SearXNG for the web. When one is missing, that part of the search is simply left out.</li>
-      </ul>
-      <p class="small muted">Diagrams of components, data flow and identity: <a href="https://github.com/machiya-kobo/machiya/blob/main/docs/architecture.md">docs/architecture.md</a>.</p>
+      <div class="feature-text">
+        <p class="tag shiori"><img src="icons/shiori.svg" alt="" width="20" height="20">Hister and Shiori</p>
+        <h2 id="f-pages">Find it again</h2>
+        <p>Browse as usual in Safari, Firefox or Chrome. Later, type a word you remember and the page comes back, along with the copy Machiya saved.</p>
+      </div>
+      <figure class="feature-shot">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="img/pages-dark.webp">
+          <img src="img/pages-light.webp" width="1215" height="1080" loading="lazy" decoding="async" alt="Shiori's Pages tab for the search lantern: saved pages about washi grades and autumn lantern festivals in Kyoto, each with its labels and a link to the saved copy.">
+        </picture>
+      </figure>
     </div>
   </section>
 
-  <section id="screenshots" aria-labelledby="shots-title">
+  <section class="feature flip" aria-labelledby="f-notes">
     <div class="wrap">
-      <h2 id="shots-title">What It Looks Like</h2>
-      <p class="prose">The same invented vault in every room: a paper-lantern workshop and a trip to Kyoto. Every room has ten themes, each light and dark. Select a picture for the full size.</p>
-      <div class="shots">
-        <figure>
-          <a href="img/kura-home-light.png"><img src="img/kura-home-light.png" width="1280" height="800" loading="lazy" decoding="async" alt="Kura in the light theme: a folder list, recently changed notes, and a preview of the note Bamboo frames with its tags and the notes that link to it."></a>
-          <figcaption><strong>Kura</strong>: every note, with backlinks and search.</figcaption>
-        </figure>
-        <figure>
-          <a href="img/niwa-garden-dark.png"><img src="img/niwa-garden-dark.png" width="1280" height="800" loading="lazy" decoding="async" alt="Niwa in the dark theme: the garden's front page with topic maps and recently tended notes, each marked Seedling, Budding or Evergreen."></a>
-          <figcaption><strong>Niwa</strong>: the published garden.</figcaption>
-        </figure>
-        <figure>
-          <a href="img/konbini-board-light.png"><img src="img/konbini-board-light.png" width="1280" height="800" loading="lazy" decoding="async" alt="Konbini in the light theme: a board with Backlog, Ready, WIP, Blocked and Done columns in area lanes, cards showing next actions, priorities and due dates."></a>
-          <figcaption><strong>Konbini</strong>: the project board.</figcaption>
-        </figure>
-        <figure>
-          <a href="img/shiori-search-dark.png"><img src="img/shiori-search-dark.png" width="1280" height="800" loading="lazy" decoding="async" alt="Shiori in the dark theme: results for the search lantern, with source filters for pages, notes, web, images, videos, news and the small web, and an info box beside them."></a>
-          <figcaption><strong>Shiori</strong>: one search across your pages, your notes and the web.</figcaption>
-        </figure>
+      <div class="feature-text">
+        <p class="tag kura"><img src="icons/kura.svg" alt="" width="20" height="20"><img src="icons/niwa.svg" alt="" width="20" height="20">Kura and Niwa</p>
+        <h2 id="f-notes">Your notes come up too</h2>
+        <p>Point Machiya at your Obsidian vault and your notes show up next to your pages. Read them on your phone, and publish the ones you want to share as a small website.</p>
+      </div>
+      <figure class="feature-shot pair">
+        <picture class="wide">
+          <source media="(prefers-color-scheme: dark)" srcset="img/notes-kura-dark.webp">
+          <img src="img/notes-kura-light.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="Kura showing the note Washi paper: its tags, a table of paper weights and handling steps, beside a list of recently changed notes.">
+        </picture>
+        <picture class="phone">
+          <source media="(prefers-color-scheme: dark)" srcset="img/notes-niwa-phone-dark.webp">
+          <img src="img/notes-niwa-phone-light.webp" width="780" height="1688" loading="lazy" decoding="async" alt="Niwa on a phone: the published notes, with topic maps for crafts and travel and recently tended notes marked Seedling, Budding or Evergreen.">
+        </picture>
+      </figure>
+    </div>
+  </section>
+
+  <section class="feature" aria-labelledby="f-web">
+    <div class="wrap">
+      <div class="feature-text">
+        <p class="tag web">SearXNG</p>
+        <h2 id="f-web">The web, next to your pages</h2>
+        <p>Web results come from SearXNG and sit beside what you've saved. The search engines see your query, not your history.</p>
+      </div>
+      <figure class="feature-shot">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="img/web-dark.webp">
+          <img src="img/web-light.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="Shiori with results for kyoto lanterns: web results, a saved page about autumn lantern festivals in Kyoto, and an info box about paper lanterns.">
+        </picture>
+      </figure>
+    </div>
+  </section>
+
+  <section class="feature flip" aria-labelledby="f-code">
+    <div class="wrap">
+      <div class="feature-text">
+        <p class="tag code">Forgejo and GitHub</p>
+        <h2 id="f-code">Search your code</h2>
+        <p>Connect Forgejo or GitHub. READMEs, issues, pull requests and releases from your repositories get a Code tab of their own.</p>
+      </div>
+      <figure class="feature-shot">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="img/code-dark.webp">
+          <img src="img/code-light.webp" width="1215" height="990" loading="lazy" decoding="async" alt="Shiori's Code tab for the search flicker: an open GitHub issue, Flicker at 10% brightness, and an open Forgejo issue, The prompt flickers in tmux.">
+        </picture>
+      </figure>
+    </div>
+  </section>
+
+  <section class="runs" aria-labelledby="runs-title">
+    <div class="wrap">
+      <h2 id="runs-title">Runs on your machine</h2>
+      <div class="runs-grid">
+        <p>Run it with Docker or Podman. Most of it also runs without containers on Linux, FreeBSD, NetBSD and OpenBSD.</p>
+        <p>Images for amd64 and arm64.</p>
+        <p>Shiori has apps for iPhone, iPad, Mac, Linux and Haiku, and a web app for everything else.</p>
+        <p>Nothing can be reached from outside until you open it up.</p>
       </div>
     </div>
-  </section>
-
-  <section id="principles" aria-labelledby="principles-title">
-    <div class="wrap">
-      <h2 id="principles-title">Principles</h2>
-      <ul class="principles">
-        <li>
-          <h3>Each Runs on Its Own</h3>
-          <p>Own repository, own image, own copy of the vault. Links to the other rooms are optional URLs; when one is unset, the feature that needs it turns off and nothing else breaks.</p>
-        </li>
-        <li>
-          <h3>Metadata in Frontmatter</h3>
-          <p>A board column, a next action, a garden stage, a due date: anything a room knows about a note is a field in that note's frontmatter, not a separate database.</p>
-        </li>
-        <li>
-          <h3>Owner-Only</h3>
-          <p>Pages and APIs answer only the people you name. Agents and other people get exactly the grants you give them, and a header a caller writes is never a permission.</p>
-        </li>
-        <li>
-          <h3>Private by Default</h3>
-          <p>Out of the box every room binds to <code>127.0.0.1</code>, and behind the tailnet gate an empty allow-list lets nobody in. Your history stays in Hister: the web search never queries it, and Shiori loads image thumbnails through SearXNG, never from an engine directly.</p>
-        </li>
-        <li>
-          <h3>Tailnet-Friendly</h3>
-          <p>Each room can sit behind its own Tailscale Service and trust the tailnet's login, or behind your own proxy or sign-in.</p>
-        </li>
-        <li>
-          <h3>Runs Where You Do</h3>
-          <p>Every image is native on amd64 and arm64. Run the stack with Docker or Podman, or Kura, Niwa and Konbini natively on Linux, FreeBSD, NetBSD and OpenBSD.</p>
-        </li>
-      </ul>
-      <p class="small muted">The full list, and what each room must not do: <a href="https://github.com/machiya-kobo/machiya/blob/main/docs/principles.md">docs/principles.md</a>.</p>
-    </div>
-  </section>
-
-  <section id="start" aria-labelledby="start-title">
-    <div class="wrap"><div class="prose">
-      <h2 id="start-title">Get Started</h2>
-      <p>The machiya README has the steps, tested on a fresh clone. They aren't copied here so they can't drift.</p>
-      <ul>
-        <li><a href="https://github.com/machiya-kobo/machiya#try-it-with-the-sample-vault">Try it with the sample vault</a>: the whole stack on one machine with a small invented vault, in about ten minutes.</li>
-        <li><a href="https://github.com/machiya-kobo/machiya#quickstart">Quickstart</a>: the whole stack on your own vault.</li>
-        <li>Just one room: <a href="https://github.com/machiya-kobo/kura#quickstart">Kura</a>, <a href="https://github.com/machiya-kobo/niwa#quickstart">Niwa</a>, <a href="https://github.com/machiya-kobo/konbini#quickstart">Konbini</a> or <a href="https://github.com/machiya-kobo/shiori#quickstart">Shiori</a>, each with its own quickstart.</li>
-        <li><a href="https://github.com/machiya-kobo/machiya/blob/main/docs/install/bsd.md">Native installs on the BSDs</a>, as rc.d services.</li>
-      </ul>
-      <p class="small muted">Machiya is pre-1.0, so expect change. The APIs between the rooms are written down in <a href="https://github.com/machiya-kobo/machiya/tree/main/docs/contracts">docs/contracts</a>.</p>
-    </div></div>
-  </section>
-
-  <section id="source" aria-labelledby="source-title">
-    <div class="wrap"><div class="prose">
-      <h2 id="source-title">Source</h2>
-      <ul class="repos">
-        <li><a href="https://github.com/machiya-kobo/machiya">machiya-kobo/machiya</a><span>docs, contracts, vaultkit, the shared UI, the reference compose</span></li>
-        <li><a href="https://github.com/machiya-kobo/kura">machiya-kobo/kura</a><span>the reader, search and notes API</span></li>
-        <li><a href="https://github.com/machiya-kobo/niwa">machiya-kobo/niwa</a><span>the published garden</span></li>
-        <li><a href="https://github.com/machiya-kobo/konbini">machiya-kobo/konbini</a><span>the project board and <code>pm</code></span></li>
-        <li><a href="https://github.com/machiya-kobo/shiori">machiya-kobo/shiori</a><span>the search apps</span></li>
-      </ul>
-      <p>Issues and pull requests are welcome; each repository has a <code>CONTRIBUTING.md</code>.</p>
-      <h3>License</h3>
-      <p>Machiya is free software under the <a href="https://github.com/machiya-kobo/machiya/blob/main/LICENSE">GNU Affero General Public License</a>, version 3 or (at your option) any later version (AGPL-3.0-or-later).</p>
-    </div></div>
   </section>
 </main>
 
 <footer class="site-footer">
   <div class="wrap">
-    <p>Copyright (C) 2026 Machiya contributors. AGPL-3.0-or-later.</p>
-    <p>This page sets no cookies and loads nothing from other sites. <a href="https://github.com/machiya-kobo/machiya/tree/main/site">This page's source</a>.</p>
+    <div class="footer-cols">
+      <nav aria-labelledby="ft-start">
+        <h2 id="ft-start">Get started</h2>
+        <ul>
+          <li><a href="https://github.com/machiya-kobo/machiya#quickstart">Install</a></li>
+          <li><a href="https://github.com/machiya-kobo/machiya#try-it-with-the-sample-vault">Try it with sample data</a></li>
+          <li><a href="https://github.com/machiya-kobo/machiya/blob/main/docs/install/bsd.md">Install on the BSDs</a></li>
+        </ul>
+      </nav>
+      <nav aria-labelledby="ft-repos">
+        <h2 id="ft-repos">Repositories</h2>
+        <ul>
+          <li><a href="https://github.com/machiya-kobo/machiya">machiya</a> <span>the stack and its docs</span></li>
+          <li><a href="https://github.com/machiya-kobo/shiori">shiori</a> <span>the search apps</span></li>
+          <li><a href="https://github.com/machiya-kobo/kura">kura</a> <span>the notes reader</span></li>
+          <li><a href="https://github.com/machiya-kobo/niwa">niwa</a> <span>published notes</span></li>
+          <li><a href="https://github.com/machiya-kobo/konbini">konbini</a> <span>a project board made from your notes</span></li>
+        </ul>
+      </nav>
+      <nav aria-labelledby="ft-docs">
+        <h2 id="ft-docs">Docs</h2>
+        <ul>
+          <li><a href="https://github.com/machiya-kobo/machiya/tree/main/docs">Documentation</a></li>
+          <li><a href="https://github.com/machiya-kobo/machiya/blob/main/docs/architecture.md">Architecture</a></li>
+          <li><a href="https://github.com/machiya-kobo/machiya/blob/main/docs/principles.md">Principles</a></li>
+        </ul>
+      </nav>
+      <nav aria-labelledby="ft-built">
+        <h2 id="ft-built">Built on</h2>
+        <ul>
+          <li><a href="https://github.com/asciimoo/hister">Hister</a></li>
+          <li><a href="https://github.com/searxng/searxng">SearXNG</a></li>
+        </ul>
+      </nav>
+    </div>
+    <div class="footer-legal">
+      <p>Copyright (C) 2026 Machiya contributors. AGPL-3.0-or-later.</p>
+      <p>This page sets no cookies and loads nothing from other sites. <a href="https://github.com/machiya-kobo/machiya/tree/main/site">Its source</a>.</p>
+    </div>
   </div>
 </footer>
 </body>
