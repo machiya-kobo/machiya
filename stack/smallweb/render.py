@@ -177,7 +177,7 @@ def page(title, body, url="", native=True, archive=None, notice="", status="", q
         if url:
             bits.append('<code class="url">%s</code>' % e(url))
             if native:
-                bits.append('<a class="native" href="%s" title="open in a Gemini or Gopher app">Open natively</a>' % e(url))
+                bits.append('<a class="native" href="%s" title="Open in a Gemini or Gopher app">Open natively</a>' % e(url))
             if archive:
                 bits.append(link(archive, "Archived"))
         top = ('<p class="addr">%s</p>' % " · ".join(bits)) if bits else ""

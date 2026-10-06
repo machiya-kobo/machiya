@@ -36,7 +36,7 @@ import smolnet   # noqa: E402
 import web       # noqa: E402
 from store import Store   # noqa: E402
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -375,8 +375,8 @@ def open_gemini(url, q):
             return notice_page(url, "Slow Down", "The capsule asked us to wait; try again in %d seconds."
                                % polite.slowed(host), 429)
         if not robots_allows("gemini", host, port, u.path or "/"):
-            return notice_page(url, "Not for Proxies", "This capsule's robots.txt asks web proxies not to fetch this "
-                               "page. Open it natively instead.", 200)
+            return notice_page(url, "Not for Proxies", "This capsule asks proxies not to fetch this page. "
+                               "Open it natively instead.", 200)
         r, cached = gemini_cached(url)
         if not r:
             try:
@@ -388,8 +388,8 @@ def open_gemini(url, q):
                 form = ('<form method="post" action="/tofu"><input type="hidden" name="url" value="%s">'
                         '<input type="hidden" name="sha256" value="%s"><input type="hidden" name="not_after" value="%d">'
                         '<button>Trust the New Certificate</button></form>' % (render.e(url), r.cert_sha256, r.not_after))
-                return notice_page(url, "Certificate Changed", "%s presented a different certificate than the one "
-                                   "first seen, and the old one hasn't expired. New fingerprint: %s."
+                return notice_page(url, "Certificate Changed", "%s's certificate changed before the old one expired. "
+                                   "New fingerprint: %s."
                                    % (host, r.cert_sha256[:32]), 200, form)
             if r.status == 20:
                 store.put("page", url, json.dumps({"status": r.status, "meta": r.meta, "body": r.body.hex(),
@@ -413,8 +413,8 @@ def open_gemini(url, q):
         polite.slow_down(host, int(r.meta) if r.meta.isdigit() else 30)
         return notice_page(url, "Slow Down", "The capsule asked us to wait %s seconds." % (r.meta or "a few"), 429)
     if 60 <= r.status < 70:
-        return notice_page(url, "Needs a Client Certificate", "This page wants a client certificate (%s), which "
-                           "smallweb doesn't send. Open it natively." % r.meta, 200)
+        return notice_page(url, "Needs a Client Certificate", "This page wants a client certificate (%s). "
+                           "Open it natively." % r.meta, 200)
     if r.status != 20:
         return notice_page(url, "Gemini %d" % r.status, r.meta or "The capsule answered with an error.", 502)
     mime = r.mime or "text/gemini"
@@ -462,8 +462,8 @@ def open_gopher(url, q):
                 % render.e(url))
         return Page(200, render.page("Search", form, url))
     if not robots_allows("gopher", host, port, sel or "/"):
-        return notice_page(url, "Not for Proxies", "This gopher hole's robots.txt asks robots not to fetch this "
-                           "selector. Open it natively instead.", 200)
+        return notice_page(url, "Not for Proxies", "This gopher hole asks robots not to fetch this page. "
+                           "Open it natively instead.", 200)
     raw, fresh = store.get("page", url, PAGE_TTL)
     if raw is not None and fresh:
         body = raw

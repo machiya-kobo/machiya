@@ -1,5 +1,9 @@
 # Changelog: smallweb
 
+## 0.3.2
+
+- Shorter copy (the owner's copy-editing pass, 2026-10-05): the robots, client-certificate and changed-certificate notices are a sentence or two; the Open natively tooltip is capitalised.
+
 ## 0.3.1
 
 Security (the sweep of 2026-10):
