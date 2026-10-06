@@ -10,11 +10,12 @@
 
   /* Tokyo Night Day */
   --bg: #e1e2e7; --surface: #eef0f6; --line: #c4c8da; --line2: #aab1cb;
-  /* text in Tokyo Night Light's navy, not Day's blue, so the blue accents (the Pages pill, links) stand apart */
-  --fg: #343b58; --fg2: #4f5468;
+  --fg: #3760bf; --fg2: #4c5a8f;
   --blue: #155fc5; --orange: #9a5000; --green: #506b34; --magenta: #802cee; --cyan: #006a8e;
   /* Shiori's pill colours (Tokyo Night Day): Pages, Notes, Web, Small Web, Code */
-  --pill-pages: #155fc5; --pill-notes: #9a5000; --pill-web: #7a5e36; --pill-smallweb: #0d6e5c; --pill-code: #bd204c;
+  /* Pages takes Day's own blue (#2e7de9), not the apps' darker #155fc5: it only colours large headings here (3.1:1, enough
+     for large text), and #155fc5 is as dark as Day's blue text, so it didn't stand out from it */
+  --pill-pages: #2e7de9; --pill-notes: #9a5000; --pill-web: #7a5e36; --pill-smallweb: #0d6e5c; --pill-code: #bd204c;
   --on-blue: #ffffff;
   --shadow: 0 2px 4px rgba(55,96,191,.10), 0 18px 48px rgba(55,96,191,.18);
 }
