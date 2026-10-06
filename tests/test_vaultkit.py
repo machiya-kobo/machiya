@@ -860,6 +860,61 @@ class PalettesTest(unittest.TestCase):
                 for t in self.p.TEXT:
                     self.assertGreaterEqual(self.p.contrast(v[t], v["bg"]), self.p.minimum(mode, t), (key, mode, t))
 
+    def test_shared_components_are_readable_where_they_are_drawn(self):
+        """Text in the shell's own components >= 4.5:1 on the background it sits on, in every palette and both
+        variants (2026-10-06, after genkan's report): the footer's status line and links on --bg, the settings and
+        sign-in footnotes on --bg, the phone tab bar's current tab label on --tab-on (its icon, not text, >= 3:1),
+        and the text in a settings or sign-in group on --dark (its buttons and pickers on --hl). Each selector's
+        colour is read from ui/machiya.css, so moving a rule to another token is checked as drawn."""
+        import re
+        css = open(os.path.join(ROOT, "ui", "machiya.css"), encoding="utf-8").read()
+        css = re.sub(r"/\*.*?\*/", "", css[css.index(self.p.END):], flags=re.S)     # the hand-written rules
+        rules = [([s.strip() for s in m.group(1).split(",")], m.group(2))
+                 for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css)]
+
+        def colour(*selectors, default="fg"):
+            # the token of the first selector with a `color:` declaration (last rule wins, as in the cascade)
+            for sel in selectors:
+                found = [c.group(1) for sels, body in rules if sel in sels
+                         for c in [re.search(r"(?:^|[;\s])color:\s*var\(--([a-z0-9-]+)", body)] if c]
+                if found:
+                    return found[-1]
+            return default
+
+        def tab_on(mode):
+            pat = r"body\.theme-day \.tabbar \{[^}]*" if mode == "light" else r"\.tabbar \{ display: none;[^}]*"
+            return re.search(pat + r"--tab-on: var\(--([a-z0-9-]+)\)", css).group(1)
+
+        rooms = re.findall(r"body\.room-[a-z]+ +\{ --room: var\(--([a-z]+)\)", css)
+        self.assertEqual(len(rooms), 4)
+        here = colour(".tabbar > a.here > span", ".tabbar > a.here", default="room")
+        failures = []
+        for key in self.p.PALETTES:
+            for mode in ("dark", "light"):
+                v = self.p.tokens(key, mode)
+                pairs = [
+                    ("footer status", colour(".foot .status", ".foot"), "bg", 4.5),
+                    ("footer link", colour(".foot a"), "bg", 4.5),
+                    ("settings footnote", colour(".settings .footnote"), "bg", 4.5),
+                    ("sign-in footnote", colour(".signin .footnote"), "bg", 4.5),
+                    ("open Rooms tab", colour(".tabbar > details[open] > summary"), tab_on(mode), 4.5),
+                    ("settings group text", colour(".settings .item", ".settings .group"), "dark", 4.5),
+                    ("settings value", colour(".settings .item .value"), "dark", 4.5),
+                    ("settings subhead", colour(".settings .item.subhead"), "dark", 4.5),
+                    ("settings button", colour(".settings .item button"), "hl", 4.5),
+                    ("settings picker", colour(".settings select"), "hl", 4.5),
+                    ("sign-in group text", colour(".signin .item", ".signin .group"), "dark", 4.5),
+                    ("sign-in label", colour(".signin .item > span"), "dark", 4.5),
+                ]
+                for room in rooms:
+                    pairs.append(("current tab label (%s)" % room, room if here == "room" else here, tab_on(mode), 4.5))
+                    pairs.append(("current tab icon (%s)" % room, room, tab_on(mode), 3.0))
+                for what, fg, bg, need in pairs:
+                    got = self.p.contrast(v[fg], v[bg])
+                    if got < need:
+                        failures.append("%s %s: %s, --%s on --%s, %.2f:1" % (key, mode, what, fg, bg, got))
+        self.assertEqual(failures, [], "%d pairs under their minimum" % len(failures))
+
     def test_tokyo_night_is_unchanged(self):
         night, day = self.p.variant("tokyo-night", "dark"), self.p.variant("tokyo-night", "light")
         self.assertEqual((night["bg"], night["fg"], night["comment"], night["blue"]), ("#1a1b26", "#c0caf5", "#565f89", "#7aa2f7"))
