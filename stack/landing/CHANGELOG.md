@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.5.1
+
+- Shorter copy: the status page's empty Recent Deploys line is one sentence (the owner's copy-editing pass, 2026-10-05).
+
 ## 0.5.0
 
 - **Its own sign-in cookie** (vaultkit 0.22; decided 2026-10-05 after the sweep's LEAD-1): landing keeps a host-only `__Host-machiya_sso_landing`, made from a one-time code hister-login sends back to `/machiya/callback`, instead of reading the shared `machiya_sso` on the tailnet's whole domain (still read while hister-login's `HISTER_LOGIN_LEGACY` allows it). One sign-in still covers everything: the first visit makes one silent trip. Sign Out sets landing's own marker; the helper remembers the ended session, so no room signs the browser straight back in.

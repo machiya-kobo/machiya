@@ -216,7 +216,7 @@ def main_html(snap, history, logs, links, targets, now, tz=None):
         out.append('<ol class="list card deploys">%s</ol>' % "".join(deploy_item(ev, logs, now, tz) for ev in recent))
     else:
         since = ("since %s" % when(history.since, now, tz)) if history.since else "yet"
-        out.append('<p class="none">No deploys seen %s. A deploy is noted when an app answers with a new version.</p>' % since)
+        out.append('<p class="none">No deploys seen %s.</p>' % since)
     if len(recent) < 3:
         running = [running_item(k, apps[k], logs) for k, _, _, _ in probes.APPS if apps[k].get("version")]
         if running:
