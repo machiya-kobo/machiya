@@ -11,6 +11,9 @@ colours; where one would be hard to read as text, `readable()` moves its lightne
 - every variant: fg, fg2, muted and the accents >= 4.5:1 on bg (WCAG AA);
 - the Rooms menu's text (menu-fg: fg moved the same way) >= 4.5:1 on dark, the menu's panel (v0.16.6), and its role
   words (menu-muted: muted moved the same way) >= 4.5:1 on dark and on hl, the current row (v0.16.7);
+- each accent's panel shade (<accent>-panel: the accent moved the same way, v0.25) >= its minimum on dark and on hl,
+  the raised panels (cards, settings groups, menus): machiya.css swaps the accents for these inside a panel, and the
+  page keeps the accents themselves;
 - comment (faint text) >= 4.4:1 in a light variant, >= 2.75:1 in a dark one, and a dark variant's slate >= 4:1:
   what Tokyo Night has always had.
 
@@ -21,6 +24,7 @@ import colorsys
 
 TEXT = ("fg", "fg2", "muted", "blue", "orange", "red", "yellow", "green", "teal", "magenta", "cyan", "slate", "comment")
 TOKENS = ("bg", "dark", "hl", "line", "line2") + TEXT
+ACCENTS = ("blue", "orange", "red", "yellow", "green", "teal", "magenta", "cyan", "slate")   # each has an <accent>-panel
 
 PALETTES = {   # key: (name, dark variant's name, light variant's name, {"dark": {...}, "light": {...}})
     "tokyo-night": ("Tokyo Night", "Night", "Day", {
@@ -172,11 +176,15 @@ def variant(key, mode):
 
 
 def tokens(key, mode):
-    """variant() plus the derived tokens the stylesheet writes: menu-fg (fg readable on dark, the Rooms menu's panel)
-    and menu-muted (muted readable on dark and on hl). Text on --dark or --hl uses these (docs/design.md)."""
+    """variant() plus the derived tokens the stylesheet writes: menu-fg (fg readable on dark, the Rooms menu's panel),
+    menu-muted (muted readable on dark and on hl) and <accent>-panel (each accent readable on dark and on hl, its
+    lightness moved only where it isn't). Text on --dark or --hl uses these (docs/design.md, docs/ui.md)."""
     v = variant(key, mode)
     v["menu-fg"] = readable(v["fg"], v["dark"], 4.5, mode)
     v["menu-muted"] = readable(readable(v["muted"], v["dark"], 4.5, mode), v["hl"], 4.5, mode)
+    for t in ACCENTS:
+        need = minimum(mode, t)
+        v[t + "-panel"] = readable(readable(v[t], v["dark"], need, mode), v["hl"], need, mode)
     return v
 
 
@@ -196,6 +204,8 @@ def _block(selectors, key, mode, indent=""):
             " ".join("--%s: %s;" % (t, v[t]) for t in ("fg", "fg2", "comment", "muted", "menu-fg", "menu-muted")),
             " ".join("--%s: %s;" % (t, v[t]) for t in ("blue", "orange", "red", "yellow", "green")),
             " ".join("--%s: %s;" % (t, v[t]) for t in ("teal", "magenta", "cyan", "slate")),
+            " ".join("--%s-panel: %s;" % (t, v[t + "-panel"]) for t in ACCENTS[:5]),
+            " ".join("--%s-panel: %s;" % (t, v[t + "-panel"]) for t in ACCENTS[5:]),
             _shadow(mode, v["fg"])]
     return "%s%s {\n%s\n%s}\n" % (indent, ", ".join(selectors), "\n".join(indent + "  " + r for r in rows), indent)
 

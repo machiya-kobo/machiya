@@ -644,7 +644,7 @@ def about_section(room, version, status_text="", vaultkit=""):
     src = source_url()
     if src:
         items.append(row("Source code", '<a href="%s" rel="noopener">%s</a>' % (e(src), e(src))))
-        items.append(row("Licence", "GNU AGPL-3.0-or-later"))
+        items.append(row("License", "GNU AGPL-3.0-or-later"))
     _, name, seal, _ = room_info(room)
     return Section(("About", items, "%s (%s) is part of Machiya. Install it from the browser's menu (Add to Home Screen)."
                     % (name, seal)), "about")

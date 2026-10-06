@@ -63,6 +63,16 @@ The owner's rule (2026-10-05): settings that affect every app follow the signed-
 - **A room's own settings that follow the person:** declare them once, `shell.APP_PREFS = {"previewPane": {"type": "bool", "cookie": True}, "group": {"type": "choice", "values": ["area", "family"], "cookie": True}}`. The account key is `<room>.<snake_case>` (`kura.preview_pane`), and booleans travel as `on`/`off`. machiya.js applies only values that pass (a choice in `values`, on/off), writes the cookie when `cookie`, and fires `machiya:setting`.
 - The service worker never touches `/api/prefs` (it is in the core's `bypass`; the rooms' `^/api/` covers it too), and the answer is `no-store`.
 
+## Colours on raised panels (v0.25, owner 2026-10-07)
+
+Every accent (`--blue`, `--orange`, `--red`, `--yellow`, `--green`, `--teal`, `--magenta`, `--cyan`, `--slate`) is ≥ 4.5:1 on `--bg` (slate 4:1 in a dark variant), but not always on a raised panel: `--dark` in a light variant (cards, settings and sign-in groups, the Rooms menu) or `--hl` in a dark one (raised rows, such as the Rooms menu's current one). So each accent has a **panel shade**, `--<accent>-panel` (`--blue-panel` … `--slate-panel`), generated in `vaultkit/palettes.py` (`tokens()`): the same hue and saturation, its lightness moved only as far as it takes to reach the minimum on both `--dark` and `--hl`; where the accent already passes, the shade is the accent itself. Each room also names its pair, `--room-panel` and `--room2-panel`.
+
+Inside `.card`, `.settings .group`, `.signin .group`, `.rooms .menu`, `.update-toast` and `.nbody pre`, `machiya.css` sets every accent, `--house`, `--room` and `--room2` to its panel shade, so links, chips, `.thing` and anything a room colours with `var(--orange)` inside them need nothing of their own; the page outside keeps the accents as they are. For a room:
+
+- **A new raised surface** (`background: var(--dark)` or `var(--hl)` with accent text in it): add its selector to that rule in `machiya.css` (through the lead), or use `var(--<accent>-panel)` directly in the room's CSS.
+- **A colour of the room's own defined on `<body>` from an accent** (`body { --notes: var(--orange) }`) is resolved on `<body>` and keeps the page's shade inside a panel: define it on the element that wears it (`.note-chip { --chip: var(--orange) }`), or use the panel token.
+- Plain text on a panel uses `--menu-fg` / `--menu-muted` (above); `test_accents_are_readable_on_the_raised_panels` and `test_shared_components_are_readable_where_they_are_drawn` check both as drawn.
+
 ## Room search, update toast
 
 **Room search (a room searches its own things, then hands off to Shiori).**

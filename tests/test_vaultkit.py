@@ -915,10 +915,59 @@ class PalettesTest(unittest.TestCase):
                         failures.append("%s %s: %s, --%s on --%s, %.2f:1" % (key, mode, what, fg, bg, got))
         self.assertEqual(failures, [], "%d pairs under their minimum" % len(failures))
 
+    PANELS = (".card", ".settings .group", ".signin .group", ".rooms .menu", ".update-toast", ".nbody pre")
+
+    def test_accents_are_readable_on_the_raised_panels(self):
+        """v0.25 (owner, 2026-10-07): accent-coloured text on a raised panel (a card, a settings or sign-in group, the
+        Rooms menu, the update toast, a code block) >= its minimum on --dark and on --hl, in every palette and both
+        variants. A panel swaps each accent, and the house and room colours, for its <accent>-panel shade; this reads
+        what each panel declares in ui/machiya.css, so a panel that keeps the page's accents is checked as drawn
+        (91 pairs were under before: 68 on --dark in the light variants, 23 on --hl in the dark ones)."""
+        import re
+        css = open(os.path.join(ROOT, "ui", "machiya.css"), encoding="utf-8").read()
+        css = re.sub(r"/\*.*?\*/", "", css[css.index(self.p.END):], flags=re.S)
+        rules = [([s.strip() for s in m.group(1).split(",")], dict(re.findall(r"--([a-z0-9-]+):\s*var\(--([a-z0-9-]+)\)", m.group(2))))
+                 for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css)]
+
+        def declared(selector):
+            out = {}
+            for sels, decl in rules:
+                if selector in sels:
+                    out.update(decl)
+            return out
+
+        rooms = {sel: declared(sel) for sel in ("body", "body.room-shiori", "body.room-konbini", "body.room-niwa", "body.room-kura")}
+        for sel, decl in rooms.items():                  # each room names the panel shade of its own accents
+            for name in ("room", "room2"):
+                if name in decl and name + "-panel" in decl:
+                    self.assertEqual(decl[name + "-panel"], decl[name] + "-panel", (sel, name))
+        failures = set()
+        for panel in self.PANELS:
+            inside = declared(panel)
+            drawn = [(inside.get(a, a), a) for a in self.p.ACCENTS]          # (the token drawn, the accent it stands for)
+            drawn.append((inside.get("house", inside.get("blue", "blue")), "blue"))
+            for decl in rooms.values():
+                for name in ("room", "room2"):
+                    accent = decl.get(name, rooms["body"][name])
+                    via = inside.get(name)                                     # --room: var(--room-panel)
+                    drawn.append((decl.get(via, rooms["body"].get(via)) if via else accent, accent))
+            for key in self.p.PALETTES:
+                for mode in ("dark", "light"):
+                    v = self.p.tokens(key, mode)
+                    for tok, accent in drawn:
+                        for surface in ("dark", "hl"):
+                            got = self.p.contrast(v[tok], v[surface])
+                            if got < self.p.minimum(mode, accent):
+                                failures.add("%s %s: --%s on --%s, %.2f:1" % (key, mode, tok, surface, got))
+        self.assertEqual(sorted(failures), [], "%d pairs under their minimum" % len(failures))
+
     def test_tokyo_night_is_unchanged(self):
         night, day = self.p.variant("tokyo-night", "dark"), self.p.variant("tokyo-night", "light")
         self.assertEqual((night["bg"], night["fg"], night["comment"], night["blue"]), ("#1a1b26", "#c0caf5", "#565f89", "#7aa2f7"))
         self.assertEqual((day["bg"], day["fg"], day["comment"], day["blue"]), ("#e1e2e7", "#3760bf", "#5a6391", "#155fc5"))
+        # v0.25: the panel shades leave Night's blue as it is and darken Day's only on a panel
+        night, day = self.p.tokens("tokyo-night", "dark"), self.p.tokens("tokyo-night", "light")
+        self.assertEqual((night["blue-panel"], day["blue-panel"]), ("#7aa2f7", "#1459b9"))
 
     def test_the_stylesheet_is_the_table(self):
         css = open(os.path.join(ROOT, "ui", "machiya.css"), encoding="utf-8").read()
