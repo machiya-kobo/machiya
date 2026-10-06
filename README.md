@@ -2,7 +2,7 @@
 
 <img src="icons/png/machiya-128.png" alt="Machiya: a townhouse front with a three-panel noren" width="96" height="96" align="right">
 
-Machiya is a set of small self-hosted apps for finding what you've read: your pages ([Hister](https://github.com/asciimoo/hister)), the web ([SearXNG](https://github.com/searxng/searxng)), your notes (an [Obsidian](https://obsidian.md) vault in git) and your code.
+Machiya is a set of small self-hosted apps for finding what you've read: your pages ([Hister](https://github.com/asciimoo/hister)), the web ([SearXNG](https://github.com/searxng/searxng)), your notes ([Obsidian](https://obsidian.md)) and your code ([Forgejo](https://forgejo.org) or [GitHub](https://github.com)).
 
 A machiya (町家) is a Kyoto townhouse: a shop at the front, a small garden inside, a storehouse at the back, all under one roof.
 
