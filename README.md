@@ -10,15 +10,17 @@ A machiya (町家) is a Kyoto townhouse: a shop at the front, a small garden ins
 <a href="https://machiya-kobo.github.io/machiya/">Website</a> · <a href="#apps">Apps</a> · <a href="#architecture-diagram">Architecture Diagram</a> · <a href="#quickstart">Quickstart</a> · <a href="#try-it-with-the-sample-vault">Sample vault</a> · <a href="#use-your-own-vault">Your own vault</a> · <a href="#whats-in-this-repo">What's in this repo</a> · <a href="#status">Status</a> · <a href="#license">License</a>
 </p>
 
-<p><a href="site/img/hero-dark.webp"><img src="site/img/hero-dark.webp" alt="Shiori searching for washi: a saved page, a note and a web result in one list, with the saved page open on the right" width="100%"></a></p>
+<p align="center"><a href="site/img/hero-dark.webp"><img src="site/img/hero-dark.webp" alt="Shiori searching for washi: a saved page, a note and a web result in one list, with the saved page open on the right" width="100%"></a><br>Shiori: your pages, notes and the web in one search</p>
 
-<p>
-  <a href="docs/screenshots/kura-home-light.png"><img src="docs/screenshots/kura-home-light.png" alt="Kura, light: the vault's folders and notes, with a note open" width="32%"></a>
-  <a href="docs/screenshots/niwa-garden-dark.png"><img src="docs/screenshots/niwa-garden-dark.png" alt="Niwa, dark: the published garden with topic maps and recently tended notes" width="32%"></a>
-  <a href="docs/screenshots/konbini-board-light.png"><img src="docs/screenshots/konbini-board-light.png" alt="Konbini, light: a kanban board of project cards" width="32%"></a>
-</p>
+<table>
+  <tr>
+    <td align="center" width="33%"><a href="docs/screenshots/kura-home-light.png"><img src="docs/screenshots/kura-home-light.png" alt="Kura, light: the vault's folders and notes, with a note open" width="100%"></a><br>Kura: read your notes</td>
+    <td align="center" width="33%"><a href="docs/screenshots/niwa-garden-dark.png"><img src="docs/screenshots/niwa-garden-dark.png" alt="Niwa, dark: the published garden with topic maps and recently tended notes" width="100%"></a><br>Niwa: grow your digital garden</td>
+    <td align="center" width="33%"><a href="docs/screenshots/konbini-board-light.png"><img src="docs/screenshots/konbini-board-light.png" alt="Konbini, light: a kanban board of project cards" width="100%"></a><br>Konbini: manage your projects</td>
+  </tr>
+</table>
 
-<p align="center"><a href="site/img/hero-phone-dark.webp"><img src="site/img/hero-phone-dark.webp" alt="Shiori on a phone, dark: search results for washi" width="24%"></a></p>
+<p align="center"><a href="site/img/hero-phone-dark.webp"><img src="site/img/hero-phone-dark.webp" alt="Shiori on a phone, dark: search results for washi" width="24%"></a><br>Shiori on your phone</p>
 
 Every screenshot uses the same invented vault: a paper-lantern workshop and a trip to Kyoto.
 
