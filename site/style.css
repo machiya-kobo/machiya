@@ -134,8 +134,8 @@ p { margin: 0; }
 .feature .wrap { display: grid; gap: 28px; align-items: center; }
 .feature-text { max-width: 28em; }
 .feature h2 { font-size: clamp(28px, 4.5vw, 38px); font-weight: 800; }
-.feature-text p:not(.tag) { margin-top: 14px; font-size: 18px; color: var(--fg2); }
-.tag { display: flex; align-items: center; gap: 6px; margin-bottom: 12px !important; font-size: 15px; font-weight: 700; }
+.feature-text p:not(.tag) { margin-top: 12px; font-size: 18px; color: var(--fg2); }
+.tag { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 15px; font-weight: 700; }
 .tag img { width: 20px; height: 20px; }
 .tag img + img { margin-left: -2px; }
 /* Each feature's heading wears its Shiori pill colour (Pages, Notes, Web, Code); the tags above them share one. */
