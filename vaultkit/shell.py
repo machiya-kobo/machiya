@@ -614,7 +614,7 @@ def shared_section(ctx, room, links=None, state="standalone", who="", signin="",
     palette = getattr(ctx, "palette", palettes.DEFAULT)
     items = [
         select("Theme", "palette", PALETTES, palette, cookie=True),
-        select("Appearance", "theme", THEMES, theme, cookie=True),
+        select("Mode", "theme", THEMES, theme, cookie=True),
         select("Text Size", "textSize", TEXT_SIZES, text, cookie=True),
     ] + device_size_rows(ctx)
     note = SHARED_NOTE if state in ("account", "signed-out", "unavailable") else ""

@@ -30,7 +30,7 @@ This is how the web rooms (Kura, Niwa, Konbini) put the [design language](design
 The owner's rule (2026-10-05): settings that affect every app follow the signed-in person to every app and every device. The contract (schema, API, conflict rule, migration) is [contracts/prefs.md](contracts/prefs.md); this is the web rooms' side.
 
 **Every Settings page has the same order** (v0.23, the lead's decision on the owner's "flow logically and not be overwhelming", 2026-10-05): everyday choices first, connections and rare things later; a dependent setting directly under its parent; short Title Case headers. `shell.settings_page` sorts the sections into this order (`shell.ORDER`); the keys and cookies never changed, only placement and names.
-1. **Appearance** (`shell.shared_section`, titled "Shared" in v0.21–0.22): Theme, Appearance, Text Size, and **Use This Device's Size** directly under Text Size (with its size row while it is on; this browser's own size, a cookie the rooms of this browser share, `machiya_textSizeDevice`, never sent). Footnote "Follows you on every Machiya app when signed in." (only where an account exists), then a state line of a few words:
+1. **Appearance** (`shell.shared_section`, titled "Shared" in v0.21–0.22): Theme (the palette), Mode (System / Light / Dark), Text Size, and **Use This Device's Size** directly under Text Size (with its size row while it is on; this browser's own size, a cookie the rooms of this browser share, `machiya_textSizeDevice`, never sent). Footnote "Follows you on every Machiya app when signed in." (only where an account exists), then a state line of a few words:
 
    | `state` | The line |
    |---|---|
@@ -163,7 +163,7 @@ unpublished or owner-only things (Niwa's `/queue` and `/stream`).
 | Konbini | Board | Group By (Area / Family; `konbini.group`), Done Cards (5 / 10 / All; `konbini.done_cards`) | Offline Copies |
 | landing | none | | |
 
-All rooms get Appearance (Theme: the ten palettes; Appearance: System / Light / Dark; Text Size; Use This Device's Size), Rooms, This Device (when they have device rows), Account and About. The page's `<body>` carries `theme-<appearance>` and, for any palette but Tokyo Night, `palette-<key>`; machiya.css's palette section is generated from `vaultkit/palettes.py` (`python3 -m vaultkit.palettes`), and machiya.js sets the browser bar to the new palette's `--dark` when the theme changes on the page.
+All rooms get Appearance (Theme: the ten palettes; Mode: System / Light / Dark; Text Size; Use This Device's Size), Rooms, This Device (when they have device rows), Account and About. The page's `<body>` carries `theme-<appearance>` and, for any palette but Tokyo Night, `palette-<key>`; machiya.css's palette section is generated from `vaultkit/palettes.py` (`python3 -m vaultkit.palettes`), and machiya.js sets the browser bar to the new palette's `--dark` when the theme changes on the page.
 
 ## The source link (AGPL section 13)
 
