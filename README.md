@@ -4,7 +4,7 @@
 
 Machiya is a set of small self-hosted apps for finding what you've read: your pages (Hister), the web (SearXNG), your notes (an Obsidian vault in git) and your code.
 
-The name: a machiya is a Kyoto townhouse, with a shop at the street front, a small inner garden and a storehouse at the back, all under one roof. Each app runs on its own, and they share one vault of Markdown notes in a git repository (an Obsidian vault works as is):
+The name: a machiya (町家) is a Kyoto townhouse, with a shop at the street front, a small inner garden and a storehouse at the back, all under one roof. Each app runs on its own, and they share one vault of Markdown notes in a git repository (an Obsidian vault works as is):
 
 | Service | Means | Job | Repo |
 |---|---|---|---|
