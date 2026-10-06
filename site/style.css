@@ -170,20 +170,13 @@ p { margin: 0; text-wrap: pretty; }
   .feature.flip .feature-shot { order: 1; }
 }
 
-/* extras: one-liners, in the runs section's style */
-.extras { padding: 56px 0 0; }
+/* extras: one-liners, each with a rule at its left */
+.extras { padding: 56px 0 72px; }
 .extras .wrap { border-top: 1px solid var(--line2); padding-top: 48px; }
 .extras h2 { font-size: clamp(24px, 3.5vw, 30px); font-weight: 800; }
 .extras-grid { list-style: none; margin: 24px 0 0; padding: 0; display: grid; gap: 16px 40px;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
 .extras-grid li { color: var(--fg2); font-size: 16px; padding-left: 14px; border-left: 3px solid var(--line2); }
-
-/* runs */
-.runs { padding: 56px 0 72px; }
-.runs .wrap { border-top: 1px solid var(--line2); padding-top: 48px; }
-.runs h2 { font-size: clamp(24px, 3.5vw, 30px); font-weight: 800; }
-.runs-grid { display: grid; gap: 16px 40px; margin-top: 24px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); }
-.runs-grid p { color: var(--fg2); font-size: 16px; padding-left: 14px; border-left: 3px solid var(--line2); }
 
 /* footer */
 .site-footer { background: var(--surface); border-top: 1px solid var(--line); padding: 40px 0 32px; font-size: 15px; color: var(--fg2); }
