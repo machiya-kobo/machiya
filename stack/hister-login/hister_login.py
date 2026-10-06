@@ -49,6 +49,7 @@ import json
 import os
 import re
 import secrets
+import signal
 import socketserver
 import sqlite3
 import sys
@@ -61,7 +62,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -1931,12 +1932,19 @@ def main():
     LOG("hister-login %s: public :%d, internal :%d, Hister %s, return hosts %s, cookie %s, domain %s"
         % (VERSION, s.port, s.internal_port, s.hister_url, ",".join(s.return_hosts), s.sso,
            s.cookie_domain or "(none)"))
-    serve(login, s.bind, s.port, s.internal_port)
+    servers = serve(login, s.bind, s.port, s.internal_port)
     stop = threading.Event()
+    # PID 1 in its container with no init: without a handler, SIGTERM does nothing and `docker stop` ends in a
+    # SIGKILL after 10 s (0.4.2). Stop the housekeeping loop, finish the servers, exit 0.
+    signal.signal(signal.SIGTERM, lambda signum, frame: stop.set())
     try:
         housekeeping(login, stop)
     except KeyboardInterrupt:
         stop.set()
+    for srv in servers:
+        srv.shutdown()
+        srv.server_close()
+    LOG("hister-login: stopped")
 
 
 if __name__ == "__main__":

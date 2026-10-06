@@ -171,6 +171,15 @@ def variant(key, mode):
     return {t: readable(raw[t], raw["bg"], minimum(mode, t), mode) if t in TEXT else raw[t] for t in TOKENS}
 
 
+def tokens(key, mode):
+    """variant() plus the derived tokens the stylesheet writes: menu-fg (fg readable on dark, the Rooms menu's panel)
+    and menu-muted (muted readable on dark and on hl). Text on --dark or --hl uses these (docs/design.md)."""
+    v = variant(key, mode)
+    v["menu-fg"] = readable(v["fg"], v["dark"], 4.5, mode)
+    v["menu-muted"] = readable(readable(v["muted"], v["dark"], 4.5, mode), v["hl"], 4.5, mode)
+    return v
+
+
 # -- the stylesheet -----------------------------------------------------------------------------------------------
 
 def _shadow(mode, fg):
@@ -182,11 +191,9 @@ def _shadow(mode, fg):
 
 
 def _block(selectors, key, mode, indent=""):
-    v = variant(key, mode)
+    v = tokens(key, mode)
     rows = [" ".join("--%s: %s;" % (t, v[t]) for t in ("bg", "dark", "hl", "line", "line2")),
-            " ".join("--%s: %s;" % (t, v[t]) for t in ("fg", "fg2", "comment", "muted"))
-            + " --menu-fg: %s;" % readable(v["fg"], v["dark"], 4.5, mode)      # the Rooms menu's text, on --dark
-            + " --menu-muted: %s;" % readable(readable(v["muted"], v["dark"], 4.5, mode), v["hl"], 4.5, mode),   # its role words, on --dark and --hl
+            " ".join("--%s: %s;" % (t, v[t]) for t in ("fg", "fg2", "comment", "muted", "menu-fg", "menu-muted")),
             " ".join("--%s: %s;" % (t, v[t]) for t in ("blue", "orange", "red", "yellow", "green")),
             " ".join("--%s: %s;" % (t, v[t]) for t in ("teal", "magenta", "cyan", "slate")),
             _shadow(mode, v["fg"])]

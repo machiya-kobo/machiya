@@ -27,7 +27,7 @@ THEMES = ("system", "day", "night")                              # Appearance; `
 TEXT_SIZES = ("xsmall", "small", "standard", "large", "xlarge")   # the house's five steps
 APPS = ("shiori", "konbini", "niwa", "kura", "hister", "searxng", "machiya")   # the switcher's rows, in its order
 SHARED = {
-    "theme": {"label": "Appearance", "values": list(THEMES), "default": "system"},
+    "theme": {"label": "Mode", "values": list(THEMES), "default": "system"},
     "palette": {"label": "Theme", "values": list(palettes.PALETTES), "default": palettes.DEFAULT},
     "text_size": {"label": "Text Size", "values": list(TEXT_SIZES), "default": "standard"},
     "apps_hidden": {"label": "Apps", "list_of": list(APPS), "default": ""},
