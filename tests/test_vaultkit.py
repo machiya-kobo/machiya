@@ -905,6 +905,7 @@ class PalettesTest(unittest.TestCase):
                     ("settings picker", colour(".settings select"), "hl", 4.5),
                     ("sign-in group text", colour(".signin .item", ".signin .group"), "dark", 4.5),
                     ("sign-in label", colour(".signin .item > span"), "dark", 4.5),
+                    ("code block text", colour(".nbody pre code", ".nbody pre"), "dark", 4.5),
                 ]
                 for room in rooms:
                     pairs.append(("current tab label (%s)" % room, room if here == "room" else here, tab_on(mode), 4.5))
