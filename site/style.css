@@ -10,7 +10,8 @@
 
   /* Tokyo Night Day */
   --bg: #e1e2e7; --surface: #eef0f6; --line: #c4c8da; --line2: #aab1cb;
-  --fg: #3760bf; --fg2: #4c5a8f;
+  /* text in Tokyo Night Light's navy, not Day's blue, so the blue accents (the Pages pill, links) stand apart */
+  --fg: #343b58; --fg2: #4f5468;
   --blue: #155fc5; --orange: #9a5000; --green: #506b34; --magenta: #802cee; --cyan: #006a8e;
   /* Shiori's pill colours (Tokyo Night Day): Pages, Notes, Web, Small Web, Code */
   --pill-pages: #155fc5; --pill-notes: #9a5000; --pill-web: #7a5e36; --pill-smallweb: #0d6e5c; --pill-code: #bd204c;
