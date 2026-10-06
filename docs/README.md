@@ -9,6 +9,7 @@ Start with the [README](../README.md) for what Machiya is, then:
 | develop or test against the whole stack | [dev-stack.md](dev-stack.md): every service on synthetic data, in containers or natively, on this machine or a test VM |
 | write a client or an integration | [contracts/](contracts/): the Kura, Konbini, Hister and small-web APIs, and the settings that follow a person ([prefs.md](contracts/prefs.md)); [frontmatter.md](frontmatter.md): the note fields every service reads and writes |
 | change the look | [design.md](design.md), [ui.md](ui.md) (shared stylesheet, script, shell) |
+| write copy (page, READMEs, UI text) | [voice.md](voice.md) |
 | reuse the vault code | [vaultkit.md](vaultkit.md) |
 | add people, agents, sign-in or Shiori devices | [identity.md](identity.md) (optional; off by default); Hister's users as the sign-in: [services/hister-login.md](services/hister-login.md) |
 | connect Claude Code | [services/mcp.md](services/mcp.md) and the plugin in [../plugins/machiya/](../plugins/machiya/) |
