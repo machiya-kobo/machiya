@@ -6,24 +6,21 @@ Machiya is a set of small self-hosted apps for finding what you've read: your pa
 
 A machiya (町家) is a Kyoto townhouse: a shop at the front, a small garden inside, a storehouse at the back, all under one roof.
 
-<p><a href="site/img/hero-light.webp"><img src="site/img/hero-light.webp" alt="Shiori searching for washi: a saved page, a note and a web result in one list, with the saved page open on the right" width="100%"></a></p>
-
-<p>
-  <a href="docs/screenshots/kura-home-light.png"><img src="docs/screenshots/kura-home-light.png" alt="Kura, light: the vault's folders and notes, with a note open" width="28%"></a>
-  <a href="docs/screenshots/niwa-garden-dark.png"><img src="docs/screenshots/niwa-garden-dark.png" alt="Niwa, dark: the published garden with topic maps and recently tended notes" width="28%"></a>
-  <a href="docs/screenshots/konbini-board-light.png"><img src="docs/screenshots/konbini-board-light.png" alt="Konbini, light: a kanban board of project cards" width="28%"></a>
-  <a href="site/img/hero-phone-dark.webp"><img src="site/img/hero-phone-dark.webp" alt="Shiori on a phone, dark: search results for washi" width="8%"></a>
+<p align="center">
+<a href="https://machiya-kobo.github.io/machiya/">Website</a> · <a href="#apps">Apps</a> · <a href="#architecture-diagram">Architecture Diagram</a> · <a href="#quickstart">Quickstart</a> · <a href="#try-it-with-the-sample-vault">Sample vault</a> · <a href="#use-your-own-vault">Your own vault</a> · <a href="#whats-in-this-repo">What's in this repo</a> · <a href="#status">Status</a> · <a href="#licence">Licence</a>
 </p>
 
+<p><a href="site/img/hero-dark.webp"><img src="site/img/hero-dark.webp" alt="Shiori searching for washi: a saved page, a note and a web result in one list, with the saved page open on the right" width="100%"></a></p>
+
+<p>
+  <a href="docs/screenshots/kura-home-light.png"><img src="docs/screenshots/kura-home-light.png" alt="Kura, light: the vault's folders and notes, with a note open" width="32%"></a>
+  <a href="docs/screenshots/niwa-garden-dark.png"><img src="docs/screenshots/niwa-garden-dark.png" alt="Niwa, dark: the published garden with topic maps and recently tended notes" width="32%"></a>
+  <a href="docs/screenshots/konbini-board-light.png"><img src="docs/screenshots/konbini-board-light.png" alt="Konbini, light: a kanban board of project cards" width="32%"></a>
+</p>
+
+<p align="center"><a href="site/img/hero-phone-dark.webp"><img src="site/img/hero-phone-dark.webp" alt="Shiori on a phone, dark: search results for washi" width="24%"></a></p>
+
 Every screenshot uses the same invented vault: a paper-lantern workshop and a trip to Kyoto.
-
-**Contents**
-
-- [Apps](#apps)
-- [Architecture Diagram](#architecture-diagram)
-- [Quickstart](#quickstart): [the sample vault](#try-it-with-the-sample-vault), [one shared copy of the vault](#one-shared-copy-of-the-vault), [your own vault](#use-your-own-vault), [Shiori](#the-other-half-shiori)
-- [What's in this repo](#whats-in-this-repo)
-- [Where it runs](#where-it-runs) · [Status](#status) · [Licence](#licence)
 
 ## Apps
 
