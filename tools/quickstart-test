@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Micheal Waltz and Machiya contributors
-"""quickstart-test - run the README's stack Quickstart exactly as written, from fresh clones, and check what it says
+"""quickstart-test - run the sample-vault walkthrough (docs/install/sample-vault.md) exactly as written, from fresh clones, and check what it says
 you should see.
 
     tools/quickstart-test [--only stack|mirror|all] [--compose "docker compose"] [--siblings DIR] [--worktree]
                           [--with-packages] [--keep] [--dry-run]
 
-The README marks each runnable block with an HTML comment on the line above its fence:
+The walkthrough marks each runnable block with an HTML comment on the line above its fence:
 
     <!-- quickstart: NAME [background] -->
     ```bash
@@ -22,12 +22,12 @@ throwaway directory under $QUICKSTART_TMP (default: /var/tmp, disk-backed): the 
     mirror   mirror                                    (the shared vault copy; starts from the clean state `stop` leaves)
 
 *The `clone` block is not run: the test builds the same layout itself, from a fresh `git clone --local` of this
-repository (or, with --worktree, a copy of the working tree, to test README changes before they are committed) and of
+repository (or, with --worktree, a copy of the working tree, to test walkthrough changes before they are committed) and of
 the kura, niwa and konbini repositories found in --siblings (default: next to this one). `docker compose` in the blocks
 becomes --compose (default: `docker compose` if the docker engine answers, else `podman compose`; rootless podman needs
 its API socket: `systemctl --user enable --now podman.socket`, or point DOCKER_HOST at one).
 
---with-packages first runs the README's `packages-debian` block (apt and sudo: on a clean Debian or Ubuntu machine), then
+--with-packages first runs the walkthrough's `packages-debian` block (apt and sudo: on a clean Debian or Ubuntu machine), then
 the scenarios in a shell that has the `docker` group the block just gave your user (`sg docker`).
 
 The stack is always taken down, and the images this run built removed, even when a step fails. The exit code is 1 only
@@ -134,14 +134,14 @@ def main():
     a = ap.parse_args()
     global SG
 
-    blocks, expects = parse(os.path.join(ROOT, "README.md"))
+    blocks, expects = parse(os.path.join(ROOT, "docs", "install", "sample-vault.md"))
     chosen = [n for n in SCENARIOS if a.only in ("all", n)]
     for name in chosen:
         print("scenario %s:" % name)
         for step in SCENARIOS[name]:
             b = blocks.get(step)
             if b is None:
-                print("  %-8s MISSING in the README" % step)
+                print("  %-8s MISSING in the walkthrough" % step)
                 continue
             print("  %-8s %s%s%s" % (step, "(not run: the test builds the layout) " if step == "clone" else "",
                                      b["code"].splitlines()[0], "  (+expected output)" if step in expects else ""))
@@ -149,7 +149,7 @@ def main():
         return 0
     missing = sorted({s for n in chosen for s in SCENARIOS[n] if s not in blocks} | ({"packages-debian"} - set(blocks) if a.with_packages else set()))
     if missing:
-        print("README has no block named: " + ", ".join(missing))
+        print("The walkthrough has no block named: " + ", ".join(missing))
         return 1
     compose = a.compose or ("docker compose" if a.with_packages else default_compose())    # the package block installs it
     if not compose:
@@ -211,7 +211,7 @@ def main():
                         print(m.group(1)[-1500:])
                         failed.append("%s/%s: expected %r in the output" % (name, s, line))
                         break
-                    print("   output matches the README (%d lines)" % len(expects[s]))
+                    print("   output matches the walkthrough (%d lines)" % len(expects[s]))
             if proc.returncode != 0:
                 print(out[-2000:])
                 print(proc.stderr[-2500:])
