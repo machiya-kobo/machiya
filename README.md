@@ -15,7 +15,7 @@ A machiya (町家) is a Kyoto townhouse: a shop at the front, a small garden ins
 <table>
   <tr>
     <td align="center" width="33%"><a href="docs/screenshots/kura-home-light.png"><img src="docs/screenshots/kura-home-light.png" alt="Kura, light: the vault's folders and notes, with a note open" width="100%"></a><br>Kura: read your notes</td>
-    <td align="center" width="33%"><a href="docs/screenshots/niwa-garden-dark.png"><img src="docs/screenshots/niwa-garden-dark.png" alt="Niwa, dark: the published garden with topic maps and recently tended notes" width="100%"></a><br>Niwa: grow your digital garden</td>
+    <td align="center" width="33%"><a href="docs/screenshots/niwa-garden-dark.png"><img src="docs/screenshots/niwa-garden-dark.png" alt="Niwa, dark: the published garden with topic maps, then every note, most recently tended first, with its stage" width="100%"></a><br>Niwa: grow your digital garden</td>
     <td align="center" width="33%"><a href="docs/screenshots/konbini-board-light.png"><img src="docs/screenshots/konbini-board-light.png" alt="Konbini, light: a kanban board of project cards" width="100%"></a><br>Konbini: manage your projects</td>
   </tr>
 </table>
