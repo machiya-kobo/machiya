@@ -211,6 +211,16 @@ p { margin: 0; text-wrap: pretty; }
 .extras-grid { list-style: none; margin: 24px 0 0; padding: 0; display: grid; gap: 16px 40px;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
 .extras-grid li { color: var(--fg2); font-size: 16px; padding-left: 14px; border-left: 3px solid var(--line2); }
+/* Shiori on Haiku and on a Mac Plus. The System 6 shot is the Mac's own 512x342 pixels, never wider than that, scaled
+   pixel for pixel (exactly 2x on a high-density screen) so its 1-bit dithering stays crisp */
+.extras-shots { display: grid; gap: 32px 40px; margin-top: 44px; align-items: end;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.extras-shots img { width: 100%; height: auto; }
+/* the Haiku shot is a window with its yellow tab, transparent beside the tab: a shadow that follows its outline, no frame */
+.extras-shots .window img { border: 0; border-radius: 0; background: none; box-shadow: none; filter: drop-shadow(0 6px 16px rgb(0 0 0 / .28)); }
+.extras-shots figcaption { margin-top: 12px; text-align: center; font-size: 15px; color: var(--fg2); }
+.extras-shots .retro img { max-width: 512px; display: block; margin-inline: auto; image-rendering: pixelated;
+  border-radius: 6px; background: #fff; }
 
 /* footer */
 .site-footer { background: var(--surface); border-top: 1px solid var(--line); padding: 40px 0 32px; font-size: 15px; color: var(--fg2); }
