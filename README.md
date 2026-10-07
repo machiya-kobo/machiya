@@ -118,21 +118,7 @@ The **Rooms** menu in each app's header moves between them.
 
 ## What's in this repo
 
-- **[docs/](docs/)**: [architecture](docs/architecture.md), [principles](docs/principles.md), [voice](docs/voice.md), the [service docs](docs/services/), [API contracts](docs/contracts/), the [frontmatter schema](docs/frontmatter.md), the [design](docs/design.md) and its [shared UI](docs/ui.md), and [install guides](docs/install/).
-- **[vaultkit/](vaultkit/)**: the shared vault core (frontmatter, notes, wikilinks, the Markdown renderer, a git mirror). Each app vendors it at a tag: [docs/vaultkit.md](docs/vaultkit.md).
-- **[ui/](ui/)**: the web apps' shared stylesheet and script (themes, tab bar, Rooms menu, offline shell): [docs/ui.md](docs/ui.md).
-- **[stack/](stack/)**: small services beside the apps:
-  - `mcp/`: one MCP server for the board, notes, saved pages, labels, collections and the garden ([docs](docs/services/mcp.md))
-  - `landing/`: the stack's front page and its `/status` page ([docs](docs/services/landing.md))
-  - `hister-login/`: Hister's users as the one sign-in for every app ([docs](docs/services/hister-login.md))
-  - `smallweb/`: Gemini and Gopher search for Shiori, and saving the pages Shiori asks for into Hister
-  - `feed-import/`: what you read and star in a feed reader, into Hister
-  - `code-import/`: your Forgejo and GitHub repos, into Hister for Shiori's Code view ([docs](docs/services/code-import.md))
-  - `vault-mirror/`: one shared clone of the vault
-- **[plugins/machiya/](plugins/machiya/)**: a Claude Code plugin: the MCP server plus skills for the backlog, the weekly review, recall, garden suggestions and tidying labels.
-- **[compose/](compose/)**: the reference compose, and [compose/dev/](compose/dev/), the dev stack on synthetic data ([docs/dev-stack.md](docs/dev-stack.md)).
-- **[config/](config/)**: reference config for Hister and SearXNG.
-- **[sample-vault/](sample-vault/)**: the invented vault.
+The docs, the shared vault library, the reference compose and config, a few small services and the sample vault: [the full list](docs/README.md#whats-in-this-repo).
 
 ## Status
 
