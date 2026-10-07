@@ -28,7 +28,7 @@ Every screenshot uses the same invented vault: a paper-lantern workshop and a tr
 
 | App | Meaning | What it does | Repo |
 |---|---|---|---|
-| **Shiori** | 栞<br>bookmark | Search everything: your pages, your notes, the web and your code. iPhone, iPad, Mac, Linux, Haiku and the web. | [machiya-kobo/shiori](https://github.com/machiya-kobo/shiori) |
+| **Shiori** | 栞<br>bookmark | Search everything: your pages, your notes, the web and your code. iPhone, iPad, Mac, Linux, Haiku, Classic Macintosh and the web. | [machiya-kobo/shiori](https://github.com/machiya-kobo/shiori) |
 | **Kura** | 蔵<br>storehouse | Read your notes, with full-text search and a JSON API. | [machiya-kobo/kura](https://github.com/machiya-kobo/kura) |
 | **Niwa** | 庭<br>garden | Grow your digital garden on the Web, Gemini and Gopher. | [machiya-kobo/niwa](https://github.com/machiya-kobo/niwa) |
 | **Konbini** | コンビニ<br>convenience store | Manage your projects on a board made from your notes. | [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini) |

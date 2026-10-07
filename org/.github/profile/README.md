@@ -11,7 +11,7 @@
 | Repository | What it does |
 |---|---|
 | [machiya](https://github.com/machiya-kobo/machiya) | Start here: the stack, its docs and the Quickstart |
-| [shiori](https://github.com/machiya-kobo/shiori) | Search everything, on iPhone, iPad, Mac, Linux, Haiku and the web |
+| [shiori](https://github.com/machiya-kobo/shiori) | Search everything, on iPhone, iPad, Mac, Linux, Haiku, Classic Macintosh and the web |
 | [kura](https://github.com/machiya-kobo/kura) | Read your notes |
 | [niwa](https://github.com/machiya-kobo/niwa) | Grow your digital garden on the Web, Gemini and Gopher |
 | [konbini](https://github.com/machiya-kobo/konbini) | Manage your projects |
