@@ -162,6 +162,10 @@ p { margin: 0; text-wrap: pretty; }
 .hero-shot img, .feature-shot img {
   border-radius: var(--r-l); border: 1px solid var(--line2); box-shadow: var(--shadow); background: var(--surface);
 }
+/* lazy screenshots fade in when they arrive instead of popping (only with JavaScript, which marks them loaded) */
+.js .hero-shot img, .js .feature-shot img { opacity: 0; transition: opacity .35s ease-out; }
+.js .hero-shot img.is-loaded, .js .feature-shot img.is-loaded { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .js .hero-shot img, .js .feature-shot img { transition: none; } }
 @media (max-width: 640px) {
   .hero-shot picture { max-width: 300px; margin: 0 auto; }
   .hero-shot img { border-radius: var(--r-phone); border-width: 6px; border-color: var(--line); }

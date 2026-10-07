@@ -13,7 +13,7 @@
 <link rel="icon" href="icons/machiya.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="stylesheet" href="style.css">
-<script>try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
+<script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -208,6 +208,12 @@
     label();
   });
   system.addEventListener("change", label);
+  // screenshots load lazily as they near the screen: fade each in once it has loaded (style.css), never leave one hidden
+  document.querySelectorAll(".hero-shot img, .feature-shot img").forEach(function (img) {
+    function shown() { img.classList.add("is-loaded"); }
+    if (img.complete) shown();
+    else { img.addEventListener("load", shown); img.addEventListener("error", shown); }
+  });
 })();
 </script>
 </body>
