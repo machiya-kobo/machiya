@@ -113,7 +113,7 @@ The **Rooms** menu in each app's header moves between them.
 - **Try it on invented notes first:** [the sample vault](docs/install/sample-vault.md), about ten minutes.
 - **Use it from your phone and laptop:** [remote access](docs/install/remote-access.md).
 - **Search your code:** fill in the Code lines of `.env`, run `mkdir -p data/code-import secrets`, and add `--profile code` ([details](stack/code-import/README.md)).
-- **Get the search app:** [Shiori's Quickstart](https://github.com/machiya-kobo/shiori#quickstart) builds the web and Linux apps against this stack.
+- **Get the search app:** [build Shiori against this stack](https://github.com/machiya-kobo/shiori/blob/main/docs/quickstart.md#b-as-one-of-the-machiya-services), web and Linux.
 - **Run one app, or skip containers:** [install guides](docs/install/) for Linux, the BSDs and one app at a time.
 
 ## What's in this repo
