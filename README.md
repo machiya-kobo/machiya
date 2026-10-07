@@ -7,7 +7,7 @@ Machiya is a set of small self-hosted apps for finding what you've read: your pa
 A machiya (町家) is a Kyoto townhouse: a shop at the front, a small garden inside, a storehouse at the back, all under one roof.
 
 <p align="center">
-<a href="https://machiya-kobo.github.io/machiya/">Website</a> · <a href="#apps">Apps</a> · <a href="#architecture-diagram">Architecture Diagram</a> · <a href="#quickstart">Quickstart</a> · <a href="docs/install/sample-vault.md">Sample vault</a> · <a href="#whats-in-this-repo">What's in this repo</a> · <a href="#status">Status</a> · <a href="#license">License</a>
+<a href="https://machiya-kobo.github.io/">Website</a> · <a href="#apps">Apps</a> · <a href="#architecture-diagram">Architecture Diagram</a> · <a href="#quickstart">Quickstart</a> · <a href="docs/install/sample-vault.md">Sample vault</a> · <a href="#whats-in-this-repo">What's in this repo</a> · <a href="#status">Status</a> · <a href="#license">License</a>
 </p>
 
 <p align="center"><a href="site/img/hero-dark.webp"><img src="site/img/hero-dark.webp" alt="Shiori searching for washi: a saved page, a note and a web result in one list, with the saved page open on the right" width="100%"></a><br>Shiori: your pages, notes and the web in one search</p>

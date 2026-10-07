@@ -1,15 +1,14 @@
-# Publishes site/ to GitHub Pages on every push to main that touches it.
-# Inert until enabled: the job runs only in the machiya-kobo organisation and only when the
-# repository variable PAGES_ENABLED is "true" (site/README.md says how to switch it on).
+# Publishes the Machiya marketing page (machiya-kobo/machiya, site/) at https://machiya-kobo.github.io/.
+# The page's source stays in the machiya repo; this repo only deploys it. Runs every six hours and on demand
+# (Actions -> pages -> Run workflow) after a change to site/.
 name: pages
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "site/**"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
+  repository_dispatch:
+    types: [site]
+  schedule:
+    - cron: "17 */6 * * *"
 
 permissions:
   contents: read
@@ -22,7 +21,6 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.repository_owner == 'machiya-kobo' && vars.PAGES_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -30,6 +28,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          repository: machiya-kobo/machiya
+          sparse-checkout: site
           persist-credentials: false
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
