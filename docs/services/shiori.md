@@ -1,19 +1,27 @@
-# Shiori 栞 (the bookmark)
+# Shiori (the bookmark)
 
-**The search front door.** It's a native app for iPhone, iPad and Mac, plus a Safari extension, a hosted search page, a PWA and a Linux app. (For capturing pages in other browsers, use Hister's own extension.) It searches three sources at once: your pages (Hister), your notes (Kura), and the web (SearXNG).
+**The search front door.** Shiori searches three sources at once: your pages (Hister), your notes (Kura) and the web (SearXNG). It comes as:
+- a native app for iPhone, iPad and Mac;
+- a Safari extension;
+- a hosted search page and a PWA;
+- a Linux app.
+
+To capture pages in other browsers, use Hister's own extension.
 
 - **Repo:** [machiya-kobo/shiori](https://github.com/machiya-kobo/shiori), built on a Mac
-- **Hosted:** `https://search.example.ts.net` (the search page) and `https://shiori.example.ts.net` (the PWA). Both are owner-only, served by a small web server (nginx) next to Hister; the pages are built from the Shiori repo's sources.
+- **Hosted:** `https://search.example.ts.net` (the search page) and `https://shiori.example.ts.net` (the PWA). Only you can reach them. A small web server (nginx) next to Hister serves them, built from the Shiori repo's sources.
 
 ## Features, briefly
 
 - **Library:** everything in Hister, newest first, split into All, Pages and Notes.
-- **Search scopes:** All (your top pages, your top notes, then the web), Hister, Notes and Web, laid out like SearXNG's results (info box, related searches, images, videos, news).
-- **Search from Safari:** keep DuckDuckGo as Safari's engine; address-bar searches open Shiori's combined results.
+- **Search scopes:** All (your top pages, your top notes, then the web), Hister, Notes and Web. Laid out like SearXNG's results: info box, related searches, images, videos, news.
+- **Search from Safari:** keep DuckDuckGo as Safari's engine, and address-bar searches open Shiori's combined results.
 - **A note** opens in Obsidian to edit (`obsidian://open?vault=personal&file=…`), or in Kura to read. Its #tags link to Kura's tag pages.
 - **Remember What You Open:** opened results go into Hister history by URL.
-- **Summaries and answers** (Shiori's AI features, Claude on request). Notes are always refused, by host (`kura.`, `konbini.`, `niwa.`) and by label `vault`.
-- **Settings are per device.** The hosted pages get the notes' homes when they are built: Kura's address in `SHIORI_NIWA_URL` (the name is older than Kura) and Konbini's in `SHIORI_KONBINI_URL`. RSS for any Hister query: `/shiori/feed` (a small feed service next to Hister; not part of this repository).
+- **Summaries and answers:** Shiori's AI features, Claude on request. Notes are always refused, by host (`kura.`, `konbini.`, `niwa.`) and by label `vault`.
+- **Settings are per device.**
+- **The notes' homes** are set when the hosted pages are built: Kura's address in `SHIORI_NIWA_URL` (the name is older than Kura), Konbini's in `SHIORI_KONBINI_URL`.
+- **RSS for any Hister query:** `/shiori/feed`, from a small feed service next to Hister (not part of this repository).
 
 ## How it talks to the rest
 
@@ -27,6 +35,6 @@
 ## Rules
 
 - No folder, tag or backlink browsing in Shiori. Kura owns that.
-- No new network endpoints are added without review.
-- The hosting web server never adds or rewrites `Origin`: Hister's `Sec-Fetch-Site` check is the CSRF guard.
+- No new network endpoints without review.
+- The hosting web server never adds or rewrites `Origin`. Hister's `Sec-Fetch-Site` check is the CSRF guard.
 - Shiori reads notes from Kura and appends ` -label:vault` to its Hister queries. The notes themselves stay in Hister.
