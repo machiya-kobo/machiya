@@ -1,5 +1,5 @@
 # Machiya reference compose: the engines (Hister, SearXNG) and the rooms Kura, Niwa and Konbini on one machine, in any
-# combination, with no Tailscale. Shiori is a client and is not in it (see its README).
+# combination, with no Tailscale. Shiori's web side (the search page and web app) is the `shiori` profile; its apps are clients.
 #
 #   ./demo-init                       # the sample vault + a .env for this machine (or: cp .env.example .env and edit it)
 #   docker compose up -d --build --wait
@@ -9,7 +9,7 @@
 # Shiori's Code view), shiori (shiori-feed and shiori-ai: Shiori's Subscribe and AI answers), and proxy (an optional SOCKS5
 # egress proxy for SearXNG, off by default; see the `proxy` service below and config/searxng/settings.yml).
 # Ports: every published port is a variable (HISTER_PORT, SEARXNG_PORT, KURA_PORT, NIWA_PORT, NIWA_GEMINI_PORT, NIWA_GOPHER_PORT,
-# KONBINI_PORT, SMALLWEB_PORT, MCP_PORT) for when one is taken; change the matching *_PUBLIC_URL and MACHIYA_ROOMS with it.
+# KONBINI_PORT, SMALLWEB_PORT, MCP_PORT, SHIORI_SEARCH_PORT, SHIORI_APP_PORT) for when one is taken; change the matching *_PUBLIC_URL and MACHIYA_ROOMS with it.
 # Services find each other by URL settings only (docs/principles.md): leave one out and the feature that needs it
 # switches off. The rooms build from their own repositories, checked out next to this one (../../kura etc.).
 #
@@ -87,6 +87,7 @@ services:
     build: ${KURA_SRC:-../../kura}/app
     environment:
       - KURA_AUTH=${KURA_AUTH:-open}
+      - KURA_ALLOWED_HOSTS=kura                      # open mode answers only known names: Shiori calls http://kura:8080
       - KURA_USERS=${KURA_USERS:-}
       - MACHIYA_IDENTITY_FILE=${MACHIYA_IDENTITY_FILE:-}       # docs/identity.md; empty = off
       - KURA_SIGNIN=${KURA_SIGNIN:-}
@@ -323,6 +324,35 @@ services:
     read_only: true
     ports: ["127.0.0.1:${SHIORI_AI_PORT:-8093}:8080"]
     mem_limit: 128m
+    restart: unless-stopped
+
+  shiori-web:                                       # Shiori's search page (SHIORI_SEARCH_PORT) and web app (SHIORI_APP_PORT)
+    profiles: [shiori]
+    image: ghcr.io/machiya-kobo/shiori-web:${SHIORI_VERSION:-1.1.1}
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    environment:
+      - SHIORI_HISTER_URL=http://hister:4433
+      - SHIORI_SEARXNG_URL=http://searxng:8080
+      - SHIORI_KURA_URL=${SHIORI_KURA_URL-http://kura:8080}            # set one to empty to leave it out
+      - SHIORI_KONBINI_URL=${SHIORI_KONBINI_URL-http://konbini:8081}
+      - SHIORI_FEED_URL=${SHIORI_FEED_URL-http://shiori-feed:8080}
+      - SHIORI_AI_URL=${SHIORI_AI_URL-http://shiori-ai:8080}
+      - SHIORI_SMALLWEB_URL=${SHIORI_SMALLWEB_URL:-}                    # with the smallweb profile: http://smallweb:8080
+      - SHIORI_HISTER_PUBLIC_URL=${HISTER_PUBLIC_URL:-http://localhost:4433}
+      - SHIORI_SEARXNG_PUBLIC_URL=${SEARXNG_PUBLIC_URL:-http://localhost:8888}
+      - SHIORI_KURA_PUBLIC_URL=${KURA_PUBLIC_URL:-http://localhost:8083}
+      - SHIORI_KONBINI_PUBLIC_URL=${KONBINI_PUBLIC_URL:-http://localhost:8081}
+      - SHIORI_SEARCH_PAGE_URL=http://localhost:${SHIORI_SEARCH_PORT:-8094}/
+      - SHIORI_APP_URL=http://localhost:${SHIORI_APP_PORT:-8095}/
+    ports:
+      - "127.0.0.1:${SHIORI_SEARCH_PORT:-8094}:8080"
+      - "127.0.0.1:${SHIORI_APP_PORT:-8095}:8081"
+    networks:
+      default: {}
+      smallweb: {ipv4_address: 172.31.250.4}        # pinned like every member here (.2 is the sidecar's)
     restart: unless-stopped
 
 networks:
