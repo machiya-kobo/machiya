@@ -227,6 +227,17 @@ def main():
                 fresh_copy(os.path.join(a.siblings, repo), os.path.join(work, repo), False)
             steps = [s for s in SCENARIOS[name] if s != "clone"]
             script = ["cd machiya/compose"] if name not in ("stack", "shiori") else []   # those blocks do their own cd
+            if name == "shiori":     # pull first, with retries: a registry's network flake isn't a quickstart failure
+                pull = "%s -f shiori.yml pull --quiet" % compose
+                if a.with_packages and shutil.which("sg"):
+                    pull = "sg docker -c " + shlex.quote(pull)
+                for attempt in range(3):
+                    pr = subprocess.run("cd machiya/compose && SEARXNG_SECRET=pull " + pull, shell=True, cwd=work,
+                                        capture_output=True, text=True, timeout=900)
+                    if pr.returncode == 0:
+                        break
+                    print("   pull failed (try %d of 3): %s" % (attempt + 1, (pr.stderr or pr.stdout).strip()[-200:]))
+                    time.sleep(20)
             for s in steps:
                 code = blocks[s]["code"].replace("docker compose", compose)
                 if name == "shiori":
