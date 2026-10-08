@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -174,6 +175,7 @@ class IncrementalReadTest(unittest.TestCase):
             notes._READ.update(saved)
 
     def test_changes_are_picked_up_exactly(self):
+        from unittest import mock
         from vaultkit import notes
         tmp = tempfile.mkdtemp()
         try:
@@ -184,19 +186,58 @@ class IncrementalReadTest(unittest.TestCase):
                     f.write(text)
             for i in range(6):
                 write("N/n%d.md" % i, "---\ntitle: N%d\ntags: [a]\n---\nsee [[n%d]] and [[gone]]\n" % (i, (i + 1) % 6))
-            notes.read_notes(tmp)                           # warm the cache
-            write("N/n1.md", "---\ntitle: Edited\ntags: [b]\n---\nnow [[n4]]\n")                       # edit
-            write("N/n1b.md", "---\ntitle: Same size\n---\nx\n")                                    # add
-            write("N/gone.md", "---\ntitle: Gone\n---\nnew target for the old links\n")             # add a target
-            os.remove(os.path.join(tmp, "N/n2.md"))                                                  # delete
-            os.makedirs(os.path.join(tmp, "M"))
-            os.rename(os.path.join(tmp, "N/n3.md"), os.path.join(tmp, "M/n3.md"))                    # rename
-            st = os.stat(os.path.join(tmp, "N/n4.md"))
-            write("N/n4.md", "---\ntitle: N4\ntags: [a]\n---\nsee [[n5]] and [[gone]]\n".replace("N4", "Z4"))   # same size, same mtime
-            os.utime(os.path.join(tmp, "N/n4.md"), ns=(st.st_atime_ns, st.st_mtime_ns))
-            got = notes.read_notes(tmp), self.snapshot(tmp)
+            with mock.patch.object(notes, "RACY_NS", 0):    # trust every file, so the cache is what's tested
+                notes.read_notes(tmp)                       # warm the cache
+                time.sleep(0.05)                            # past a timestamp tick, so the edits below change ctime
+                write("N/n1.md", "---\ntitle: Edited\ntags: [b]\n---\nnow [[n4]]\n")                   # edit
+                write("N/n1b.md", "---\ntitle: Same size\n---\nx\n")                                # add
+                write("N/gone.md", "---\ntitle: Gone\n---\nnew target for the old links\n")         # a link target
+                os.remove(os.path.join(tmp, "N/n2.md"))                                              # delete
+                os.makedirs(os.path.join(tmp, "M"))
+                os.rename(os.path.join(tmp, "N/n3.md"), os.path.join(tmp, "M/n3.md"))                # rename
+                st = os.stat(os.path.join(tmp, "N/n4.md"))
+                write("N/n4.md", "---\ntitle: Z4\ntags: [a]\n---\nsee [[n5]] and [[gone]]\n")         # same size,
+                os.utime(os.path.join(tmp, "N/n4.md"), ns=(st.st_atime_ns, st.st_mtime_ns))         # same mtime
+                got = notes.read_notes(tmp), self.snapshot(tmp)
             self.assertEqual(got, self.fresh(tmp))
             self.assertIn("Z4", dict((r, t) for r, _, t in got[0])["N/n4.md"])    # the change time caught it
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_unchanged_files_are_not_read_again(self):
+        from unittest import mock
+        from vaultkit import notes
+        tmp = tempfile.mkdtemp()
+        try:
+            for i in range(3):
+                with open(os.path.join(tmp, "n%d.md" % i), "w") as f:
+                    f.write("---\ntitle: N%d\n---\nbody\n" % i)
+            with mock.patch.object(notes, "RACY_NS", 0):
+                first = notes.read_notes(tmp)
+                with mock.patch.object(notes, "read_file", side_effect=AssertionError("read again")):
+                    self.assertEqual(notes.read_notes(tmp), first)
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_a_file_changed_just_now_is_read_again(self):
+        """A file changed within RACY_NS of the read could change again in the same timestamp tick and keep its size
+        and times: it is never served from the cache."""
+        from unittest import mock
+        from vaultkit import notes
+        tmp = tempfile.mkdtemp()
+        try:
+            path = os.path.join(tmp, "a.md")
+            with open(path, "w") as f:
+                f.write("---\ntitle: A\n---\none\n")
+            notes.read_notes(tmp)
+            with open(path, "w") as f:                      # same size, at once: maybe the same tick
+                f.write("---\ntitle: B\n---\none\n")
+            self.assertEqual(notes.read_notes(tmp)[0][1], {"title": "B"})
+            calls = []
+            real = notes.read_file
+            with mock.patch.object(notes, "read_file", side_effect=lambda p: calls.append(p) or real(p)):
+                notes.read_notes(tmp)
+            self.assertEqual(len(calls), 1)                 # still recent, so read again
         finally:
             shutil.rmtree(tmp)
 

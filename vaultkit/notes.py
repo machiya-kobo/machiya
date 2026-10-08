@@ -5,6 +5,7 @@ import html
 import os
 import re
 import stat
+import time
 
 from .front import FRONT_RE, PHONE_CONFLICT, _str, note_front, tags_of
 
@@ -29,6 +30,7 @@ def read_notes(root):
     symlinked folder), and the file is opened with O_NOFOLLOW, so a committed `x.md -> /proc/self/environ` reads
     nothing."""
     out, was, now = [], _READ.get(os.path.abspath(root), {}), {}
+    racy_after = time.time_ns() - RACY_NS
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in SKIP_DIRS]
         for name in filenames:
@@ -49,7 +51,9 @@ def read_notes(root):
                     if text is None:
                         continue
                     fm = note_front(text) or {}
-                now[full] = (key, fm, text)
+                # a file changed this close to now could change again within the same timestamp tick, unseen: read
+                # it again next time (git's "racy" rule)
+                now[full] = (None if max(st.st_mtime_ns, st.st_ctime_ns) >= racy_after else key, fm, text)
                 out.append((os.path.relpath(full, root), copy.deepcopy(fm), text))
     _READ[os.path.abspath(root)] = now
     return out
@@ -58,7 +62,10 @@ def read_notes(root):
 # v0.28: what read_notes last read under each root, by file: (stat key, frontmatter, text). A file whose device, inode,
 # size, modification and change times are all unchanged isn't read or parsed again (the change time can't be set back
 # by a tool that keeps the modification time). Each call replaces its root's entry, so a deleted note drops out.
+# File timestamps come from a coarse clock (a few milliseconds a tick), so a file changed within RACY_NS of a read
+# isn't trusted from the cache: an edit in the same tick could keep size and every time the same.
 _READ = {}
+RACY_NS = 2 * 10 ** 9
 
 
 def read_file(path):
