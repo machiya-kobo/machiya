@@ -450,7 +450,8 @@ def page(ctx, room, title, body, tabs=(), current="", links=None, head="", style
         '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<title>%s</title>\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
         '<meta name="color-scheme" content="%s">\n%s\n%s'
-        '<link rel="icon" href="/static/icons/%s.svg" type="image/svg+xml">\n'
+        '<link rel="icon" href="/static/icons/%s-small.svg" type="image/svg+xml">\n'
+        '<link rel="alternate icon" href="/static/icons/%s.ico" sizes="16x16 32x32 48x48">\n'
         '<link rel="apple-touch-icon" href="/static/icons/%s-apple-180.png">\n'
         '<meta name="apple-mobile-web-app-capable" content="yes">\n<meta name="mobile-web-app-capable" content="yes">\n'
         '<meta name="apple-mobile-web-app-status-bar-style" content="%s">\n'
@@ -458,7 +459,7 @@ def page(ctx, room, title, body, tabs=(), current="", links=None, head="", style
         '</head>\n<body class="theme-%s%s room-%s" data-room="%s" data-text="%s"%s>\n%s\n%s\n</body>\n</html>\n'
     ) % (e(title), scheme, colors,
          '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">\n' if manifest else "",
-         room, room, "default" if theme == "day" else "black-translucent", e(name),
+         room, room, room, "default" if theme == "day" else "black-translucent", e(name),
          (prefs_meta(prefs_url) + app_prefs_meta(room)) if prefs_url else "", css, js, head, theme,
          "" if palette == palettes.DEFAULT else " palette-" + palette, room, room, e(text),
          (' data-cookie-domain="%s"' % e(COOKIE_DOMAIN)) if COOKIE_DOMAIN else "", body,
@@ -644,7 +645,7 @@ def about_section(room, version, status_text="", vaultkit=""):
     src = source_url()
     if src:
         items.append(row("Source code", '<a href="%s" rel="noopener">%s</a>' % (e(src), e(src))))
-        items.append(row("Licence", "GNU AGPL-3.0-or-later"))
+        items.append(row("License", "GNU AGPL-3.0-or-later"))
     _, name, seal, _ = room_info(room)
     return Section(("About", items, "%s (%s) is part of Machiya. Install it from the browser's menu (Add to Home Screen)."
                     % (name, seal)), "about")

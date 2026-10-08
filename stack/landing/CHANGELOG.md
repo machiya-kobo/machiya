@@ -1,5 +1,11 @@
 # Changelog: machiya-landing
 
+## 0.6.0
+
+- **Shiori's look** (vaultkit 0.26.3, the style guide): outlined chips and pills; hovering thickens an outline instead of filling it, so text stays at 4.5:1 in every theme.
+- **The browser-tab icon is the small house** (`machiya-small.svg`, plus `machiya.ico` for older browsers), as in every room.
+- vaultkit re-vendored (0.23.0 → 0.26.3, which also brings 0.24/0.25's contrast fixes).
+
 ## 0.5.1
 
 - Shorter copy: the status page's empty Recent Deploys line is one sentence (the owner's copy-editing pass, 2026-10-05).

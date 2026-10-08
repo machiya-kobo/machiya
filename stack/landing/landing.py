@@ -37,7 +37,7 @@ with open(os.path.join(HERE, "VERSION"), encoding="utf-8") as _f:
 
 STATIC_TYPES = {"landing.css": "text/css", "landing.js": "text/javascript"}
 SHARED_UI = {"machiya.css": "text/css", "machiya.js": "text/javascript"}
-ICONS = {"machiya.svg": "image/svg+xml", "machiya-small.svg": "image/svg+xml", "machiya-apple-180.png": "image/png",
+ICONS = {"machiya.svg": "image/svg+xml", "machiya-small.svg": "image/svg+xml", "machiya.ico": "image/x-icon", "machiya-apple-180.png": "image/png",
          "machiya-192.png": "image/png", "machiya-512.png": "image/png", "machiya-maskable-512.png": "image/png"}
 TRUE = ("1", "on", "true", "yes")
 CHANGELOG_APPS = ("kura", "konbini", "niwa", "machiya-mcp", "smallweb")    # the apps that serve GET /api/changelog

@@ -1,5 +1,10 @@
 # Changelog: hister-login
 
+## 0.4.3
+
+- **The sign-in and sessions pages have their tab icon again**: they wear the Machiya room, and the page shell's `machiya-small.svg`, `machiya.ico` and `machiya-apple-180.png` are now served under `/machiya/static/icons/` (before, the icon link answered 404).
+- vaultkit re-vendored (0.24.0 → 0.26.3: Shiori's outlined chips and pills, the contrast fixes).
+
 ## 0.4.2
 
 - Stops on SIGTERM in about a second (it ran as PID 1 with no handler, so every `docker stop` waited 10 s and ended in a SIGKILL).

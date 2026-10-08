@@ -62,7 +62,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.4.2"
+VERSION = "0.4.3"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -896,6 +896,11 @@ STATIC = {
     "machiya.js": (os.path.join(shell.UI_DIR, "machiya.js"), "text/javascript; charset=utf-8"),
     "signin.js": (os.path.join(HERE, "static", "signin.js"), "text/javascript; charset=utf-8"),
     "icons/hister.svg": (os.path.join(HERE, "static", "hister.svg"), "image/svg+xml"),
+    # the page shell's tab and home-screen icons for the "machiya" room these pages wear (vaultkit 0.26.1: <room>-small.svg,
+    # <room>.ico, <room>-apple-180.png; the copies come from machiya's icons/)
+    "icons/machiya-small.svg": (os.path.join(HERE, "static", "icons", "machiya-small.svg"), "image/svg+xml"),
+    "icons/machiya.ico": (os.path.join(HERE, "static", "icons", "machiya.ico"), "image/x-icon"),
+    "icons/machiya-apple-180.png": (os.path.join(HERE, "static", "icons", "machiya-apple-180.png"), "image/png"),
 }
 e = shell.e
 
