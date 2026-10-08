@@ -2,6 +2,7 @@
 
 ## 0.5.0
 
+- **Changed default: `HISTER_LOGIN_LEGACY` is now `none`.** Unset, the helper sets no shared-domain `machiya_sso` and rooms refuse a browser's helper id and Hister's raw token (`401 legacy-off`). If an old room or client still needs one, set it: `domain-cookie`, `hister-token`, or both. Each works as before.
 - **`/v1/nginx` hands Hister's session only to the hosted pages.** It answers with `X-Hister-Cookie` only when the origin in `X-Machiya-Room` is in `HISTER_LOGIN_PROXIED_ORIGINS` and the room session was made for that same origin. Before, any caller of the internal port could name its own room and trade a Kura or Konbini session, or an app's id, for the raw Hister session. Everything else now gets a 401, as a signed-out browser does. The hosted pages' nginx needs no change.
 
 ## 0.4.3

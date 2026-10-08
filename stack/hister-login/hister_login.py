@@ -3,7 +3,7 @@
 Hister keeps its session cookie (`hister`) on its own host. This helper sits on that host too (Tailscale Serve sends
 it /machiya/… and /api/oauth/callback; everything else goes to Hister) and turns a Hister session into an opaque id,
 its own host-only cookie `__Host-machiya_sso=mhs_…` (0.3.0; before, `machiya_sso` on the tailnet's shared domain,
-which HISTER_LOGIN_LEGACY still sets during the move). Each room gets a cookie of its own: the room sends the browser
+which HISTER_LOGIN_LEGACY=domain-cookie still sets, an opt-in since 0.5.0). Each room gets a cookie of its own: the room sends the browser
 here with a state, the helper sends it back to the room's /machiya/callback with a one-time code (60 s, one use,
 bound to that room's origin and the browser's state), and the room trades it at POST /v1/redeem for a room session
 (`mhr_…`) that only that room accepts. The rooms ask about a credential over the internal network (/v1/check, naming
@@ -118,9 +118,9 @@ class Settings:
         self.legacy_out = self.sso + "_out"             # (0.2.x) the marker on the shared domain
         self.return_cookie = self.prefix + RETURN_COOKIE
         self.origin = histerauth.origin_of(self.public_url)
-        raw = env.get("HISTER_LOGIN_LEGACY")
-        legacy = {"domain-cookie", "hister-token"} if raw is None else \
-            {x.strip().lower() for x in raw.split(",") if x.strip()} - {"none"}
+        # 0.5.0: none by default; each legacy credential is an explicit opt-in (domain-cookie, hister-token)
+        raw = env.get("HISTER_LOGIN_LEGACY") or ""
+        legacy = {x.strip().lower() for x in raw.split(",") if x.strip()} - {"none"}
         if legacy - {"domain-cookie", "hister-token"}:
             raise SystemExit("hister-login: HISTER_LOGIN_LEGACY is a list of domain-cookie and hister-token, or none")
         self.legacy = legacy

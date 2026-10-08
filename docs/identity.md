@@ -278,7 +278,7 @@ Send it as `Authorization: Bearer mht_…`, from a file, never in a URL or argv.
 
 ### Moving to it (readers first, writers after)
 
-1. **hister-login 0.3.0**, with `HISTER_LOGIN_LEGACY` at its default (`domain-cookie,hister-token`). Nothing changes for old rooms: the helper still sets the shared `machiya_sso` beside its host-only cookie.
+1. **hister-login 0.3.0**, with `HISTER_LOGIN_LEGACY` at its default then (`domain-cookie,hister-token`; since 0.5.0 the default is `none`, so a move like this one sets it). Nothing changes for old rooms: the helper still sets the shared `machiya_sso` beside its host-only cookie.
 2. **The rooms and landing** re-vendor vaultkit 0.22 (no code change). They prefer their own cookie and still take the shared one and Hister's token, passing both to the helper.
 3. **The callers** get room tokens (the table above). Shiori's extensions and apps update. Kura and Konbini list the hosted pages' origins, and the hosted pages' nginx changes ([hister-login](services/hister-login.md#shioris-hosted-pages)).
 4. **The switch:** `HISTER_LOGIN_LEGACY=none`. The shared cookie is no longer set, and the rooms refuse it and Hister's raw token (`401 {"reason": "legacy-off"}`). Each browser makes one silent trip per room. Until then, the helper logs (hourly per room) every legacy credential it still accepts. **Rollback:** set the old value again and restart the helper.

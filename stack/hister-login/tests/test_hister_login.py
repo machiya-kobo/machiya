@@ -26,7 +26,9 @@ KURA = "https://kura.example.test/n/Note?x=1"
 ENV = {"HISTER_LOGIN_PUBLIC_URL": PUBLIC, "MACHIYA_COOKIE_DOMAIN": "example.test",
        "MACHIYA_ROOMS": "kura=https://kura.example.test,niwa=https://niwa.example.test,"
                         "searxng=https://searxng.example.test,hister=https://hister.example.test",
-       "HISTER_LOGIN_PROVIDERS": "oidc"}
+       "HISTER_LOGIN_PROVIDERS": "oidc",
+       # 0.5.0: legacy is off by default; most tests here still cover the opted-in old ways (LegacyDefaultTest: none)
+       "HISTER_LOGIN_LEGACY": "domain-cookie,hister-token"}
 
 
 def cookies_of(headers):
@@ -47,6 +49,7 @@ class HelperBase(unittest.TestCase):
         self.fake = FakeHister()
         env = dict(ENV, HISTER_LOGIN_HISTER_URL=self.fake.url, HISTER_LOGIN_DB=os.path.join(self.tmp, "d", "hl.db"),
                    **getattr(self, "EXTRA", {}))
+        env = {k: v for k, v in env.items() if v is not None}          # EXTRA's None: the setting left unset
         self.err = io.StringIO()
         with redirect_stderr(self.err):
             self.settings = hl.Settings(env)
@@ -1189,8 +1192,47 @@ class LegacyOffTest(HelperBase):
             hl.Settings(dict(ENV, HISTER_LOGIN_LEGACY="cookies"))
         self.assertEqual(hl.Settings(dict(ENV, HISTER_LOGIN_LEGACY="hister-token")).legacy, {"hister-token"})
         self.assertEqual(hl.Settings(dict(ENV)).legacy, {"domain-cookie", "hister-token"})
+        unset = {k: v for k, v in ENV.items() if k != "HISTER_LOGIN_LEGACY"}
+        self.assertEqual(hl.Settings(unset).legacy, set())                                  # 0.5.0: the default
+        for raw in ("", " ", "none", "NONE"):
+            self.assertEqual(hl.Settings(dict(unset, HISTER_LOGIN_LEGACY=raw)).legacy, set(), raw)
+        self.assertEqual(hl.Settings(dict(unset, HISTER_LOGIN_LEGACY="domain-cookie")).legacy, {"domain-cookie"})
         with self.assertRaises(SystemExit):
             hl.Settings(dict(ENV, HISTER_LOGIN_PROXIED_ORIGINS="https://search.example.test/path"))
+
+
+class LegacyDefaultTest(LegacyOffTest):
+    """0.5.0: HISTER_LOGIN_LEGACY unset is the switch (none), every LegacyOffTest check with the setting unset."""
+    EXTRA = {"HISTER_LOGIN_LEGACY": None}
+
+
+class LegacyOptInTest(HelperBase):
+    """0.5.0: each legacy way is its own opt-in; one doesn't bring the other."""
+    MODE = "domain-cookie"
+    EXTRA = {"HISTER_LOGIN_LEGACY": MODE}
+
+    def test_only_what_was_asked_for(self):
+        session = self.fake.signed_in()
+        status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode({"return": KURA}),
+                                         {"Cookie": "hister=" + session})
+        sid = cookie_value(headers, "__Host-machiya_sso")
+        self.assertTrue(sid)
+        cookie_on, token_on = self.MODE == "domain-cookie", self.MODE == "hister-token"
+        self.assertEqual(cookie_value(headers, "machiya_sso") == sid, cookie_on)         # the shared-domain copy
+        room = {"X-Machiya-Room": KURA_O}
+        status, _, body = self.internal("GET", "/v1/check", {"X-Machiya-Session": sid, **room})
+        self.assertEqual(status, 200 if cookie_on else 401)
+        if not cookie_on:
+            self.assertEqual(json.loads(body), {"reason": "legacy-off"})
+        status, _, body = self.internal("GET", "/v1/check", {"X-Access-Token": "tok-owner", **room})
+        self.assertEqual(status, 200 if token_on else 401)
+        if not token_on:
+            self.assertEqual(json.loads(body), {"reason": "legacy-off"})
+
+
+class LegacyTokenOptInTest(LegacyOptInTest):
+    MODE = "hister-token"
+    EXTRA = {"HISTER_LOGIN_LEGACY": MODE}
 
 
 class PrefsTest(unittest.TestCase):

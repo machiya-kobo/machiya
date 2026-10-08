@@ -46,7 +46,7 @@ See also [identity.md](../identity.md#one-cookie-per-room).
 - They are opaque. The helper keeps the mapping to the browser's Hister session.
 - Hister's own `hister` cookie stays on Hister's host.
 - `MACHIYA_SSO_COOKIE` renames the base (letters, digits, `_`, `-`). The rooms and the landing page read the same setting.
-- While `HISTER_LOGIN_LEGACY` includes `domain-cookie` (the default, for migrating), the helper also sets the old `machiya_sso` cookie on `MACHIYA_COOKIE_DOMAIN`.
+- While `HISTER_LOGIN_LEGACY` includes `domain-cookie`, the helper also sets the old `machiya_sso` cookie on `MACHIYA_COOKIE_DOMAIN`. It's off unless you set it (0.5.0); so is `hister-token`, which lets rooms take Hister's raw token.
 
 ### Sign-in
 
