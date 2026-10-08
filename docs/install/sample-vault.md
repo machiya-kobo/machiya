@@ -9,7 +9,7 @@ The whole stack on an invented vault (a paper-lantern workshop and a trip to Kyo
 - About 2 GB of disk, on amd64 or arm64
 - These ports free on `127.0.0.1`: 8081, 8082, 8083, 4433, 8888, 1965 and 7070 ([`compose/.env.example`](../../compose/.env.example) moves any of them)
 
-On a clean Debian or Ubuntu machine, install them, then log out and back in (or run `newgrp docker`) so you're in the `docker` group:
+On a clean Debian 13, install them, then log out and back in (or run `newgrp docker`) so you're in the `docker` group. On Ubuntu 24.04, install `docker-compose-v2` in place of `docker-compose`:
 
 <!-- quickstart: packages-debian -->
 ```bash
@@ -18,7 +18,7 @@ sudo apt-get install -y git curl docker.io docker-compose
 sudo usermod -aG docker "$USER"
 ```
 
-(Elsewhere: Docker's own packages for [your system](https://docs.docker.com/engine/install/), or Podman as above.)
+(Debian 12, older Ubuntu and elsewhere: their `docker-compose` is the old 1.x tool, so use Docker's own packages for [your system](https://docs.docker.com/engine/install/), or Podman as above.)
 
 **1. Get the code.** The stack builds its services from their own repositories, checked out side by side:
 
