@@ -11,7 +11,7 @@ import os
 import sys
 import time
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from vaultkit.git import Mirror, read_secret   # noqa: E402

@@ -64,5 +64,21 @@ class MirrorStatus(unittest.TestCase):
         self.assertNotIn("s3cret", json.dumps(self.status()))
 
 
+
+class Image(unittest.TestCase):
+    """0.1.3: the image runs as uid 1000 on its own (a USER line, not only compose's `user:`), and that uid owns
+    /data, where everything it writes lives (the clone, status.json, HOME)."""
+
+    def test_runs_as_uid_1000(self):
+        with open(os.path.join(HERE, "..", "Dockerfile")) as f:
+            lines = [line.strip() for line in f.read().replace("\\\n", " ").splitlines()]
+        users = [line.split()[1] for line in lines if line.startswith("USER ")]
+        self.assertEqual(users[-1:], ["1000:1000"])
+        self.assertTrue(any("chown 1000:1000 /data" in line for line in lines))
+        self.assertIn("ENV HOME=/data PYTHONDONTWRITEBYTECODE=1", lines)
+        cmd = [i for i, line in enumerate(lines) if line.startswith("CMD ")]
+        self.assertLess(max(i for i, line in enumerate(lines) if line.startswith("USER ")), cmd[-1])
+
+
 if __name__ == "__main__":
     unittest.main()

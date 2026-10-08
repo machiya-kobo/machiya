@@ -1,5 +1,9 @@
 # Changelog: vault-mirror
 
+## 0.1.3
+
+- **Runs as uid 1000 by itself.** The image now has `USER 1000:1000` (before, only the reference compose's `user:` kept it off root). It writes only under `/data`: the clone and `status.json`. If you ran it as root, `chown -R 1000:1000` the `/data` volume before you upgrade, or the mirror can't write.
+
 ## 0.1.2
 
 - A failed clone, fetch or reset is reported (`error` in `status.json`, the last good `head` and `synced_at` kept) instead of a fresh "synced" on the old copy (sweep 2026-10, MACH-F-4). The status's `error` never carries credentials from a URL.
