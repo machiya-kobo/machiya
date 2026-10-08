@@ -50,6 +50,13 @@ through LibYAML when PyYAML has it (aliases still refused; anything LibYAML refu
 tended dates walk the git history once, then only the commits added since; the same walk gives `Vault.tended_at`, each
 note's commit time in seconds. On 3,000 notes and 400 commits, a re-index after a commit takes 0.14 s (1.64 s in 0.27).
 
+**Hardening** (v0.29).
+- **Trusted proxies:** `identity.load_for` and `histerauth.load_for` read `<ROOM>_TRUSTED_PROXIES`, and an identity header from any other peer counts for nothing inside vaultkit too (`Identity.resolve(headers, client)`; pass `client=` to `HisterAuth.resolve`). `identity.trusted_proxies()` and `identity.peer_trusted()` replace the rooms' own copies.
+- **Note classes:** a note's raw-HTML `class` survives only when every class is vaultkit's own (`task`, `wikilink`, `seed`, `mermaid`, `language-*`).
+- **Remote images:** `render(..., remote_images="click")` shows an image from another site as a placeholder with a Load image button (`ui/machiya.js`), or a link on a retro page; the default `"load"` is unchanged, for API answers.
+- **Pairing and devices:** a pairing code works once per room; a paired device's token lasts 90 days (older ones until 2027-01-06).
+- **Room tokens:** rooms explain hister-login 0.6.0's `token-expired`.
+
 **A note is data, never code** (v0.13). `render()` returns clean HTML (`vaultkit.sanitize.clean`): raw HTML in a note
 keeps only known tags and attributes; scripts, styles, frames, forms and event handlers are dropped, and a link or
 image keeps only an `http(s)`, `mailto`, `obsidian`, `gemini` or `gopher` URL (or a relative one). `- [ ]` / `- [x]`
