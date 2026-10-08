@@ -4,7 +4,7 @@
 
 Machiya (町家, townhouse) is a set of small self-hosted apps for finding what you've read: your pages ([Hister](https://github.com/asciimoo/hister)), the web ([SearXNG](https://github.com/searxng/searxng)), your notes ([Obsidian](https://obsidian.md)) and your code ([Forgejo](https://forgejo.org) or [GitHub](https://github.com)).
 
-Like a Kyoto machiya: a shop at the front, a small garden inside, a storehouse at the back, all under one roof.
+A Kyoto machiya has a shop at the front, a small garden inside and a storehouse at the back, all under one roof.
 
 <p align="center">
 <a href="https://machiya-kobo.github.io/">Website</a> · <a href="#apps">Apps</a> · <a href="#architecture">Architecture</a> · <a href="#quickstart">Quickstart</a> · <a href="docs/install/sample-vault.md">Sample vault</a> · <a href="docs/install/">Install</a> · <a href="#license">License</a>
