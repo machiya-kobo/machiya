@@ -67,6 +67,13 @@ PAIR_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"   # no 0/O, 1/I/L
 PAIR_LEN = 8
 
 
+# v0.29 (the owner, 2026-10-08): a paired device's token (mcd_) lasts DEVICE_DAYS; pairing again issues a fresh one.
+# Tokens issued before 0.29 carry no expiry: they last until DEVICE_LEGACY_UNTIL, 90 days after the release, not a
+# sudden sign-out.
+DEVICE_DAYS = 90
+DEVICE_LEGACY_UNTIL = 1799193600        # 2027-01-06T00:00:00Z
+
+
 class IdentityError(ValueError):
     """The identity file (or a setting) can't be used: the room must not start, or must not serve."""
 
@@ -614,6 +621,7 @@ class Identity:
         self.signin_names = Throttle(5, 900)
         self.signin_addrs = Throttle(20, 900)
         self.pair_addrs = Throttle(5, 600)
+        self.spent = {}                 # v0.29: device id -> when its code expires; a code works once in this room
 
     def _stamp(self, config):
         """The identity file's and the session key's (inode, mtime, size): a change to either is a reload."""
@@ -737,6 +745,12 @@ class Identity:
             if payload.get("u") != raw["uid"] or not whole(payload.get("e")) or payload["e"] != raw["epoch"] \
                     or not isinstance(device, str) or device in raw["revoked"]:
                 return Result(None, 401, "device signed out")
+            until = payload.get("x", DEVICE_LEGACY_UNTIL)       # v0.29: no expiry yet = the legacy date
+            if not whole(until):
+                return Result(None, 401, "unknown device token")
+            if until <= now():
+                return Result(None, 401, "device token expired on %s: pair the device again" % time.strftime(
+                    "%Y-%m-%d", time.gmtime(until)))
             return Result(config.principals[name].with_via("device:" + device))
         return Result(None, 401, "unknown token")
 
@@ -860,15 +874,24 @@ class Identity:
         if not HASHING.acquire(blocking=False):
             self.pair_addrs.forgive(client)
             return Result(None, 429, "busy; try again in a moment"), ""
+        with self.lock:
+            self.spent = {d: x for d, x in self.spent.items() if x > t}
+            spent = set(self.spent)
         try:
-            found = next((e for e in config.pairing if e["expires"] > t and check_password(code, e["code"])), None)
+            found = next((e for e in config.pairing if e["expires"] > t and e["device"] not in spent
+                          and check_password(code, e["code"])), None)
         finally:
             HASHING.release()
         if not found:
             return Result(None, 401, "unknown or expired code"), ""
+        with self.lock:                 # v0.29: spent; a second use (a race included) finds nothing
+            if found["device"] in self.spent:
+                return Result(None, 401, "unknown or expired code"), ""
+            self.spent[found["device"]] = found["expires"]
         name = found["principal"]
+        issued = now()
         payload = {"p": name, "u": config.raw[name]["uid"], "d": found["device"], "e": config.raw[name]["epoch"],
-                   "iat": now()}
+                   "iat": issued, "x": issued + DEVICE_DAYS * 86400}
         token = "mcd_" + sign(key, "device", payload)
         return Result(config.principals[name].with_via("device:" + found["device"])), token
 

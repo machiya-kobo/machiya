@@ -399,6 +399,49 @@ class PairingTest(Base):
         i.checked = 0
         self.assertEqual(i.resolve(headers(Authorization="Bearer " + token)).status, 401)
 
+    def test_a_code_works_once(self):
+        """v0.29: a pairing code is spent by its first use; a second gets the same answer as a wrong code."""
+        with open(self.path, "rb") as f:
+            data = idn.tomllib.load(f)
+        code, device = idn.new_pairing(data, "owner", "iPad")
+        idn.write_file(self.path, data)
+        i = self.ident()
+        r, token = i.pair(code, "10.0.0.6")
+        self.assertEqual(r.principal.name, "owner")
+        again, token2 = i.pair(code, "10.0.0.7")
+        self.assertEqual((again.status, again.error, token2), (401, "unknown or expired code", ""))
+        self.assertEqual(i.resolve(headers(Authorization="Bearer " + token)).principal.via, "device:" + device)
+
+    def test_device_tokens_expire_after_90_days(self):
+        """v0.29: an mcd_ token carries its expiry (DEVICE_DAYS); a token from before has the legacy date."""
+        from unittest import mock
+        with open(self.path, "rb") as f:
+            data = idn.tomllib.load(f)
+        code, _ = idn.new_pairing(data, "owner", "phone")
+        idn.write_file(self.path, data)
+        i = self.ident()
+        t0 = 1_800_000_000
+        with mock.patch.object(idn, "now", return_value=t0):
+            _, token = i.pair(code, "10.0.0.6")
+            payload = idn.unsign(i.current()[1], "device", token[4:])
+            self.assertEqual(payload["x"] - payload["iat"], 90 * 86400)
+            self.assertEqual(i.resolve(headers(Authorization="Bearer " + token)).principal.name, "owner")
+        with mock.patch.object(idn, "now", return_value=t0 + 90 * 86400):
+            r = i.resolve(headers(Authorization="Bearer " + token))
+            self.assertEqual(r.status, 401)
+            self.assertRegex(r.error, r"^device token expired on \d{4}-\d{2}-\d{2}: pair the device again$")
+        config, key = i.current()
+        raw = config.raw["owner"]
+        old = "mcd_" + idn.sign(key, "device", {"p": "owner", "u": raw["uid"], "d": "olddevice01", "e": raw["epoch"],
+                                                "iat": t0 - 86400})               # issued before 0.29: no "x"
+        with mock.patch.object(idn, "now", return_value=idn.DEVICE_LEGACY_UNTIL - 1):
+            self.assertEqual(i.resolve(headers(Authorization="Bearer " + old)).principal.name, "owner")
+        with mock.patch.object(idn, "now", return_value=idn.DEVICE_LEGACY_UNTIL):
+            self.assertIn("2027-01-06", i.resolve(headers(Authorization="Bearer " + old)).error)
+        bad = "mcd_" + idn.sign(key, "device", {"p": "owner", "u": raw["uid"], "d": "x1", "e": raw["epoch"],
+                                                "x": "never"})
+        self.assertEqual(i.resolve(headers(Authorization="Bearer " + bad)).error, "unknown device token")
+
     def test_expired_code_and_throttle(self):
         with open(self.path, "rb") as f:
             data = idn.tomllib.load(f)

@@ -132,7 +132,7 @@ python3 -m vaultkit.identity grant partner niwa read
 
 **A Shiori device**, either way:
 
-- **Code:** `identity pair partner --label iPhone` prints a one-time code (8 characters, good for 10 minutes; `--minutes` up to 60) and the device id. Type it in Shiori's Sign in to Machiya; Shiori trades it at any room's `POST /api/pair` for its own device token.
+- **Code:** `identity pair partner --label iPhone` prints a one-time code (8 characters, good for 10 minutes; `--minutes` up to 60) and the device id. Type it in Shiori's Sign in to Machiya; Shiori trades it at any room's `POST /api/pair` for its own device token. A code works once in each room (vaultkit 0.29). The device token lasts **90 days**; after that the room answers `device token expired on <date>: pair the device again`. Tokens paired before 0.29 last until 2027-01-06.
 - **Paste:** `identity token mint partner --label iPhone` and paste the token into Shiori's settings (the Linux app, scripts).
 
 Details per app: Shiori's [docs/signing-in.md](https://github.com/machiya-kobo/shiori/blob/main/docs/signing-in.md).
@@ -293,6 +293,6 @@ Send it as `Authorization: Bearer mht_…`, from a file, never in a URL or argv.
 - **Niwa's public garden never consults identity.** With `NIWA_PUBLIC_PORT`, Niwa runs a second web listener for anyone. Like its Gemini and Gopher listeners, it serves only published notes. It reads no `Authorization`, `Tailscale-User-Login`, proxy login header or cookie, sets no cookie, and answers only GET and HEAD on a fixed list of read-only routes. The owner's listener keeps its mode and its bind rules unchanged: a header mode still refuses a non-loopback bind without `NIWA_BIND_BEHIND_PROXY=1`. Never point the public proxy (Funnel, Caddy) at the owner's port. Point it at `NIWA_PUBLIC_PORT`.
 - **Trade-offs to know:**
   - **Throttling locks out.** Five wrong passwords lock that name for 15 minutes for everyone, and 20 failures lock an address; behind a proxy every client shares the proxy's address. Pairing allows 5 tries per address per 10 minutes.
-  - **A pairing code is reusable until it expires.** The rooms can't mark it used (the file is read-only). The short window, the throttle and the one device id in every token it yields (revoked as one) are the guard; cancel it with `pair --cancel` once the device is in.
+  - **A pairing code works once per room.** Since vaultkit 0.29 a room remembers a code it took, so a second use there is refused; the file is read-only to the rooms, so another room could still take it once until it expires. The short window, the throttle and the one device id in every token it yields (revoked as one) are the rest of the guard; cancel it with `pair --cancel` once the device is in.
   - **The shared cookie domain.** With the identity file's built-in sign-in, `MACHIYA_COOKIE_DOMAIN` makes one sign-in cover every room, and sends the session cookie to every site under that domain. Use a domain only Machiya's rooms serve, or leave it unset and sign in per room. (In Hister sign-in mode the rooms' cookies are host-only since vaultkit 0.22; the domain only carries the preference cookies and the legacy `machiya_sso` until the switch.)
 - Every state change made with a cookie must be same-origin, and no room changes state on a GET.
