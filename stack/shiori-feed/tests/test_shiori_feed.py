@@ -275,3 +275,111 @@ class TestRate(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# -- 0.2.0: room tokens, /api/status, /api/changelog ------------------------------------------------------------------
+
+GOOD = "mht_" + "A" * 43            # a room token the fake helper confirms
+OTHER = "mht_" + "B" * 43           # another room's token: refused
+
+
+class Login(BaseHTTPRequestHandler):
+    """A fake hister-login: GET /v1/check confirms GOOD for the feed's own origin only."""
+    seen = []
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        Login.seen.append((self.path, self.headers.get("X-Machiya-Room")))
+        ok = self.path == "/v1/check" and self.headers.get("X-Machiya-Session") == GOOD \
+            and self.headers.get("X-Machiya-Room") == "https://feed.example.ts.net"
+        body = json.dumps({"kind": "token", "username": "you"} if ok else {"error": "no"}).encode()
+        self.send_response(200 if ok else 401)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+LOGIN_SRV, LOGIN_URL = serve(Login)
+TOKENS = dict(AUTH_URL=LOGIN_URL, PUBLIC_URL="https://feed.example.ts.net/", HISTER_USERS="you")
+
+
+class TestRoomTokens(Base):
+    cfg_env = dict(AUTH="tailscale", USERS="you@example.com", BIND="127.0.0.1", **TOKENS)
+
+    def test_a_good_token_passes(self):
+        self.assertEqual(get(self.base, "/shiori/feed?q=x", {"Authorization": "Bearer " + GOOD})[0], 200)
+        self.assertEqual(get(self.base, "/shiori/feed?q=x", {"X-Machiya-Token": GOOD})[0], 200)
+        self.assertEqual(Login.seen[-1][1], "https://feed.example.ts.net")     # asked for its own origin
+
+    def test_a_token_decides_alone(self):
+        # another room's token is refused even with a good Tailscale login beside it
+        self.assertEqual(get(self.base, "/shiori/feed?q=x", {"Authorization": "Bearer " + OTHER,
+                                                             "Tailscale-User-Login": "you@example.com"})[0], 403)
+        for bad in ({"Authorization": "Bearer mht_short"}, {"X-Machiya-Token": "nope"},
+                    {"Authorization": "Bearer " + GOOD, "X-Machiya-Token": GOOD}):
+            self.assertEqual(get(self.base, "/shiori/feed?q=x", bad)[0], 403, bad)
+        # a non-room Authorization header is no token: the login decides, as before
+        self.assertEqual(get(self.base, "/shiori/feed?q=x", {"Authorization": "Basic eDp5",
+                                                             "Tailscale-User-Login": "you@example.com"})[0], 200)
+
+    def test_cached_and_never_logged(self):
+        Login.seen = []
+        for _ in range(3):
+            self.assertEqual(get(self.base, "/shiori/feed?q=x", {"Authorization": "Bearer " + GOOD})[0], 200)
+        self.assertEqual(len(Login.seen), 1)                    # a good answer is kept 30 s
+        self.assertNotIn("mht_", self.err.getvalue())
+
+    def test_proxy_mode_takes_tokens_from_anywhere(self):
+        self.start(env(AUTH="proxy", BIND="0.0.0.0", TRUSTED_PROXIES="192.0.2.1", **TOKENS))
+        self.assertEqual(get(self.base, "/shiori/feed?q=x")[0], 403)
+        self.assertEqual(get(self.base, "/shiori/feed?q=x", {"Authorization": "Bearer " + GOOD})[0], 200)
+
+    def test_without_auth_url_a_token_is_refused(self):
+        self.start(env(AUTH="tailscale", USERS="*", BIND="127.0.0.1"))
+        self.assertEqual(get(self.base, "/shiori/feed?q=x")[0], 200)
+        self.assertEqual(get(self.base, "/shiori/feed?q=x", {"Authorization": "Bearer " + GOOD})[0], 403)
+
+    def test_start_checks(self):
+        for bad in (dict(AUTH_URL=LOGIN_URL, HISTER_USERS="you"),                       # no public URL
+                    dict(AUTH_URL=LOGIN_URL, PUBLIC_URL="https://f.example"),           # nobody to act as
+                    dict(AUTH_URL=LOGIN_URL, PUBLIC_URL="https://f.example", HISTER_USERS="*"),
+                    dict(AUTH_URL="hister-login:8081", PUBLIC_URL="https://f.example", HISTER_USERS="you")):
+            with self.assertRaises(SystemExit, msg=bad):
+                sf.Config(env(**bad))
+        self.assertIsNone(sf.Config(env()).room_tokens)
+
+
+class TestStatusAndChangelog(Base):
+    cfg_env = {"AUTH": "tailscale", "USERS": "you@example.com", "BIND": "127.0.0.1"}
+
+    def test_status_is_open_and_counts_failures(self):
+        for path in ("/shiori/api/status", "/api/status"):
+            code, headers, body = get(self.base, path)
+            self.assertEqual(code, 200)
+            self.assertTrue(headers["Content-Type"].startswith("application/json"))
+            st = json.loads(body)
+            self.assertEqual((st["ok"], st["ready"], st["error"], st["version"], st["auth"], st["room_tokens"]),
+                             (True, True, None, sf.VERSION, "tailscale", False))
+        Hister.mode = "down"
+        for i in range(sf.HISTER_FAILS):
+            self.assertEqual(get(self.base, "/shiori/feed?q=secret", {"Tailscale-User-Login": "you@example.com"})[0], 502)
+        st = json.loads(get(self.base, "/api/status")[2])
+        self.assertFalse(st["ok"])
+        self.assertIn("HTTPError", st["error"].replace("HTTP 500", "HTTPError"))
+        self.assertNotIn("secret", json.dumps(st))
+        Hister.mode = "ok"
+        self.assertEqual(get(self.base, "/shiori/feed?q=x", {"Tailscale-User-Login": "you@example.com"})[0], 200)
+        st = json.loads(get(self.base, "/api/status")[2])
+        self.assertTrue(st["ok"])
+        self.assertIsNotNone(st["hister"]["last_ok"])
+        self.assertNotIn("/api/status", self.err.getvalue())    # the probe isn't logged
+
+    def test_changelog(self):
+        code, headers, body = get(self.base, "/shiori/api/changelog")
+        self.assertEqual(code, 200)
+        self.assertTrue(headers["Content-Type"].startswith("text/markdown"))
+        self.assertIn(b"## " + sf.VERSION.encode(), body)
+        self.assertEqual(get(self.base, "/api/changelog", {"If-None-Match": headers["ETag"]})[0], 304)
+        self.assertEqual(get(self.base, "/api/changelog", method="POST")[0], 405)

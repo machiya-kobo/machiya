@@ -12,10 +12,12 @@ It is one stdlib Python file. It keeps no state and only ever calls Hister.
 | `&title=<text>` | the channel's title, after "Shiori – " (at most 200 characters; default: the query) |
 | `&exclude_label=<label>` | repeatable, at most 20: leaves out pages with exactly that label (case-sensitive), sent to Hister as ` -label:"…"`. Shiori adds `exclude_label=vault`, so your notes stay out |
 | `GET /shiori/healthz` | 200 `ok`, with no gate and no Hister call: for probes |
+| `GET /shiori/api/status` | JSON `{ok, ready, error, version, auth, room_tokens, hister: {token, last_ok, last_error}}`, with no gate. `ok` turns false once three feeds in a row failed to reach Hister. Never a query, a title or a token |
+| `GET /shiori/api/changelog` | this service's `CHANGELOG.md` as `text/markdown` (at most 64 KiB, an `ETag`), with no gate: the landing page's Recent Deploys |
 
 - `q` is anything Hister's search box takes: `label:books`, an alias, words, `*` for everything.
 - Code documents (`metadata.source:code`, from [code-import](../../docs/services/code-import.md)) are never feed items.
-- Each path also answers without `/shiori` (`/feed`, `/healthz`), for a proxy that strips its mount point.
+- Each path also answers without `/shiori` (`/feed`, `/healthz`, `/api/status`, `/api/changelog`), for a proxy that strips its mount point.
 - Errors: 400 (no `q`, or over a limit above; `q` is at most 500 characters), 403 (the gate), 429 (over `SHIORI_FEED_PER_MINUTE`, with `Retry-After`), 502 (Hister failed or sent more than 16 MB), 404 and 405 for anything else.
 
 Each item carries the page's title, its URL as link and guid, its label as a category, and the first 500 characters of its text as the description.
@@ -30,14 +32,19 @@ shiori-feed has a gate of its own, so it is safe without anything in front. `SHI
 | `proxy` | only connections from `SHIORI_FEED_TRUSTED_PROXIES`: a proxy that signs people in itself, such as nginx with `auth_request` to [hister-login](../../docs/services/hister-login.md) | anywhere; it refuses to start without `SHIORI_FEED_TRUSTED_PROXIES` |
 | `open` | everyone | `127.0.0.1`, or anywhere with `SHIORI_FEED_BIND_BEHIND_PROXY=1`: for a container whose port is published on the host's `127.0.0.1` only, as in the reference compose |
 
-`/shiori/healthz` is open in every mode. The proxy in front must drop a `Tailscale-User-Login` a client sends (Tailscale Serve does).
+`/shiori/healthz`, `/shiori/api/status` and `/shiori/api/changelog` are open in every mode. The proxy in front must drop a `Tailscale-User-Login` a client sends (Tailscale Serve does).
 
 A feed reader on the tailnet can read the feeds straight from a Tailscale Serve address. A reader on a tagged machine (a self-hosted one on a server) sends no login, so it needs `SHIORI_FEED_USERS=*`, which lets in anyone your tailnet policy lets reach the address. A reader on the open internet can't, by design: these feeds are your browsing history.
 
-## Not yet
+## Room tokens
 
-- **Room tokens.** A later release adds `SHIORI_FEED_AUTH_URL`, as smallweb has: a headless caller (a feed reader on a tagged machine) sends a room token from hister-login instead of needing `SHIORI_FEED_USERS=*`.
-- **`/api/status` and `/api/changelog`.** shiori-feed answers `/shiori/healthz` only, so the landing page can't say what a deploy brought.
+A headless caller, like a feed reader on a tagged machine, sends no Tailscale login. Instead of opening the gate with `SHIORI_FEED_USERS=*`, give it a room token from [hister-login](../../docs/services/hister-login.md):
+
+- `SHIORI_FEED_AUTH_URL`: hister-login's address (`http://hister-login:8081`);
+- `SHIORI_FEED_PUBLIC_URL`: the address the tokens are issued for (the hosted pages' own, say);
+- `SHIORI_FEED_HISTER_USERS`: the Hister users a token may act as (never `*`).
+
+In `tailscale` or `proxy` mode the caller then sends `Authorization: Bearer mht_…` (or `X-Machiya-Token: mht_…`). hister-login confirms each token; a good answer is kept 30 s and a refusal 5 s. A request that carries a token is decided by the token alone, and a bad or another room's token is refused. Tokens are never logged.
 
 ## Settings
 
@@ -49,6 +56,9 @@ A feed reader on the tailnet can read the feeds straight from a Tailscale Serve 
 | `SHIORI_FEED_AUTH` | `tailscale` | `tailscale`, `proxy` or `open` (above) |
 | `SHIORI_FEED_USERS` | — | the Tailscale logins allowed in `tailscale` mode; `*` = anyone; unset = nobody |
 | `SHIORI_FEED_TRUSTED_PROXIES` | — | addresses or CIDRs of the proxy: `172.31.250.2/32` |
+| `SHIORI_FEED_AUTH_URL` | — | [hister-login](../../docs/services/hister-login.md)'s address: turns on room tokens (with the next two) |
+| `SHIORI_FEED_PUBLIC_URL` | — | the address the room tokens are issued for (its origin is what hister-login checks) |
+| `SHIORI_FEED_HISTER_USERS` | — | the Hister users a room token may act as, comma-separated (never `*`) |
 | `SHIORI_FEED_BIND_BEHIND_PROXY` | — | `1`: only the proxy (or the host's own `127.0.0.1` port) reaches the listener's network, so in `tailscale` mode the header may come from any address there. Prefer `SHIORI_FEED_TRUSTED_PROXIES` |
 | `SHIORI_FEED_BIND`, `SHIORI_FEED_PORT` | `127.0.0.1`, `8080` | the listener. The image sets `0.0.0.0` |
 | `SHIORI_FEED_PER_MINUTE` | `60` | feeds served per minute, for every caller together; `0` = no limit |

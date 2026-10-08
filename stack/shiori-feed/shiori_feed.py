@@ -7,8 +7,13 @@
            400: q missing or over 500 characters, a title over 200, more than 20 exclude_label or one over 100.
            403: the gate refused the caller. 429: over SHIORI_FEED_PER_MINUTE (+ Retry-After). 502: Hister failed.
     GET /shiori/healthz -> 200 "ok" (no gate; doesn't touch Hister)
+    GET /shiori/api/status -> 200 JSON {"ok", "ready", "error", "version", "auth", "room_tokens", "hister": {"token",
+        "last_ok", "last_error"}} (no gate, like every Machiya service's): `error` is set once three feeds in a row
+        failed to reach Hister.
+    GET /shiori/api/changelog -> this service's CHANGELOG.md, text/markdown (no gate; at most 64 KiB, an ETag)
 
-The paths also answer without the /shiori prefix (/feed, /healthz), for a proxy that strips its mount point.
+The paths also answer without the /shiori prefix (/feed, /healthz, /api/status, /api/changelog), for a proxy that
+strips its mount point.
 `q` is anything Hister's search box takes: label:books, an alias, words, * for everything. Each exclude_label (exact,
 case-sensitive) is sent to Hister as ` -label:"x"`. Code documents (metadata.source:code) are never feed items.
 
@@ -17,11 +22,17 @@ The gate (SHIORI_FEED_AUTH; the README has the details):
                when set; a non-loopback bind needs that or SHIORI_FEED_BIND_BEHIND_PROXY=1, or it refuses to start
     proxy      a proxy in front signs people in (nginx auth_request, say); only SHIORI_FEED_TRUSTED_PROXIES may connect
     open       no check; only on a loopback bind, or with SHIORI_FEED_BIND_BEHIND_PROXY=1 (a published 127.0.0.1 port)
+Room tokens (0.2.0), in tailscale and proxy mode: with SHIORI_FEED_AUTH_URL (hister-login's internal address) a caller
+may also send `Authorization: Bearer mht_…` (or `X-Machiya-Token`), a room token hister-login issued for
+SHIORI_FEED_PUBLIC_URL's origin, acting as one of SHIORI_FEED_HISTER_USERS. A request that carries one is decided by
+the token alone: a bad, revoked or other room's token is refused, never passed to the other checks.
 
 Hister gets `Origin: hister://` and the owner's token from SHIORI_FEED_HISTER_TOKEN_FILE (X-Access-Token), never a
 redirect. The log carries method, path and status only: never a query, a title or a token. Stdlib only.
 """
 import collections
+import hashlib
+import http.client
 import ipaddress
 import json
 import os
@@ -37,16 +48,23 @@ from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from xml.sax.saxutils import escape
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 FEED_PATHS = {"/shiori/feed", "/feed"}
 HEALTH_PATHS = {"/shiori/healthz", "/healthz"}
+STATUS_PATHS = {"/shiori/api/status", "/api/status"}
+CHANGELOG_PATHS = {"/shiori/api/changelog", "/api/changelog"}
+OPEN_PATHS = HEALTH_PATHS | STATUS_PATHS | CHANGELOG_PATHS     # no gate, and not logged
+CHANGELOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CHANGELOG.md")
+CHANGELOG_LIMIT = 64 * 1024
+HISTER_FAILS = 3                    # feeds in a row that failed to reach Hister before /api/status reports an error
 FEED_LIMIT, Q_MAX, TITLE_MAX, LABEL_MAX, LABELS_MAX, DESC_MAX = 50, 500, 200, 100, 20, 500
 HISTER_TIMEOUT = 20                 # seconds for one Hister search
 HISTER_MAX = 16 << 20               # the most of Hister's answer read (50 documents with their text)
 CLIENT_TIMEOUT = 30                 # seconds a client may take to send its request
 CTRL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f￾￿]")     # not allowed in XML 1.0 (and DEL)
 TOKEN_RE = re.compile(r"[\x21-\x7e]{1,4096}")
+RTOKEN_RE = re.compile(r"mht_[A-Za-z0-9_-]{43}\Z")     # a room token, as hister-login mints them
 MODES = ("tailscale", "proxy", "open")
 
 
@@ -121,6 +139,92 @@ def flag(value):
     return (value or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def own_origin(url):
+    """scheme://host[:port], as hister-login writes a room's origin (lowercase, no default port)."""
+    try:
+        u = urllib.parse.urlsplit(url)
+        port = None if u.port in (None, {"https": 443, "http": 80}.get(u.scheme)) else u.port
+        return "%s://%s%s" % (u.scheme.lower(), (u.hostname or "").lower(), "" if port is None else ":%d" % port)
+    except ValueError:
+        return ""
+
+
+class RoomTokens:
+    """Room tokens checked with hister-login (GET <auth_url>/v1/check), as smallweb does: a good answer is kept 30 s,
+    a refusal 5 s, keyed by the token's SHA-256 (the token itself is never kept, logged or passed on)."""
+
+    def __init__(self, auth_url, public_url, users, timeout=2):
+        self.auth_url, self.origin, self.users, self.timeout = auth_url, own_origin(public_url), users, timeout
+        self.cache, self.lock = {}, threading.Lock()
+
+    def check(self, value):
+        """-> the Hister username the token acts as, or None."""
+        key = hashlib.sha256(value.encode("ascii")).hexdigest()
+        with self.lock:
+            hit = self.cache.get(key)
+        if hit and hit[0] > time.monotonic():
+            return hit[1]
+        user, ttl = None, 5
+        u = urllib.parse.urlsplit(self.auth_url)
+        conn = (http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection)(
+            u.hostname, u.port, timeout=self.timeout)
+        try:
+            conn.request("GET", u.path.rstrip("/") + "/v1/check", headers={
+                "X-Machiya-Session": value, "X-Machiya-Room": self.origin, "Accept": "application/json"})
+            r = conn.getresponse()
+            data = json.loads(r.read(1 << 16) or b"null")
+            if r.status == 200 and isinstance(data, dict) and data.get("kind") == "token" \
+                    and data.get("username") in self.users:
+                user, ttl = data["username"], 30
+        except (OSError, http.client.HTTPException, ValueError):
+            pass
+        finally:
+            conn.close()
+        with self.lock:
+            if len(self.cache) > 1024:
+                self.cache.clear()
+            self.cache[key] = (time.monotonic() + ttl, user)
+        return user
+
+
+def room_token_user(tokens, headers):
+    """-> (presented, Hister username or None). A request without a room token isn't one (presented False: the other
+    checks decide); a malformed token, two of them, or one sent when room tokens are off is refused."""
+    values = headers.get_all("Authorization") or []
+    extra = [v.strip() for v in headers.get_all("X-Machiya-Token") or [] if v.strip()]   # a client with fixed headers
+    if extra:
+        if values or len(extra) > 1 or tokens is None or not RTOKEN_RE.match(extra[0]):
+            return True, None
+        value = extra[0]
+    else:
+        if not values:
+            return False, None
+        scheme, _, value = values[0].strip().partition(" ")
+        value = value.strip()
+        if len(values) == 1 and not (scheme.lower() == "bearer" and value.startswith("mht_")):
+            return False, None
+        if tokens is None or len(values) > 1 or not RTOKEN_RE.match(value):
+            return True, None
+    return True, tokens.check(value)
+
+
+def changelog():
+    """GET /api/changelog (the shape of vaultkit.changelog): (status, body, headers). The file's first 64 KiB cut at a
+    whole line, text/markdown, an ETag; a missing file is a 404."""
+    try:
+        with open(CHANGELOG_FILE, "rb") as f:
+            data = f.read(CHANGELOG_LIMIT + 1)
+    except OSError:
+        return 404, b"no changelog\n", [("Content-Type", "text/plain; charset=utf-8"), ("Cache-Control", "no-store")]
+    if len(data) > CHANGELOG_LIMIT:
+        data = data[:CHANGELOG_LIMIT]
+        cut = data.rfind(b"\n")
+        data = data[:cut + 1] if cut > 0 else data
+    body = data.decode("utf-8", "replace").encode("utf-8")
+    tag = '"%s"' % hashlib.sha256(body).hexdigest()[:20]
+    return 200, body, [("Content-Type", "text/markdown; charset=utf-8"), ("ETag", tag), ("Cache-Control", "no-cache")]
+
+
 class Config:
     """Everything from the environment, checked once at start: a bad setting stops the start with its reason."""
 
@@ -149,6 +253,17 @@ class Config:
             self.per_minute = int(g("PER_MINUTE", "60"))
         except ValueError:
             raise SystemExit("shiori-feed: SHIORI_FEED_PORT and SHIORI_FEED_PER_MINUTE are numbers")
+        self.auth_url = g("AUTH_URL").rstrip("/")
+        self.public_url = g("PUBLIC_URL").rstrip("/")
+        self.hister_users = frozenset(u.strip() for u in g("HISTER_USERS").split(",") if u.strip())
+        if self.auth_url:
+            if not self.auth_url.startswith(("http://", "https://")):
+                raise SystemExit("shiori-feed: SHIORI_FEED_AUTH_URL must be hister-login's http(s) address")
+            if not self.public_url.startswith(("http://", "https://")) or not self.hister_users \
+                    or "*" in self.hister_users:
+                raise SystemExit("shiori-feed: SHIORI_FEED_AUTH_URL (room tokens) needs SHIORI_FEED_PUBLIC_URL (the "
+                                 "address the tokens are issued for) and SHIORI_FEED_HISTER_USERS (never *)")
+        self.room_tokens = RoomTokens(self.auth_url, self.public_url, self.hister_users) if self.auth_url else None
         self.check_bind()
 
     def check_bind(self):
@@ -168,8 +283,18 @@ class Config:
 
     def allows(self, client, headers):
         """The gate, for one request: True to serve it."""
+        return self.decide(client, headers)[0]
+
+    def decide(self, client, headers):
+        """The gate: (serve it, decided by a room token)."""
         if self.auth == "open":
-            return True
+            return True, False
+        presented, user = room_token_user(self.room_tokens, headers)
+        if presented:                                   # a room token decides alone
+            return user is not None, True
+        return self.allows_session(client, headers), False
+
+    def allows_session(self, client, headers):
         ip = peer_ip(client)
         from_proxy = ip is not None and any(ip in net for net in self.trusted)
         if self.auth == "proxy":
@@ -304,10 +429,13 @@ class Handler(BaseHTTPRequestHandler):
             docs = hister_search(self.cfg, q, exclude)
         except urllib.error.HTTPError as e:
             log("hister: HTTP %d" % e.code)
+            self.server.hister_failed("HTTP %d" % e.code)
             return self.reply(502, b"Hister failed\n")
         except (OSError, ValueError) as e:                  # refused, timeouts, too big, bad JSON
             log("hister: %s" % type(e).__name__)
+            self.server.hister_failed(type(e).__name__)
             return self.reply(502, b"Hister failed\n")
+        self.server.hister_ok()
         self.reply(200, rss(self.cfg, q, title, docs), "application/rss+xml; charset=utf-8", "private, max-age=300")
 
     def do_GET(self):
@@ -316,21 +444,34 @@ class Handler(BaseHTTPRequestHandler):
             return self.feed()
         if path in HEALTH_PATHS:
             return self.reply(200, b"ok\n")
+        if path in STATUS_PATHS:
+            return self.reply(200, json.dumps(self.server.status()).encode(), "application/json; charset=utf-8")
+        if path in CHANGELOG_PATHS:
+            code, body, headers = changelog()
+            tag = dict(headers).get("ETag")
+            asked = [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]
+            if code == 200 and tag and (tag in asked or "*" in asked):
+                code, body = 304, b""
+            h = dict(headers)
+            return self.reply(code, body, h["Content-Type"], h["Cache-Control"],
+                              [(k, v) for k, v in headers if k not in ("Content-Type", "Cache-Control")])
         self.reply(404, b"not found\n")
 
     def do_HEAD(self):
         path = self.path.split("?", 1)[0]
+        if path in STATUS_PATHS | CHANGELOG_PATHS:
+            return self.do_GET()
         self.reply(200 if path in HEALTH_PATHS else 405 if path in FEED_PATHS else 404)
 
     def refuse(self):
         path = self.path.split("?", 1)[0]
-        self.reply(405 if path in FEED_PATHS | HEALTH_PATHS else 404, headers=[("Allow", "GET")])
+        self.reply(405 if path in FEED_PATHS | OPEN_PATHS else 404, headers=[("Allow", "GET")])
 
     do_PUT = do_POST = do_DELETE = do_PATCH = do_OPTIONS = refuse
 
     def log_request(self, code="-", size="-"):        # method, path and status: never the query (searches)
         path = CTRL.sub("?", (getattr(self, "path", "") or "").split("?", 1)[0])[:200]
-        if path not in HEALTH_PATHS:
+        if path not in OPEN_PATHS:
             log("%s %s %s" % (CTRL.sub("?", self.command or "-")[:16], path, getattr(code, "value", code)))
 
     def log_error(self, fmt, *args):                   # the code only, never the raw request line
@@ -340,19 +481,47 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def setup(self, cfg):
+        self.cfg, self.limiter = cfg, Limiter(cfg.per_minute)
+        self.hister = {"last_ok": None, "last_error": None, "fails": 0}
+        self.state_lock = threading.Lock()
+
+    def hister_ok(self):
+        with self.state_lock:
+            self.hister.update(last_ok=int(time.time()), fails=0)
+
+    def hister_failed(self, why):
+        with self.state_lock:
+            self.hister["fails"] += 1
+            self.hister["last_error"] = "%s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), why)
+
+    def status(self):
+        """GET /api/status: never a query, a title or a token."""
+        with self.state_lock:
+            h = dict(self.hister)
+        error = "Hister failed %d feeds in a row (%s)" % (h["fails"], h["last_error"]) \
+            if h["fails"] >= HISTER_FAILS else None
+        return {"ok": error is None, "ready": True, "error": error, "version": VERSION, "auth": self.cfg.auth,
+                "room_tokens": self.cfg.room_tokens is not None,
+                "hister": {"token": self.cfg.token is not None, "last_ok": h["last_ok"], "last_error": h["last_error"]}}
+
+
 def make_server(cfg, bind=None, port=None):
-    server = ThreadingHTTPServer((cfg.bind if bind is None else bind, cfg.port if port is None else port), Handler)
-    server.daemon_threads = True
-    server.cfg, server.limiter = cfg, Limiter(cfg.per_minute)
+    server = Server((cfg.bind if bind is None else bind, cfg.port if port is None else port), Handler)
+    server.setup(cfg)
     return server
 
 
 def main():
     cfg = Config()
     server = make_server(cfg)
-    log("%s: listening on %s:%d, auth %s%s, Hister %s%s" % (
+    log("%s: listening on %s:%d, auth %s%s%s, Hister %s%s" % (
         VERSION, cfg.bind, cfg.port, cfg.auth,
         "" if cfg.auth != "tailscale" else " (%s)" % (",".join(sorted(cfg.users)) or "NOBODY: set SHIORI_FEED_USERS"),
+        " + room tokens" if cfg.room_tokens and cfg.auth != "open" else "",
         cfg.hister, " with a token" if cfg.token else ""))
     if cfg.auth == "open":
         log("WARNING: SHIORI_FEED_AUTH=open: no identity check; anyone who reaches %s:%d can read your Hister through "
