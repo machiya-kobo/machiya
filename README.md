@@ -61,7 +61,7 @@ flowchart LR
 
 ## Quickstart
 
-Run the whole stack on one machine, on your own vault. It listens on `127.0.0.1` only, so there's nothing to sign in to. You need `git` and Docker with Compose 2.20+, or Podman (`podman compose`).
+Run the whole stack on one machine, on your own vault. It listens on `127.0.0.1` only, so there's nothing to sign in to. You need `git` and Docker with Compose 2.20+, or rootless Podman 4.9+ set up as in [the sample vault](docs/install/sample-vault.md#what-you-need).
 
 **1. Get the code**
 
@@ -73,13 +73,15 @@ cp .env.example .env
 mkdir -p data/kura data/niwa data/konbini data/hister   # yours, not root's: Docker would create missing ones as root
 ```
 
-**2. Give the apps your vault.** Niwa and Konbini write to it, so they need copies they can push to:
+**2. Give the apps your vault.** Niwa and Konbini write to it, so the stack keeps a copy they can push to:
 
 ```bash
 sudo mkdir -p /srv/machiya && sudo chown "$USER" /srv/machiya
 git clone --bare <your vault> /srv/machiya/vault.git
-git clone <your vault> /srv/machiya/konbini-repo
+git clone /srv/machiya/vault.git /srv/machiya/konbini-repo
 ```
+
+`/srv/machiya/vault.git` is now the stack's vault. Add it as a remote of your vault (`git remote add machiya <this machine>:/srv/machiya/vault.git`), push your edits to it, and pull the apps' edits from it.
 
 **3. Fill in `.env`**
 
@@ -87,15 +89,16 @@ git clone <your vault> /srv/machiya/konbini-repo
 |---|---|
 | `VAULT_REPO_URL` | `file:///srv/machiya/vault.git` (https and ssh URLs work too; Niwa needs write access, Kura only reads) |
 | `VAULT_GIT` | `/srv/machiya/vault.git` (uncomment it) |
-| `VAULT_SUBDIR` | the folder that holds your notes, if it isn't the root |
+| `VAULT_SUBDIR` | the folder that holds your notes, if it isn't the root (uncomment it) |
+| `MACHIYA_USERNS`, `MACHIYA_NO_HEALTHCHECK` | rootless Podman only: `keep-id` and `true` |
 | `KONBINI_REPO` | `/srv/machiya/konbini-repo` |
 | `SEARXNG_SECRET` | the output of `openssl rand -hex 32` |
 | `MACHIYA_UID`, `MACHIYA_GID` | the output of `id -u` and `id -g` |
 
-**4. Start it.** Profiles pick the apps; leave one out and the others carry on:
+**4. Start it.** `COMPOSE_PROFILES` in `.env` picks the apps; leave one out and the others carry on. With Podman, drop `--wait`:
 
 ```bash
-docker compose --profile engines --profile kura --profile niwa --profile konbini up -d --build --wait
+docker compose up -d --build --wait
 ```
 
 | App | Address |
@@ -112,7 +115,7 @@ The **Rooms** menu in each app's header moves between them.
 
 - **Try it on invented notes first:** [the sample vault](docs/install/sample-vault.md), about ten minutes.
 - **Use it from your phone and laptop:** [remote access](docs/install/remote-access.md).
-- **Search your code:** fill in the Code lines of `.env`, run `mkdir -p data/code-import secrets`, and add `--profile code` ([details](stack/code-import/README.md)).
+- **Search your code:** fill in the Code lines of `.env`, run `mkdir -p data/code-import secrets`, and add `code` to `COMPOSE_PROFILES` ([details](stack/code-import/README.md)).
 - **Get the search app:** [build Shiori against this stack](https://github.com/machiya-kobo/shiori/blob/main/docs/quickstart.md#b-as-one-of-the-machiya-services), web and Linux.
 - **Run one app, or skip containers:** [install guides](docs/install/) for Linux, the BSDs and one app at a time.
 
