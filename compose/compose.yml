@@ -6,7 +6,7 @@
 #
 # `docker compose` works the same as `podman compose`. Profiles choose what runs (COMPOSE_PROFILES in .env, or
 # --profile on the command line): engines (hister, searxng + valkey), kura, niwa, konbini, smallweb, mcp, code (code-import: your repos for
-# Shiori's Code view), and proxy (an optional SOCKS5
+# Shiori's Code view), shiori (shiori-feed and shiori-ai: Shiori's Subscribe and AI answers), and proxy (an optional SOCKS5
 # egress proxy for SearXNG, off by default; see the `proxy` service below and config/searxng/settings.yml).
 # Ports: every published port is a variable (HISTER_PORT, SEARXNG_PORT, KURA_PORT, NIWA_PORT, NIWA_GEMINI_PORT, NIWA_GOPHER_PORT,
 # KONBINI_PORT, SMALLWEB_PORT, MCP_PORT) for when one is taken; change the matching *_PUBLIC_URL and MACHIYA_ROOMS with it.
