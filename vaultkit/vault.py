@@ -106,8 +106,11 @@ class Vault:
         for n in notes.values():
             for t in n.links:
                 backlinks.setdefault(t, set()).add(n.rel)
+        self._walk_times = {}
         tended = self.tended_dates()
-        self.notes, self.by_name, self.assets, self.backlinks, self.tended = notes, by_name, assets, backlinks, tended
+        tended_at = self._walk_times
+        self.notes, self.by_name, self.assets, self.backlinks = notes, by_name, assets, backlinks
+        self.tended, self.tended_at = tended, tended_at
         self._key = key
 
     def resolve(self, target):
@@ -115,16 +118,43 @@ class Vault:
 
     def tended_dates(self):
         """{rel: YYYY-MM-DD of the note's latest commit}. v0.22 (KURA-5): core.quotePath=false, so a non-ASCII name
-        (町家.md, café notes.md) isn't printed quoted and octal-escaped, and keeps its date."""
-        out = self.git("-c", "core.quotePath=false", "log", "--format=@%as", "--name-only", "--", self.subdir or ".")
-        dates, current = {}, None
+        (町家.md, café notes.md) isn't printed quoted and octal-escaped, and keeps its date.
+
+        v0.28: one walk, then only what's new. The walk remembers the commit it reached; when HEAD has moved on from it,
+        only the new commits are walked and their dates laid over the old ones (a note's newest commit wins, as in a
+        full walk). After a history rewrite (the old commit isn't an ancestor any more) it walks everything again. The
+        same walk gives each note's commit time in seconds, as Vault.tended_at after index()."""
+        head = self.git("rev-parse", "HEAD").strip()
+        walked = getattr(self, "_walked", None)
+        if head and walked and walked[0] == head:
+            dates, times = walked[1], walked[2]
+        elif head and walked and self.git("merge-base", walked[0], head).strip() == walked[0]:
+            new_dates, new_times = self._walk("%s..%s" % (walked[0], head))
+            dates, times = dict(walked[1]), dict(walked[2])
+            dates.update(new_dates)
+            times.update(new_times)
+        else:
+            dates, times = self._walk(head) if head else self._walk()
+        if head:
+            self._walked = (head, dates, times)
+        self._walk_times = times
+        return dates
+
+    def _walk(self, *revs):
+        """({rel: date}, {rel: seconds}) of each file's newest commit in `git log revs` under the vault."""
+        out = self.git("-c", "core.quotePath=false", "log", "--format=@%as %at", "--name-only", *revs, "--",
+                       self.subdir or ".")
+        dates, times, current = {}, {}, None
         prefix = self.subdir + "/" if self.subdir else ""
         for line in out.splitlines():
             if line.startswith("@"):
-                current = line[1:]
+                day, _, at = line[1:].partition(" ")
+                current = (day, int(at) if at.isdigit() else 0)
             elif line and line.startswith(prefix) and current:
-                dates.setdefault(line[len(prefix):], current)
-        return dates
+                rel = line[len(prefix):]
+                if rel not in dates:
+                    dates[rel], times[rel] = current
+        return dates, times
 
     def get(self, slug):
         self.index()

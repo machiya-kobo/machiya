@@ -214,6 +214,68 @@ class IncrementalReadTest(unittest.TestCase):
             shutil.rmtree(tmp)
 
 
+class TendedWalkTest(unittest.TestCase):
+    """v0.28: the tended dates walk only the commits added since the last walk; the result (and tended_at, the commit
+    times from the same walk) must equal a full walk from scratch after edits, renames, deletes, a merge and a history
+    rewrite."""
+
+    def commit(self, root, msg, date):
+        env = dict(os.environ, GIT_AUTHOR_DATE=date, GIT_COMMITTER_DATE=date)
+        g = ("git", "-c", "user.name=t", "-c", "user.email=t@t")
+        subprocess.run(g + ("add", "-A"), cwd=root, check=True)
+        subprocess.run(g + ("commit", "-q", "-m", msg), cwd=root, check=True, env=env)
+
+    def full(self, root):
+        v = vaultkit.Vault(root, "personal")
+        v.revision = "fresh"
+        v.index()
+        return v.tended, v.tended_at
+
+    def test_incremental_equals_a_full_walk(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            make_repo(tmp)
+            p = os.path.join(tmp, "personal")
+            v = vaultkit.Vault(tmp, "personal")
+            n = 0
+
+            def check():
+                nonlocal n
+                n += 1
+                v.revision = "r%d" % n
+                v.index()
+                self.assertEqual((v.tended, v.tended_at), self.full(tmp))
+                self.assertTrue(v.tended)
+
+            check()
+            rels = sorted(r for r in v.notes)
+            with open(os.path.join(p, rels[0]), "a") as f:
+                f.write("\nedit\n")
+            self.commit(tmp, "edit", "2026-02-01T10:00:00")
+            check()
+            subprocess.run(("git", "mv", os.path.join(p, rels[1]), os.path.join(p, "Renamed.md")), cwd=tmp, check=True)
+            os.remove(os.path.join(p, rels[2]))
+            self.commit(tmp, "rename and delete", "2026-03-01T10:00:00")
+            check()
+            g = ("git", "-c", "user.name=t", "-c", "user.email=t@t")
+            subprocess.run(("git", "checkout", "-q", "-b", "side", "HEAD~1"), cwd=tmp, check=True)
+            with open(os.path.join(p, "Side.md"), "w") as f:
+                f.write("side\n")
+            self.commit(tmp, "side", "2026-03-05T10:00:00")
+            subprocess.run(("git", "checkout", "-q", "main"), cwd=tmp, check=True)
+            subprocess.run(g + ("merge", "-q", "--no-edit", "side"), cwd=tmp, check=True,
+                           env=dict(os.environ, GIT_AUTHOR_DATE="2026-03-06T10:00:00", GIT_COMMITTER_DATE="2026-03-06T10:00:00"))
+            check()
+            subprocess.run(("git", "reset", "-q", "--hard", "HEAD~2"), cwd=tmp, check=True)    # a history rewrite
+            with open(os.path.join(p, "After.md"), "w") as f:
+                f.write("after\n")
+            self.commit(tmp, "rewritten", "2026-04-01T10:00:00")
+            check()
+            check()                                          # nothing new: the same answer
+        finally:
+            shutil.rmtree(tmp)
+
+
 class SanitizeTest(unittest.TestCase):
     """vaultkit.sanitize (v0.13): a note's HTML never runs, in a page or an API answer."""
 
