@@ -875,3 +875,10 @@ class TrustedFallbackTest(unittest.TestCase):
         env["NIWA_TRUSTED_PROXIES"] = "proxy"
         with self.assertRaisesRegex(IdentityError, "NIWA_TRUSTED_PROXIES"):
             quiet(ha.load_for, "niwa", env, bind="127.0.0.1")
+
+
+class RefusedTextTest(unittest.TestCase):
+    def test_token_expired_is_explained(self):
+        """v0.29: hister-login 0.6.0's token-expired reaches the room as its own reason, with a sentence for people."""
+        self.assertIn("token-expired", ha.REFUSED_TEXT)
+        self.assertIn("90 days", ha.REFUSED_TEXT["token-expired"])
