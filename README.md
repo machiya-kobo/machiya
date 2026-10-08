@@ -6,6 +6,8 @@ Machiya (町家, townhouse) is a set of small self-hosted apps for finding what 
 
 A Kyoto machiya has a shop at the front, a small garden inside and a storehouse at the back, all under one roof.
 
+Agentically coded with [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+
 <p align="center">
 <a href="https://machiya-kobo.github.io/">Website</a> · <a href="#apps">Apps</a> · <a href="#architecture">Architecture</a> · <a href="#quickstart">Quickstart</a> · <a href="docs/install/sample-vault.md">Sample vault</a> · <a href="docs/install/">Install</a> · <a href="#license">License</a>
 </p>
