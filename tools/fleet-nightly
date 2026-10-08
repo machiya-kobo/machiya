@@ -26,6 +26,7 @@ Legs (each OS lists its own in `oses.<os>.legs`):
                      --hister-via <the Hister host> (a kept Docker dev stack on `hister_host`, started on first
                      need, kept until the last OS that needs it, then stopped)
   stack-quickstart   machiya tools/quickstart-test --with-packages, on the VM  (the README's stack Quickstart)
+  shiori-quickstart  machiya tools/quickstart-test --only shiori --with-packages, on the VM  (Shiori from scratch)
   kura-native        kura tools/quickstart-test --only native --ssh VM
   kura-container     kura tools/quickstart-test --only container --ssh VM      (podman)
   niwa-native        niwa tools/quickstart-test --only native --with-packages, on the VM
@@ -70,7 +71,7 @@ REPOS = ("machiya", "kura", "niwa", "konbini")
 SCHEMA = 1
 KIND = "machiya-fleet-nightly"
 
-LINUX_LEGS = ["dev-docker", "dev-native", "stack-quickstart", "kura-native", "kura-container", "niwa-native",
+LINUX_LEGS = ["dev-docker", "dev-native", "stack-quickstart", "shiori-quickstart", "kura-native", "kura-container", "niwa-native",
               "niwa-container", "konbini-native", "konbini-container"]
 BSD_LEGS = ["dev-native", "kura-native", "niwa-native", "konbini-native"]
 
@@ -80,6 +81,8 @@ LEGS = {
     "dev-native": {"title": "dev stack, native (dev-test --packages --native)", "where": "local", "timeout": 1800},
     "stack-quickstart": {"title": "machiya README Quickstart (quickstart-test --with-packages)", "where": "vm",
                          "repo": "machiya", "args": "--with-packages --siblings {dir}", "timeout": 2700},
+    "shiori-quickstart": {"title": "machiya README, Shiori from scratch (compose/shiori.yml)", "where": "vm",
+                          "repo": "machiya", "args": "--only shiori --with-packages", "timeout": 1800},
     "kura-native": {"title": "Kura README, native", "where": "local", "repo": "kura",
                     "args": "--only native --ssh {vm}", "timeout": 1200},
     "kura-container": {"title": "Kura README, container (podman)", "where": "local", "repo": "kura",

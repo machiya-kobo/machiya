@@ -80,6 +80,7 @@ Open <http://localhost:8080> to search, or <http://localhost:8081> for the web a
 
 `compose/shiori.yml` brings up all three on this machine:
 
+<!-- quickstart: shiori-up -->
 ```bash
 git clone https://github.com/machiya-kobo/machiya.git && cd machiya/compose
 echo "SEARXNG_SECRET=$(openssl rand -hex 32)" >> .env
