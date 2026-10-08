@@ -63,9 +63,9 @@ flowchart LR
 
 ## Quickstart
 
-### Already have Hister and SearXNG?
+### Already have Hister and SearXNG? Search them together with Shiori
 
-Search them together with [Shiori](https://github.com/machiya-kobo/shiori). Turn on SearXNG's JSON results (`formats: [html, json]` under `search:` in its `settings.yml`), then run:
+[Shiori](https://github.com/machiya-kobo/shiori) needs only those two. Turn on SearXNG's JSON results (`formats: [html, json]` under `search:` in its `settings.yml`), then run:
 
 ```bash
 docker run -d --name shiori -p 8080:8080 -p 8081:8081 \
@@ -76,7 +76,9 @@ docker run -d --name shiori -p 8080:8080 -p 8081:8081 \
 
 Open <http://localhost:8080> to search, or <http://localhost:8081> for the web app. If your Hister has users, sign in with your Hister account.
 
-Starting from nothing? `compose/shiori.yml` runs Hister, SearXNG and Shiori together:
+### Starting from scratch? Run Hister, SearXNG and Shiori together
+
+`compose/shiori.yml` brings up all three on this machine:
 
 ```bash
 git clone https://github.com/machiya-kobo/machiya.git && cd machiya/compose
@@ -85,7 +87,11 @@ mkdir -p data/hister
 docker compose -f shiori.yml up -d
 ```
 
-**Add more.** Each extra is its own app with a public image on `ghcr.io/machiya-kobo`. Run it, then give Shiori its address:
+Then open <http://localhost:8080>. Save pages to Hister with its [browser extension](https://hister.org/docs/browser-extension), and they show up in Shiori.
+
+### Add more to Shiori
+
+Each extra is its own app with a public image on `ghcr.io/machiya-kobo`. Run it, then give Shiori its address:
 
 | To search | Run | Then set on Shiori |
 |---|---|---|
