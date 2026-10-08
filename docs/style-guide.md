@@ -26,6 +26,14 @@ The row of choices above a list: Shiori's All · Pages · Notes · Web tabs, Niw
 - One row that scrolls sideways, with no scrollbar, never wrapping. `machiya.js` fades the edge it can still scroll toward (`data-fade`, v0.26.1).
 - Each pill's colour is the colour of what it shows (rule 1). When the choices aren't things (dates, states), they all wear the room's colour.
 
+## View switches
+
+How a list is shown (Group By, Sort, a layout), as opposed to what it holds, is a `.segmented` control: neutral, a sunken track with the chosen option as a raised pill, like Shiori's Anytime and Best Match settings. It never takes a colour, so it can't be mistaken for a filter row of pills (v0.27.1).
+
+```html
+<nav class="segmented" aria-label="Group By"><a aria-current="true">Area</a><a>Stream</a><a>Family</a></nav>
+```
+
 ## Chips
 
 - **State:** `.chip` with `--chip` set: outlined in its colour, the colour as text, no fill. Use it for a stage (Seedling, Budding, Evergreen), a status, a priority, a count.
