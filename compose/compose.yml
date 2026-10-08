@@ -266,6 +266,57 @@ services:
     mem_limit: 256m
     restart: unless-stopped
 
+  # -- Shiori's companions: shiori-feed and shiori-ai (profile `shiori`) ------------------------------
+  # Subscribe feeds of any Hister search, and Summarize and AI Answer for Shiori's hosted pages
+  # (docs/services/shiori-feed.md, docs/services/shiori-ai.md). Each has a gate of its own: in the default `open` mode
+  # the published port binds 127.0.0.1 and *_BIND_BEHIND_PROXY=1 says so. Behind a proxy that signs people in, set
+  # *_AUTH=proxy and the proxy's address in *_TRUSTED_PROXIES; behind a Tailscale sidecar, *_AUTH=tailscale, *_USERS
+  # and the sidecar's address. Secrets are files in SHIORI_SECRETS_DIR, mounted at /secrets.
+  shiori-feed:
+    profiles: [shiori]
+    <<: *room
+    build: ../stack/shiori-feed
+    environment:
+      - SHIORI_FEED_AUTH=${SHIORI_FEED_AUTH:-open}
+      - SHIORI_FEED_BIND_BEHIND_PROXY=${SHIORI_FEED_BIND_BEHIND_PROXY:-1}
+      - SHIORI_FEED_USERS=${SHIORI_FEED_USERS:-}
+      - SHIORI_FEED_TRUSTED_PROXIES=${SHIORI_FEED_TRUSTED_PROXIES:-}
+      - SHIORI_FEED_HISTER_URL=${SHIORI_FEED_HISTER_URL:-http://hister:4433}
+      - SHIORI_FEED_HISTER_TOKEN_FILE=${SHIORI_HISTER_TOKEN_FILE:-}       # e.g. /secrets/hister-token; only when Hister has users
+      - SHIORI_FEED_HISTER_PUBLIC_URL=${HISTER_PUBLIC_URL:-http://localhost:4433}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SHIORI_SECRETS_DIR:-./secrets}:/secrets:ro
+    read_only: true
+    ports: ["127.0.0.1:${SHIORI_FEED_PORT:-8092}:8080"]
+    mem_limit: 64m
+    restart: unless-stopped
+
+  shiori-ai:
+    profiles: [shiori]
+    <<: *room
+    build: ../stack/shiori-ai
+    environment:
+      - SHIORI_AI_AUTH=${SHIORI_AI_AUTH:-open}
+      - SHIORI_AI_BIND_BEHIND_PROXY=${SHIORI_AI_BIND_BEHIND_PROXY:-1}
+      - SHIORI_AI_USERS=${SHIORI_AI_USERS:-}
+      - SHIORI_AI_TRUSTED_PROXIES=${SHIORI_AI_TRUSTED_PROXIES:-}
+      - SHIORI_AI_KEY_FILE=${SHIORI_AI_KEY_FILE:-}                         # e.g. /secrets/anthropic-api-key; empty = AI off
+      - SHIORI_AI_MODEL=${SHIORI_AI_MODEL:-claude-sonnet-5-5}
+      - SHIORI_AI_DAILY_REQUESTS=${SHIORI_AI_DAILY_REQUESTS:-100}
+      - SHIORI_AI_DAILY_INPUT_TOKENS=${SHIORI_AI_DAILY_INPUT_TOKENS:-2000000}
+      - SHIORI_AI_HISTER_URL=${SHIORI_AI_HISTER_URL:-http://hister:4433}   # summaries; empty = off
+      - SHIORI_AI_HISTER_TOKEN_FILE=${SHIORI_HISTER_TOKEN_FILE:-}
+      - SHIORI_AI_SEARXNG_URL=${SHIORI_AI_SEARXNG_URL:-http://searxng:8080}   # answers; empty = off
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${SHIORI_AI_DATA:-./data/shiori-ai}:/data
+      - ${SHIORI_SECRETS_DIR:-./secrets}:/secrets:ro
+    read_only: true
+    ports: ["127.0.0.1:${SHIORI_AI_PORT:-8093}:8080"]
+    mem_limit: 128m
+    restart: unless-stopped
+
 networks:
   default: {}
   smallweb:                                         # smallweb (.3) and its proxy only; .2 is the sidecar's: pin every member
