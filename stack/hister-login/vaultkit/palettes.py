@@ -189,6 +189,24 @@ def mix(a, b, pct):
     return _hex(tuple(x * pct / 100 + y * (1 - pct / 100) for x, y in zip(ra, rb)))
 
 
+HOVER_MIX = 24   # a hovered filter pill: its colour at 24% over --hl (Shiori 0.18.0, the owner: the plain lift hardly showed)
+
+
+def hover_shade(colour, hl, mode):
+    """A hovered pill's colour (v0.27.4): colour with its lightness moved until it reads at 4.5:1 on its own fill,
+    color-mix(in srgb, itself HOVER_MIX%, hl). The stylesheet mixes the fill from this same shade, so the browser draws
+    exactly the pair checked here."""
+    h, l, s = colorsys.rgb_to_hls(*_rgb(colour))
+    step = -0.005 if mode == "light" else 0.005
+    out = colour
+    while contrast(out, mix(out, hl, HOVER_MIX)) < 4.5:
+        l += step
+        if not 0 <= l <= 1:
+            return "#000000" if mode == "light" else "#ffffff"
+        out = _hex(colorsys.hls_to_rgb(h, l, s))
+    return out
+
+
 def card_colour(v, mode):
     """Shiori's result card (v0.27): a surface a step above the page. In a dark variant it's --bg moved 40% toward --hl
     (Tokyo Night #202331, Shiori's #24283b; at 50% Solarized dark's fg2 fell to 4.45:1); in a light one it's --hl,
@@ -221,6 +239,8 @@ def tokens(key, mode):
     for t in ACCENTS:
         need = minimum(mode, t)
         v[t + "-panel"] = readable(readable(v[t], v["dark"], need, mode), v["hl"], need, mode)
+    for t in ACCENTS:
+        v[t + "-hover"] = hover_shade(v[t], v["hl"], mode)
     v["card"] = card_colour(v, mode)
     v["tint-mix"] = tint_mix(v, mode)
     return v
@@ -244,6 +264,8 @@ def _block(selectors, key, mode, indent=""):
             " ".join("--%s: %s;" % (t, v[t]) for t in ("teal", "magenta", "cyan", "slate")),
             " ".join("--%s-panel: %s;" % (t, v[t + "-panel"]) for t in ACCENTS[:5]),
             " ".join("--%s-panel: %s;" % (t, v[t + "-panel"]) for t in ACCENTS[5:]),
+            " ".join("--%s-hover: %s;" % (t, v[t + "-hover"]) for t in ACCENTS[:5]),
+            " ".join("--%s-hover: %s;" % (t, v[t + "-hover"]) for t in ACCENTS[5:]),
             "--card: %s; --tint-mix: %d%%; --tint-base: var(--%s);" % (v["card"], v["tint-mix"], tint_base(mode)),
             _shadow(mode, v["fg"])]
     return "%s%s {\n%s\n%s}\n" % (indent, ", ".join(selectors), "\n".join(indent + "  " + r for r in rows), indent)

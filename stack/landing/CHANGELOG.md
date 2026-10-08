@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.6.3
+
+- **Shiori's pill hover** (vaultkit 0.27.4): an unselected pill under the pointer fills with 24% of its colour, its text in a shade that stays at 4.5:1 on that fill in every theme.
+
 ## 0.6.2
 
 - **A readable pill hover** (vaultkit 0.27.3): an unselected pill under the pointer lifts onto the raised colour with a small shadow, its text in a shade that stays at 4.5:1 in every theme. Also brings 0.27.2's `.sidehead` and `.rows`.
