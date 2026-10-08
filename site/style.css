@@ -150,13 +150,13 @@ p { margin: 0; text-wrap: pretty; }
 }
 .lede a { color: inherit; text-decoration-color: var(--blue); }
 .lede { text-wrap: balance; max-width: 34em; margin-inline: auto; margin-top: 18px; font-size: clamp(18px, 2.4vw, 21px); color: var(--fg2); }
-.actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px 28px; margin-top: 28px; }
+.actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px 14px; margin-top: 28px; }
 .button {
-  display: inline-block; padding: 12px 32px; border-radius: var(--r-pill);
+  display: inline-block; padding: 12px 32px; border-radius: var(--r-pill); border: 2px solid var(--blue);
   background: var(--blue); color: var(--on-blue); font-weight: 700; text-decoration: none;
 }
+.button.secondary { background: transparent; color: var(--blue); }   /* the same pill, outlined: beside the filled one */
 .button:hover { text-decoration: underline; }
-.quiet { color: var(--fg2); font-weight: 600; }
 
 .hero-shot { margin-top: 44px; }
 .hero-shot img, .feature-shot img {
