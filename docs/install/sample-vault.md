@@ -1,6 +1,6 @@
 # Try Machiya with the sample vault
 
-The whole stack on an invented vault (a paper-lantern workshop and a trip to Kyoto), in about ten minutes. [`tools/quickstart-test`](../../tools/quickstart-test) runs every block marked `quickstart:` on a fresh clone, so these are exactly the commands that were tested. To run it on your own notes instead, see the [Quickstart](../../README.md#quickstart).
+The whole stack on an invented vault (a paper-lantern workshop and a trip to Kyoto), in about ten minutes. To run it on your own notes instead, see the [Quickstart](../../README.md#quickstart).
 
 ## What you need
 
@@ -31,7 +31,7 @@ git clone https://github.com/machiya-kobo/niwa.git
 git clone https://github.com/machiya-kobo/konbini.git
 ```
 
-**2. Set the demo up.** `demo-init` makes the sample vault a git repository, gives Konbini its own clone, and writes a `.env` for this machine: your user and group ids, a fresh SearXNG secret, no login (safe only because every port binds `127.0.0.1`), every app on.
+**2. Set the demo up.** `demo-init` makes the sample vault a git repository, gives Konbini its own clone, and writes a `.env` for this machine. There's no login, which is safe only because every port binds `127.0.0.1`.
 
 <!-- quickstart: init -->
 ```bash
@@ -112,7 +112,7 @@ git -C data/vault.git log --format='%an: %s' -1
 garden: garden: 1 change (publish Candle vs LED)
 ```
 
-(In the browser you would use Niwa's **Publish** button on a note's page; the command above is the same form post.)
+(In the browser, that's Niwa's **Publish** button.)
 
 **6. Stop it, or start over.** Your data is the `data/` folder next to `compose.yml`:
 
@@ -145,3 +145,5 @@ rm -rf data .env
 ```text
 .../data/mirror/vault/.git/objects
 ```
+
+**Tested:** [`tools/quickstart-test`](../../tools/quickstart-test) runs every block on this page from a fresh clone.
