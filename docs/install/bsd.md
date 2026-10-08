@@ -2,7 +2,7 @@
 
 Native installs, packages only, no ports. Covers FreeBSD 14/15, NetBSD 10/11 and OpenBSD 7.7–7.9. The rc.d scripts are in [`contrib/rc.d/`](../../contrib/rc.d/).
 
-**Tested on** FreeBSD 15.1, NetBSD 11.0 and OpenBSD 7.9 (clean amd64 VMs): this guide as written, from the packages and the venv (§2) to Kura, Niwa and Konbini as rc.d services on 127.0.0.1 behind the owner gate. The [dev stack](../dev-stack.md) passes on all three too.
+**Tested** as written on clean amd64 FreeBSD 15.1, NetBSD 11.0 and OpenBSD 7.9 VMs. The [dev stack](../dev-stack.md) passes on all three too.
 
 - You need Kura 0.9.0, Niwa 0.6.1 and Konbini 0.13.0 or later (vaultkit v0.22, which needs `markdown` 3.11).
 - OpenBSD's Python has no `hashlib.scrypt`. The apps run there, but the identity file's password features refuse.
@@ -15,7 +15,7 @@ Native installs, packages only, no ports. Covers FreeBSD 14/15, NetBSD 10/11 and
 | Niwa | `NIWA_` | `NIWA_ENV_FILE` |
 | Konbini | `KANBAN_` (the old name stayed) | `KANBAN_ENV_FILE` |
 
-In the examples, `<app>` is `kura`, `niwa` or `konbini`, and `<tailnet>` is your tailnet's name (`<tailnet>.ts.net`).
+In the examples, `<app>` is `kura`, `niwa` or `konbini`.
 
 ## 1. Why every app listens on 127.0.0.1
 
@@ -33,13 +33,13 @@ The apps trust the `Tailscale-User-Login` header to know it's you. `tailscale se
 |---|---|---|---|
 | install | `pkg install -y python312 py312-sqlite3 py312-pyyaml git-lite curl` | `pkg_add python313 py313-yaml git-base curl daemonize` with `PKG_PATH` set (below) | `pkg_add python%3 py3-yaml git curl` |
 | Python | `/usr/local/bin/python3.12` (no `python3` name) | `/usr/pkg/bin/python3.13` (no `python3` name) | `/usr/local/bin/python3` |
-| note | **`py312-sqlite3` is separate**: FreeBSD splits `sqlite3` out of Python | sqlite3 is inside `python313` | sqlite3 is inside the Python package |
+
+FreeBSD splits sqlite3 out of Python, so `py312-sqlite3` is separate.
 
 - **A clean FreeBSD or NetBSD has no `python3` name**, only `python3.12` or `python3.13`. Make one (the Quickstarts do):
   - FreeBSD: `sudo ln -sf /usr/local/bin/python3.12 /usr/local/bin/python3`
   - NetBSD: `sudo ln -sf /usr/pkg/bin/python3.13 /usr/pkg/bin/python3`. `/usr/pkg/bin` must then be on the service's PATH; the rc.d scripts set it.
-- **A clean NetBSD has no `pkgin`** (it's a separate package). Install with `pkg_add`, pointed at the binary repository: `sudo env PKG_PATH="https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -p)/$(uname -r | cut -d_ -f1)/All" pkg_add python313 py313-yaml git-base curl daemonize`. If you prefer `pkgin`, add it the same way (`pkg_add pkgin`) and configure its repository first.
-- A clean FreeBSD or NetBSD also has no `git` or `curl`. They're in the lists above.
+- **A clean NetBSD has no `pkgin`** (it's a separate package). Install with `pkg_add`, pointed at the binary repository: `sudo env PKG_PATH="https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -p)/$(uname -r | cut -d_ -f1)/All" pkg_add python313 py313-yaml git-base curl daemonize`.
 - **Run the privileged commands as root** (`su -`), or through `sudo` or `doas` once one is set up.
   - A fresh FreeBSD or NetBSD has no `sudo`. As root: `pkg install sudo`, or `pkg_add sudo` with `PKG_PATH` as above, then allow your user with `visudo`.
   - A fresh OpenBSD has `doas` but no `/etc/doas.conf`. As root: `echo 'permit persist :wheel' > /etc/doas.conf`.
@@ -48,9 +48,7 @@ The apps trust the `Tailscale-User-Login` header to know it's you. `tailscale se
 
 ### The venv
 
-The apps need `markdown` **3.11 or later**. vaultkit refuses to start with an older one: 3.7–3.10 on Python 3.13 can be driven out of memory by a single note. Every BSD's package is older (FreeBSD 3.10.2, NetBSD 3.10.3, OpenBSD 3.10.2 as of October 2026), and OpenBSD's pip refuses to install into the system Python (`externally-managed-environment`, PEP 668).
-
-So on all three, make **one venv** for the apps, as root, once the `python3` link above exists. It keeps the packages' PyYAML and adds markdown. It brings its own pip, so you need no pip package:
+The apps need `markdown` **3.11 or later** (older ones can run out of memory on one note under Python 3.13), and every BSD's package is older (3.10.x as of October 2026). OpenBSD's pip also refuses the system Python (PEP 668). So, on all three, make **one venv** as root, once the `python3` link exists. It keeps the packages' PyYAML and brings its own pip:
 
 ```sh
 python3 -m venv --system-site-packages /usr/local/lib/machiya-venv
@@ -69,8 +67,6 @@ Kura's search needs SQLite's FTS5. The packages build it in:
 python3 -c 'import sqlite3; sqlite3.connect(":memory:").execute("create virtual table t using fts5(x)"); print("fts5 ok")'
 ```
 
-Without the `python3` link above, use `python3.12` on FreeBSD and `python3.13` on NetBSD.
-
 ## 3. A user and its directories
 
 Each app runs as its own unprivileged user. Its home is its data directory: the clone, the sqlite file, `~/.ssh`.
@@ -88,7 +84,7 @@ install -d -o kura -g kura -m 0700 /var/db/kura        # OpenBSD: -o _kura -g _k
 
 Repeat for `niwa` and `konbini` (OpenBSD: `_niwa` and `_konbini`).
 
-`useradd` warns that the home directory doesn't exist and `-m` wasn't given. That's harmless: the `install -d` right after it creates the directory.
+(`useradd`'s warning about the missing home is harmless: `install -d` makes it.)
 
 **The service user must own its clone.** git refuses a repository owned by someone else ("dubious ownership").
 
@@ -105,7 +101,7 @@ cd $SHARE/kura && /usr/local/lib/machiya-venv/bin/python3 -m vaultkit.verify   #
 
 Repeat for `niwa` and `konbini`.
 
-The rc.d scripts expect the app files directly in `/usr/local/share/<app>/` (NetBSD: `/usr/pkg/share/<app>/`), which the link gives. Or point `<app>_code` (FreeBSD and NetBSD) or the flags (OpenBSD) at `.../app`.
+The rc.d scripts expect the app files directly in `/usr/local/share/<app>/` (NetBSD: `/usr/pkg/share/<app>/`), which the link gives.
 
 ## 5. The vault
 
@@ -209,14 +205,10 @@ Copy the script for your BSD from `contrib/rc.d/<bsd>/<app>`, mode `0555`.
 | python | the venv's python3 when it exists, else `/usr/local/bin/python3.12`; another with `sysrc <app>_python=…` | the venv's python3 when it exists, else `/usr/pkg/bin/python3.13`; another with `<app>_python=…` in `/etc/rc.conf` | the script's `daemon=`: the venv's python3 when it exists, else `/usr/local/bin/python3` (rcctl can't change it; edit the script) |
 | settings | `<app>_config`, `_dir`, `_code`, `_python`, `_runas` in rc.conf | the same | `rcctl set <app> flags …` |
 
-All three scripts look for the venv of §2 (`/usr/local/lib/machiya-venv/bin/python3`) each time they run, so nothing needs setting.
-
-Without the venv they fall back to the system Python, whose markdown is missing or too old. The app then exits at once (`No module named 'markdown'`, or vaultkit's "needs Python-Markdown 3.11"), and each BSD reports it differently:
+Without the venv the scripts fall back to the system Python, whose markdown is missing or too old. The app then exits at once (`No module named 'markdown'`, or vaultkit's "needs Python-Markdown 3.11"), and each BSD reports it differently:
 - FreeBSD: daemon(8) restarts it in a loop, and `service <app> status` says it's running. Look in syslog.
 - NetBSD: `service <app> status` says it's not running.
 - OpenBSD: `rcctl start` says `failed`.
-
-The scripts pass `--env-file` to the app. They don't use rc.subr's own environment support: FreeBSD's `<name>_env_file` sources the file as shell, which expands `$` and breaks on values with spaces such as `GIT_SSH_COMMAND`.
 
 NetBSD and OpenBSD have no supervisor in base. Restart from cron (`crontab -e` as root):
 ```
@@ -272,7 +264,7 @@ block return in quick on egress proto tcp to port { 8080 8081 8082 1965 7070 }
 
 ## 11. Identity (optional)
 
-Skip this if you're the only user, on the tailnet: `*_USERS` (§6) is enough. For other people, agents, sign-in without Tailscale, or Shiori devices, add the identity file ([identity.md](../identity.md)). Every package Python above is 3.11 or newer, which the CLI needs.
+Skip this if you're the only user, on the tailnet: `*_USERS` (§6) is enough. For other people, agents, sign-in without Tailscale, or Shiori devices, add the identity file ([identity.md](../identity.md)).
 
 ```sh
 mkdir -p /usr/local/etc/machiya                                   # NetBSD, OpenBSD: /etc/machiya
@@ -284,7 +276,6 @@ cd /usr/local/share/kura                                          # NetBSD: /usr
 - The CLI keeps the mode and owner when it rewrites the file. A new key needs them set again.
 - Add the printed lines to each app's env file (`MACHIYA_IDENTITY_FILE=…`, and `<APP>_SIGNIN=1` for the built-in sign-in), then restart it. With the file, `*_USERS` is unused.
 - Keep `<APP>_BIND=127.0.0.1` (§1). In `tailscale` or `header` mode the apps refuse any other address unless `<APP>_BIND_BEHIND_PROXY=1`.
-- The CLI comes with every app (its vendored `vaultkit`), so `cd` into any app's directory as above, or run it from a checkout of the Machiya repository.
 
 ## Niwa and Konbini extras
 
