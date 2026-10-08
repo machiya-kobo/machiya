@@ -1,12 +1,12 @@
-<p align="center"><img src="https://machiya-kobo.github.io/icons/machiya.svg" alt="Machiya" width="96" height="96"></p>
+<img src="https://machiya-kobo.github.io/icons/machiya.svg" alt="Machiya" width="96" height="96" align="right">
 
-<h3 align="center">Find everything you read yesterday, last month, last year.</h3>
+### Find everything you read yesterday, last month, last year.
 
-<p align="center">Small self-hosted apps for finding what you've read: your pages (<a href="https://github.com/asciimoo/hister">Hister</a>), the web (<a href="https://github.com/searxng/searxng">SearXNG</a>), your notes (<a href="https://obsidian.md">Obsidian</a>) and your code (Forgejo or GitHub).</p>
+Small self-hosted apps for finding what you've read: your pages ([Hister](https://github.com/asciimoo/hister)), the web ([SearXNG](https://github.com/searxng/searxng)), your notes ([Obsidian](https://obsidian.md)) and your code (Forgejo or GitHub).
 
-<p align="center">Agentically coded with <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>.</p>
+Agentically coded with [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 
-<p align="center"><a href="https://machiya-kobo.github.io/">Website</a> · <a href="https://github.com/machiya-kobo/machiya#quickstart">Quickstart</a> · <a href="https://github.com/machiya-kobo/machiya/tree/main/docs">Docs</a></p>
+[Website](https://machiya-kobo.github.io/) · [Quickstart](https://github.com/machiya-kobo/machiya#quickstart) · [Docs](https://github.com/machiya-kobo/machiya/tree/main/docs)
 
 <p align="center"><a href="https://machiya-kobo.github.io/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://machiya-kobo.github.io/img/hero-dark.webp"><img src="https://machiya-kobo.github.io/img/hero-light.webp" alt="Shiori, the Machiya search app, with results for washi: a web result, your saved pages and your note Lantern festival kit in one list." width="100%"></picture></a></p>
 
