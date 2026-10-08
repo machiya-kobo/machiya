@@ -1,5 +1,9 @@
 # Changelog: feed-import
 
+## 0.1.3
+
+- **A reader's credentials never follow a redirect.** NewsBlur, Miniflux, Feedbin and FreshRSS calls (and FreshRSS's sign-in) no longer follow a 3xx: urllib would have sent the token, password or `Authorization` header on to wherever it pointed, another host included. A redirect now fails the call, as an error from that reader; point `FEED_IMPORT_*_URL` at the final address.
+
 ## 0.1.2
 
 - **One bad story no longer stops the import** (the 2026-10 sweep, MACH-F-3). An entry whose handling raised (a malformed permalink's `ValueError`, an odd charset's `LookupError`) crashed every run at the same entry, and a restart rewrote `status.json` as ok. Now:

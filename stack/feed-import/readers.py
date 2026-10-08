@@ -26,6 +26,19 @@ class ReaderError(Exception):
     """The reader couldn't be asked (unreachable, refused the credentials, answered nonsense). Nothing is recorded."""
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Every reader call carries its credential (a header, or FreshRSS's login form), and urllib would carry it to
+    wherever a redirect points: a redirect is never followed, it is an HTTPError (vaultkit websafe.token_opener's
+    rule; feed-import vendors no vaultkit)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, "redirect refused (a credential never follows one)",
+                                     headers, fp)
+
+
+OPENER = urllib.request.build_opener(NoRedirect)
+
+
 @dataclass
 class Entry:
     id: str                              # the reader's own stable id (NewsBlur: the story hash)
@@ -72,9 +85,10 @@ class Client:
             headers["Content-Type"] = "application/x-www-form-urlencoded"
         req = urllib.request.Request(url, data=body, method="POST" if body is not None else "GET", headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            with OPENER.open(req, timeout=self.timeout) as r:
                 payload = r.read()
         except urllib.error.HTTPError as e:
+            e.close()
             if e.code in missing:
                 return None
             raise ReaderError("%s %s: HTTP %d" % (self.name, path, e.code))

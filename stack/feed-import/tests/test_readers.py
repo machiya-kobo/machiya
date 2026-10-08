@@ -323,5 +323,64 @@ class Build(unittest.TestCase):
             feedimport.build(dict(env, FEED_IMPORT_READERS="inoreader"))
 
 
+# -- redirects (0.1.3): a reader's credential never follows one ------------------------------------------------------
+
+CAUGHT = []             # (method, path, headers, body) of every request that reached the other host
+
+
+class Catcher(Fake):
+    def answer(self, method, path, q, form, raw):
+        CAUGHT.append((method, path, dict(self.headers), raw))
+        self.send(200, {"authenticated": True, "stories": [], "feeds": {}, "entries": [], "total": 0})
+
+
+class Redirector(Fake):
+    def answer(self, method, path, q, form, raw):
+        self.send_response(302)
+        self.send_header("Location", CATCH_URL + self.path)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+
+CATCH_SRV, CATCH_URL = T.serve(Catcher)
+CATCH_URL = CATCH_URL.replace("127.0.0.1", "localhost")                 # another host, as a browser would see it
+RD_SRV, RD_URL = T.serve(Redirector)
+
+
+class Redirects(unittest.TestCase):
+    """A 302 from the reader's address to another host is an error, and the credential never reaches that host."""
+
+    def setUp(self):
+        CAUGHT.clear()
+        REQ.clear()
+
+    def refused(self, run):
+        with self.assertRaises(ReaderError) as cm:
+            run()
+        self.assertIn("302", str(cm.exception))
+        self.assertEqual(CAUGHT, [])
+
+    def test_newsblur(self):
+        from newsblur import NewsBlur
+        self.refused(lambda: list(NewsBlur(RD_URL, "nb-secret", gap=0).read(lambda h: False)))
+
+    def test_miniflux(self):
+        self.refused(lambda: list(Miniflux(RD_URL, "mf-secret", gap=0).read(lambda i: False)))
+
+    def test_feedbin(self):
+        self.refused(lambda: list(Feedbin(RD_URL, "me@example.com", "fb-secret", gap=0).starred(lambda i: False)))
+
+    def test_freshrss_login(self):
+        self.refused(lambda: FreshRSS(RD_URL, "owner", "fr-secret", gap=0).login())
+
+    def test_the_catcher_catches(self):
+        """The test itself: a plain urllib call does follow the 302 and hands the other host the header."""
+        import urllib.request
+        req = urllib.request.Request(RD_URL + "/x", headers={"X-Auth-Token": "mf-secret"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            r.read()
+        self.assertEqual([(c[0], c[1], c[2].get("X-Auth-Token")) for c in CAUGHT], [("GET", "/x", "mf-secret")])
+
+
 if __name__ == "__main__":
     unittest.main()

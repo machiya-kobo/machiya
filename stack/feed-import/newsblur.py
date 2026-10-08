@@ -20,7 +20,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from readers import Entry, Reader, ReaderError
+from readers import OPENER, Entry, Reader, ReaderError
 
 PAGE = 50              # stories per read_stories page (NewsBlur's default is 10; 1,001 is the most it keeps)
 MAX_PAGES = 25         # 25 x 50 covers the whole 1,001-story list
@@ -49,9 +49,10 @@ class NewsBlur(Reader):
             "Authorization": "Bearer " + self.token, "Accept": "application/json",
             "User-Agent": "machiya-feed-import (read-only)"})
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            with OPENER.open(req, timeout=self.timeout) as r:      # a redirect is refused, never followed
                 body = json.load(r)
         except urllib.error.HTTPError as e:
+            e.close()
             raise ReaderError("NewsBlur %s: HTTP %d" % (path, e.code))
         except (urllib.error.URLError, OSError, ValueError) as e:
             raise ReaderError("NewsBlur %s: %s" % (path, e))

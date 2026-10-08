@@ -69,6 +69,8 @@ What they don't keep, and so what the importer can't know:
 
 Inoreader is left out: its API needs a Pro plan, OAuth refresh tokens, and 100 requests a day.
 
+Every reader call carries its credentials, so feed-import never follows a redirect from a reader (0.1.3): give each `FEED_IMPORT_*_URL` as its final address.
+
 ## Settings
 
 | Env | Default | |
