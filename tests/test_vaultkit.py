@@ -652,6 +652,17 @@ class ShellTest(unittest.TestCase):
         self.assertLess(html.index("/static/machiya.css"), html.index("</head>"))
         self.assertRegex(html, r'/static/machiya\.css\?v=[0-9a-f]{10}"')              # versioned by content
 
+    def test_tab_icon_is_the_small_variant(self):
+        """v0.26.1 (the style guide's icons): the browser tab gets the room's small icon, an SVG with the detail that
+        doesn't read at 16 px dropped, plus a 16/32/48 .ico for browsers without SVG favicons; the home-screen icon stays
+        the full drawing."""
+        from vaultkit import shell
+        html = shell.page(shell.Prefs(), "kura", "t", "b")
+        self.assertIn('<link rel="icon" href="/static/icons/kura-small.svg" type="image/svg+xml">', html)
+        self.assertIn('<link rel="alternate icon" href="/static/icons/kura.ico" sizes="16x16 32x32 48x48">', html)
+        self.assertIn('<link rel="apple-touch-icon" href="/static/icons/kura-apple-180.png">', html)
+        self.assertNotIn('href="/static/icons/kura.svg"', html)
+
     def test_prefs_meta(self):
         from vaultkit import shell
         ctx = shell.Prefs()

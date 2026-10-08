@@ -521,6 +521,14 @@ a.chip.link:hover, a.chip.link:focus-visible { background: color-mix(in srgb, cu
 .pill:hover { background: color-mix(in srgb, var(--pill) 14%, transparent); text-decoration: none; }
 .pill[aria-current]:not([aria-current="false"]), .pill[aria-pressed="true"], .pill.on { color: var(--bg); background: var(--pill); }
 .pill .count { margin-left: 5px; font-weight: 400; font-variant-numeric: tabular-nums; }
+/* a row that scrolls sideways fades at the edge it scrolls toward (Shiori); machiya.js sets data-fade on .pills */
+[data-fade] { --fade: 28px; }
+[data-fade="end"] { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--fade)), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--fade)), transparent); }
+[data-fade="start"] { -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--fade));
+  mask-image: linear-gradient(to right, transparent, #000 var(--fade)); }
+[data-fade="both"] { -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--fade), #000 calc(100% - var(--fade)), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 var(--fade), #000 calc(100% - var(--fade)), transparent); }
 
 /* ---- tinted items (Shiori, v0.26): what's yours wears its room's colour: a fill at --tint-mix, the most each theme
    allows with every text in it readable (vaultkit/palettes.py, on --tint-base), and an outline in it. A raised panel:

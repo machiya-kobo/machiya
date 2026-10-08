@@ -23,7 +23,7 @@ The row of choices above a list: Shiori's All · Pages · Notes · Web tabs, Niw
 
 - Outlined 1.5px in `--pill` (default: the room's colour), 600 weight, fully rounded. The current one (`aria-current`, `aria-pressed="true"` or `.on`) is filled, with the page background as its text.
 - Counts sit inside, in 400 weight and tabular numbers.
-- One row that scrolls sideways, with no scrollbar and a fade at the edge (`data-fade`), never wrapping.
+- One row that scrolls sideways, with no scrollbar, never wrapping. `machiya.js` fades the edge it can still scroll toward (`data-fade`, v0.26.1).
 - Each pill's colour is the colour of what it shows (rule 1). When the choices aren't things (dates, states), they all wear the room's colour.
 
 ## Chips
@@ -67,7 +67,7 @@ The pieces above are shared. These stay each app's own:
 
 Each app's favicon is its own icon (`icons/<app>.svg`, the header mark and the Rooms menu icon), never a letter, a kanji square or a generic glyph:
 
-- `favicon.ico` (16, 32 and 48 px) from a small variant with fine detail dropped, so it still reads at 16 px (see `machiya-small.svg`);
+- the browser tab: `<room>-small.svg`, a small variant with fine detail dropped so it still reads at 16 px (see `machiya-small.svg`), and `<room>.ico` (16, 32 and 48 px) from it. `shell.page` links both (v0.26.1);
 - `apple-touch-icon` 180 px, and the web manifest's 192 and 512 px, plus a maskable 512;
 - the same drawing everywhere: the favicon, the home-screen icon, the header mark and the README.
 

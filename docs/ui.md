@@ -13,6 +13,7 @@ This is how the web rooms (Kura, Niwa, Konbini) put the [design language](design
    - `ctx = shell.prefs(self.headers.get("Cookie"))` gives `.theme` (the appearance: system/night/day; `auto` is read as system), `.palette` (the theme, v0.15: a `vaultkit.palettes` key, `tokyo-night` when unset or unknown) and `.text` (text size).
    - `room` is `kura`, `niwa` or `konbini`: it sets the seal, the wordmark and `--room`.
    - Nav labels are Title Case. Up to four phone tabs, plus the automatic Rooms tab, whose menu ends in Settings.
+   - **Icons** (v0.26.1): serve `/static/icons/<room>.svg` (the drawing), `<room>-small.svg` (the same drawing with the detail that doesn't read at 16 px dropped, for the browser tab), `<room>.ico` (16, 32 and 48 px, from the small variant) and `<room>-apple-180.png`. `shell.page` links the small SVG and the .ico as the tab icon. The manifest's 192, 512 and maskable icons come from the full drawing. All of them are the room's own icon ([style-guide.md](style-guide.md#icons-and-favicons)).
 4. **Theme**: keep `/theme?set=` working as a no-JavaScript fallback (set the `theme` cookie, accept `system` and `auto`), but link the header to `/settings`, not the old night/day/auto links.
 5. **`/settings`** (v0.21: the same order in every app, [Settings](#settings-appearance-per-app-this-device) below):
    `shell.settings_page([shell.shared_section(ctx, room, links, state, who, signin), <your section>, shell.device_section(ctx, [shell.offline_row(), …]), <account>, shell.about_section(room, VERSION, status_text, vaultkit)], room)`.
