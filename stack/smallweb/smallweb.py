@@ -36,7 +36,7 @@ import smolnet   # noqa: E402
 import web       # noqa: E402
 from store import Store   # noqa: E402
 
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -104,6 +104,19 @@ def own_origin(url):
         return "%s://%s%s" % (u.scheme.lower(), (u.hostname or "").lower(), "" if port is None else ":%d" % port)
     except ValueError:
         return ""
+
+
+def same_origin(headers, public_url=None):
+    """A form post's CSRF check: its Origin (else its Referer) is smallweb's own. 0.3.3: with SMALLWEB_PUBLIC_URL, that
+    URL's origin, so a DNS-rebound name (whose Host the other site picks, along with its Origin) never matches;
+    without it, the request's own Host, as before."""
+    public_url = PUBLIC_URL if public_url is None else public_url
+    claimed = (headers.get("Origin") or "").rstrip("/") or headers.get("Referer") or ""
+    if public_url:
+        mine = own_origin(public_url)
+        return bool(claimed) and not mine.endswith("://") and bool(mine) and own_origin(claimed) == mine
+    host = headers.get("Host")
+    return bool(host) and urlsplit(claimed).netloc == host
 
 
 if AUTH_URL and (not PUBLIC_URL.startswith(("https://", "http://")) or not HISTER_USERS or "*" in HISTER_USERS):
@@ -896,7 +909,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403, "forbidden\n", "text/plain")
         u = urlsplit(self.path)
         origin = (self.headers.get("Origin") or "").rstrip("/")
-        own = bool(self.headers.get("Host")) and urlsplit(origin or self.headers.get("Referer") or "").netloc == self.headers["Host"]
+        own = same_origin(self.headers)
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:

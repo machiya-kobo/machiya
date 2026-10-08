@@ -871,7 +871,8 @@ class Gateway(unittest.TestCase):
         form = dict(_re.findall(r'name="(\w+)" value="([^"]*)"', tofu_form))
         data = urllib.parse.urlencode(form).encode()
         self.assertEqual(get("/tofu", data=data, headers={"Origin": "https://evil.test"})[0], 403)
-        self.assertEqual(get("/tofu", data=data, headers={"Origin": BASE})[0], 303)
+        self.assertEqual(get("/tofu", data=data, headers={"Origin": BASE})[0], 403)    # its Host, not its address
+        self.assertEqual(get("/tofu", data=data, headers={"Origin": "https://smallweb.test"})[0], 303)
         self.assertIn("<h1>Two</h1>", page(url)[2])
         Fakes.cert = "a"
 
@@ -908,6 +909,44 @@ def raw_server():
 
 RAW_PORT = raw_server()
 CROSS = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document"}
+
+
+class CsrfOrigin(unittest.TestCase):
+    """0.3.3: a form post must come from SMALLWEB_PUBLIC_URL's origin when it is set; the request's own Host is only the
+    fallback. DNS rebinding hands the other site both the Host and the Origin, so a Host match proves nothing."""
+
+    def test_public_url_decides(self):
+        pub = "https://smallweb.test"
+        ok = smallweb.same_origin
+        self.assertTrue(ok({"Origin": "https://smallweb.test", "Host": "x"}, pub))
+        self.assertTrue(ok({"Origin": "https://SmallWeb.test:443/"}, pub))
+        self.assertTrue(ok({"Referer": "https://smallweb.test/page?url=x"}, pub))
+        for h in ({"Origin": "http://evil.test", "Host": "evil.test"},           # rebound: Host and Origin agree
+                  {"Origin": "http://smallweb.test", "Host": "smallweb.test"},   # another scheme
+                  {"Origin": "https://smallweb.test:8443"},
+                  {"Origin": "null", "Host": "null"},
+                  {"Referer": "https://evil.test/https://smallweb.test", "Host": "evil.test"},
+                  {"Host": "smallweb.test"}, {}):
+            self.assertFalse(ok(h, pub), h)
+        self.assertFalse(ok({"Origin": "https://evil.test:x"}, "https://smallweb.test:x"))   # unreadable: never
+
+    def test_host_only_without_public_url(self):
+        ok = smallweb.same_origin
+        self.assertTrue(ok({"Origin": "http://smallweb.lan:8080", "Host": "smallweb.lan:8080"}, ""))
+        self.assertTrue(ok({"Referer": "http://smallweb.lan:8080/x", "Host": "smallweb.lan:8080"}, ""))
+        self.assertFalse(ok({"Origin": "http://evil.test", "Host": "smallweb.lan:8080"}, ""))
+        self.assertFalse(ok({"Origin": "http://evil.test"}, ""))
+
+    def test_rebound_post_refused_in_open_mode(self):
+        smallweb.AUTH = "open"
+        try:
+            rebound = {"Host": "evil.test", "Origin": "http://evil.test",
+                       "Content-Type": "application/x-www-form-urlencoded"}
+            self.assertEqual(get("/tofu", user=None, data=b"x=1", headers=rebound)[0], 403)
+            own = dict(rebound, Origin="https://smallweb.test")
+            self.assertEqual(get("/tofu", user=None, data=b"x=1", headers=own)[0], 400)    # past the check
+        finally:
+            smallweb.AUTH = "tailscale"
 
 
 class Sweep(unittest.TestCase):

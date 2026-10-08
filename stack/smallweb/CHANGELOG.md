@@ -1,5 +1,9 @@
 # Changelog: smallweb
 
+## 0.3.3
+
+- **Form posts are checked against `SMALLWEB_PUBLIC_URL`.** With it set, a post (Accept Certificate, a same-origin save) must come from that origin. Before, smallweb compared the `Origin` or `Referer` to the request's own `Host`, and DNS rebinding sets both, so in open mode another site could post as smallweb. Without `SMALLWEB_PUBLIC_URL` the `Host` check stays: set it.
+
 ## 0.3.2
 
 - Shorter copy (the owner's copy-editing pass, 2026-10-05): the robots, client-certificate and changed-certificate notices are a sentence or two; the Open natively tooltip is capitalised.

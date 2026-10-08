@@ -17,7 +17,7 @@ Machiya's gateway to the small web: Gemini and Gopher search for Shiori, and the
 | `SMALLWEB_HISTER_TOKEN_FILE` | — | the owner's Hister token (the file's first line), sent as `X-Access-Token` with every save ([contracts/hister.md](../../docs/contracts/hister.md)); re-read when the file changes; set but missing or empty stops the start. Unset = no token (a Hister without users ignores it) |
 | `SMALLWEB_FETCH_ALLOW` | — | host names (exact, lowercase) and CIDRs an http(s) save may reach although they are private: `wiki.internal,10.1.0.0/16`. Unset = nothing private: loopback, RFC 1918, link-local, CGNAT `100.64.0.0/10` (Tailscale), `fc00::/7` and the like are refused. A private Kura vault's address (`/v/<name>/…`) is never saved, listed or not |
 | `SMALLWEB_ORIGINS` | — | origins besides smallweb's own and `hister://` that may `POST /api/save`: `https://shiori.example.ts.net` (Shiori's hosted pages, if they call smallweb from their own origin) |
-| `SMALLWEB_PUBLIC_URL` | the request's host | `https://smallweb.example.ts.net`: the base of `proxy_url` in `/api/search`. Set it, since Shiori calls the API from its own origin |
+| `SMALLWEB_PUBLIC_URL` | the request's host | `https://smallweb.example.ts.net`: the base of `proxy_url` in `/api/search`, and the only origin its own form posts (and same-origin saves) are taken from (0.3.3). Set it, since Shiori calls the API from its own origin. Unset, a post must match the request's `Host`, which DNS rebinding can fake in open mode |
 | `SMALLWEB_DATA` | `/data` | `smallweb.sqlite3`: TOFU known hosts, caches, the hourly counts, the save log. All of it can be deleted |
 | `SMALLWEB_PER_HOUR` | `30` | searches per engine per hour |
 
