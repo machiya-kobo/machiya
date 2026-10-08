@@ -185,7 +185,8 @@ p { margin: 0; text-wrap: pretty; }
 .feature:has(.tag.web) { --c: var(--pill-web); }
 .feature:has(.tag.code) { --c: var(--pill-code); }
 .feature:has(.tag.konbini) { --c: var(--pill-konbini); }
-/* a heading that names several kinds of thing gives each its pill's colour (the search section: pages blue, code red, the web gold) */
+/* a heading that names several kinds of thing gives each its pill's colour (the search section: pages blue, notes orange, code red, the web gold, as Shiori's pills) */
+.feature h2 .c-notes { color: var(--pill-notes); }
 .feature h2 .c-code { color: var(--pill-code); }
 .feature h2 .c-web { color: var(--pill-web); }
 .feature h2 { color: var(--c); }
