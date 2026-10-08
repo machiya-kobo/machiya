@@ -167,8 +167,6 @@ p { margin: 0; text-wrap: pretty; }
 .js .hero-shot img.is-loaded, .js .feature-shot img.is-loaded { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .js .hero-shot img, .js .feature-shot img { transition: none; } }
 @media (max-width: 640px) {
-  .hero-shot picture { max-width: 300px; margin: 0 auto; }
-  .hero-shot img { border-radius: var(--r-phone); border-width: 6px; border-color: var(--line); }
 }
 
 /* features */
@@ -195,6 +193,16 @@ p { margin: 0; text-wrap: pretty; }
 .pair .wide { width: 88%; }
 .pair .phone { position: absolute; right: 0; bottom: 0; width: 26%; }
 .pair .phone img { border-radius: 18px; border: 4px solid var(--line); }
+/* three shots at once (the search section): the web on a desktop at the back, code in a smaller window in front of it,
+   and pages on a phone at the side */
+.trio { position: relative; padding-bottom: 22%; }
+.trio .wide { width: 80%; }
+.trio .second { position: absolute; left: 8%; bottom: 0; width: 44%; }
+.trio .phone { position: absolute; right: 0; bottom: 4%; width: 23%; }
+.trio .phone img { border-radius: 18px; border: 4px solid var(--line); }
+/* the hero as a pair: the Mac app with the phone in front */
+.hero-shot.pair .wide { width: 90%; }
+.hero-shot.pair .phone { width: 22%; }
 
 @media (min-width: 880px) {
   .feature { padding: 72px 0; }

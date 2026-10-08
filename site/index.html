@@ -39,68 +39,50 @@
           <a class="quiet" href="https://github.com/machiya-kobo/machiya">Source</a>
         </div>
       </div>
-      <div class="hero-shot">
-        <picture class="only-light">
-          <source media="(max-width: 640px)" srcset="img/hero-phone-light.webp" width="780" height="1688">
+      <div class="hero-shot pair">
+        <picture class="wide only-light">
           <img src="img/hero-light.webp" width="2560" height="1600" loading="lazy" decoding="async" fetchpriority="high" alt="Shiori, the Machiya search app, with results for washi: a web result, your saved pages How washi paper is made and Kozo, mitsumata and gampi, and your note Lantern festival kit in one list. The saved page How washi paper is made is open on the right.">
         </picture>
-        <picture class="only-dark">
-          <source media="(max-width: 640px)" srcset="img/hero-phone-dark.webp" width="780" height="1688">
+        <picture class="wide only-dark">
           <img src="img/hero-dark.webp" width="2560" height="1600" loading="lazy" decoding="async" fetchpriority="high" alt="Shiori, the Machiya search app, with results for washi: a web result, your saved pages How washi paper is made and Kozo, mitsumata and gampi, and your note Lantern festival kit in one list. The saved page How washi paper is made is open on the right.">
         </picture>
+        <picture class="phone only-light">
+          <img src="img/hero-phone-light.webp" width="780" height="1688" loading="lazy" decoding="async" alt="The same search for washi in Shiori on a phone.">
+        </picture>
+        <picture class="phone only-dark">
+          <img src="img/hero-phone-dark.webp" width="780" height="1688" loading="lazy" decoding="async" alt="The same search for washi in Shiori on a phone.">
+        </picture>
       </div>
     </div>
   </section>
 
-  <section class="feature" aria-labelledby="f-pages">
+  <section class="feature" aria-labelledby="f-search">
     <div class="wrap">
       <div class="feature-text">
-        <h2 id="f-pages">Search your pages</h2>
-        <p class="tag shiori"><img src="icons/shiori.svg" alt="" width="20" height="20">Hister and Shiori</p>
+        <h2 id="f-search">Search your pages, code and the World Wide Web</h2>
+        <p class="tag shiori"><img src="icons/shiori.svg" alt="" width="20" height="20">Shiori, Hister and SearXNG</p>
         <p>Browse as usual: Hister's <a href="https://hister.org/docs/browser-extension">official extensions</a> save what you read in Firefox and Chrome, and <a href="https://github.com/nburns/hister-safari">hister-safari</a> does it in Safari on the Mac. Shiori also comes with its own Safari extension for your iPhone, iPad and Mac.</p>
+        <p>Results from SearXNG appear beside the pages you've read. The search engines see your query, never your history.</p>
+        <p>Connect Forgejo or GitHub, and the READMEs, issues, pull requests and releases from your repositories get a Code tab of their own.</p>
       </div>
-      <figure class="feature-shot">
-        <picture class="only-light">
-          <img src="img/pages-light.webp" width="1215" height="1080" loading="lazy" decoding="async" alt="Shiori's Pages tab for the search lantern: your saved pages Folding a chōchin lantern, Restoring an old paper lantern and Kyoto's summer lantern festival, each with its labels and Archive.org and Archive.is buttons.">
-        </picture>
-        <picture class="only-dark">
-          <img src="img/pages-dark.webp" width="1215" height="1080" loading="lazy" decoding="async" alt="Shiori's Pages tab for the search lantern: your saved pages Folding a chōchin lantern, Restoring an old paper lantern and Kyoto's summer lantern festival, each with its labels and Archive.org and Archive.is buttons.">
-        </picture>
-      </figure>
-    </div>
-  </section>
-
-  <section class="feature flip" aria-labelledby="f-web">
-    <div class="wrap">
-      <div class="feature-text">
-        <h2 id="f-web">Search the World Wide Web</h2>
-        <p class="tag web">SearXNG</p>
-        <p>Search results from SearXNG and Hister appear side by side: the web next to the pages you've read. The search engines see your query, never your history.</p>
-      </div>
-      <figure class="feature-shot">
-        <picture class="only-light">
+      <figure class="feature-shot trio">
+        <picture class="wide only-light">
           <img src="img/web-light.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="Shiori with results for kyoto lanterns: web results with your saved page Kyoto's summer lantern festival among them, each with Archive.org and Archive.is buttons, and an Info box about paper lanterns on the right.">
         </picture>
-        <picture class="only-dark">
+        <picture class="wide only-dark">
           <img src="img/web-dark.webp" width="1920" height="1080" loading="lazy" decoding="async" alt="Shiori with results for kyoto lanterns: web results with your saved page Kyoto's summer lantern festival among them, each with Archive.org and Archive.is buttons, and an Info box about paper lanterns on the right.">
         </picture>
-      </figure>
-    </div>
-  </section>
-
-  <section class="feature" aria-labelledby="f-code">
-    <div class="wrap">
-      <div class="feature-text">
-        <h2 id="f-code">Search your code</h2>
-        <p class="tag code">Forgejo and GitHub</p>
-        <p>Connect Forgejo or GitHub. READMEs, issues, pull requests and releases from your repositories get a Code tab of their own.</p>
-      </div>
-      <figure class="feature-shot">
-        <picture class="only-light">
+        <picture class="second only-light">
           <img src="img/code-light.webp" width="1215" height="990" loading="lazy" decoding="async" alt="Shiori's Code tab for the search flicker: an open GitHub issue, Flicker at 10% brightness, and an open Forgejo issue, The prompt flickers in tmux.">
         </picture>
-        <picture class="only-dark">
+        <picture class="second only-dark">
           <img src="img/code-dark.webp" width="1215" height="990" loading="lazy" decoding="async" alt="Shiori's Code tab for the search flicker: an open GitHub issue, Flicker at 10% brightness, and an open Forgejo issue, The prompt flickers in tmux.">
+        </picture>
+        <picture class="phone only-light">
+          <img src="img/pages-phone-light.webp" width="780" height="1688" loading="lazy" decoding="async" alt="Shiori on a phone: the Pages tab for the search lantern, your saved pages with their labels and Archive.org and Archive.is buttons.">
+        </picture>
+        <picture class="phone only-dark">
+          <img src="img/pages-phone-dark.webp" width="780" height="1688" loading="lazy" decoding="async" alt="Shiori on a phone: the Pages tab for the search lantern, your saved pages with their labels and Archive.org and Archive.is buttons.">
         </picture>
       </figure>
     </div>
