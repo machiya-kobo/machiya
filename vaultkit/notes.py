@@ -1,4 +1,5 @@
 """Notes: reading them off disk and the fields every view uses (title, tags, stage, type, summary)."""
+import copy
 import datetime
 import html
 import os
@@ -27,17 +28,37 @@ def read_notes(root):
     Symlinks are never followed (v0.22, KURA-2): a symlinked note is skipped (os.walk already doesn't descend into a
     symlinked folder), and the file is opened with O_NOFOLLOW, so a committed `x.md -> /proc/self/environ` reads
     nothing."""
-    out = []
+    out, was, now = [], _READ.get(os.path.abspath(root), {}), {}
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in SKIP_DIRS]
         for name in filenames:
             if name.endswith(".md") and PHONE_CONFLICT not in name:
                 full = os.path.join(dirpath, name)
-                text = read_file(full)
-                if text is None:
+                try:
+                    st = os.lstat(full)
+                except OSError:
                     continue
-                out.append((os.path.relpath(full, root), note_front(text) or {}, text))
+                if not stat.S_ISREG(st.st_mode):        # a symlink or not a file: read_file would refuse it too
+                    continue
+                key = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+                hit = was.get(full)
+                if hit and hit[0] == key:
+                    fm, text = hit[1], hit[2]
+                else:
+                    text = read_file(full)
+                    if text is None:
+                        continue
+                    fm = note_front(text) or {}
+                now[full] = (key, fm, text)
+                out.append((os.path.relpath(full, root), copy.deepcopy(fm), text))
+    _READ[os.path.abspath(root)] = now
     return out
+
+
+# v0.28: what read_notes last read under each root, by file: (stat key, frontmatter, text). A file whose device, inode,
+# size, modification and change times are all unchanged isn't read or parsed again (the change time can't be set back
+# by a tool that keeps the modification time). Each call replaces its root's entry, so a deleted note drops out.
+_READ = {}
 
 
 def read_file(path):

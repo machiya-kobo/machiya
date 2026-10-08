@@ -151,6 +151,69 @@ class IndexSwapTest(unittest.TestCase):
             shutil.rmtree(tmp)
 
 
+class IncrementalReadTest(unittest.TestCase):
+    """v0.28: read_notes re-reads only the files whose stat changed; after adds, edits, deletes and renames its result
+    and the index built from it must equal a full read from scratch."""
+
+    def snapshot(self, root):
+        v = vaultkit.Vault(root)
+        v.revision = "x"
+        v.tended_dates = lambda: {}
+        v.index()
+        return ([(r, n.title, n.tags, sorted(n.links), n.fm, n.text) for r, n in v.notes.items()],
+                v.by_name, {k: sorted(b) for k, b in v.backlinks.items()})
+
+    def fresh(self, root):
+        from vaultkit import notes
+        saved = dict(notes._READ)
+        notes._READ.clear()
+        try:
+            return notes.read_notes(root), self.snapshot(root)
+        finally:
+            notes._READ.clear()
+            notes._READ.update(saved)
+
+    def test_changes_are_picked_up_exactly(self):
+        from vaultkit import notes
+        tmp = tempfile.mkdtemp()
+        try:
+            def write(rel, text):
+                full = os.path.join(tmp, rel)
+                os.makedirs(os.path.dirname(full), exist_ok=True)
+                with open(full, "w") as f:
+                    f.write(text)
+            for i in range(6):
+                write("N/n%d.md" % i, "---\ntitle: N%d\ntags: [a]\n---\nsee [[n%d]] and [[gone]]\n" % (i, (i + 1) % 6))
+            notes.read_notes(tmp)                           # warm the cache
+            write("N/n1.md", "---\ntitle: Edited\ntags: [b]\n---\nnow [[n4]]\n")                       # edit
+            write("N/n1b.md", "---\ntitle: Same size\n---\nx\n")                                    # add
+            write("N/gone.md", "---\ntitle: Gone\n---\nnew target for the old links\n")             # add a target
+            os.remove(os.path.join(tmp, "N/n2.md"))                                                  # delete
+            os.makedirs(os.path.join(tmp, "M"))
+            os.rename(os.path.join(tmp, "N/n3.md"), os.path.join(tmp, "M/n3.md"))                    # rename
+            st = os.stat(os.path.join(tmp, "N/n4.md"))
+            write("N/n4.md", "---\ntitle: N4\ntags: [a]\n---\nsee [[n5]] and [[gone]]\n".replace("N4", "Z4"))   # same size, same mtime
+            os.utime(os.path.join(tmp, "N/n4.md"), ns=(st.st_atime_ns, st.st_mtime_ns))
+            got = notes.read_notes(tmp), self.snapshot(tmp)
+            self.assertEqual(got, self.fresh(tmp))
+            self.assertIn("Z4", dict((r, t) for r, _, t in got[0])["N/n4.md"])    # the change time caught it
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_cached_frontmatter_is_a_copy(self):
+        from vaultkit import notes
+        tmp = tempfile.mkdtemp()
+        try:
+            with open(os.path.join(tmp, "a.md"), "w") as f:
+                f.write("---\ntitle: A\ntags: [x]\n---\nbody\n")
+            notes.read_notes(tmp)
+            first = notes.read_notes(tmp)[0][1]
+            first["tags"].append("mutated")
+            self.assertEqual(notes.read_notes(tmp)[0][1], {"title": "A", "tags": ["x"]})
+        finally:
+            shutil.rmtree(tmp)
+
+
 class SanitizeTest(unittest.TestCase):
     """vaultkit.sanitize (v0.13): a note's HTML never runs, in a page or an API answer."""
 
