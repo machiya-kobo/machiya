@@ -918,7 +918,26 @@ class PalettesTest(unittest.TestCase):
                         failures.append("%s %s: %s, --%s on --%s, %.2f:1" % (key, mode, what, fg, bg, got))
         self.assertEqual(failures, [], "%d pairs under their minimum" % len(failures))
 
-    PANELS = (".card", ".settings .group", ".signin .group", ".rooms .menu", ".update-toast", ".nbody pre")
+    PANELS = (".card", ".settings .group", ".signin .group", ".rooms .menu", ".update-toast", ".nbody pre", ".tinted")
+
+    def test_tinted_items_keep_their_text_readable(self):
+        """v0.26 (Shiori's design language, owner 2026-10-07): a tinted item is its room colour's panel shade mixed into
+        --tint-base at --tint-mix. Every text a panel draws (menu-fg, menu-muted, each accent's panel shade) stays at its
+        minimum on it, under each room colour, in every palette and both variants; and the tint is there to see."""
+        failures = []
+        for key in self.p.PALETTES:
+            for mode in ("dark", "light"):
+                v = self.p.tokens(key, mode)
+                self.assertGreaterEqual(v["tint-mix"], 5, "%s %s: tint-mix %s%% is too faint to see" % (key, mode, v["tint-mix"]))
+                base = v[self.p.tint_base(mode)]
+                texts = [("menu-fg", 4.5), ("menu-muted", 4.5)] + [(t + "-panel", self.p.minimum(mode, t)) for t in self.p.ACCENTS]
+                for tint in self.p.TINTS:
+                    bg = self.p.mix(v[tint + "-panel"], base, v["tint-mix"])
+                    for name, need in texts:
+                        got = self.p.contrast(v[name], bg)
+                        if got < need:
+                            failures.append("%s %s: --%s on a %s tint, %.2f:1" % (key, mode, name, tint, got))
+        self.assertEqual(failures, [], "%d pairs under their minimum" % len(failures))
 
     def test_accents_are_readable_on_the_raised_panels(self):
         """v0.25 (owner, 2026-10-07): accent-coloured text on a raised panel (a card, a settings or sign-in group, the

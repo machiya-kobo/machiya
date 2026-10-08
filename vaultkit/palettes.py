@@ -175,6 +175,36 @@ def variant(key, mode):
     return {t: readable(raw[t], raw["bg"], minimum(mode, t), mode) if t in TEXT else raw[t] for t in TOKENS}
 
 
+# Tinted items (Shiori's design language, docs/style-guide.md, v0.26): something that's yours wears its room's colour, a
+# fill of that colour mixed into the card at --tint-mix with an outline in it. The mix is the most each variant allows
+# with every text a card draws (menu-fg, menu-muted, each accent's panel shade) still at its minimum, under every room
+# colour; Shiori found 9% (Tokyo Night) and 8% (Day) the same way. Never more than TINT_MAX.
+TINTS = ("blue", "orange", "magenta", "green", "teal")
+TINT_MAX = 9
+
+
+def mix(a, b, pct):
+    """CSS color-mix(in srgb, a pct%, b): the channels mixed as written (gamma-encoded), as the browser does."""
+    ra, rb = _rgb(a), _rgb(b)
+    return _hex(tuple(x * pct / 100 + y * (1 - pct / 100) for x, y in zip(ra, rb)))
+
+
+def tint_base(mode):
+    """What a tinted item's fill is mixed into: the card colour (--dark) in a dark variant; in a light one the lighter
+    raised shade (--hl), since a light variant's --dark leaves its text no room for any tint (Shiori's light cards are
+    lighter than the page too)."""
+    return "dark" if mode == "dark" else "hl"
+
+
+def tint_mix(v, mode):
+    texts = [(v["menu-fg"], 4.5), (v["menu-muted"], 4.5)] + [(v[t + "-panel"], minimum(mode, t)) for t in ACCENTS]
+    base = v[tint_base(mode)]
+    for pct in range(TINT_MAX, -1, -1):
+        if all(contrast(fg, mix(v[t + "-panel"], base, pct)) >= need for t in TINTS for fg, need in texts):
+            return pct
+    return 0
+
+
 def tokens(key, mode):
     """variant() plus the derived tokens the stylesheet writes: menu-fg (fg readable on dark, the Rooms menu's panel),
     menu-muted (muted readable on dark and on hl) and <accent>-panel (each accent readable on dark and on hl, its
@@ -185,6 +215,7 @@ def tokens(key, mode):
     for t in ACCENTS:
         need = minimum(mode, t)
         v[t + "-panel"] = readable(readable(v[t], v["dark"], need, mode), v["hl"], need, mode)
+    v["tint-mix"] = tint_mix(v, mode)
     return v
 
 
@@ -206,6 +237,7 @@ def _block(selectors, key, mode, indent=""):
             " ".join("--%s: %s;" % (t, v[t]) for t in ("teal", "magenta", "cyan", "slate")),
             " ".join("--%s-panel: %s;" % (t, v[t + "-panel"]) for t in ACCENTS[:5]),
             " ".join("--%s-panel: %s;" % (t, v[t + "-panel"]) for t in ACCENTS[5:]),
+            "--tint-mix: %d%%; --tint-base: var(--%s);" % (v["tint-mix"], tint_base(mode)),
             _shadow(mode, v["fg"])]
     return "%s%s {\n%s\n%s}\n" % (indent, ", ".join(selectors), "\n".join(indent + "  " + r for r in rows), indent)
 
