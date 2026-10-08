@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<!-- Kura icon for favicon sizes (16-48 px): the same shelves with three bold spines a row, the cabinet's body and the base dropped, so the orange spine and the two shelves survive at 16 px -->
+<rect width="512" height="512" rx="112" fill="#1a1b26"/>
+<rect x="76" y="76" width="360" height="360" rx="28" fill="#292e42"/>
+<rect x="76" y="238" width="360" height="36" fill="#1a1b26"/>
+<rect x="108" y="110" width="84" height="128" rx="14" fill="#7aa2f7"/><rect x="214" y="100" width="84" height="138" rx="14" fill="#ff9e64"/><rect x="320" y="118" width="84" height="120" rx="14" fill="#9ece6a"/>
+<rect x="108" y="298" width="84" height="116" rx="14" fill="#9ece6a"/><rect x="214" y="288" width="84" height="126" rx="14" fill="#ff9e64"/><rect x="320" y="306" width="84" height="108" rx="14" fill="#7aa2f7"/>
+</svg>

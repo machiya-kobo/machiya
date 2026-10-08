@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<!-- Konbini icon for favicon sizes (16-48 px): the same awning and three shelves, drawn on a 16 px grid (one pixel = 32 units) with the fine detail dropped, so the three colours and the shelves stay crisp at 16 px -->
+<rect width="512" height="512" rx="112" fill="#1a1b26"/>
+<rect x="32" y="64" width="448" height="64" rx="16" fill="#7aa2f7"/>
+<rect x="192" y="64" width="160" height="64" fill="#ff9e64"/>
+<rect x="352" y="64" width="128" height="64" rx="16" fill="#9ece6a"/>
+<rect x="352" y="64" width="32" height="64" fill="#9ece6a"/>
+<rect x="32" y="160" width="128" height="288" rx="16" fill="#414868"/>
+<rect x="192" y="160" width="128" height="288" rx="16" fill="#414868"/>
+<rect x="352" y="160" width="128" height="288" rx="16" fill="#414868"/>
+<rect x="32" y="160" width="128" height="96" rx="16" fill="#7aa2f7"/>
+<rect x="32" y="288" width="128" height="96" rx="16" fill="#7aa2f7" opacity=".6"/>
+<rect x="192" y="160" width="128" height="96" rx="16" fill="#ff9e64"/>
+<rect x="192" y="288" width="128" height="96" rx="16" fill="#ff9e64" opacity=".6"/>
+<rect x="352" y="160" width="128" height="96" rx="16" fill="#9ece6a"/>
+</svg>

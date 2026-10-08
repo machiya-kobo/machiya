@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+<!-- Niwa icon for favicon sizes (16-48 px): the same sprout with the baseline dropped and the stem and leaves made bold, so two leaves and the stem survive at 16 px -->
+<rect width="512" height="512" rx="112" fill="#1a1b26"/>
+<path d="M256 444 L256 262" stroke="#9ece6a" stroke-width="48" stroke-linecap="round" fill="none"/>
+<path d="M262 330 C 262 220, 190 144, 62 152 C 58 276, 138 344, 262 330 Z" fill="#9ece6a"/>
+<path d="M250 276 C 250 166, 322 90, 450 98 C 454 222, 374 290, 250 276 Z" fill="#73daca"/>
+</svg>
