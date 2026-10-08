@@ -15,3 +15,4 @@ identity.toml
 # the dev stack's local state: where its data lives, and the file Hister writes beside its config natively
 compose/dev/.data-dir
 compose/dev/config/tui.yaml
+CLAUDE.local.md
