@@ -30,6 +30,7 @@ services:
       HISTER_LOGIN_HISTER_URL: http://hister:4433
       HISTER_LOGIN_PUBLIC_URL: https://hister.machiya.test:19043
       HISTER_LOGIN_PROVIDERS: oidc
+      HISTER_LOGIN_LEGACY: domain-cookie,hister-token    # gate 0 is the shared-cookie design (the default before 0.5.0)
       MACHIYA_COOKIE_DOMAIN: ${HELPER_COOKIE_DOMAIN-machiya.test}   # gate0's loop guard check empties it
     volumes: [login-data:/data]
     depends_on: [hister]
