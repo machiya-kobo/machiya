@@ -121,6 +121,36 @@ class VaultTest(unittest.TestCase):
         self.assertIn("New.md", self.v.notes)
 
 
+class IndexSwapTest(unittest.TestCase):
+    """v0.28: a rebuild is built aside and put in place at the end; while it runs, readers see the previous index whole
+    (its notes, links, backlinks and dates together), never new notes beside old dates or a half-filled backlink map."""
+
+    def test_readers_see_the_old_index_until_the_new_one_is_ready(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            make_repo(tmp)
+            seen = []
+
+            class Watched(vaultkit.Vault):
+                def tended_dates(inner):                     # late in the build: what a reader would see right now
+                    if hasattr(inner, "notes"):
+                        seen.append((inner.notes, inner.backlinks, inner.tended))
+                    return super().tended_dates()
+
+            v = Watched(tmp, "personal")
+            v.revision = "r1"
+            v.index()
+            before = (v.notes, v.backlinks, v.tended)
+            v.revision = "r2"
+            v.index()
+            self.assertEqual(len(seen), 1)
+            for got, old in zip(seen[0], before):
+                self.assertIs(got, old)                      # still the previous index, all of it
+            self.assertIsNot(v.notes, before[0])            # and the new one is in place afterwards
+        finally:
+            shutil.rmtree(tmp)
+
+
 class SanitizeTest(unittest.TestCase):
     """vaultkit.sanitize (v0.13): a note's HTML never runs, in a page or an API answer."""
 

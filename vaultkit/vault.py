@@ -51,6 +51,14 @@ HIDDEN = ("Templates/",)
 IGNORED = ("CLAUDE.md",)            # agent instructions, not notes
 
 
+def resolve_in(by_name, target):
+    """A wikilink target -> the note's rel in by_name, or None (the resolution rule in this module's docstring)."""
+    t = target.strip().rstrip("\\").strip().lower()     # Obsidian escapes the alias pipe inside a table: [[Note\|alias]]
+    if t.endswith(".md"):
+        t = t[:-3]
+    return by_name.get(t) or by_name.get(t.split("/")[-1])
+
+
 class Vault:
     def __init__(self, repo, subdir="", git=None):
         self.repo, self.subdir = repo, subdir
@@ -70,6 +78,8 @@ class Vault:
     # -- index ---------------------------------------------------------
 
     def index(self):
+        """v0.28: the new index is built aside (notes, names, images, links, backlinks, dates) and then put in place
+        together, so a reader in another thread never sees notes without their links or a half-filled backlink map."""
         key = self.key()
         if key == self._key:
             return
@@ -87,24 +97,21 @@ class Vault:
             for name in filenames:
                 if name.lower().endswith(IMAGE_EXT) and not os.path.islink(os.path.join(dirpath, name)):   # v0.22
                     assets.setdefault(name, os.path.relpath(os.path.join(dirpath, name), self.root))
-        self.notes, self.by_name, self.assets = notes, by_name, assets
         for n in notes.values():
             for m in LINK_RE.finditer(n.text):
-                target = self.resolve(m.group(1))
+                target = resolve_in(by_name, m.group(1))
                 if target and target != n.rel:
                     n.links.add(target)
-        self.backlinks = {}
+        backlinks = {}
         for n in notes.values():
             for t in n.links:
-                self.backlinks.setdefault(t, set()).add(n.rel)
-        self.tended = self.tended_dates()
+                backlinks.setdefault(t, set()).add(n.rel)
+        tended = self.tended_dates()
+        self.notes, self.by_name, self.assets, self.backlinks, self.tended = notes, by_name, assets, backlinks, tended
         self._key = key
 
     def resolve(self, target):
-        t = target.strip().rstrip("\\").strip().lower()     # Obsidian escapes the alias pipe inside a table: [[Note\|alias]]
-        if t.endswith(".md"):
-            t = t[:-3]
-        return self.by_name.get(t) or self.by_name.get(t.split("/")[-1])
+        return resolve_in(self.by_name, target)
 
     def tended_dates(self):
         """{rel: YYYY-MM-DD of the note's latest commit}. v0.22 (KURA-5): core.quotePath=false, so a non-ASCII name
