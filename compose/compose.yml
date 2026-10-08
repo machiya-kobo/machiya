@@ -14,9 +14,9 @@
 # switches off. The rooms build from their own repositories, checked out next to this one (../../kura etc.).
 #
 # Who may use the apps: AUTH defaults to `open` (no identity check), which is only safe because every published port
-# binds 127.0.0.1. To let other people in, put a proxy in front that sets a Tailscale-User-Login header (a Tailscale
-# sidecar does, and terminates TLS too), set KURA_AUTH/NIWA_AUTH/KONBINI_AUTH=tailscale and list the logins in
-# KURA_USERS/NIWA_USERS/KONBINI_USERS. One vault copy for the whole stack: add mirror.yml (see it).
+# binds 127.0.0.1. To let other people in, put `tailscale serve` in front, set KURA_AUTH/NIWA_AUTH/KONBINI_AUTH=tailscale,
+# list the logins in KURA_USERS/NIWA_USERS/KONBINI_USERS and name the proxy's address in *_TRUSTED_PROXIES
+# (docs/install/remote-access.md). One vault copy for the whole stack: add mirror.yml (see it).
 # Identity (optional, off by default): people, agents and sign-in from one identity file. Set MACHIYA_IDENTITY_DIR and
 # MACHIYA_IDENTITY_FILE in .env; the directory is mounted read-only at the same path. See docs/identity.md.
 name: machiya
@@ -92,6 +92,7 @@ services:
       - KURA_SIGNIN=${KURA_SIGNIN:-}
       - KURA_AUTH_HEADER=${KURA_AUTH_HEADER:-}
       - KURA_BIND_BEHIND_PROXY=${KURA_BIND_BEHIND_PROXY:-}
+      - KURA_TRUSTED_PROXIES=${KURA_TRUSTED_PROXIES:-}   # tailscale mode: the peer tailscale serve's connections come from (docs/install/remote-access.md)
       - KURA_REPO_URL=${VAULT_REPO_URL:-}
       - KURA_REPO_SUBDIR=${VAULT_SUBDIR:-}
       - KURA_REPO_USER=${VAULT_REPO_USER:-}
@@ -131,6 +132,7 @@ services:
       - NIWA_SIGNIN=${NIWA_SIGNIN:-}
       - NIWA_AUTH_HEADER=${NIWA_AUTH_HEADER:-}
       - NIWA_BIND_BEHIND_PROXY=${NIWA_BIND_BEHIND_PROXY:-}
+      - NIWA_TRUSTED_PROXIES=${NIWA_TRUSTED_PROXIES:-}
       - NIWA_PUBLIC_URL=${NIWA_PUBLIC_URL:-http://localhost:8082}   # its web address (the sign-in's origin over http)
       - NIWA_HOST=${NIWA_HOST:-localhost}            # the name in the gemini certificate and the gopher menus
       - NIWA_REPO_URL=${VAULT_REPO_URL:-}            # it pushes the garden's fields here: needs write access
@@ -172,6 +174,7 @@ services:
       - KANBAN_SIGNIN=${KONBINI_SIGNIN:-}
       - KANBAN_AUTH_HEADER=${KONBINI_AUTH_HEADER:-}
       - KANBAN_BIND_BEHIND_PROXY=${KONBINI_BIND_BEHIND_PROXY:-}
+      - KANBAN_TRUSTED_PROXIES=${KONBINI_TRUSTED_PROXIES:-}
       - KANBAN_REPO=/repo                            # its own read-write clone of the vault (demo-init makes it)
       - KANBAN_DB=/data/kanban.sqlite3
       - KANBAN_REPO_SUBDIR=${VAULT_SUBDIR:-}
