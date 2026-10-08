@@ -982,6 +982,27 @@ class PalettesTest(unittest.TestCase):
                             failures.append("%s %s: --%s on a %s tint, %.2f:1" % (key, mode, name, tint, got))
         self.assertEqual(failures, [], "%d pairs under their minimum" % len(failures))
 
+    def test_a_hovered_pill_stays_readable_and_tinted(self):
+        """v0.27.4 (Shiori 0.18.0, the owner): a hovered filter pill is its hover shade on a fill of that same shade at
+        HOVER_MIX% over --hl, as the stylesheet mixes it. The text reads at 4.5:1 in every palette, both variants, each
+        accent; and the stylesheet draws it that way (the shade swap and the mix)."""
+        failures = []
+        for key in self.p.PALETTES:
+            for mode in ("dark", "light"):
+                v = self.p.tokens(key, mode)
+                for t in self.p.ACCENTS:
+                    got = self.p.contrast(v[t + "-hover"], self.p.mix(v[t + "-hover"], v["hl"], self.p.HOVER_MIX))
+                    if got < 4.5:
+                        failures.append("%s %s %s: %.2f:1" % (key, mode, t, got))
+        self.assertEqual(failures, [], "%d hovered pills under 4.5:1" % len(failures))
+        css = open(os.path.join(ROOT, "ui", "machiya.css")).read()
+        rule = css[css.index(".pill:hover:not([aria-current])"):]
+        rule = rule[:rule.index("}")]
+        self.assertIn("color-mix(in srgb, var(--pill) %d%%, var(--hl))" % self.p.HOVER_MIX, rule)
+        for t in self.p.ACCENTS:
+            self.assertIn("--%s: var(--%s-hover)" % (t, t), rule)
+        self.assertIn("--room: var(--room-hover)", rule)
+
     def test_accents_are_readable_on_the_raised_panels(self):
         """v0.25 (owner, 2026-10-07): accent-coloured text on a raised panel (a card, a settings or sign-in group, the
         Rooms menu, the update toast, a code block) >= its minimum on --dark and on --hl, in every palette and both

@@ -13,4 +13,4 @@ from .vault import CALLOUT_RE, EMBED_RE, HIDDEN, IMAGE_EXT, MDIMG_RE, Vault     
 from .frontmatter import EditError, edit_front, merge_note, version_of, yaml_scalar   # noqa: F401
 from .gitsync import GitSync                                                          # noqa: F401
 
-__version__ = "0.27.3"
+__version__ = "0.27.4"
