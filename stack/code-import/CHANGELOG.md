@@ -1,5 +1,9 @@
 # Changelog: code-import
 
+## 0.1.6
+
+- The base image is pinned by digest (`tools/pin-bases`), so a rebuild gets exactly the image that was tested. The first release with a signed tag, so the public image on GitHub's registry is built and signed from it.
+
 ## 0.1.5
 
 - **A reconcile puts back what Hister lost.** Hister's Rules page offers "delete matching documents", and a skip pattern that refuses the tailnet's hosts still matches a tailnet Forgejo's URLs, so one click could wipe code-import's documents. An unchanged document is skipped by its fingerprint, so they would never come back (Kura lost 237 notes this way on 2026-10-02; its 0.9.1 reconcile restored them). Now:
