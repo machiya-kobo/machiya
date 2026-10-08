@@ -407,3 +407,109 @@ class TestText(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# -- 0.2.0: room tokens, /api/status, /api/changelog ------------------------------------------------------------------
+
+GOOD = "mht_" + "A" * 43            # a room token the fake helper confirms
+OTHER = "mht_" + "B" * 43
+
+
+class Login(BaseHTTPRequestHandler):
+    """A fake hister-login: GET /v1/check confirms GOOD for shiori-ai's own origin only."""
+    seen = []
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        Login.seen.append(self.headers.get("X-Machiya-Room"))
+        ok = self.path == "/v1/check" and self.headers.get("X-Machiya-Session") == GOOD \
+            and self.headers.get("X-Machiya-Room") == "https://shiori.example.ts.net"
+        body = json.dumps({"kind": "token", "username": "you"} if ok else {"error": "no"}).encode()
+        self.send_response(200 if ok else 401)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+LOGIN_SRV, LOGIN_URL = serve(Login)
+TOKENS = dict(AUTH_URL=LOGIN_URL, PUBLIC_URL="https://shiori.example.ts.net", HISTER_USERS="you")
+
+
+class TestRoomTokens(Base):
+    extra = dict(AUTH="tailscale", USERS="you@example.com", **TOKENS)
+
+    def test_a_good_token_passes_without_the_same_origin_check(self):
+        # an agent's call: no Sec-Fetch-Site, no Origin; the token is what lets it in
+        code, _, res = self.call("POST", "/shiori/ai/answer", {"q": "a"},
+                                 {"Sec-Fetch-Site": None, "Authorization": "Bearer " + GOOD})
+        self.assertEqual(code, 200, res)
+        self.assertEqual(Login.seen[-1], "https://shiori.example.ts.net")
+
+    def test_a_session_still_needs_the_same_origin(self):
+        self.assertEqual(self.call("POST", "/shiori/ai/answer", {"q": "a"},
+                                   {"Sec-Fetch-Site": "cross-site", "Tailscale-User-Login": "you@example.com"})[0], 403)
+
+    def test_a_token_decides_alone(self):
+        self.assertEqual(self.call("POST", "/shiori/ai/answer", {"q": "a"},
+                                   {"Authorization": "Bearer " + OTHER,
+                                    "Tailscale-User-Login": "you@example.com"})[0], 403)
+        self.assertEqual(self.call("POST", "/shiori/ai/answer", {"q": "a"}, {"X-Machiya-Token": "mht_bad"})[0], 403)
+        self.assertEqual(seen("searx"), [])
+
+    def test_notes_are_still_refused_with_a_token(self):
+        code, _, res = self.call("POST", "/shiori/ai/summarize", {"url": "file:///home/you/notes.md"},
+                                 {"Sec-Fetch-Site": None, "Authorization": "Bearer " + GOOD})
+        self.assertEqual(code, 403, res)
+        self.assertEqual(seen("engine"), [])
+        self.assertNotIn("mht_", self.err.getvalue())
+
+    def test_start_checks(self):
+        for bad in (dict(AUTH_URL=LOGIN_URL, HISTER_USERS="you"),
+                    dict(AUTH_URL=LOGIN_URL, PUBLIC_URL="https://s.example"),
+                    dict(AUTH_URL=LOGIN_URL, PUBLIC_URL="https://s.example", HISTER_USERS="*")):
+            with self.assertRaises(SystemExit, msg=bad):
+                sa.Config(self.env(**bad))
+
+
+class TestStatusAndChangelog(Base):
+    extra = {"AUTH": "tailscale", "USERS": "you@example.com"}
+
+    def test_status_is_open(self):
+        for path in ("/api/status", "/shiori/ai/api/status"):
+            code, _, st = self.call("GET", path)
+            self.assertEqual(code, 200)
+            self.assertEqual((st["ok"], st["ready"], st["error"], st["version"], st["auth"], st["room_tokens"],
+                              st["enabled"]), (True, True, None, sa.VERSION, "tailscale", False, True))
+
+    def test_status_errors(self):
+        self.start(AUTH="open")
+        Fake.mode["engine"] = "down"
+        for _ in range(sa.UPSTREAM_FAILS):
+            self.call("POST", "/shiori/ai/summarize", {"url": PAGE_URL})
+        st = self.call("GET", "/api/status")[2]
+        self.assertFalse(st["ok"])
+        self.assertNotIn("a.example", json.dumps(st))
+        Fake.mode["engine"] = "ok"
+        self.assertEqual(self.call("POST", "/shiori/ai/answer", {"q": "a"})[0], 200)
+        self.assertTrue(self.call("GET", "/api/status")[2]["ok"])
+        os.unlink(self.key)
+        st = self.call("GET", "/api/status")[2]
+        self.assertEqual((st["ok"], st["enabled"]), (False, False))
+        self.assertIn("KEY_FILE", st["error"])
+
+    def test_changelog(self):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        conn.request("GET", "/shiori/ai/api/changelog")
+        r = conn.getresponse()
+        body, tag = r.read(), r.getheader("ETag")
+        conn.close()
+        self.assertEqual(r.status, 200)
+        self.assertTrue(r.getheader("Content-Type").startswith("text/markdown"))
+        self.assertIn(b"## " + sa.VERSION.encode(), body)
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        conn.request("GET", "/api/changelog", headers={"If-None-Match": tag})
+        self.assertEqual(conn.getresponse().status, 304)
+        conn.close()
+        self.assertNotIn("/api/changelog", self.err.getvalue())

@@ -10,6 +10,10 @@ Shiori's hosted pages call it on their own origin (docs/ai.md in Shiori's reposi
        Answered ONLY from SearXNG's result snippets (the first 8 http(s) results): no page is fetched, and the client
        sends only the query, so this is no general LLM proxy.
   GET  /healthz (also /shiori/ai/healthz) -> 200 {"ok": true} (no gate)
+  GET  /api/status (also /shiori/ai/api/status) -> 200 {"ok", "ready", "error", "version", "auth", "room_tokens",
+       "enabled", "answer", "summarize", "model", "remaining"} (no gate, like every Machiya service's): `error` is set
+       when SHIORI_AI_KEY_FILE holds no key, or once three requests in a row failed at the engine or SearXNG.
+  GET  /api/changelog (also /shiori/ai/api/changelog) -> this service's CHANGELOG.md, text/markdown (no gate)
 Errors are JSON {"error", "message"}: 400 bad_request, 403 forbidden (the gate, or not Shiori's own page), 403 note /
 code / local, 404 not_indexed / not_found, 405, 422 empty / no_results, 429 cap or busy (+ Retry-After), 502 engine /
 declined, 503 unavailable, 504 searx.
@@ -20,7 +24,10 @@ Rules:
     source `code` and type `local` after. Answer: only SearXNG's http(s) web results, never a note host's; Hister is
     never asked. Runs only on request. Daily request and input-token caps (UTC day).
   - The gate (SHIORI_AI_AUTH: tailscale | proxy | open), as shiori-feed's; POSTs also need Shiori's own page
-    (Sec-Fetch-Site same-origin, or Origin = https://<Host>).
+    (Sec-Fetch-Site same-origin, or Origin = https://<Host>). Room tokens (0.2.0), as shiori-feed's: with
+    SHIORI_AI_AUTH_URL, SHIORI_AI_PUBLIC_URL and SHIORI_AI_HISTER_USERS a caller may send `Authorization: Bearer
+    mht_…`; a token decides alone, and a request it lets in skips the same-origin check (a bearer token is no cookie
+    another site's page can ride on).
   - Secrets come from files: the Anthropic key (SHIORI_AI_KEY_FILE, read per request) and the Hister token
     (SHIORI_AI_HISTER_TOKEN_FILE). No redirect is ever followed, and no proxy from the environment is used, so neither
     goes anywhere but where it is meant to.
@@ -30,7 +37,9 @@ Hister's `updated`), the newest CACHE_MAX kept; a re-captured page gets a fresh 
 lowercased, whitespace collapsed, kept 24 h. Cached replies don't count against the caps. Stdlib only.
 """
 import collections
+import hashlib
 import html
+import http.client
 import ipaddress
 import json
 import os
@@ -48,7 +57,7 @@ from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 TEXT_MAX, BODY_MAX, URL_MAX, MAX_TOKENS, ENGINE_TIMEOUT = 60000, 8192, 4096, 300, 90
 HISTER_TIMEOUT, HISTER_MAX = 20, 16 << 20          # one stored page, with its HTML
@@ -60,6 +69,10 @@ Q_MAX, ANSWER_RESULTS, ANSWER_TOKENS, ANSWER_TTL = 300, 8, 300, 86400
 HISTER_SYNTAX = re.compile(r"label:|url:|metadata\.", re.I)                # never sent to the web
 CTRL = re.compile("[\x00-\x1f\x7f]")
 TOKEN_RE = re.compile(r"[\x21-\x7e]{1,4096}")
+RTOKEN_RE = re.compile(r"mht_[A-Za-z0-9_-]{43}\Z")     # a room token, as hister-login mints them
+CHANGELOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CHANGELOG.md")
+CHANGELOG_LIMIT = 64 * 1024
+UPSTREAM_FAILS = 3                  # requests in a row failing at the engine or SearXNG before /api/status errs
 MODES = ("tailscale", "proxy", "open")
 DEFAULT_API = "https://api.anthropic.com/v1/messages"
 
@@ -175,6 +188,92 @@ def base_url(value, name):
     return value
 
 
+def own_origin(url):
+    """scheme://host[:port], as hister-login writes a room's origin (lowercase, no default port)."""
+    try:
+        u = urllib.parse.urlsplit(url)
+        port = None if u.port in (None, {"https": 443, "http": 80}.get(u.scheme)) else u.port
+        return "%s://%s%s" % (u.scheme.lower(), (u.hostname or "").lower(), "" if port is None else ":%d" % port)
+    except ValueError:
+        return ""
+
+
+class RoomTokens:
+    """Room tokens checked with hister-login (GET <auth_url>/v1/check), as smallweb does: a good answer is kept 30 s,
+    a refusal 5 s, keyed by the token's SHA-256 (the token itself is never kept, logged or passed on)."""
+
+    def __init__(self, auth_url, public_url, users, timeout=2):
+        self.auth_url, self.origin, self.users, self.timeout = auth_url, own_origin(public_url), users, timeout
+        self.cache, self.lock = {}, threading.Lock()
+
+    def check(self, value):
+        """-> the Hister username the token acts as, or None."""
+        key = hashlib.sha256(value.encode("ascii")).hexdigest()
+        with self.lock:
+            hit = self.cache.get(key)
+        if hit and hit[0] > time.monotonic():
+            return hit[1]
+        user, ttl = None, 5
+        u = urllib.parse.urlsplit(self.auth_url)
+        conn = (http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection)(
+            u.hostname, u.port, timeout=self.timeout)
+        try:
+            conn.request("GET", u.path.rstrip("/") + "/v1/check", headers={
+                "X-Machiya-Session": value, "X-Machiya-Room": self.origin, "Accept": "application/json"})
+            r = conn.getresponse()
+            data = json.loads(r.read(1 << 16) or b"null")
+            if r.status == 200 and isinstance(data, dict) and data.get("kind") == "token" \
+                    and data.get("username") in self.users:
+                user, ttl = data["username"], 30
+        except (OSError, http.client.HTTPException, ValueError):
+            pass
+        finally:
+            conn.close()
+        with self.lock:
+            if len(self.cache) > 1024:
+                self.cache.clear()
+            self.cache[key] = (time.monotonic() + ttl, user)
+        return user
+
+
+def room_token_user(tokens, headers):
+    """-> (presented, Hister username or None). A request without a room token isn't one (presented False: the other
+    checks decide); a malformed token, two of them, or one sent when room tokens are off is refused."""
+    values = headers.get_all("Authorization") or []
+    extra = [v.strip() for v in headers.get_all("X-Machiya-Token") or [] if v.strip()]   # a client with fixed headers
+    if extra:
+        if values or len(extra) > 1 or tokens is None or not RTOKEN_RE.match(extra[0]):
+            return True, None
+        value = extra[0]
+    else:
+        if not values:
+            return False, None
+        scheme, _, value = values[0].strip().partition(" ")
+        value = value.strip()
+        if len(values) == 1 and not (scheme.lower() == "bearer" and value.startswith("mht_")):
+            return False, None
+        if tokens is None or len(values) > 1 or not RTOKEN_RE.match(value):
+            return True, None
+    return True, tokens.check(value)
+
+
+def changelog():
+    """GET /api/changelog (the shape of vaultkit.changelog): (status, body, headers). The file's first 64 KiB cut at a
+    whole line, text/markdown, an ETag; a missing file is a 404."""
+    try:
+        with open(CHANGELOG_FILE, "rb") as f:
+            data = f.read(CHANGELOG_LIMIT + 1)
+    except OSError:
+        return 404, b"no changelog\n", [("Content-Type", "text/plain; charset=utf-8"), ("Cache-Control", "no-store")]
+    if len(data) > CHANGELOG_LIMIT:
+        data = data[:CHANGELOG_LIMIT]
+        cut = data.rfind(b"\n")
+        data = data[:cut + 1] if cut > 0 else data
+    body = data.decode("utf-8", "replace").encode("utf-8")
+    tag = '"%s"' % hashlib.sha256(body).hexdigest()[:20]
+    return 200, body, [("Content-Type", "text/markdown; charset=utf-8"), ("ETag", tag), ("Cache-Control", "no-cache")]
+
+
 class Config:
     """Everything from the environment, checked once at start: a bad setting stops the start with its reason."""
 
@@ -215,6 +314,17 @@ class Config:
         self.trusted = cidrs(g("TRUSTED_PROXIES"), "SHIORI_AI_TRUSTED_PROXIES")
         self.behind_proxy = flag(g("BIND_BEHIND_PROXY"))
         self.bind = g("BIND", "127.0.0.1")
+        self.auth_url = g("AUTH_URL").rstrip("/")
+        self.public_url = g("PUBLIC_URL").rstrip("/")
+        self.hister_users = frozenset(u.strip() for u in g("HISTER_USERS").split(",") if u.strip())
+        if self.auth_url:
+            if not self.auth_url.startswith(("http://", "https://")):
+                raise SystemExit("shiori-ai: SHIORI_AI_AUTH_URL must be hister-login's http(s) address")
+            if not self.public_url.startswith(("http://", "https://")) or not self.hister_users \
+                    or "*" in self.hister_users:
+                raise SystemExit("shiori-ai: SHIORI_AI_AUTH_URL (room tokens) needs SHIORI_AI_PUBLIC_URL (the address "
+                                 "the tokens are issued for) and SHIORI_AI_HISTER_USERS (never *)")
+        self.room_tokens = RoomTokens(self.auth_url, self.public_url, self.hister_users) if self.auth_url else None
         self.check_bind()
 
     def check_bind(self):
@@ -234,8 +344,18 @@ class Config:
 
     def allows(self, client, headers):
         """The gate, for one request: True to serve it."""
+        return self.decide(client, headers)[0]
+
+    def decide(self, client, headers):
+        """The gate: (serve it, decided by a room token)."""
         if self.auth == "open":
-            return True
+            return True, False
+        presented, user = room_token_user(self.room_tokens, headers)
+        if presented:                                   # a room token decides alone
+            return user is not None, True
+        return self.allows_session(client, headers), False
+
+    def allows_session(self, client, headers):
         ip = peer_ip(client)
         from_proxy = ip is not None and any(ip in net for net in self.trusted)
         if self.auth == "proxy":
@@ -674,6 +794,16 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def raw(self, code, body, headers):
+        self.send_response(code)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        for k, v in headers:
+            self.send_header(k, v)
+        self.end_headers()
+        if body and self.command != "HEAD":
+            self.wfile.write(body)
+
     def fail(self, f):
         self.reply(f.code, {"error": f.error, "message": f.message}, f.headers)
 
@@ -687,6 +817,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ok": True})
         if r == "/status":
             return self.reply(200, self.ai.status())
+        if r == "/api/status":
+            return self.reply(200, self.server.status())
+        if r == "/api/changelog":
+            code, body, headers = changelog()
+            tag = dict(headers).get("ETag")
+            asked = [t.strip() for t in (self.headers.get("If-None-Match") or "").split(",")]
+            if code == 200 and tag and (tag in asked or "*" in asked):
+                code, body = 304, b""
+            return self.raw(code, body, headers)
         if r in ("/summarize", "/answer"):
             return self.reply(405, {"error": "bad_request", "message": "Use POST."}, {"Allow": "POST"})
         self.reply(404, {"error": "not_found", "message": "No such endpoint."})
@@ -702,9 +841,10 @@ class Handler(BaseHTTPRequestHandler):
         route = self.route()
         if route not in ("/summarize", "/answer"):
             return self.reply(404, {"error": "not_found", "message": "No such endpoint."})
-        if not self.ai.cfg.allows(self.client_address[0], self.headers):
+        allowed, by_token = self.ai.cfg.decide(self.client_address[0], self.headers)
+        if not allowed:
             return self.fail(Fail(403, "forbidden", "Sign in first."))
-        if not self.same_origin():
+        if not by_token and not self.same_origin():
             return self.fail(Fail(403, "forbidden", "Only Shiori's own page may use this."))
         try:
             n = int(self.headers.get("Content-Length", ""))
@@ -728,13 +868,19 @@ class Handler(BaseHTTPRequestHandler):
             return self.fail(Fail(429, "busy", "Too many requests. Try again in a minute.", {"Retry-After": str(wait)}))
         refresh = req.get("refresh") is True
         try:
-            self.reply(200, self.ai.summarize(value.strip(), refresh) if route == "/summarize"
-                       else self.ai.answer(value.strip(), refresh))
+            out = self.ai.summarize(value.strip(), refresh) if route == "/summarize" else self.ai.answer(value.strip(),
+                                                                                                         refresh)
         except Fail as f:
-            self.fail(f)
+            if f.code in (502, 503, 504):
+                self.server.upstream_failed("%d %s" % (f.code, f.error))
+            return self.fail(f)
+        self.server.upstream_ok()
+        self.reply(200, out)
 
     def do_HEAD(self):
         r = self.route()
+        if r in ("/api/status", "/api/changelog"):
+            return self.do_GET()
         self.reply(200 if r in ("/healthz", "/status") else 405 if r in ("/summarize", "/answer") else 404, {})
 
     def refuse(self):
@@ -744,7 +890,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_request(self, code="-", size="-"):        # method, path and status: no query, no body
         path = CTRL.sub("?", (getattr(self, "path", "") or "").split("?", 1)[0])[:200]
-        if not path.endswith("/healthz"):
+        if not path.endswith(("/healthz", "/api/status", "/api/changelog")):
             log("%s %s %s" % (CTRL.sub("?", self.command or "-")[:16], path, getattr(code, "value", code)))
 
     def log_error(self, fmt, *args):                   # the code only, never the raw request line
@@ -754,10 +900,43 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def setup(self, ai, cfg):
+        self.ai, self.limiter = ai, Limiter(cfg.per_minute)
+        self.upstream = {"last_ok": None, "last_error": None, "fails": 0}
+        self.state_lock = threading.Lock()
+
+    def upstream_ok(self):
+        with self.state_lock:
+            self.upstream.update(last_ok=int(time.time()), fails=0)
+
+    def upstream_failed(self, why):
+        with self.state_lock:
+            self.upstream["fails"] += 1
+            self.upstream["last_error"] = "%s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), why)
+
+    def status(self):
+        """GET /api/status: never a URL, a query, text or a secret."""
+        cfg = self.ai.cfg
+        with self.state_lock:
+            u = dict(self.upstream)
+        st = self.ai.status()
+        error = None
+        if cfg.key_file and not st["enabled"]:
+            error = "SHIORI_AI_KEY_FILE holds no key"
+        elif u["fails"] >= UPSTREAM_FAILS:
+            error = "%d requests in a row failed (%s)" % (u["fails"], u["last_error"])
+        out = {"ok": error is None, "ready": True, "error": error, "version": VERSION, "auth": cfg.auth,
+               "room_tokens": cfg.room_tokens is not None, "last_ok": u["last_ok"], "last_error": u["last_error"]}
+        out.update({k: st[k] for k in ("enabled", "answer", "summarize", "model", "remaining")})
+        return out
+
+
 def make_server(cfg, bind=None, port=None, ai=None):
-    server = ThreadingHTTPServer((cfg.bind if bind is None else bind, cfg.port if port is None else port), Handler)
-    server.daemon_threads = True
-    server.ai, server.limiter = ai or AI(cfg), Limiter(cfg.per_minute)
+    server = Server((cfg.bind if bind is None else bind, cfg.port if port is None else port), Handler)
+    server.setup(ai or AI(cfg), cfg)
     return server
 
 

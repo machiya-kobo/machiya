@@ -18,6 +18,8 @@ Shiori's pages call these on their own origin (`/shiori/ai/` on the Hister host'
 | `POST /shiori/ai/summarize` | `{"url": <a URL Hister has>, "refresh": false}` → `{summary, engine, model, partial, cached, updated}`. `partial`: the page was cut to 60,000 characters first |
 | `POST /shiori/ai/answer` | `{"q": <1-300 characters>, "refresh": false}` → `{answer, sources: [{n, title, url}], engine, model, cached}`. The answer cites sources as `[1]`, `[2]` |
 | `GET /healthz`, `/shiori/ai/healthz` | `{"ok": true}`. No gate |
+| `GET /api/status`, `/shiori/ai/api/status` | `{ok, ready, error, version, auth, room_tokens, last_ok, last_error, enabled, answer, summarize, model, remaining}`, no gate. `ok` turns false when `SHIORI_AI_KEY_FILE` holds no key, or once three requests in a row failed at the engine or SearXNG. Never a URL, a query or text |
+| `GET /api/changelog`, `/shiori/ai/api/changelog` | this service's `CHANGELOG.md` as `text/markdown` (at most 64 KiB, an `ETag`), no gate |
 
 Errors are JSON `{error, message}`:
 
@@ -45,12 +47,11 @@ shiori-ai has a gate of its own, so it is safe without anything in front. `SHIOR
 | `proxy` | only connections from `SHIORI_AI_TRUSTED_PROXIES`: a proxy that signs people in itself, such as the nginx serving Shiori's pages with `auth_request` to [hister-login](../../docs/services/hister-login.md) | anywhere; it refuses to start without `SHIORI_AI_TRUSTED_PROXIES` |
 | `open` | everyone | `127.0.0.1`, or anywhere with `SHIORI_AI_BIND_BEHIND_PROXY=1`: for a container whose port is published on the host's `127.0.0.1` only |
 
-On top of the gate, `summarize` and `answer` take only requests from Shiori's own page: `Sec-Fetch-Site: same-origin`, or, from a client without Fetch Metadata, `Origin: https://<Host>`. So the proxy must pass `Host` as the page's own host. `status` and `healthz` are open in every mode.
+On top of the gate, `summarize` and `answer` take only requests from Shiori's own page: `Sec-Fetch-Site: same-origin`, or, from a client without Fetch Metadata, `Origin: https://<Host>`. So the proxy must pass `Host` as the page's own host. `status`, `healthz`, `/api/status` and `/api/changelog` are open in every mode.
 
-## Not yet
+## Room tokens
 
-- **Room tokens.** A later release adds `SHIORI_AI_AUTH_URL`, as smallweb has: a headless caller sends a room token from hister-login.
-- **`/api/status` and `/api/changelog`.** shiori-ai answers `/healthz` and `/shiori/ai/status` only, so the landing page can't say what a deploy brought.
+A headless caller sends a room token from [hister-login](../../docs/services/hister-login.md), as for [shiori-feed](../shiori-feed/README.md#room-tokens): `SHIORI_AI_AUTH_URL`, `SHIORI_AI_PUBLIC_URL` and `SHIORI_AI_HISTER_USERS` (never `*`), then `Authorization: Bearer mht_…` in `tailscale` or `proxy` mode. A request a token lets in skips the same-origin check: a bearer token isn't a cookie another site's page can ride on. Notes, code and local files are refused all the same.
 
 ## Settings
 
@@ -68,6 +69,9 @@ On top of the gate, `summarize` and `answer` take only requests from Shiori's ow
 | `SHIORI_AI_AUTH` | `tailscale` | `tailscale`, `proxy` or `open` (above) |
 | `SHIORI_AI_USERS` | — | the Tailscale logins allowed in `tailscale` mode; `*` = anyone; unset = nobody |
 | `SHIORI_AI_TRUSTED_PROXIES` | — | addresses or CIDRs of the proxy |
+| `SHIORI_AI_AUTH_URL` | — | [hister-login](../../docs/services/hister-login.md)'s address: turns on room tokens (with the next two) |
+| `SHIORI_AI_PUBLIC_URL` | — | the address the room tokens are issued for (its origin is what hister-login checks) |
+| `SHIORI_AI_HISTER_USERS` | — | the Hister users a room token may act as, comma-separated (never `*`) |
 | `SHIORI_AI_BIND_BEHIND_PROXY` | — | `1`: only the proxy (or the host's own `127.0.0.1` port) reaches the listener's network. Prefer `SHIORI_AI_TRUSTED_PROXIES` |
 | `SHIORI_AI_BIND`, `SHIORI_AI_PORT` | `127.0.0.1`, `8080` | the listener. The image sets `0.0.0.0` |
 | `SHIORI_AI_DATA` | `/data` | `shiori-ai.db`: the caches and the daily counts. It can be deleted (the day's counts go with it) |
