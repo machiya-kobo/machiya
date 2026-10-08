@@ -57,7 +57,7 @@ import time
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 from . import prefs as vprefs
-from .identity import Identity, IdentityError, Principal, check_bind, tailscale_uid
+from .identity import Identity, IdentityError, Principal, check_bind, peer_trusted, tailscale_uid, trusted_proxies
 
 SSO_COOKIE = "machiya_sso"              # the base name; the legacy shared-domain cookie itself (read, never set here)
 TRY_COOKIE = "machiya_sso_try"          # (before v0.22) the loop guard; now <host prefix><base>_<room>_try
@@ -317,7 +317,7 @@ class HisterAuth:
 
     def __init__(self, room, signin, users, public_url, auth_url="", fallback="tailscale", fallback_users=(),
                  cookie_domain="", secure=True, fetch=None, clock=time.monotonic, sso_cookie=SSO_COOKIE, provider="",
-                 accept_origins=()):
+                 accept_origins=(), trusted=None):
         if fallback not in ("tailscale", "none"):
             raise IdentityError("%s: the fallback must be tailscale or none, not %r" % (room, fallback))
         if not signin:
@@ -331,6 +331,10 @@ class HisterAuth:
         if cookie_domain and not re.fullmatch(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", cookie_domain):
             raise IdentityError("MACHIYA_COOKIE_DOMAIN must be a domain name, not %r" % cookie_domain)
         self.room, self.signin, self.public_url = room, signin, public_url.rstrip("/")
+        # v0.29: the room's trusted proxies; with them and the peer's address (resolve(client=…)), a Tailscale login
+        # from a peer that isn't one counts for nothing. None: the room checks the peer itself, as before.
+        self.trusted = None if trusted is None else tuple(trusted)
+        self._peer = threading.local()  # the peer of the request this thread is resolving (resolve's client)
         self.users = frozenset(users)
         self.auth_url, self.fallback = auth_url, fallback
         self.fallback_users = frozenset(u.strip().lower() for u in fallback_users if u.strip())
@@ -562,11 +566,13 @@ class HisterAuth:
 
     # -- deciding
 
-    def resolve(self, headers, is_page=True, path="/"):
+    def resolve(self, headers, is_page=True, path="/", client=None):
         """headers: http.server's message (or a mapping with .get); is_page: a top-level page load (else an API,
         XHR or service-worker call: never redirected); path: the page's local path + query, for return=. Never
-        raises: anything unexpected is refused (503, no fallback)."""
+        raises: anything unexpected is refused (503, no fallback). client (v0.29): the peer's address, so the
+        Tailscale fallback believes the login header only from the room's trusted proxies; None: as before."""
         try:
+            self._peer.client = client
             return self._resolve(headers, is_page, path)
         except Exception as e:          # a request thread must never die on hostile input; fail closed
             print("histerauth: %s: %s while checking a request" % (self.room, type(e).__name__),
@@ -690,7 +696,11 @@ class HisterAuth:
     def _fallback(self, headers, banner=True):
         """The Tailscale identity (Tailscale Serve sets the header and strips a client's own copy): a login in
         <P>_USERS is the owner. Nothing is cached."""
-        values = Identity.header_values(headers, "Tailscale-User-Login")
+        client = getattr(self._peer, "client", None)
+        if self.trusted is not None and client is not None and not peer_trusted(client, self.trusted):
+            values = []                 # v0.29: an untrusted peer's login header counts for nothing
+        else:
+            values = Identity.header_values(headers, "Tailscale-User-Login")
         login = values[0].strip() if len(values) == 1 and isinstance(values[0], str) else ""
         if not login or any(ord(c) < 32 or ord(c) == 127 for c in login):
             return Result(None, 503, UNAVAILABLE, signin=self.signin_location("/"))
@@ -1007,4 +1017,5 @@ def load_for(room, env=None, bind="0.0.0.0", secure=True, fetch=None):
                       (env.get("MACHIYA_COOKIE_DOMAIN") or "").strip().lstrip("."), secure, fetch,
                       sso_cookie=sso_cookie_name(env),
                       provider=(env.get("MACHIYA_SIGNIN_PROVIDER") or "").strip().lower(),
-                      accept_origins=_list(env.get(prefix + "_AUTH_ACCEPT_ORIGINS")))
+                      accept_origins=_list(env.get(prefix + "_AUTH_ACCEPT_ORIGINS")),
+                      trusted=trusted_proxies(env.get(prefix + "_TRUSTED_PROXIES"), prefix + "_TRUSTED_PROXIES"))

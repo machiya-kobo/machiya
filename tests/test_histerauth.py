@@ -833,3 +833,45 @@ class TokenGateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrustedFallbackTest(unittest.TestCase):
+    """v0.29: with the room's trusted proxies and the peer's address, the Tailscale fallback believes the login header
+    only from those proxies; without them (or without the peer), as before."""
+
+    def make(self, trusted, auth_url="http://hl:8081"):
+        helper, clock = FakeHelper(), Clock()
+        helper.down = True                       # the helper is down, so the fallback decides
+        a = ha.HisterAuth("niwa", SIGNIN, ("owner",), "https://niwa.example.ts.net", auth_url, "tailscale",
+                          ("me@passkey",), "example.ts.net", True, fetch=helper, clock=clock, trusted=trusted)
+        return a
+
+    def test_untrusted_peer_gets_no_fallback(self):
+        nets = ha.trusted_proxies("10.210.4.2/32")
+        a = self.make(nets)
+        h = Headers(("Tailscale-User-Login", "me@passkey"))
+        self.assertEqual(quiet(a.resolve, h, client="10.210.4.2").status, 200)
+        self.assertEqual(quiet(a.resolve, h, client="10.210.4.9").status, 503)   # as with no login at all
+        self.assertEqual(quiet(a.resolve, h).status, 200)                          # no peer given: as before
+        self.assertEqual(a.fallback_total, 2)
+
+    def test_standalone_too(self):
+        a = self.make(ha.trusted_proxies("10.210.4.2/32"), auth_url="")
+        h = Headers(("Tailscale-User-Login", "me@passkey"))
+        self.assertEqual(quiet(a.resolve, h, client="10.210.4.2").status, 200)
+        self.assertEqual(quiet(a.resolve, h, client="192.0.2.1").status, 503)
+
+    def test_none_and_empty_are_unchanged(self):
+        h = Headers(("Tailscale-User-Login", "me@passkey"))
+        self.assertEqual(quiet(self.make(None).resolve, h, client="192.0.2.1").status, 200)
+        self.assertEqual(quiet(self.make(()).resolve, h, client="192.0.2.1").status, 200)
+
+    def test_load_for_reads_the_rooms_trusted_proxies(self):
+        env = {"NIWA_AUTH": "hister", "NIWA_AUTH_SIGNIN_URL": SIGNIN, "NIWA_HISTER_USERS": "owner",
+               "NIWA_USERS": "me@passkey", "NIWA_PUBLIC_URL": "https://niwa.example.ts.net",
+               "NIWA_AUTH_URL": "http://hl:8081", "NIWA_TRUSTED_PROXIES": "10.210.4.2/32"}
+        a = quiet(ha.load_for, "niwa", env, bind="127.0.0.1")
+        self.assertEqual(a.trusted, ha.trusted_proxies("10.210.4.2/32"))
+        env["NIWA_TRUSTED_PROXIES"] = "proxy"
+        with self.assertRaisesRegex(IdentityError, "NIWA_TRUSTED_PROXIES"):
+            quiet(ha.load_for, "niwa", env, bind="127.0.0.1")

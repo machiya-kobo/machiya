@@ -916,3 +916,80 @@ print(json.dumps(out))
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrustedProxiesTest(Base):
+    """v0.29: vaultkit itself refuses an identity header from a peer that isn't one of the room's trusted proxies, so a
+    room that forgets to strip it can't be fooled; with no trusted proxies passed, nothing changes."""
+
+    PROXY = "10.210.4.2"
+
+    def nets(self, value="10.210.4.2/32"):
+        return idn.trusted_proxies(value)
+
+    def test_parse_and_match(self):
+        nets = idn.trusted_proxies(" 10.210.4.2/32, 192.0.2.0/24 ,fd00::1 ")
+        self.assertEqual(len(nets), 3)
+        self.assertTrue(idn.peer_trusted("10.210.4.2", nets))
+        self.assertTrue(idn.peer_trusted("::ffff:192.0.2.9", nets))           # an IPv4-mapped peer
+        self.assertTrue(idn.peer_trusted("fd00::1%eth0", nets))               # a scoped address
+        self.assertFalse(idn.peer_trusted("10.210.4.3", nets))
+        self.assertFalse(idn.peer_trusted("", nets))
+        self.assertFalse(idn.peer_trusted("not-an-ip", nets))
+        self.assertTrue(idn.peer_trusted("10.9.9.9", ()))                     # none set: any peer, as the rooms do
+        self.assertEqual(idn.trusted_proxies(""), ())
+        with self.assertRaisesRegex(idn.IdentityError, "KURA_TRUSTED_PROXIES"):
+            idn.trusted_proxies("10.0.0.0/8, proxy", "KURA_TRUSTED_PROXIES")
+
+    def test_none_is_unchanged(self):
+        i = self.ident()                                                        # trusted=None: the room checks
+        r = i.resolve(headers(Tailscale_User_Login="owner@example.com"), "10.9.9.9")
+        self.assertEqual(r.principal.name, "owner")
+
+    def test_tailscale_header_from_an_untrusted_peer_counts_for_nothing(self):
+        i = self.ident(trusted=self.nets())
+        h = headers(Tailscale_User_Login="owner@example.com")
+        self.assertEqual(i.resolve(h, self.PROXY).principal.name, "owner")
+        r = i.resolve(h, "10.210.4.9")
+        self.assertIsNone(r.principal)
+        self.assertEqual((r.status, r.error), (401, "no identity"))          # as if the header were absent
+        self.assertEqual(i.resolve(h, "").status, 401)                         # an unknown peer is untrusted
+        self.assertEqual(self.ident(trusted=()).resolve(h, "10.9.9.9").principal.name, "owner")   # () = any peer
+
+    def test_duplicate_headers_from_an_untrusted_peer_are_ignored_not_refused(self):
+        i = self.ident(trusted=self.nets())
+        class Twice(H):
+            def get_all(self, name):
+                return ["owner@example.com", "partner@example.com"] if name.lower() == "tailscale-user-login" else []
+        h = Twice(Tailscale_User_Login="owner@example.com")
+        self.assertEqual(i.resolve(h, "10.210.4.9").error, "no identity")
+        self.assertEqual(i.resolve(h, self.PROXY).error, "Tailscale-User-Login twice")
+
+    def test_capabilities_and_proxy_header_follow_the_same_rule(self):
+        cap = json.dumps({idn.CAPABILITY: [{"principal": "mcp"}]})
+        i = self.ident(accept_caps=True, trusted=self.nets())
+        self.assertEqual(i.resolve(headers(Tailscale_App_Capabilities=cap), self.PROXY).principal.name, "mcp")
+        self.assertEqual(i.resolve(headers(Tailscale_App_Capabilities=cap), "10.210.4.9").status, 401)
+        p = self.ident(auth="header", header="Remote-User", trusted=self.nets())
+        self.assertEqual(p.resolve(headers(Remote_User="owner"), self.PROXY).principal.name, "owner")
+        self.assertEqual(p.resolve(headers(Remote_User="owner"), "10.210.4.9").status, 401)
+
+    def test_a_token_works_from_any_peer(self):
+        i = self.ident(trusted=self.nets())
+        r = i.resolve(headers(Authorization="Bearer mch_abcd12_" + SECRET), "10.210.4.9")
+        self.assertEqual(r.principal.name, "vm")
+
+    def test_load_for_reads_the_rooms_trusted_proxies(self):
+        env = {"MACHIYA_IDENTITY_FILE": self.path, "KANBAN_TRUSTED_PROXIES": "10.210.5.2/32", "KANBAN_BIND_BEHIND_PROXY": "1"}
+        room = idn.load_for("konbini", env, bind="0.0.0.0")
+        self.assertEqual(room.trusted, idn.trusted_proxies("10.210.5.2/32"))
+        self.assertEqual(idn.load_for("kura", {"MACHIYA_IDENTITY_FILE": self.path}, bind="127.0.0.1").trusted, ())
+        with self.assertRaisesRegex(idn.IdentityError, "KURA_TRUSTED_PROXIES"):
+            idn.load_for("kura", {"MACHIYA_IDENTITY_FILE": self.path, "KURA_TRUSTED_PROXIES": "nope"}, bind="127.0.0.1")
+
+    def test_ambient(self):
+        h = headers(Tailscale_User_Login="me@example.com")
+        self.assertEqual(idn.ambient("tailscale", h).name, "me@example.com")                       # as before
+        self.assertEqual(idn.ambient("tailscale", h, self.PROXY, self.nets()).name, "me@example.com")
+        self.assertIsNone(idn.ambient("tailscale", h, "10.210.4.9", self.nets()))
+        self.assertEqual(idn.ambient("tailscale", h, None, self.nets()).name, "me@example.com")   # no peer: as before
