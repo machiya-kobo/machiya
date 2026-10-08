@@ -34,6 +34,11 @@ shiori-feed has a gate of its own, so it is safe without anything in front. `SHI
 
 A feed reader on the tailnet can read the feeds straight from a Tailscale Serve address. A reader on a tagged machine (a self-hosted one on a server) sends no login, so it needs `SHIORI_FEED_USERS=*`, which lets in anyone your tailnet policy lets reach the address. A reader on the open internet can't, by design: these feeds are your browsing history.
 
+## Not yet
+
+- **Room tokens.** A later release adds `SHIORI_FEED_AUTH_URL`, as smallweb has: a headless caller (a feed reader on a tagged machine) sends a room token from hister-login instead of needing `SHIORI_FEED_USERS=*`.
+- **`/api/status` and `/api/changelog`.** shiori-feed answers `/shiori/healthz` only, so the landing page can't say what a deploy brought.
+
 ## Settings
 
 | Env | Default | |

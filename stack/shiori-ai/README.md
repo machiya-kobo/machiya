@@ -47,6 +47,11 @@ shiori-ai has a gate of its own, so it is safe without anything in front. `SHIOR
 
 On top of the gate, `summarize` and `answer` take only requests from Shiori's own page: `Sec-Fetch-Site: same-origin`, or, from a client without Fetch Metadata, `Origin: https://<Host>`. So the proxy must pass `Host` as the page's own host. `status` and `healthz` are open in every mode.
 
+## Not yet
+
+- **Room tokens.** A later release adds `SHIORI_AI_AUTH_URL`, as smallweb has: a headless caller sends a room token from hister-login.
+- **`/api/status` and `/api/changelog`.** shiori-ai answers `/healthz` and `/shiori/ai/status` only, so the landing page can't say what a deploy brought.
+
 ## Settings
 
 | Env | Default | |
