@@ -172,6 +172,7 @@ location / {                                          # the Hister route (as bef
 - **The trip:** a page's 401 goes to `…hister…/machiya/signin?return=<page>` as usual. The helper sees no state for that host, so it sends the browser through `<host>/machiya/start`. That sets the state cookie on the host and comes back. Then a code goes to `<host>/machiya/callback`, and the room cookie is set there. The pages need no change for this.
 - **Sign Out** must post to `/machiya/signout` on the pages' own origin.
 - `GET /v1/nginx` answers 200 with `X-Hister-Cookie: hister=<session>` for nginx's own hop to Hister, else 401 or 503.
+- It answers 200 only for an origin in `HISTER_LOGIN_PROXIED_ORIGINS`, with a room session made for that same origin (0.5.0). Another room's session, an app's or a browser's id, or any other origin gets the 401 of a signed-out browser. The internal port can't tell who is asking, so `X-Machiya-Room` alone proves nothing.
 - That location must replace the browser's `Cookie` header **and** have `proxy_hide_header Set-Cookie;`. Hister re-sends its session cookie on every signed-in answer. Without it, the raw Hister session would reach the browser on the pages' host.
 
 ## When something is down

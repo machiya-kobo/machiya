@@ -62,7 +62,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.4.3"
+VERSION = "0.5.0"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -1236,20 +1236,28 @@ class Internal(Handler):
     def nginx(self):
         """GET /v1/nginx (auth_request for the hosted pages): the hosted pages' room session (X-Machiya-Session, or
         their room cookie in Cookie) with X-Machiya-Room (their origin) -> 200 and X-Hister-Cookie for nginx's own
-        hop to Hister; legacy: a browser's helper id without X-Machiya-Room (while domain-cookie is on)."""
+        hop to Hister. 0.5.0: only for an origin in HISTER_LOGIN_PROXIED_ORIGINS (that nginx is the one caller) and a
+        room session made for that same origin; anything else (another room's session, an app's or a browser's
+        helper id, an origin not in the list, none) is answered as signed out, 401."""
         lg = self.login
         rooms = self.rooms()
+        origin = rooms[0] if rooms else None
+        if origin not in lg.s.proxied:
+            return self.send(401, [("Cache-Control", "no-store")])
         sid = (self.headers.get("X-Machiya-Session") or "").strip()
-        if not sid and rooms:
+        if not sid:
             sid = next((v for v in histerauth.HisterAuth.cookie_values(self.headers.get("Cookie"),
                                                                        lg.s.proxied_cookie)[:4]
                         if histerauth.RSID_RE.match(v)), "")
-        answer = lg.resolve("sid", sid, rooms) if sid else ("out",)
-        row = answer[1].get("row") if answer[0] == "ok" else None
+        if not histerauth.RSID_RE.match(sid):
+            return self.send(401, [("Cache-Control", "no-store")])
+        answer = lg.resolve("room", sid, [origin])
+        info = answer[1] if answer[0] == "ok" else {}
+        row = info.get("row") if info.get("room") == origin else None
         if row is not None:
             return self.send(200, [("X-Hister-Cookie", "%s=%s" % (HISTER_COOKIE, row["hister_session"])),
                                    ("X-Hister-User", row["username"]), ("Cache-Control", "no-store")])
-        return self.send(401 if answer[0] == "out" else 503, [("Cache-Control", "no-store")])
+        return self.send(401 if answer[0] in ("out", "ok") else 503, [("Cache-Control", "no-store")])
 
     def _post(self):
         path = urlsplit(self.path).path

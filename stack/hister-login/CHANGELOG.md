@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.5.0
+
+- **`/v1/nginx` hands Hister's session only to the hosted pages.** It answers with `X-Hister-Cookie` only when the origin in `X-Machiya-Room` is in `HISTER_LOGIN_PROXIED_ORIGINS` and the room session was made for that same origin. Before, any caller of the internal port could name its own room and trade a Kura or Konbini session, or an app's id, for the raw Hister session. Everything else now gets a 401, as a signed-out browser does. The hosted pages' nginx needs no change.
+
 ## 0.4.3
 
 - **The sign-in and sessions pages have their tab icon again**: they wear the Machiya room, and the page shell's `machiya-small.svg`, `machiya.ico` and `machiya-apple-180.png` are now served under `/machiya/static/icons/` (before, the icon link answered 404).

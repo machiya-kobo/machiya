@@ -368,15 +368,17 @@ class HelperTest(HelperBase):
 
     # -- nginx
 
-    def test_nginx(self):
+    def test_nginx_takes_no_helper_id(self):
+        """0.5.0: /v1/nginx hands Hister's session only to a hosted page's own room session (RoomSessionTest); a
+        browser's or an app's helper id gets nothing, with or without a room named (here no proxied origin at all)."""
         session, sid, _ = self.sign_in()
-        status, headers, _ = self.internal("GET", "/v1/nginx", {"X-Machiya-Session": sid})
-        self.assertEqual((status, dict(headers)["X-Hister-Cookie"]), (200, "hister=" + session))
-        self.assertEqual(self.internal("GET", "/v1/nginx", {"X-Machiya-Session": ""})[0], 401)
-        self.assertEqual(self.internal("GET", "/v1/nginx")[0], 401)
-        self.age()
-        self.fake.fail = True
-        self.assertEqual(self.internal("GET", "/v1/nginx", {"X-Machiya-Session": sid})[0], 503)
+        app = self.login.store.create(self.fake.signed_in(), "owner", 1, "app", "iPhone")
+        for h in ({"X-Machiya-Session": sid}, {"X-Machiya-Session": app},
+                  {"X-Machiya-Session": sid, "X-Machiya-Room": "https://kura.example.test"},
+                  {"X-Machiya-Session": ""}, {}):
+            status, headers, _ = self.internal("GET", "/v1/nginx", h)
+            self.assertEqual(status, 401, h)
+            self.assertNotIn("X-Hister-Cookie", dict(headers), h)
 
     def test_internal_paths_not_public(self):
         session, sid, _ = self.sign_in()
@@ -689,16 +691,15 @@ class HelperTest(HelperBase):
             ("GET", "/v1/check", tok("nope")),                      # a bad token
             ("GET", "/v1/check", tok("tok-other")),                 # another person's token
             ("GET", "/v1/check", {}),                               # nobody again
-            ("GET", "/v1/nginx", sess(sid)),                        # nginx: the owner's Hister cookie
+            ("GET", "/v1/nginx", sess(sid)),                        # nginx: a helper id gets no Hister cookie
             ("GET", "/v1/nginx", {}),                               # ... nobody: none
             ("GET", "/v1/nginx", sess(other)),
             ("GET", "/v1/nginx", sess("junk")),
         ])
-        self.assertEqual([g[0] for g in got], [400, 200, 401, 200, 200, 401, 200, 400, 200, 401, 200, 401])
+        self.assertEqual([g[0] for g in got], [400, 200, 401, 200, 200, 401, 200, 400, 401, 401, 401, 401])
         names = [json.loads(g[2]).get("username") if g[2] else None for g in got[:8]]
         self.assertEqual(names, [None, "owner", None, "other", "owner", None, "other", None])
-        self.assertEqual([g[1].get("X-Hister-User") for g in got[8:]], ["owner", None, "other", None])
-        self.assertTrue(all("X-Hister-Cookie" not in g[1] for g in (got[9], got[11])))
+        self.assertTrue(all("X-Hister-Cookie" not in g[1] and "X-Hister-User" not in g[1] for g in got[8:]))
 
     def test_keep_alive_public_pages_answer_each_request_alone(self):
         _, sid, _ = self.sign_in()
@@ -1071,6 +1072,46 @@ class RoomSessionTest(HelperBase):
             self.assertIn(want, script)
         for gone in ("requestSubmit", "form.submit", '"submit"', '"formdata"'):
             self.assertNotIn(gone, script)
+
+    def test_nginx_only_for_a_proxied_origin_and_its_own_session(self):
+        """0.5.0: X-Hister-Cookie (the raw Hister session) only for an origin in HISTER_LOGIN_PROXIED_ORIGINS and a
+        room session made for that same origin; the internal port can't tell who asks, so X-Machiya-Room alone
+        proves nothing. Anything else is answered as signed out."""
+        session, _, nonce, code, _ = self.trip(ret=SEARCH_O + "/search?q=x")
+        search = self.redeem(code, room=SEARCH_O, nonce=nonce)[1]["session"]
+        _, _, nonce, code, _ = self.trip(session=session)
+        kura = self.redeem(code, room=KURA_O, nonce=nonce)[1]["session"]
+        self.assertEqual(self.room_check(kura)[0], 200)                    # a good session, for Kura
+        app = self.login.store.create(session, "owner", 1, "app", "iPhone")
+
+        def nginx(sid, room):
+            h = {"X-Machiya-Session": sid}
+            if room is not None:
+                h["X-Machiya-Room"] = room
+            status, headers, _ = self.internal("GET", "/v1/nginx", h)
+            return status, dict(headers).get("X-Hister-Cookie")
+
+        # the right origin and its own session
+        self.assertEqual(nginx(search, SEARCH_O), (200, "hister=" + session))
+        self.assertEqual(nginx(search, SEARCH_O + ", " + KURA_O), (200, "hister=" + session))
+        # a session from another room, under the hosted pages' origin or its own
+        self.assertEqual(nginx(kura, SEARCH_O), (401, None))
+        self.assertEqual(nginx(kura, KURA_O), (401, None))
+        self.assertEqual(nginx(kura, KURA_O + ", " + SEARCH_O), (401, None))
+        # an origin not in the list, even with a session of that origin's... or of the listed one
+        self.assertEqual(nginx(search, KURA_O), (401, None))
+        self.assertEqual(nginx(search, NIWA_O), (401, None))
+        self.assertEqual(nginx(search, None), (401, None))
+        # an app's or a browser's helper id is no room session
+        for sid in (app, self.login.store.create(session, "owner", 1, "browser", "Firefox")):
+            self.assertEqual(nginx(sid, SEARCH_O), (401, None))
+            self.assertEqual(nginx(sid, KURA_O), (401, None))
+            self.assertEqual(nginx(sid, None), (401, None))
+        # Hister down: the right session still says so (503), a wrong one is still just signed out
+        self.age()
+        self.fake.fail = True
+        self.assertEqual(nginx(search, SEARCH_O), (503, None))
+        self.assertEqual(nginx(kura, SEARCH_O), (401, None))
 
     # keep-alive and smuggling on the new endpoints
 

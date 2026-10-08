@@ -78,7 +78,9 @@ kura,konbini [--days N] [--out FILE]`; `token add … --from-file FILE` register
 
 `GET /v1/nginx` (for `auth_request`) takes the hosted pages' room session (`X-Machiya-Session`, or their
 `__Host-machiya_sso_shiori` cookie in `Cookie`) with `X-Machiya-Room: https://$host`, and answers 200 with
-`X-Hister-Cookie: hister=<session>` for nginx's hop to Hister, 401, or 503. Hister re-sends its cookie on every signed-in
+`X-Hister-Cookie: hister=<session>` for nginx's hop to Hister, 401, or 503. Since 0.5.0 it answers 200 only when that
+origin is in `HISTER_LOGIN_PROXIED_ORIGINS` and the session was made for that same origin; another room's session, an
+app's or a browser's `mhs_…`, or any other origin gets the 401 of a signed-out browser. Hister re-sends its cookie on every signed-in
 answer, so that nginx location must also have `proxy_hide_header Set-Cookie;`, or the raw Hister session reaches the
 browser on the hosted pages' host. The nginx side: [docs/services/hister-login.md](../../docs/services/hister-login.md).
 
