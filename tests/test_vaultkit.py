@@ -661,6 +661,10 @@ class ShellTest(unittest.TestCase):
         self.assertIn("background: transparent", rule)
         self.assertIn("border: 1px solid currentColor", rule)
         self.assertNotIn("color-mix", rule)
+        for sel in (r"a\.chip\.link:hover", r"\.pill:hover"):         # v0.26.3 (kura's audit): hover thickens, never fills
+            hover = re.search(r"\n" + sel + r"[^{]*\{([^}]*)\}", css).group(1)
+            self.assertNotIn("color-mix", hover, sel)
+            self.assertNotIn("background", hover, sel)
 
     def test_tab_icon_is_the_small_variant(self):
         """v0.26.1 (the style guide's icons): the browser tab gets the room's small icon, an SVG with the detail that

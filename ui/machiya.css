@@ -510,9 +510,10 @@ body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
   font-size: var(--fs-xs); color: var(--fg2); white-space: nowrap; }
 a.tag:hover { border-color: var(--room); color: var(--fg); text-decoration: none; }
 .thing { color: var(--thing, var(--house)); }
-/* link chips (Shiori, v0.26): a chip that opens something ("Kura", "Obsidian", a label): a light fill on hover */
+/* link chips (Shiori, v0.26): a chip that opens something ("Kura", "Obsidian", a label): a heavier outline on hover */
 .chip.link { cursor: pointer; }
-a.chip.link:hover, a.chip.link:focus-visible { background: color-mix(in srgb, currentColor 14%, transparent); text-decoration: none; }
+/* hover thickens the outline: a fill of the chip's own colour pulls its text under 4.5:1 (kura's audit, v0.26.3) */
+a.chip.link:hover { box-shadow: inset 0 0 0 1px currentColor; text-decoration: none; }
 
 /* ---- filter pills (Shiori's tab pills, v0.26): outlined in their colour, the current one filled ----------------- */
 .pills { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 2px 0; }
@@ -520,7 +521,7 @@ a.chip.link:hover, a.chip.link:focus-visible { background: color-mix(in srgb, cu
 .pill { --pill: var(--room); flex: none; display: inline-flex; align-items: center; padding: 4px 10px; border-radius: var(--r-pill);
   font-size: var(--fs-s); font-weight: 600; line-height: 1.3; white-space: nowrap; text-decoration: none; cursor: pointer;
   color: var(--pill); background: transparent; border: 1.5px solid var(--pill); font-family: inherit; }
-.pill:hover { background: color-mix(in srgb, var(--pill) 14%, transparent); text-decoration: none; }
+.pill:hover { box-shadow: inset 0 0 0 1px var(--pill); text-decoration: none; }   /* no fill: see a.chip.link:hover */
 .pill[aria-current]:not([aria-current="false"]), .pill[aria-pressed="true"], .pill.on { color: var(--bg); background: var(--pill); }
 .pill .count { margin-left: 5px; font-weight: 400; font-variant-numeric: tabular-nums; }
 /* a row that scrolls sideways fades at the edge it scrolls toward (Shiori); machiya.js sets data-fade on .pills */
