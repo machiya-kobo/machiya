@@ -521,9 +521,30 @@ a.chip.link:hover { box-shadow: inset 0 0 0 1px currentColor; text-decoration: n
 .pill { --pill: var(--room); flex: none; display: inline-flex; align-items: center; padding: 4px 10px; border-radius: var(--r-pill);
   font-size: var(--fs-s); font-weight: 600; line-height: 1.3; white-space: nowrap; text-decoration: none; cursor: pointer;
   color: var(--pill); background: transparent; border: 1.5px solid var(--pill); font-family: inherit; }
-.pill:hover { box-shadow: inset 0 0 0 1px var(--pill); text-decoration: none; }   /* no fill: see a.chip.link:hover */
+/* under the pointer an unselected filter pill lifts onto the raised colour, --hl (v0.27.3, the owner: a visible hover that stays
+   readable). A same-colour fill can't: 26% left 140 of 180 pairs under 4.5:1. The hovered pill is a raised panel, so its
+   colour takes the panel shade, which palettes.py makes readable on --hl in every theme (and the tests check). */
+.pill:hover:not([aria-current]):not([aria-pressed="true"]):not(.on), .pill[aria-current="false"]:hover {
+  background: var(--hl); text-decoration: none; box-shadow: var(--shadow-1);
+  --blue: var(--blue-panel); --orange: var(--orange-panel); --red: var(--red-panel); --yellow: var(--yellow-panel);
+  --green: var(--green-panel); --teal: var(--teal-panel); --magenta: var(--magenta-panel); --cyan: var(--cyan-panel);
+  --slate: var(--slate-panel); --house: var(--blue-panel); --room: var(--room-panel); --room2: var(--room2-panel); }
 .pill[aria-current]:not([aria-current="false"]), .pill[aria-pressed="true"], .pill.on { color: var(--bg); background: var(--pill); }
 .pill .count { margin-left: 5px; font-weight: 400; font-variant-numeric: tabular-nums; }
+/* a sidebar's section heading (v0.27.2, the owner): the rows' size, semibold, teal in every app (the one place teal isn't
+   the Small Web); and selectable rows: 14% of the room's colour under the pointer, never on the current row */
+.sidehead { margin: var(--sp-3) var(--sp-2) var(--sp-1); font-size: inherit; font-weight: 600; color: var(--teal); }
+.rows > a:hover:not(.here):not([aria-current]), .rows > li > a:hover:not(.here):not([aria-current]) {
+  background: color-mix(in srgb, var(--room) 14%, transparent); text-decoration: none; }
+/* a view switch (v0.27.1): how a list is shown (Group By, Sort, a layout), not what it holds. Neutral, as Shiori keeps
+   its Anytime and Best Match: a sunken track, the chosen option a raised pill. Coloured .pills stay for filters, so the
+   two never look alike (the owner, on Konbini's Group By beside Area). */
+.segmented { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: var(--r-pill); background: var(--dark); }
+.segmented > a, .segmented > button { padding: 4px 12px; border: 0; border-radius: var(--r-pill); background: transparent;
+  font: inherit; font-size: var(--fs-s); font-weight: 500; color: var(--menu-muted, var(--muted)); text-decoration: none; cursor: pointer; white-space: nowrap; }
+.segmented > a:hover, .segmented > button:hover { color: var(--menu-fg, var(--fg)); text-decoration: none; }
+.segmented > [aria-current]:not([aria-current="false"]), .segmented > [aria-pressed="true"], .segmented > .on {
+  background: var(--hl); color: var(--menu-fg, var(--fg)); font-weight: 600; box-shadow: var(--shadow-1); }
 /* a row that scrolls sideways fades at the edge it scrolls toward (Shiori); machiya.js sets data-fade on .pills */
 [data-fade] { --fade: 28px; }
 [data-fade="end"] { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--fade)), transparent);

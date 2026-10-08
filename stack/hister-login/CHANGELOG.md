@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.5.2
+
+- **A readable pill hover** (vaultkit 0.27.3): an unselected pill under the pointer lifts onto the raised colour with a small shadow, its text in a shade that stays at 4.5:1 in every theme. Also brings 0.27.2's `.sidehead` and `.rows`.
+
 ## 0.5.1
 
 - **Further toward Shiori** (vaultkit 0.27.0, the style guide's round 2): Shiori's result cards, Title Case section headings, and the header's current page as a raised pill with no underline.
