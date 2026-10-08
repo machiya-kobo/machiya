@@ -8,11 +8,11 @@ somewhere else. Each room (Kura, Niwa, Konbini, Shiori) lists what it ships in i
 Shipped in this repository
 --------------------------
 
-icons/hister.svg, searxng.svg  Neutral glyphs drawn for Machiya (this repository's licence), standing in for the
+icons/hister.svg, searxng.svg  Neutral glyphs drawn for Machiya (this repository's license), standing in for the
                                 Hister and SearXNG logos in the Rooms menu.
 config/hister/, config/searxng/ Reference configuration for Hister and SearXNG, written for Machiya (this repository's
-                                licence). They configure those programs; they contain none of their code.
-ui/, vaultkit/shell.py          The "Tokyo Night" and "Tokyo Night Day" colour palettes (by enkia, MIT licence;
+                                license). They configure those programs; they contain none of their code.
+ui/, vaultkit/shell.py          The "Tokyo Night" and "Tokyo Night Day" colour palettes (by enkia, MIT license;
                                 github.com/enkia/tokyo-night-vscode-theme) are the basis of the apps' themes.
 
 Everything else here (vaultkit, ui/, stack/, plugins/, compose/, docs/, the sample vault) is original to Machiya.
@@ -21,10 +21,10 @@ stack/mcp/vaultkit/ is a vendored copy of this repository's own vaultkit/.
 Needed at run time, not distributed here
 ----------------------------------------
 
-Python 3.11+ standard library        PSF licence
+Python 3.11+ standard library        PSF license
 markdown (3.7 or later)              BSD 3-Clause (https://github.com/Python-Markdown/markdown)
 PyYAML (6.x)                         MIT (https://github.com/yaml/pyyaml)
-git, openssh                         their own licences (the container images install them from the OS)
+git, openssh                         their own licenses (the container images install them from the OS)
 
 The container images Machiya builds install these from PyPI and the OS at build time; a published image would carry
-their licence texts in its own notices.
+their license texts in its own notices.

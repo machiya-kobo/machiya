@@ -809,7 +809,7 @@ class SourceLinkTest(unittest.TestCase):
             rows = shell.about_section("kura", "0.3.0", "synced abc", "v0.9.0 (abc)")[1]
             self.assertEqual(len(rows), 3)
             self.assertNotIn("Source", "".join(rows))
-            self.assertNotIn("Licence", "".join(rows))
+            self.assertNotIn("License", "".join(rows))
 
     def test_set_shows_a_link_in_the_footer_and_about(self):
         from vaultkit import shell
