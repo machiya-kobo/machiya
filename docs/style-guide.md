@@ -51,6 +51,8 @@ How a list is shown (Group By, Sort, a layout), as opposed to what it holds, is 
 
 - `.tinted` fills the item with its room's colour at `--tint-mix` and outlines it in the same colour at 55%. Give it `.is-note`, `.is-card` or `.is-garden`, or set `--thing`.
 - `--tint-mix` is computed for each theme by `vaultkit/palettes.py`: the most tint each one allows with every text in it still at 4.5:1. It's 9% in most themes and 7% in Ayu dark. In a light theme the tint mixes into the lighter raised shade (`--tint-base`), as Shiori's light cards are lighter than the page. Don't hard-code a percentage.
+- Every accent can tint (v0.27.5), so a card can wear a status colour too (Konbini's cards by column).
+- **Card Style**, Shiori's Settings → Result Style: an app may let people choose how tinted cards are marked, with `data-card-style` on `<body>`: **Tint** (the default; no attribute), **Solid** (a plain card), **Left Bar** (`bar`: a line down the leading edge) or **None** (no card). Use Shiori's names and order.
 - `.kind` is the small line above the title that says whose it is, in the tint's colour.
 - A tinted item is a raised panel, so accents inside it use their panel shades, as in any card.
 

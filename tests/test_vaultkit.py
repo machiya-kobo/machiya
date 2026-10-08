@@ -1003,6 +1003,15 @@ class PalettesTest(unittest.TestCase):
             self.assertIn("--%s: var(--%s-hover)" % (t, t), rule)
         self.assertIn("--room: var(--room-hover)", rule)
 
+    def test_card_style_has_shioris_four_choices(self):
+        """v0.27.5 (the owner: Konbini's stripes tinted, or a choice, as Shiori's Result Style): every accent tints, and
+        data-card-style switches a tinted card to solid, a left bar or none; tint is the default."""
+        self.assertEqual(tuple(self.p.TINTS), tuple(self.p.ACCENTS))
+        css = open(os.path.join(ROOT, "ui", "machiya.css")).read()
+        for style in ("solid", "bar", "none"):
+            self.assertIn('[data-card-style="%s"] .card.tinted' % style, css)
+        self.assertIn("inset 3px 0 0 var(--tint)", css)
+
     def test_accents_are_readable_on_the_raised_panels(self):
         """v0.25 (owner, 2026-10-07): accent-coloured text on a raised panel (a card, a settings or sign-in group, the
         Rooms menu, the update toast, a code block) >= its minimum on --dark and on --hl, in every palette and both
