@@ -2,6 +2,8 @@
 
 Machiya's apps are rooms in one house: each room is distinct, and they share a design language.
 
+The pieces you see in a list (filter pills, chips, tinted items, cards) and how each app keeps its character are in the [style guide](style-guide.md).
+
 ## The house
 
 - **Ten themes, each dark and light** (v0.15, `vaultkit/palettes.py`): Tokyo Night (the default), Solarized, Nord, Dracula (Alucard for light), Catppuccin (Mocha / Latte), Gruvbox, Rosé Pine (Dawn for light), Kanagawa (Wave / Lotus), Everforest and Ayu. Each uses its own published colours, with any that would be hard to read as text moved in lightness only (never hue) until it is: text and accents ≥ 4.5:1 on the background (Tokyo Night Day's rule from Shiori), checked by a contrast test. The shared components are checked as drawn too (2026-10-06): text on `--dark` or `--hl` (settings and sign-in groups, the Rooms menu, the phone's current tab) uses `--menu-fg` / `--menu-muted`, which are readable there; the footer and footnotes use `--muted`; `--comment` is faint (2.75:1 in a dark variant) and not for text in the shell. Accents on a raised panel use their panel shade, `--<accent>-panel` (v0.25, docs/ui.md), which the panels swap in themselves.
