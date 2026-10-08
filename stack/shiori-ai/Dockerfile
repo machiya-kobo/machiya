@@ -2,7 +2,7 @@
 # Python only. Build context: this directory. Runs as uid 1000; the caches and daily counters (one SQLite file) live in
 # /data. The image listens on 0.0.0.0:8080, so it needs a gate: SHIORI_AI_AUTH=tailscale with SHIORI_AI_TRUSTED_PROXIES
 # (or SHIORI_AI_BIND_BEHIND_PROXY=1), or proxy with SHIORI_AI_TRUSTED_PROXIES. It refuses to start without one.
-FROM public.ecr.aws/docker/library/python:3.13-alpine
+FROM public.ecr.aws/docker/library/python:3.13-alpine@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a
 RUN adduser -D -u 1000 -h /data -s /sbin/nologin shioriai
 WORKDIR /app
 COPY shiori_ai.py CHANGELOG.md /app/
