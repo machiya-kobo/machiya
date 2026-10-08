@@ -44,7 +44,7 @@ services:
     restart: unless-stopped
 
   shiori:
-    image: ghcr.io/machiya-kobo/shiori-web:${SHIORI_VERSION:-1.1.0}
+    image: ghcr.io/machiya-kobo/shiori-web:${SHIORI_VERSION:-1.1.1}
     read_only: true
     tmpfs: [/tmp]
     security_opt: ["no-new-privileges:true"]
