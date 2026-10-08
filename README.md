@@ -2,12 +2,12 @@
 
 <img src="icons/png/machiya-128.png" alt="Machiya: a townhouse front with a three-panel noren" width="96" height="96" align="right">
 
-Machiya is a set of small self-hosted apps for finding what you've read: your pages ([Hister](https://github.com/asciimoo/hister)), the web ([SearXNG](https://github.com/searxng/searxng)), your notes ([Obsidian](https://obsidian.md)) and your code ([Forgejo](https://forgejo.org) or [GitHub](https://github.com)).
+Machiya (町家, townhouse) is a set of small self-hosted apps for finding what you've read: your pages ([Hister](https://github.com/asciimoo/hister)), the web ([SearXNG](https://github.com/searxng/searxng)), your notes ([Obsidian](https://obsidian.md)) and your code ([Forgejo](https://forgejo.org) or [GitHub](https://github.com)).
 
-A machiya (町家) is a Kyoto townhouse: a shop at the front, a small garden inside, a storehouse at the back, all under one roof.
+Like a Kyoto machiya: a shop at the front, a small garden inside, a storehouse at the back, all under one roof.
 
 <p align="center">
-<a href="https://machiya-kobo.github.io/">Website</a> · <a href="#apps">Apps</a> · <a href="#architecture-diagram">Architecture Diagram</a> · <a href="#quickstart">Quickstart</a> · <a href="docs/install/sample-vault.md">Sample vault</a> · <a href="#whats-in-this-repo">What's in this repo</a> · <a href="#status">Status</a> · <a href="#license">License</a>
+<a href="https://machiya-kobo.github.io/">Website</a> · <a href="#apps">Apps</a> · <a href="#architecture">Architecture</a> · <a href="#quickstart">Quickstart</a> · <a href="docs/install/sample-vault.md">Sample vault</a> · <a href="docs/install/">Install</a> · <a href="#license">License</a>
 </p>
 
 <p align="center"><a href="site/img/hero-dark.webp"><img src="site/img/hero-dark.webp" alt="Shiori searching for washi: a saved page, a note and a web result in one list, with the saved page open on the right" width="100%"></a><br>Shiori: your pages, notes and the web in one search</p>
@@ -35,7 +35,7 @@ Every screenshot uses the same invented vault: a paper-lantern workshop and a tr
 
 Powered by [Hister](https://github.com/asciimoo/hister) (every page you've read, plus your notes) and [SearXNG](https://github.com/searxng/searxng) (the web). Their reference config is in [config/](config/).
 
-## Architecture Diagram
+## Architecture
 
 Each app runs on its own. They share one vault of Markdown notes in git, and an Obsidian vault works as is. More diagrams: [docs/architecture.md](docs/architecture.md).
 
@@ -125,10 +125,10 @@ The docs, the shared vault library, the reference compose and config, a few smal
 
 ## Status
 
-Pre-1.0, so expect change. The APIs are in [docs/contracts/](docs/contracts/) and the vault conventions in [docs/frontmatter.md](docs/frontmatter.md). Issues and pull requests are welcome; see each repository's `CONTRIBUTING.md`.
+Pre-1.0, so expect change. The APIs are in [docs/contracts/](docs/contracts/) and the vault conventions in [docs/frontmatter.md](docs/frontmatter.md).
 
 ## License
 
 Copyright (C) 2026 Micheal Waltz and Machiya contributors.
 
-Machiya is free software: GNU Affero General Public License, version 3 or (at your option) any later version. See `LICENSE`. What the repository ships from other projects is listed in `THIRD_PARTY_NOTICES`.
+Machiya is free software under the GNU Affero General Public License, version 3 or (at your option) any later version: see [LICENSE](LICENSE). What it ships from other projects is listed with their licenses in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). Contributions are welcome: [CONTRIBUTING.md](CONTRIBUTING.md); report a vulnerability privately: [SECURITY.md](SECURITY.md).
