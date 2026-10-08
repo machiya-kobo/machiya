@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.5.1
+
+- **Further toward Shiori** (vaultkit 0.27.0, the style guide's round 2): Shiori's result cards, Title Case section headings, and the header's current page as a raised pill with no underline.
+
 ## 0.5.0
 
 - **Changed default: `HISTER_LOGIN_LEGACY` is now `none`.** Unset, the helper sets no shared-domain `machiya_sso` and rooms refuse a browser's helper id and Hister's raw token (`401 legacy-off`). If an old room or client still needs one, set it: `domain-cookie`, `hister-token`, or both. Each works as before.
