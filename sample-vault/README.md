@@ -2,7 +2,7 @@
 
 A small, fictional vault for running Machiya without real notes: a paper-lantern workshop and a planned trip to Kyoto. It is what the Quickstarts and the screenshots use, and it exercises every feature of the stack.
 
-The vault folder is `personal/`, so set `*_REPO_SUBDIR=personal` (the reference compose does, through `VAULT_SUBDIR`); the services' own default is the repository root. To serve it, make it a git repository: `tools/demo-vault <dir>` copies it into `<dir>` and commits it (a bare clone of that is what `VAULT_REPO_URL=file:///…` points at); by hand: `git init -b main && git add -A && git commit -m sample`.
+The vault folder is `personal/`, so set `*_REPO_SUBDIR=personal` (the reference compose's `demo-init` does, through `VAULT_SUBDIR`); the services' own default is the repository root. To serve it, make it a git repository: `tools/demo-vault <dir>` copies it into `<dir>` and commits it (a bare clone of that is what `VAULT_REPO_URL=file:///…` points at); by hand: `git init -b main && git add -A && git commit -m sample`.
 
 | Folder | What's in it |
 |---|---|
