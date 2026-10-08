@@ -2,7 +2,7 @@
 # Build context: the machiya repo root, because the original articles are fetched with stack/smallweb's checked fetcher
 # (web.py + smolnet.py, unchanged). Runs as uid 1000; the state (one sqlite file) and status.json live in /data.
 # It listens on nothing.
-FROM public.ecr.aws/docker/library/python:3.13-alpine
+FROM public.ecr.aws/docker/library/python:3.13-alpine@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a
 RUN apk add --no-cache tzdata && adduser -D -u 1000 -h /data -s /sbin/nologin feedimport
 WORKDIR /app
 COPY stack/smallweb/web.py stack/smallweb/smolnet.py /app/

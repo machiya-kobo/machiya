@@ -1,7 +1,7 @@
 # vault-mirror (machiya-kobo/machiya stack/vault-mirror): git + the vaultkit package from this repo. Build context: the
 # machiya repo root (the compose file points at it). Runs as uid 1000 (0.1.3: the image's own USER, not only compose's
 # `user:`); it writes only under /data (the clone, status.json; HOME), which must be writable by that uid.
-FROM public.ecr.aws/docker/library/python:3.13-slim
+FROM public.ecr.aws/docker/library/python:3.13-slim@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/* \
  && useradd --uid 1000 --home-dir /data --no-create-home --shell /usr/sbin/nologin mirror \
  && mkdir -p /data && chown 1000:1000 /data

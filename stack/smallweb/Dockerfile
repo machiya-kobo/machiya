@@ -1,6 +1,6 @@
 # smallweb (machiya-kobo/machiya stack/smallweb): the small-web gateway for Shiori. Stdlib Python only. Build context: this
 # directory. Runs as uid 1000; state (TOFU known hosts, caches, the save log) in /data.
-FROM public.ecr.aws/docker/library/python:3.13-alpine
+FROM public.ecr.aws/docker/library/python:3.13-alpine@sha256:2d9aefe2fef018a7eb2c13064c89c71929800fd2e5dccdbf52ea5da5bb8d929a
 RUN adduser -D -u 1000 -h /data -s /sbin/nologin smallweb
 WORKDIR /app
 COPY smallweb.py smolnet.py web.py engines.py render.py store.py selftest.py smallweb.css CHANGELOG.md /app/

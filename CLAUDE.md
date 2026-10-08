@@ -37,6 +37,7 @@ Python 3.11 or later. `tests/test_private_names.py` is skipped unless you have t
 - **Secrets are read from files** (`*_FILE` settings, `read_secret(path)`). Never put a token in a URL, a command line, a log line or `.git/config`.
 - **No personal details in the repository**: no hostnames, network or tailnet names, people's names, emails, vault names, tokens or anyone's own settings. Code, tests, docs and commit messages use `example.com`, `example.ts.net` and the sample vault.
 - **Copy and docs** are American English, in the voice of `docs/voice.md`.
+- **Base images are pinned by digest.** Run `tools/pin-bases` before a release (it refreshes every Dockerfile's `FROM` to the current multi-arch digest; `--check` reports stale ones), and after changing a base image or an `ARG` it names.
 - **Config here is reference.** `compose/` and `config/` are examples to copy and adapt; nothing here deploys itself.
 
 ## Commits and releases

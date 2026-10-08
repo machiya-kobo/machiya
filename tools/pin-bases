@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""pin-bases - pin every Dockerfile's base images to their current multi-arch digest.
+
+    tools/pin-bases [--check] [PATH ...]      (default: every Dockerfile under the current directory)
+
+A `FROM image:tag` line becomes `FROM image:tag@sha256:<index digest>`: the tag stays for people to read, the digest
+is what builds use, so a rebuild gets exactly the image that was tested. The digest is the image index (the
+multi-arch list), so amd64 and arm64 builds both pin. A tag that names an ARG (`hister:${HISTER_VERSION}`) is
+resolved with that ARG's default in the same file. Run it before a release to pick up the base images' security
+fixes; --check only reports pins that are missing or out of date, and exits 1 if there are any.
+
+Registry access is anonymous (the token flow every public registry offers); the standard library only.
+"""
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+ACCEPT = ", ".join([
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+])
+FROM = re.compile(r"^(?P<lead>\s*FROM\s+(?:--platform=\S+\s+)?)(?P<ref>\S+)(?P<rest>.*)$", re.I)
+ARG = re.compile(r"^\s*ARG\s+(\w+)=(\S+)", re.I)
+
+
+def split(ref):
+    """'public.ecr.aws/docker/library/python:3.13-slim@sha256:..' -> (registry, repository, tag)."""
+    ref = ref.split("@", 1)[0]
+    name, _, tag = ref.rpartition(":") if ":" in ref.rsplit("/", 1)[-1] else (ref, "", "latest")
+    first, _, rest = name.partition("/")
+    if "." in first or ":" in first or first == "localhost":
+        registry, repo = first, rest
+    else:
+        registry, repo = "registry-1.docker.io", name if "/" in name else "library/" + name
+    return registry, repo, tag
+
+
+def _get(url, headers):
+    req = urllib.request.Request(url, headers=headers, method="HEAD")
+    return urllib.request.urlopen(req, timeout=30)
+
+
+def digest(registry, repo, tag):
+    """The registry's Docker-Content-Digest for repo:tag (the index for a multi-arch image)."""
+    url = "https://%s/v2/%s/manifests/%s" % (registry, repo, tag)
+    headers = {"Accept": ACCEPT}
+    try:
+        return _get(url, headers).headers["Docker-Content-Digest"]
+    except urllib.error.HTTPError as err:
+        if err.code != 401:
+            raise
+        challenge = err.headers.get("WWW-Authenticate", "")
+        params = dict(re.findall(r'(\w+)="([^"]*)"', challenge))
+        query = {"service": params.get("service", ""), "scope": params.get("scope") or "repository:%s:pull" % repo}
+        with urllib.request.urlopen(params["realm"] + "?" + urllib.parse.urlencode(query), timeout=30) as resp:
+            body = json.load(resp)
+        headers["Authorization"] = "Bearer " + (body.get("token") or body.get("access_token"))
+        return _get(url, headers).headers["Docker-Content-Digest"]
+
+
+def pin_file(path, check):
+    """Pin one Dockerfile -> [(line number, old, new)] of the lines that need a change."""
+    lines = open(path).read().splitlines(keepends=True)
+    args, changes, stages = {}, [], set()
+    for i, line in enumerate(lines):
+        a = ARG.match(line)
+        if a:
+            args[a.group(1)] = a.group(2).strip('"\'')
+        m = FROM.match(line.rstrip("\n"))
+        if not m:
+            continue
+        ref = m.group("ref")
+        alias = re.search(r"\bAS\s+(\S+)", m.group("rest"), re.I)
+        if ref in stages or ref.lower() == "scratch":
+            stages.add(alias.group(1)) if alias else None
+            continue
+        if alias:
+            stages.add(alias.group(1))
+        resolved = re.sub(r"\$\{?(\w+)\}?", lambda v: args.get(v.group(1), v.group(0)), ref)
+        if "$" in resolved:
+            print("%s:%d: can't resolve %s (no ARG default)" % (path, i + 1, ref), file=sys.stderr)
+            continue
+        want = digest(*split(resolved))
+        base = ref.split("@", 1)[0]
+        new = "%s%s@%s%s\n" % (m.group("lead"), base, want, m.group("rest"))
+        if new.rstrip("\n") != line.rstrip("\n"):
+            changes.append((i + 1, line.rstrip("\n"), new.rstrip("\n")))
+            lines[i] = new if line.endswith("\n") else new.rstrip("\n")
+    if changes and not check:
+        open(path, "w").write("".join(lines))
+    return changes
+
+
+def main(argv):
+    check = "--check" in argv
+    paths = [a for a in argv if a != "--check"]
+    if not paths:
+        for root, dirs, files in os.walk("."):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "vendor")]
+            paths += [os.path.join(root, f) for f in files if f == "Dockerfile" or f.startswith("Dockerfile.")]
+    stale = 0
+    for path in sorted(paths):
+        for n, old, new in pin_file(path, check):
+            stale += 1
+            print("%s:%d\n  - %s\n  + %s" % (path, n, old.strip(), new.strip()))
+    if check and stale:
+        print("%d base image(s) not pinned to their current digest: run tools/pin-bases" % stale)
+        return 1
+    print("all base images pinned" if not stale else "pinned %d base image(s)" % stale)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
