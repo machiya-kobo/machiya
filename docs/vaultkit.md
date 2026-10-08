@@ -43,6 +43,13 @@ v.index()
 html = v.render(v.get("Projects/Kura"), "", mode="all")
 ```
 
+**Indexing** (v0.28). `index()` builds the new index aside and puts it in place at the end, so a reader in another
+thread sees the previous index whole until the new one is ready. `read_notes()` re-reads only notes whose stat
+(device, inode, size, modification and change times) changed since its last call for that root, and frontmatter goes
+through LibYAML when PyYAML has it (aliases still refused; anything LibYAML refuses goes to the Python loader). The
+tended dates walk the git history once, then only the commits added since; the same walk gives `Vault.tended_at`, each
+note's commit time in seconds. On 3,000 notes and 400 commits, a re-index after a commit takes 0.14 s (1.64 s in 0.27).
+
 **A note is data, never code** (v0.13). `render()` returns clean HTML (`vaultkit.sanitize.clean`): raw HTML in a note
 keeps only known tags and attributes; scripts, styles, frames, forms and event handlers are dropped, and a link or
 image keeps only an `http(s)`, `mailto`, `obsidian`, `gemini` or `gopher` URL (or a relative one). `- [ ]` / `- [x]`
