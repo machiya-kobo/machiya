@@ -5,7 +5,7 @@ How a Machiya app looks, taken from Shiori, the front door. Every app shares the
 ## The rules
 
 1. **Colour means where a thing comes from.** Notes are Kura orange, cards Konbini magenta, the published garden Niwa green, your pages and the house blue, and the small web teal. A hue that already has a meaning is never reused for something else. A new kind of thing takes a neutral, or needs a design decision.
-2. **Outlined, as Shiori draws them.** Pills and chips are drawn in their colour's outline on no fill. Only the selected pill is filled. A pill or chip that opens something draws a heavier outline on hover. A fill of a colour behind text in that same colour always pulls it under 4.5:1, so there are no filled chips (v0.26.2).
+2. **Outlined, as Shiori draws them.** Pills and chips are drawn in their colour's outline on no fill. Only the selected pill is filled. Under the pointer, a filter pill that isn't selected fills with 26% of its own colour (the owner, 2026-10-07: an outline change hardly showed). It's a passing state, so its text may dip under 4.5:1 while hovered; at rest, pills stay outlined on no fill. A chip that opens something still draws a heavier outline on hover. A fill of a colour behind text in that same colour always pulls it under 4.5:1, so there are no filled chips (v0.26.2).
 3. **Tint only what's yours, in a mixed list.** The default card is plain. A tinted card says "this one is yours, from that room" among other things, as Shiori's All tab mixes your notes and pages into the web's results.
 4. **Every text stays at 4.5:1**, in all ten themes, dark and light, on every surface it's drawn on. The tests check the shared components; anything new gets a check too.
 5. **Title Case labels, short words, one field first.** As in [voice.md](voice.md).
@@ -58,7 +58,11 @@ How a list is shown (Group By, Sort, a layout), as opposed to what it holds, is 
 
 - **A result card** (`.card`, v0.27) is Shiori's: a surface a step above the page (`--card`, computed per theme), 14px corners, no visible border, the small shadow. Its parts: `.title` (16px, 500, in the thing's or room's colour), `.snippet` (the secondary colour), `.meta` (a row of state and link chips plus small text).
 - **A list of cards** is `<ul class="cards">`, one `<li class="card">` each, 10px apart, as Shiori's results. Use it for lists of things a person reads one by one (notes in a garden, search results, cards in a stream). Dense, scannable indexes stay `.list` rows with dividers (Kura's columns, a tag index).
-- **Section headings** (`.sechead`) are written in Title Case and drawn as written ("Notes", "Topic Maps"), 14px, 600, the secondary colour, as Shiori's. No uppercase, no letter-spacing.
+- **Section headings** (`.sechead`) are written in Title Case and drawn as written ("Notes", "Topic Maps"), 14px, 600, the secondary colour, as Shiori's. No uppercase, no letter-spacing. In a list with its own tabs (Shiori's search page), the heading on a tab wears that tab's colour, as its pill does (Your Pages blue, Your Notes orange, Your Code red).
+- **Links inside a card** (a result's title, which opens the original) underline under the pointer and show the link cursor, as a web link does. A click anywhere else on the card does what the card's click does, so the link has to read apart from it. On macOS, draw it as a plain SwiftUI button: AppKit draws a borderless one and keeps the hover from its label.
+- **Rows that select** (a sidebar's rows): under the pointer, a light fill of the accent (14%) across the row, past the label's edges like the selection, never on the selected row. Nothing moves.
+- **Sidebar section headings** (Shiori's Collections and Labels, Kura's Folders): `.sidehead`, the rows' size, semibold, in teal, in every app (the owner, 2026-10-07: in the rows' colour they read as one more row, and the accent read as purple beside the selection). This is the one place teal doesn't mean the Small Web.
+- **Selectable rows** in a sidebar or a dense column: `.rows`, whose links fill with 14% of the room's colour under the pointer (a passing state, like a pill's hover), never the current row (`.here` or `aria-current`).
 - **The header's current page** is a raised pill (`--hl`), as Shiori's tab bar draws it, with no underline.
 - Empty states: a Title Case heading and one line (`.empty`).
 

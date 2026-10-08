@@ -676,7 +676,9 @@ class ShellTest(unittest.TestCase):
         self.assertIn("background: transparent", rule)
         self.assertIn("border: 1px solid currentColor", rule)
         self.assertNotIn("color-mix", rule)
-        for sel in (r"a\.chip\.link:hover", r"\.pill:hover"):         # v0.26.3 (kura's audit): hover thickens, never fills
+        # v0.26.3 (kura's audit): a link chip's hover thickens, never fills. (A filter pill's hover fills 26% since v0.27.2,
+        # the owner's call: a passing state, see the style guide.)
+        for sel in (r"a\.chip\.link:hover",):
             hover = re.search(r"\n" + sel + r"[^{]*\{([^}]*)\}", css).group(1)
             self.assertNotIn("color-mix", hover, sel)
             self.assertNotIn("background", hover, sel)
