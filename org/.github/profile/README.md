@@ -4,9 +4,11 @@
 
 <p align="center">Small self-hosted apps for finding what you've read: your pages (<a href="https://github.com/asciimoo/hister">Hister</a>), the web (<a href="https://github.com/searxng/searxng">SearXNG</a>), your notes (<a href="https://obsidian.md">Obsidian</a>) and your code (Forgejo or GitHub).</p>
 
+<p align="center">Agentically coded with <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>.</p>
+
 <p align="center"><a href="https://machiya-kobo.github.io/">Website</a> · <a href="https://github.com/machiya-kobo/machiya#quickstart">Quickstart</a> · <a href="https://github.com/machiya-kobo/machiya/tree/main/docs">Docs</a></p>
 
-<p align="center"><a href="https://machiya-kobo.github.io/"><img src="https://machiya-kobo.github.io/img/hero-dark.webp" alt="Shiori searching for washi: a saved page, a note and a web result in one list" width="100%"></a></p>
+<p align="center"><a href="https://machiya-kobo.github.io/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://machiya-kobo.github.io/img/hero-dark.webp"><img src="https://machiya-kobo.github.io/img/hero-light.webp" alt="Shiori, the Machiya search app, with results for washi: a web result, your saved pages and your note Lantern festival kit in one list." width="100%"></picture></a></p>
 
 | Repository | What it does |
 |---|---|
