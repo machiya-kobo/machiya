@@ -36,7 +36,9 @@ flowchart LR
 
 ## Who may use it
 
-The same gate as [shiori-feed](shiori-feed.md) (`SHIORI_AI_AUTH`: `tailscale`, `proxy` or `open`), then a same-origin check: only Shiori's own page may post. The caps (`SHIORI_AI_DAILY_REQUESTS`, 100; `SHIORI_AI_DAILY_INPUT_TOKENS`, 2,000,000; both per UTC day) and a per-minute limit bound the bill.
+The same gate as [shiori-feed](shiori-feed.md) (`SHIORI_AI_AUTH`: `tailscale`, `proxy` or `open`), then a same-origin check: only Shiori's own page may post. **Room tokens** (0.2.0), as [shiori-feed](shiori-feed.md) takes them: `SHIORI_AI_AUTH_URL`, `SHIORI_AI_PUBLIC_URL` and `SHIORI_AI_HISTER_USERS`. A request a room token lets in skips the same-origin check, since no other site's page can send one; notes, code and local files are refused all the same.
+
+The caps (`SHIORI_AI_DAILY_REQUESTS`, 100; `SHIORI_AI_DAILY_INPUT_TOKENS`, 2,000,000; both per UTC day) and a per-minute limit bound the bill.
 
 ## Deploying it
 
@@ -47,4 +49,4 @@ The same gate as [shiori-feed](shiori-feed.md) (`SHIORI_AI_AUTH`: `tailscale`, `
   - the gate's settings.
 - **Routes:** on the web server that serves Shiori's pages, `/shiori/ai/` to shiori-ai behind its sign-in, with `Host` set to the page's own host. `/shiori/ai/status` and `/shiori/ai/healthz` may skip the sign-in. When shiori-ai is down, answer JSON 503 there: never fall through to Hister.
 - **Shiori's build:** `SHIORI_AI=1`, so the pages offer it.
-- **Monitoring:** probe `/healthz`. The [landing page](landing.md) shows "AI on · N left today" from `status`.
+- **Monitoring:** probe `/healthz` (alive) or `/api/status` (`ok` turns false when the key file holds no key, or once three requests in a row failed at the engine or SearXNG). `/api/changelog` serves this service's CHANGELOG. Neither needs a login. The [landing page](landing.md) shows "AI on · N left today" from `status`.

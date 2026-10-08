@@ -283,6 +283,9 @@ services:
       - SHIORI_FEED_BIND_BEHIND_PROXY=${SHIORI_FEED_BIND_BEHIND_PROXY:-1}
       - SHIORI_FEED_USERS=${SHIORI_FEED_USERS:-}
       - SHIORI_FEED_TRUSTED_PROXIES=${SHIORI_FEED_TRUSTED_PROXIES:-}
+      - SHIORI_FEED_AUTH_URL=${SHIORI_FEED_AUTH_URL:-}                     # room tokens: hister-login's address (with the next two)
+      - SHIORI_FEED_PUBLIC_URL=${SHIORI_FEED_PUBLIC_URL:-}
+      - SHIORI_FEED_HISTER_USERS=${SHIORI_FEED_HISTER_USERS:-}
       - SHIORI_FEED_HISTER_URL=${SHIORI_FEED_HISTER_URL:-http://hister:4433}
       - SHIORI_FEED_HISTER_TOKEN_FILE=${SHIORI_HISTER_TOKEN_FILE:-}       # e.g. /secrets/hister-token; only when Hister has users
       - SHIORI_FEED_HISTER_PUBLIC_URL=${HISTER_PUBLIC_URL:-http://localhost:4433}
@@ -303,6 +306,9 @@ services:
       - SHIORI_AI_BIND_BEHIND_PROXY=${SHIORI_AI_BIND_BEHIND_PROXY:-1}
       - SHIORI_AI_USERS=${SHIORI_AI_USERS:-}
       - SHIORI_AI_TRUSTED_PROXIES=${SHIORI_AI_TRUSTED_PROXIES:-}
+      - SHIORI_AI_AUTH_URL=${SHIORI_AI_AUTH_URL:-}                         # room tokens: hister-login's address (with the next two)
+      - SHIORI_AI_PUBLIC_URL=${SHIORI_AI_PUBLIC_URL:-}
+      - SHIORI_AI_HISTER_USERS=${SHIORI_AI_HISTER_USERS:-}
       - SHIORI_AI_KEY_FILE=${SHIORI_AI_KEY_FILE:-}                         # e.g. /secrets/anthropic-api-key; empty = AI off
       - SHIORI_AI_MODEL=${SHIORI_AI_MODEL:-claude-sonnet-5-5}
       - SHIORI_AI_DAILY_REQUESTS=${SHIORI_AI_DAILY_REQUESTS:-100}
