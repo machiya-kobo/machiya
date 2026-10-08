@@ -189,11 +189,17 @@ def mix(a, b, pct):
     return _hex(tuple(x * pct / 100 + y * (1 - pct / 100) for x, y in zip(ra, rb)))
 
 
+def card_colour(v, mode):
+    """Shiori's result card (v0.27): a surface a step above the page. In a dark variant it's --bg moved 40% toward --hl
+    (Tokyo Night #202331, Shiori's #24283b; at 50% Solarized dark's fg2 fell to 4.45:1); in a light one it's --hl,
+    lighter than the page, as Shiori's light cards are. The tests check every text on it."""
+    return mix(v["hl"], v["bg"], 40) if mode == "dark" else v["hl"]
+
+
 def tint_base(mode):
-    """What a tinted item's fill is mixed into: the card colour (--dark) in a dark variant; in a light one the lighter
-    raised shade (--hl), since a light variant's --dark leaves its text no room for any tint (Shiori's light cards are
-    lighter than the page too)."""
-    return "dark" if mode == "dark" else "hl"
+    """What a tinted item's fill is mixed into: the card (v0.27; before, --dark in a dark variant and --hl in a light
+    one: a light variant's --dark leaves its text no room for any tint)."""
+    return "card"
 
 
 def tint_mix(v, mode):
@@ -215,6 +221,7 @@ def tokens(key, mode):
     for t in ACCENTS:
         need = minimum(mode, t)
         v[t + "-panel"] = readable(readable(v[t], v["dark"], need, mode), v["hl"], need, mode)
+    v["card"] = card_colour(v, mode)
     v["tint-mix"] = tint_mix(v, mode)
     return v
 
@@ -237,7 +244,7 @@ def _block(selectors, key, mode, indent=""):
             " ".join("--%s: %s;" % (t, v[t]) for t in ("teal", "magenta", "cyan", "slate")),
             " ".join("--%s-panel: %s;" % (t, v[t + "-panel"]) for t in ACCENTS[:5]),
             " ".join("--%s-panel: %s;" % (t, v[t + "-panel"]) for t in ACCENTS[5:]),
-            "--tint-mix: %d%%; --tint-base: var(--%s);" % (v["tint-mix"], tint_base(mode)),
+            "--card: %s; --tint-mix: %d%%; --tint-base: var(--%s);" % (v["card"], v["tint-mix"], tint_base(mode)),
             _shadow(mode, v["fg"])]
     return "%s%s {\n%s\n%s}\n" % (indent, ", ".join(selectors), "\n".join(indent + "  " + r for r in rows), indent)
 

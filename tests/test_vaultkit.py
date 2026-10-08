@@ -652,6 +652,21 @@ class ShellTest(unittest.TestCase):
         self.assertLess(html.index("/static/machiya.css"), html.index("</head>"))
         self.assertRegex(html, r'/static/machiya\.css\?v=[0-9a-f]{10}"')              # versioned by content
 
+    def test_every_text_is_readable_on_shioris_card(self):
+        """v0.27: the result card (--card: --bg 40% toward --hl in a dark variant, --hl in a light one) keeps every text a
+        card draws at its minimum (fg, fg2, menu-fg, menu-muted, each accent's panel shade), in every palette and both."""
+        from vaultkit import palettes as P
+        bad = []
+        for key in P.PALETTES:
+            for mode in ("dark", "light"):
+                v = P.tokens(key, mode)
+                for t, need in [("fg", 4.5), ("fg2", 4.5), ("menu-fg", 4.5), ("menu-muted", 4.5)] + \
+                        [(a + "-panel", P.minimum(mode, a)) for a in P.ACCENTS]:
+                    got = P.contrast(v[t], v["card"])
+                    if got < need:
+                        bad.append("%s %s: --%s on --card %.2f:1" % (key, mode, t, got))
+        self.assertEqual(bad, [])
+
     def test_chips_have_no_fill_of_their_own_colour(self):
         """v0.26.2 (niwa's audit): a chip's text is its colour, and every accent is only guaranteed 4.5:1 on the bare page,
         panel or tint, so a chip draws an outline and no fill (an 18% fill failed 95 of 140 theme and colour pairs)."""
@@ -953,7 +968,8 @@ class PalettesTest(unittest.TestCase):
         for key in self.p.PALETTES:
             for mode in ("dark", "light"):
                 v = self.p.tokens(key, mode)
-                self.assertGreaterEqual(v["tint-mix"], 5, "%s %s: tint-mix %s%% is too faint to see" % (key, mode, v["tint-mix"]))
+                # v0.27: tinted on Shiori's --card, 3% (Ayu dark) to 9%; the 55% outline carries the colour where the fill is faint
+                self.assertGreaterEqual(v["tint-mix"], 3, "%s %s: tint-mix %s%% is too faint to see" % (key, mode, v["tint-mix"]))
                 base = v[self.p.tint_base(mode)]
                 texts = [("menu-fg", 4.5), ("menu-muted", 4.5)] + [(t + "-panel", self.p.minimum(mode, t)) for t in self.p.ACCENTS]
                 for tint in self.p.TINTS:

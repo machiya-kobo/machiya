@@ -48,7 +48,10 @@ The row of choices above a list: Shiori's All · Pages · Notes · Web tabs, Niw
 
 ## Cards and lists
 
-- `.card` for a raised item (`--dark`, a 1px `--line` border, a 10px radius, the small shadow). `.list` for a plain list with dividers. `.sechead` for an uppercase section heading.
+- **A result card** (`.card`, v0.27) is Shiori's: a surface a step above the page (`--card`, computed per theme), 14px corners, no visible border, the small shadow. Its parts: `.title` (16px, 500, in the thing's or room's colour), `.snippet` (the secondary colour), `.meta` (a row of state and link chips plus small text).
+- **A list of cards** is `<ul class="cards">`, one `<li class="card">` each, 10px apart, as Shiori's results. Use it for lists of things a person reads one by one (notes in a garden, search results, cards in a stream). Dense, scannable indexes stay `.list` rows with dividers (Kura's columns, a tag index).
+- **Section headings** (`.sechead`) are written in Title Case and drawn as written ("Notes", "Topic Maps"), 14px, 600, the secondary colour, as Shiori's. No uppercase, no letter-spacing.
+- **The header's current page** is a raised pill (`--hl`), as Shiori's tab bar draws it, with no underline.
 - Empty states: a Title Case heading and one line (`.empty`).
 
 ## Each app's own character
