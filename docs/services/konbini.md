@@ -29,4 +29,4 @@ See [contracts/konbini-api.md](../contracts/konbini-api.md). Other services read
 Konbini is the board. The reader and search belong to [Kura](kura.md), and the published garden to [Niwa](niwa.md).
 
 - `/garden/*` redirects to Niwa, and writing kits link to Niwa directly.
-- A card page shows the project and links the note to Kura (read) and Obsidian (edit). It doesn't render the note.
+- A card page shows the project, edits its description (the text under the title heading, up to the next heading; Konbini 0.16.0), and links the note to Kura (read) and Obsidian (edit). It doesn't render the rest of the note.

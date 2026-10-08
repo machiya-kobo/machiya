@@ -71,13 +71,22 @@ Sections come in a fixed order: `wip` (WIP over the area's limit; 3 per area by 
 | `GET /api/cards/<slug>/kit` | a card's writing kit |
 | `GET /api/events`, `/api/roundup`, `/api/links`, `/api/rev`, `/api/stream` (SSE) | history, roundups, link rot, change feed |
 | `PATCH /api/cards/<slug>` | board fields (`board` or `status`, `next`, `blocked_by` or `waiting`, `priority` as 1-3 or high/normal/low, `rank`, `dependsOn`, `stream`, `goal`, `due`); the note is written under the names it already uses. A move sets `started` (first move to WIP) and `completedDate` (move to done; cleared when reopened) |
-| `POST /api/cards` | a new stub note (`pm new`) |
+| `POST /api/cards` | a new stub note (`pm new`); also takes `description` and `stream` (0.16.0) |
 | `POST /api/cards/<slug>/events` | a log line |
 | `POST`/`DELETE /api/cards/<slug>/claim` | an agent's "working on this" badge (15 min) |
 | `POST /api/order` | ranks within a column |
 | `POST /api/garden/suggest` | answers 308 to Niwa's `/api/suggest` (`pm suggest` posts to Niwa directly) |
 
 **`client_id` (Konbini 0.15.1, optional, additive):** the card form (`POST /p/<slug>`), `POST /api/cards` and `POST /api/cards/<slug>/events` accept `client_id`, 8-64 characters of `[A-Za-z0-9-]` (anything else is ignored). The board keeps it on the event it makes; a repeat with the same id answers with what was already done (the same card for a create, no second note) instead of doing it twice. Konbini's offline outbox sends one with every queued create and note; other callers may leave it out.
+
+**Descriptions and Won't do (Konbini 0.16.0, additive):**
+- `GET /api/cards/<slug>` gains `description`: the text under the note's title heading, up to the next heading (`/api/cards` and `/api/digest` are unchanged).
+- A PATCH also takes:
+  - `description`, written in place, the one part of a body the board writes;
+  - `area`, an existing lane;
+  - `outcome: "wontdo"` with a `reason`, when archiving.
+- Won't do is a move event carrying `outcome` and `reason` in `.board/events`, with no new frontmatter field. Posts skips a card whose newest archive move says `wontdo`.
+- When an upstream edit and the board both changed the description, the board's edit is dropped and the alert says so. A board description edit is kept over an upstream edit elsewhere in the body.
 
 **`dependsOn` in a PATCH:** a list of names, or one string of names separated by commas; each is a card's slug or title, or a note name (`[[X]]` is accepted too). It's stored as a block list of quoted links to the note's file name (`dependsOn:\n  - "[[Kura]]"`, the frontmatter schema), compared by the card each name points to, so re-sending the same dependencies changes nothing. `""` or `[]` removes the field. A card that depends on itself → 422. `pm dep <slug> +x -y` builds on it.
 

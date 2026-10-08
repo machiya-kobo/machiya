@@ -28,6 +28,6 @@ Each service runs by itself, so any mix of them can be deployed. A service that 
 
 - Kura doesn't write to the vault.
 - Niwa writes only the garden fields: `publish`, `growth`, `confidence`, `garden_pin`.
-- Konbini writes only board frontmatter and new stub notes. It never edits a note body.
+- Konbini writes only board frontmatter, new stub notes and a card's description: the text under the note's title heading, up to the next heading (owner, 2026-10-07, Konbini 0.16.0). The rest of a note's body is never touched.
 - Shiori doesn't build folder, tag or backlink browsing; it links to Kura, which owns browsing.
 - SearXNG never queries Hister, because SearXNG is shared and Hister is private to the owner.
