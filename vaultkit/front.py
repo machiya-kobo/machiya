@@ -32,15 +32,68 @@ class _NoAliases(yaml.SafeLoader):
         return super().compose_node(parent, index)
 
 
-def load_yaml(text):
-    """yaml.safe_load without aliases and at most MAX_FRONT characters (v0.22); YAMLError otherwise."""
-    if len(text) > MAX_FRONT:
-        raise yaml.YAMLError("frontmatter is larger than %d bytes" % MAX_FRONT)
+def _shares_a_node(node):
+    """Does the node graph reach any node twice? The composer turns an alias (*name) into a second reference to the
+    anchored node, so a graph with a shared node is a document with an alias; one without is safe to construct (no
+    expansion). Iterative, so a deep document can't exhaust the stack."""
+    seen, stack = set(), [node]
+    while stack:
+        n = stack.pop()
+        if id(n) in seen:
+            return True
+        seen.add(id(n))
+        if isinstance(n, yaml.SequenceNode):
+            stack.extend(n.value)
+        elif isinstance(n, yaml.MappingNode):
+            for k, v in n.value:
+                stack.extend((k, v))
+    return False
+
+
+class AliasError(yaml.YAMLError):
+    """The frontmatter uses a YAML alias (refused since v0.22)."""
+
+
+def _load_c(text):
+    """v0.28: the document through LibYAML (PyYAML's C parser, about five times faster), with the same guard: the
+    node graph is composed in C, checked for aliases, and only then constructed."""
+    loader = yaml.CSafeLoader(text)
+    try:
+        node = loader.get_single_node()
+        if node is None:
+            return None
+        if _shares_a_node(node):
+            raise AliasError("YAML aliases are not allowed in frontmatter")
+        return loader.construct_document(node)
+    finally:
+        loader.dispose()
+
+
+def _load_py(text):
     loader = _NoAliases(text)
     try:
         return loader.get_single_data()
     finally:
         loader.dispose()
+
+
+def load_yaml(text):
+    """yaml.safe_load without aliases and at most MAX_FRONT characters (v0.22); YAMLError otherwise. v0.28: through
+    LibYAML when PyYAML has it; anything LibYAML refuses (other than an alias) is read by the pure-Python loader as
+    before, so a note that loaded before still loads, the same."""
+    if len(text) > MAX_FRONT:
+        raise yaml.YAMLError("frontmatter is larger than %d bytes" % MAX_FRONT)
+    if _C:
+        try:
+            return _load_c(text)
+        except AliasError:
+            raise
+        except yaml.YAMLError:
+            pass
+    return _load_py(text)
+
+
+_C = hasattr(yaml, "CSafeLoader")
 
 
 def _str(value):

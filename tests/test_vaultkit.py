@@ -480,6 +480,58 @@ class YamlBombTest(unittest.TestCase):
         self.assertIsNone(vaultkit.note_front(big))
 
 
+class FastYamlTest(unittest.TestCase):
+    """v0.28: frontmatter goes through LibYAML (PyYAML's C parser) when it's there, with the alias guard on the composed
+    node graph; the result must be exactly what the pure-Python loader gives."""
+
+    CASES = ["title: A", "a: &a 1\nb: 2", "tags: [x, y]", "d: 2026-10-08", "t: 2026-10-08T10:00:00", "n: 0o17",
+             "n: 017", "b: yes", "b: on", "x: ~", "s: '[[Note]]'", "list:\n  - [[A]]", "k: 1e3", "k: 0x1F", "k: 1_000",
+             "u: \"\\u00e9\"", "dup: 1\ndup: 2", "k: |\n  multi\n  line", "k: >\n  folded", "? complex\n: value",
+             "k: [a, {b: c}]", "e: 町家", "k: 12:30", "k: 2026-1-8", "k: NaN", "k: .inf", "- a\n- b", "", "plain"]
+
+    def corpus(self):
+        out = list(self.CASES)
+        for rel, fm, text in vaultkit.read_notes(os.path.join(ROOT, "sample-vault")):
+            m = vaultkit.front.FRONT_RE.match(text)
+            if m:
+                out.append(m.group(1))
+        return out
+
+    def test_same_result_as_the_python_loader(self):
+        from vaultkit import front
+        import yaml
+        if not front._C:
+            self.skipTest("this PyYAML has no LibYAML")
+        for text in self.corpus():
+            try:
+                want = front._load_py(text)
+            except yaml.YAMLError:
+                want = "error"
+            try:
+                got = front.load_yaml(text)
+            except yaml.YAMLError:
+                got = "error"
+            self.assertEqual(got, want, text)
+
+    def test_aliases_are_refused_by_the_c_loader_too(self):
+        from vaultkit import front
+        import yaml
+        if not front._C:
+            self.skipTest("this PyYAML has no LibYAML")
+        with self.assertRaises(yaml.YAMLError):
+            front._load_c(YamlBombTest.BOMB.split("---\n")[1])
+        with self.assertRaises(yaml.YAMLError):
+            front._load_c("a: &a [1]\nb: *a")
+        self.assertEqual(front._load_c("title: &t A\ntags: [x]"), {"title": "A", "tags": ["x"]})
+
+    def test_without_libyaml_the_python_loader_reads_it(self):
+        from vaultkit import front
+        from unittest import mock
+        with mock.patch.object(front, "_C", False):
+            self.assertEqual(front.load_yaml("title: A\ntags: [x]"), {"title": "A", "tags": ["x"]})
+            self.assertIsNone(vaultkit.note_front(YamlBombTest.BOMB))
+
+
 class MigrationNamesTest(unittest.TestCase):
     """Legacy and current field names are both read (docs/frontmatter.md); the current ones win."""
 
