@@ -275,7 +275,7 @@ cd /usr/local/share/kura                                          # NetBSD: /usr
 - Each app runs as its own user. So give the file and its `session.key` a group the three users share, mode `0640`: `chgrp machiya` and `chmod 0640` both. Make the group and add `kura`, `niwa` and `konbini` to it (on OpenBSD `_kura` and so on).
 - The CLI keeps the mode and owner when it rewrites the file. A new key needs them set again.
 - Add the printed lines to each app's env file (`MACHIYA_IDENTITY_FILE=…`, and `<APP>_SIGNIN=1` for the built-in sign-in), then restart it. With the file, `*_USERS` is unused.
-- Keep `<APP>_BIND=127.0.0.1` (§1). In `tailscale` or `header` mode the apps refuse any other address unless `<APP>_BIND_BEHIND_PROXY=1`.
+- Keep `<APP>_BIND=127.0.0.1` (§1). In `tailscale` or `header` mode the apps refuse any other address until you name the proxy: `<APP>_TRUSTED_PROXIES` (Kura, Konbini) and `<APP>_BIND_BEHIND_PROXY=1` (Niwa, Konbini).
 
 ## Niwa and Konbini extras
 
