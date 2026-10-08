@@ -213,6 +213,7 @@ services:
       NIWA_AUTH_FALLBACK: tailscale                   # production's rule: Niwa falls back to the tailnet login
       NIWA_USERS: ${DEV_TAILNET_USERS:-owner@dev}
       NIWA_BIND_BEHIND_PROXY: "1"
+      NIWA_TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32"   # dev only: front, the Serve stand-in, has no fixed address on the stack's network (two stacks may run side by side), so any private peer counts as the proxy; production names its sidecar's /32 (Niwa 0.12, Konbini 0.17 refuse to start without it)
       NIWA_PUBLIC_URL: ${DEV_URL}:19202
       NIWA_HOST: ${DEV_HOST}
       NIWA_REPO_URL: file://${DEV_DATA}/vault.git
@@ -260,6 +261,7 @@ services:
       KANBAN_AUTH_FALLBACK: tailscale                 # production's rule: Konbini falls back to the tailnet login
       KANBAN_TAILNET_USERS: ${DEV_TAILNET_USERS:-owner@dev}
       KANBAN_BIND_BEHIND_PROXY: "1"
+      KANBAN_TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1/32"   # dev only: front, the Serve stand-in, has no fixed address on the stack's network (two stacks may run side by side), so any private peer counts as the proxy; production names its sidecar's /32 (Niwa 0.12, Konbini 0.17 refuse to start without it)
       KANBAN_BOARD_URL: ${DEV_URL}:19203
       KANBAN_REPO: /repo
       KANBAN_REPO_SUBDIR: personal
