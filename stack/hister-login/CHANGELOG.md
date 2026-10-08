@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.5.4
+
+- vaultkit re-vendored (vaultkit 0.27.4 → 0.29.0): identity headers are believed only from the trusted proxies inside vaultkit itself, single-use pairing codes, the indexing speedups, and the shared hover and card styles. Base images pinned by digest.
+
 ## 0.5.3
 
 - **Shiori's pill hover** (vaultkit 0.27.4): an unselected pill under the pointer fills with 24% of its colour, its text in a shade that stays at 4.5:1 on that fill in every theme.

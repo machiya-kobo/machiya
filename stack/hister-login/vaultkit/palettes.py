@@ -178,8 +178,9 @@ def variant(key, mode):
 # Tinted items (Shiori's design language, docs/style-guide.md, v0.26): something that's yours wears its room's colour, a
 # fill of that colour mixed into the card at --tint-mix with an outline in it. The mix is the most each variant allows
 # with every text a card draws (menu-fg, menu-muted, each accent's panel shade) still at its minimum, under every room
-# colour; Shiori found 9% (Tokyo Night) and 8% (Day) the same way. Never more than TINT_MAX.
-TINTS = ("blue", "orange", "magenta", "green", "teal")
+# colour; Shiori found 9% (Tokyo Night) and 8% (Day) the same way. Never more than TINT_MAX. Since v0.27.5 every accent
+# can tint (Konbini tints its cards by status: slate, blue, orange, red, green), which costs a point or two in a few themes.
+TINTS = ACCENTS
 TINT_MAX = 9
 
 

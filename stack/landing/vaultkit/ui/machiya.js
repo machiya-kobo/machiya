@@ -820,3 +820,18 @@ function fadeRow(el) {
   update();
 }
 for (const el of document.querySelectorAll(".pills")) fadeRow(el);
+
+// v0.29: an image from another site waits for a click (vaultkit.sanitize's remote_images="click"), so opening a note
+// doesn't tell that site. "Load image" puts the image in place; the address only ever came from an http(s) src.
+document.addEventListener("click", (event) => {
+  const button = event.target.closest && event.target.closest(".remote-img-load");
+  if (!button) return;
+  const box = button.closest(".remote-img");
+  const src = box && box.dataset.src;
+  if (!src || !/^https?:\/\//i.test(src)) return;
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = box.dataset.alt || "";
+  img.referrerPolicy = "no-referrer";
+  box.replaceWith(img);
+});

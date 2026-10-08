@@ -10,6 +10,12 @@ handler; links and images only with a safe scheme (never javascript:, data:, vbs
 
 autolink=True also turns bare http(s)/gemini/gopher URLs in text into links (never inside <a>, <code> or <pre>), with
 trailing punctuation and an unbalanced closing bracket left out of the link.
+
+v0.29: a `class` attribute is kept only when every class in it is on the allow-list (vaultkit's own: task, wikilink,
+seed, mermaid, and language-* from fenced code); otherwise the whole attribute goes. remote_images="click" (pages
+that ask for it) turns an image from another site into a placeholder (the address, the alt text and a Load image
+button that ui/machiya.js answers), so opening a note doesn't tell that site; "link" (pages without script) makes it a
+link. An image under `own` (the room's /a/ path) or with a relative address is the vault's and loads as before.
 """
 import html
 import re
@@ -33,6 +39,17 @@ API_SCHEMES = ("http", "https", "mailto", "obsidian")
 SCHEME_RE = re.compile(r"^([a-z][a-z0-9+.-]*):", re.I)
 URL_RE = re.compile(r"\b(?:https?|gemini|gopher)://[^\s<>\"']+", re.I)
 NO_LINK_IN = {"a", "code", "pre"}
+CLASSES = {"task", "wikilink", "seed", "mermaid"}                       # v0.29: vaultkit's own classes
+CLASS_RE = re.compile(r"language-[A-Za-z0-9_+#.-]{1,40}")              # fenced code's highlighting class
+REMOTE_RE = re.compile(r"^https?://", re.I)
+
+
+def keep_class(value):
+    """v0.29: the class attribute's value to keep, or None when any class in it isn't on the allow-list."""
+    names = (value or "").split()
+    if not names or not all(n in CLASSES or CLASS_RE.fullmatch(n) for n in names):
+        return None
+    return " ".join(names)
 
 
 def _trim(url):
@@ -61,10 +78,13 @@ def safe_url(value, schemes=PAGE_SCHEMES, base=None):
 
 
 class Sanitizer(HTMLParser):
-    def __init__(self, base=None, schemes=PAGE_SCHEMES, autolink=False):
+    def __init__(self, base=None, schemes=PAGE_SCHEMES, autolink=False, remote_images="load", own=None):
         super().__init__(convert_charrefs=True)
         self.base = base.rstrip("/") + "/" if base else None
         self.schemes, self.autolink = schemes, autolink
+        if remote_images not in ("load", "click", "link"):
+            raise ValueError("remote_images must be load, click or link, not %r" % (remote_images,))
+        self.remote_images, self.own = remote_images, own
         self.out, self.skip, self.open = [], 0, []
 
     def handle_starttag(self, tag, attrs):
@@ -75,6 +95,8 @@ class Sanitizer(HTMLParser):
             return
         if tag == "input" and dict(attrs).get("type") != "checkbox":
             return                                # a task list's box, nothing else
+        if tag == "img" and self.remote_images != "load" and self.placeholder(dict(attrs)):
+            return
         kept = []
         for k, v in attrs:
             if k not in ATTRS.get(tag, set()) | COMMON:
@@ -86,6 +108,10 @@ class Sanitizer(HTMLParser):
                 continue                          # every box is disabled (below)
             if v is None:
                 continue
+            if k == "class":
+                v = keep_class(v)
+                if v is None:
+                    continue
             if k in ("href", "src"):
                 v = safe_url(v, self.schemes, self.base)
                 if v is None:
@@ -96,6 +122,22 @@ class Sanitizer(HTMLParser):
         self.out.append("<%s%s>" % (tag, "".join(kept)))
         if tag not in VOID:
             self.open.append(tag)
+
+    def placeholder(self, attrs):
+        """v0.29: an image from another site (an absolute http(s) address that isn't under `own`) as a placeholder
+        (remote_images "click") or a link ("link"). -> True when it wrote one."""
+        src = "".join(c for c in (attrs.get("src") or "") if ord(c) > 32 and ord(c) != 127)
+        if not REMOTE_RE.match(src) or (self.own and src.startswith(self.own)):
+            return False
+        url, alt = html.escape(src, quote=True), html.escape((attrs.get("alt") or "").strip(), quote=True)
+        label = alt or "image"
+        if self.remote_images == "link":
+            self.out.append('<a href="%s">[%s]</a>' % (url, label))
+            return True
+        self.out.append('<span class="remote-img" data-src="%s" data-alt="%s"><span class="remote-img-alt">%s</span> '
+                        '<span class="remote-img-url">%s</span> <button type="button" class="remote-img-load">'
+                        'Load image</button></span>' % (url, alt, label, url))
+        return True
 
     def handle_startendtag(self, tag, attrs):
         if tag in DROP_WITH_CONTENT:
@@ -139,9 +181,9 @@ class Sanitizer(HTMLParser):
             self.out.append("</%s>" % self.open.pop())
 
 
-def clean(markup, base=None, schemes=PAGE_SCHEMES, autolink=False):
+def clean(markup, base=None, schemes=PAGE_SCHEMES, autolink=False, remote_images="load", own=None):
     """markup with everything not on the allow-list removed (see the module docstring)."""
-    s = Sanitizer(base, schemes, autolink)
+    s = Sanitizer(base, schemes, autolink, remote_images, own)
     s.feed(markup or "")
     s.close()
     return "".join(s.out)

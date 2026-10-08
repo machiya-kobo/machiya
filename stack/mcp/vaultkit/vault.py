@@ -51,6 +51,14 @@ HIDDEN = ("Templates/",)
 IGNORED = ("CLAUDE.md",)            # agent instructions, not notes
 
 
+def resolve_in(by_name, target):
+    """A wikilink target -> the note's rel in by_name, or None (the resolution rule in this module's docstring)."""
+    t = target.strip().rstrip("\\").strip().lower()     # Obsidian escapes the alias pipe inside a table: [[Note\|alias]]
+    if t.endswith(".md"):
+        t = t[:-3]
+    return by_name.get(t) or by_name.get(t.split("/")[-1])
+
+
 class Vault:
     def __init__(self, repo, subdir="", git=None):
         self.repo, self.subdir = repo, subdir
@@ -70,6 +78,8 @@ class Vault:
     # -- index ---------------------------------------------------------
 
     def index(self):
+        """v0.28: the new index is built aside (notes, names, images, links, backlinks, dates) and then put in place
+        together, so a reader in another thread never sees notes without their links or a half-filled backlink map."""
         key = self.key()
         if key == self._key:
             return
@@ -87,37 +97,64 @@ class Vault:
             for name in filenames:
                 if name.lower().endswith(IMAGE_EXT) and not os.path.islink(os.path.join(dirpath, name)):   # v0.22
                     assets.setdefault(name, os.path.relpath(os.path.join(dirpath, name), self.root))
-        self.notes, self.by_name, self.assets = notes, by_name, assets
         for n in notes.values():
             for m in LINK_RE.finditer(n.text):
-                target = self.resolve(m.group(1))
+                target = resolve_in(by_name, m.group(1))
                 if target and target != n.rel:
                     n.links.add(target)
-        self.backlinks = {}
+        backlinks = {}
         for n in notes.values():
             for t in n.links:
-                self.backlinks.setdefault(t, set()).add(n.rel)
-        self.tended = self.tended_dates()
+                backlinks.setdefault(t, set()).add(n.rel)
+        self._walk_times = {}
+        tended = self.tended_dates()
+        tended_at = self._walk_times
+        self.notes, self.by_name, self.assets, self.backlinks = notes, by_name, assets, backlinks
+        self.tended, self.tended_at = tended, tended_at
         self._key = key
 
     def resolve(self, target):
-        t = target.strip().rstrip("\\").strip().lower()     # Obsidian escapes the alias pipe inside a table: [[Note\|alias]]
-        if t.endswith(".md"):
-            t = t[:-3]
-        return self.by_name.get(t) or self.by_name.get(t.split("/")[-1])
+        return resolve_in(self.by_name, target)
 
     def tended_dates(self):
         """{rel: YYYY-MM-DD of the note's latest commit}. v0.22 (KURA-5): core.quotePath=false, so a non-ASCII name
-        (町家.md, café notes.md) isn't printed quoted and octal-escaped, and keeps its date."""
-        out = self.git("-c", "core.quotePath=false", "log", "--format=@%as", "--name-only", "--", self.subdir or ".")
-        dates, current = {}, None
+        (町家.md, café notes.md) isn't printed quoted and octal-escaped, and keeps its date.
+
+        v0.28: one walk, then only what's new. The walk remembers the commit it reached; when HEAD has moved on from it,
+        only the new commits are walked and their dates laid over the old ones (a note's newest commit wins, as in a
+        full walk). After a history rewrite (the old commit isn't an ancestor any more) it walks everything again. The
+        same walk gives each note's commit time in seconds, as Vault.tended_at after index()."""
+        head = self.git("rev-parse", "HEAD").strip()
+        walked = getattr(self, "_walked", None)
+        if head and walked and walked[0] == head:
+            dates, times = walked[1], walked[2]
+        elif head and walked and self.git("merge-base", walked[0], head).strip() == walked[0]:
+            new_dates, new_times = self._walk("%s..%s" % (walked[0], head))
+            dates, times = dict(walked[1]), dict(walked[2])
+            dates.update(new_dates)
+            times.update(new_times)
+        else:
+            dates, times = self._walk(head) if head else self._walk()
+        if head:
+            self._walked = (head, dates, times)
+        self._walk_times = times
+        return dates
+
+    def _walk(self, *revs):
+        """({rel: date}, {rel: seconds}) of each file's newest commit in `git log revs` under the vault."""
+        out = self.git("-c", "core.quotePath=false", "log", "--format=@%as %at", "--name-only", *revs, "--",
+                       self.subdir or ".")
+        dates, times, current = {}, {}, None
         prefix = self.subdir + "/" if self.subdir else ""
         for line in out.splitlines():
             if line.startswith("@"):
-                current = line[1:]
+                day, _, at = line[1:].partition(" ")
+                current = (day, int(at) if at.isdigit() else 0)
             elif line and line.startswith(prefix) and current:
-                dates.setdefault(line[len(prefix):], current)
-        return dates
+                rel = line[len(prefix):]
+                if rel not in dates:
+                    dates[rel], times[rel] = current
+        return dates, times
 
     def get(self, slug):
         self.index()
@@ -136,10 +173,12 @@ class Vault:
 
     # -- rendering -----------------------------------------------------
 
-    def render(self, note, base, retro=False, mode="garden", prefix=""):
+    def render(self, note, base, retro=False, mode="garden", prefix="", remote_images="load"):
         """prefix (v0.8): a path put before /n/ and /a/ (Kura's other vaults: "/v/work"); "" = unchanged output.
         The result is clean (v0.13, vaultkit.sanitize): raw HTML in a note never runs; "- [ ]" / "- [x]" items are
-        checkboxes (class "task"), and bare URLs in the text are links."""
+        checkboxes (class "task"), and bare URLs in the text are links. remote_images (v0.29): "click" for a page,
+        where an image from another site waits for a click (a link on a retro page); "load" (the default): as before,
+        for API answers and anything another program renders."""
         self.index()
         body = FRONT_RE.sub("", note.text, count=1)
 
@@ -182,7 +221,8 @@ class Vault:
         out = TASK_RE.sub(lambda m: '<li class="task">%s<input type="checkbox"%s disabled> '
                           % (m.group(1) or "", " checked" if m.group(2) != " " else ""), out)
         out = SMALLWEB_AUTOLINK_RE.sub(lambda m: '<a href="%s">%s</a>' % (m.group(1), m.group(1)), out)
-        out = clean(out, autolink=True)
+        mode_img = "link" if remote_images == "click" and retro else remote_images
+        out = clean(out, autolink=True, remote_images=mode_img, own="%s%s/a/" % (base, prefix))
         if retro:
             out = out.replace("<table>", '<table border="1" cellpadding="4" cellspacing="0">')
         return out

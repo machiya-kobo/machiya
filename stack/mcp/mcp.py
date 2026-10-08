@@ -33,7 +33,7 @@ import envelope                                   # noqa: E402
 from backend import HISTER_ORIGIN, Backend, BackendError, SecretFile   # noqa: E402
 from rooms import ToolError, cross, hister, hister_write, konbini, kura, niwa, prompts, vault  # noqa: E402
 
-VERSION = "0.8.1"
+VERSION = "0.8.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHANGELOG = os.path.join(HERE, "CHANGELOG.md")    # /app/CHANGELOG.md in the image; GET /api/changelog serves it
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26")

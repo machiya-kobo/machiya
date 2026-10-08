@@ -112,7 +112,7 @@ body.palette-nord.theme-night, body.palette-nord.theme-system, body.palette-nord
   --teal-panel: #8fbcbb; --magenta-panel: #c3a5bd; --cyan-panel: #88c0d0; --slate-panel: #9aa4b7;
   --blue-hover: #e6ecf3; --orange-hover: #f6e9e5; --red-hover: #f6e9ea; --yellow-hover: #f7e9ce; --green-hover: #e7eee1;
   --teal-hover: #e2eeed; --magenta-hover: #f1eaf0; --cyan-hover: #e0eef3; --slate-hover: #ebedf0;
-  --card: #333a47; --tint-mix: 6%; --tint-base: var(--card);
+  --card: #333a47; --tint-mix: 5%; --tint-base: var(--card);
   --shadow-1: 0 1px 2px rgba(0,0,0,.35); --shadow-2: 0 1px 2px rgba(0,0,0,.35), 0 6px 18px rgba(0,0,0,.25);
 }
 body.palette-nord.theme-day {
@@ -202,7 +202,7 @@ body.palette-catppuccin.theme-day {
   --teal-panel: #127377; --magenta-panel: #8737ef; --cyan-panel: #03709c; --slate-panel: #65687b;
   --blue-hover: #094cd2; --orange-hover: #9a3901; --red-hover: #aa0c2e; --yellow-hover: #7e5010; --green-hover: #29661b;
   --teal-hover: #106468; --magenta-hover: #6d12e3; --cyan-hover: #026085; --slate-hover: #585a6b;
-  --card: #f8f9fb; --tint-mix: 9%; --tint-base: var(--card);
+  --card: #f8f9fb; --tint-mix: 8%; --tint-base: var(--card);
   --shadow-1: 0 1px 2px rgba(76,79,105,.12); --shadow-2: 0 1px 2px rgba(76,79,105,.12), 0 6px 18px rgba(76,79,105,.12);
 }
 @media (prefers-color-scheme: light) {
@@ -215,7 +215,7 @@ body.palette-catppuccin.theme-day {
     --teal-panel: #127377; --magenta-panel: #8737ef; --cyan-panel: #03709c; --slate-panel: #65687b;
     --blue-hover: #094cd2; --orange-hover: #9a3901; --red-hover: #aa0c2e; --yellow-hover: #7e5010; --green-hover: #29661b;
     --teal-hover: #106468; --magenta-hover: #6d12e3; --cyan-hover: #026085; --slate-hover: #585a6b;
-    --card: #f8f9fb; --tint-mix: 9%; --tint-base: var(--card);
+    --card: #f8f9fb; --tint-mix: 8%; --tint-base: var(--card);
     --shadow-1: 0 1px 2px rgba(76,79,105,.12); --shadow-2: 0 1px 2px rgba(76,79,105,.12), 0 6px 18px rgba(76,79,105,.12);
   }
 }
@@ -307,7 +307,7 @@ body.palette-kanagawa.theme-night, body.palette-kanagawa.theme-system, body.pale
   --teal-panel: #7aa89f; --magenta-panel: #9d89bd; --cyan-panel: #7fb4ca; --slate-panel: #938aa9;
   --blue-hover: #adc0e6; --orange-hover: #ffab78; --red-hover: #f0adb5; --yellow-hover: #e6c384; --green-hover: #adc98a;
   --teal-hover: #a8c6c0; --magenta-hover: #c7bcda; --cyan-hover: #9ec6d7; --slate-hover: #c2bdcf;
-  --card: #23232e; --tint-mix: 5%; --tint-base: var(--card);
+  --card: #23232e; --tint-mix: 4%; --tint-base: var(--card);
   --shadow-1: 0 1px 2px rgba(0,0,0,.35); --shadow-2: 0 1px 2px rgba(0,0,0,.35), 0 6px 18px rgba(0,0,0,.25);
 }
 body.palette-kanagawa.theme-day {
@@ -358,7 +358,7 @@ body.palette-everforest.theme-day {
   --teal-panel: #267658; --magenta-panel: #bc288e; --cyan-panel: #2c6f94; --slate-panel: #606d60;
   --blue-hover: #266080; --orange-hover: #954307; --red-hover: #ac0a07; --yellow-hover: #785700; --green-hover: #556101;
   --teal-hover: #21674d; --magenta-hover: #9f2277; --cyan-hover: #266080; --slate-hover: #546054;
-  --card: #fffbef; --tint-mix: 9%; --tint-base: var(--card);
+  --card: #fffbef; --tint-mix: 8%; --tint-base: var(--card);
   --shadow-1: 0 1px 2px rgba(92,106,114,.12); --shadow-2: 0 1px 2px rgba(92,106,114,.12), 0 6px 18px rgba(92,106,114,.12);
 }
 @media (prefers-color-scheme: light) {
@@ -371,7 +371,7 @@ body.palette-everforest.theme-day {
     --teal-panel: #267658; --magenta-panel: #bc288e; --cyan-panel: #2c6f94; --slate-panel: #606d60;
     --blue-hover: #266080; --orange-hover: #954307; --red-hover: #ac0a07; --yellow-hover: #785700; --green-hover: #556101;
     --teal-hover: #21674d; --magenta-hover: #9f2277; --cyan-hover: #266080; --slate-hover: #546054;
-    --card: #fffbef; --tint-mix: 9%; --tint-base: var(--card);
+    --card: #fffbef; --tint-mix: 8%; --tint-base: var(--card);
     --shadow-1: 0 1px 2px rgba(92,106,114,.12); --shadow-2: 0 1px 2px rgba(92,106,114,.12), 0 6px 18px rgba(92,106,114,.12);
   }
 }
@@ -397,7 +397,7 @@ body.palette-ayu.theme-day {
   --teal-panel: #2b7960; --magenta-panel: #8954bd; --cyan-panel: #257692; --slate-panel: #6b6d71;
   --blue-hover: #136199; --orange-hover: #984304; --red-hover: #b21313; --yellow-hover: #84530a; --green-hover: #4d6600;
   --teal-hover: #256953; --magenta-hover: #7943af; --cyan-hover: #1f647b; --slate-hover: #5d5f63;
-  --card: #ffffff; --tint-mix: 9%; --tint-base: var(--card);
+  --card: #ffffff; --tint-mix: 7%; --tint-base: var(--card);
   --shadow-1: 0 1px 2px rgba(92,97,102,.12); --shadow-2: 0 1px 2px rgba(92,97,102,.12), 0 6px 18px rgba(92,97,102,.12);
 }
 @media (prefers-color-scheme: light) {
@@ -410,7 +410,7 @@ body.palette-ayu.theme-day {
     --teal-panel: #2b7960; --magenta-panel: #8954bd; --cyan-panel: #257692; --slate-panel: #6b6d71;
     --blue-hover: #136199; --orange-hover: #984304; --red-hover: #b21313; --yellow-hover: #84530a; --green-hover: #4d6600;
     --teal-hover: #256953; --magenta-hover: #7943af; --cyan-hover: #1f647b; --slate-hover: #5d5f63;
-    --card: #ffffff; --tint-mix: 9%; --tint-base: var(--card);
+    --card: #ffffff; --tint-mix: 7%; --tint-base: var(--card);
     --shadow-1: 0 1px 2px rgba(92,97,102,.12); --shadow-2: 0 1px 2px rgba(92,97,102,.12), 0 6px 18px rgba(92,97,102,.12);
   }
 }
@@ -567,6 +567,14 @@ body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
 .chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: var(--r-pill);
   font-size: var(--fs-xs); font-weight: 500; background: transparent; border: 1px solid currentColor;
   color: var(--chip, var(--muted)); white-space: nowrap; }
+/* v0.29: an image from another site, waiting for a click (vaultkit.sanitize remote_images="click"); only tested text
+   colours on the page (fg2, muted, the house blue), so contrast holds in every theme */
+.remote-img { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; max-width: 100%; padding: 6px 10px;
+  border: 1px dashed var(--line2); border-radius: 8px; color: var(--fg2); font-size: var(--fs-s); }
+.remote-img-url { color: var(--muted); overflow-wrap: anywhere; }
+.remote-img-load { font: inherit; font-weight: 600; color: var(--house); background: transparent; cursor: pointer;
+  border: 1px solid currentColor; border-radius: var(--r-pill); padding: 1px 10px; }
+.remote-img-load:hover { box-shadow: inset 0 0 0 1px currentColor; }
 .tag { display: inline-block; padding: 0 7px; border: 1px solid var(--line2); border-radius: var(--r-pill);
   font-size: var(--fs-xs); color: var(--fg2); white-space: nowrap; }
 a.tag:hover { border-color: var(--room); color: var(--fg); text-decoration: none; }
@@ -620,6 +628,12 @@ a.chip.link:hover { box-shadow: inset 0 0 0 1px currentColor; text-decoration: n
    accents inside take their panel shades. Pair with .is-note / .is-card / .is-garden, or set --thing. ------------ */
 .tinted, .card.tinted { --tint: var(--thing, var(--room)); background: color-mix(in srgb, var(--tint) var(--tint-mix), var(--tint-base));
   border: 1px solid color-mix(in srgb, var(--tint) 55%, transparent); }
+/* Card Style (v0.27.5, as Shiori's Settings → Result Style): how a tinted card marks whose it is. An app that offers
+   the choice sets <body data-card-style="tint|solid|bar|none">; tint (no attribute) is the default. */
+[data-card-style="solid"] .tinted, [data-card-style="solid"] .card.tinted { background: var(--card); border-color: transparent; }
+[data-card-style="bar"] .tinted, [data-card-style="bar"] .card.tinted { background: var(--card); border-color: transparent;
+  box-shadow: inset 3px 0 0 var(--tint), var(--shadow-1); }
+[data-card-style="none"] .tinted, [data-card-style="none"] .card.tinted { background: transparent; border-color: transparent; box-shadow: none; }
 .kind { display: block; margin-bottom: 3px; color: var(--tint, var(--thing, var(--room))); font-size: var(--fs-xs);
   font-weight: 600; letter-spacing: .02em; }
 

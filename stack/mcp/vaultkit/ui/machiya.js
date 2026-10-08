@@ -806,3 +806,32 @@ function pullStep(s, e) {
     rest();
   });
 })();
+
+// A pill row that scrolls sideways fades at the edge it can still scroll toward (Shiori's tab pills; machiya.css's
+// [data-fade]). A row that fits has no fade.
+function fadeRow(el) {
+  const update = () => {
+    const start = el.scrollLeft > 2, end = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+    const fade = start && end ? "both" : start ? "start" : end ? "end" : "";
+    if (fade) el.dataset.fade = fade; else el.removeAttribute("data-fade");
+  };
+  el.addEventListener("scroll", update, { passive: true });
+  window.addEventListener("resize", update);
+  update();
+}
+for (const el of document.querySelectorAll(".pills")) fadeRow(el);
+
+// v0.29: an image from another site waits for a click (vaultkit.sanitize's remote_images="click"), so opening a note
+// doesn't tell that site. "Load image" puts the image in place; the address only ever came from an http(s) src.
+document.addEventListener("click", (event) => {
+  const button = event.target.closest && event.target.closest(".remote-img-load");
+  if (!button) return;
+  const box = button.closest(".remote-img");
+  const src = box && box.dataset.src;
+  if (!src || !/^https?:\/\//i.test(src)) return;
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = box.dataset.alt || "";
+  img.referrerPolicy = "no-referrer";
+  box.replaceWith(img);
+});

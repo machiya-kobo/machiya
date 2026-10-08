@@ -67,6 +67,13 @@ PAIR_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"   # no 0/O, 1/I/L
 PAIR_LEN = 8
 
 
+# v0.29 (the owner, 2026-10-08): a paired device's token (mcd_) lasts DEVICE_DAYS; pairing again issues a fresh one.
+# Tokens issued before 0.29 carry no expiry: they last until DEVICE_LEGACY_UNTIL, 90 days after the release, not a
+# sudden sign-out.
+DEVICE_DAYS = 90
+DEVICE_LEGACY_UNTIL = 1799193600        # 2027-01-06T00:00:00Z
+
+
 class IdentityError(ValueError):
     """The identity file (or a setting) can't be used: the room must not start, or must not serve."""
 
@@ -220,6 +227,40 @@ def check_bind(auth, bind, behind_proxy=False):
         raise IdentityError("auth=%s trusts a login header, so the room must listen on 127.0.0.1 behind the proxy "
                             "(or set <ROOM>_BIND_BEHIND_PROXY=1 when the proxy is the only way in), not on %r"
                             % (auth, bind))
+
+
+# The headers that name a person on a proxy's word (v0.29). A room believes them only from its trusted proxies.
+IDENTITY_HEADERS = ("Tailscale-User-Login", "Tailscale-User-Name", "Tailscale-User-Profile-Pic",
+                    "Tailscale-App-Capabilities")
+
+
+def trusted_proxies(value, setting="TRUSTED_PROXIES"):
+    """<ROOM>_TRUSTED_PROXIES (v0.29, as the rooms parsed it themselves before): the peer addresses (single addresses
+    or CIDRs, comma-separated) whose identity headers count. () when unset; IdentityError for anything that isn't an
+    address or network, naming `setting`."""
+    out = []
+    for part in (value or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            out.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            raise IdentityError("%s: %r is not an address or network (like 10.210.4.2/32)" % (setting, part))
+    return tuple(out)
+
+
+def peer_trusted(address, proxies):
+    """Whether a peer (the connection's address) is one of the trusted proxies; True when none are set (the room then
+    listens on loopback, or behind a proxy that is the only way in: check_bind)."""
+    if not proxies:
+        return True
+    try:
+        ip = ipaddress.ip_address((address or "").split("%")[0])
+    except ValueError:
+        return False
+    ip = getattr(ip, "ipv4_mapped", None) or ip
+    return any(ip.version == net.version and ip in net for net in proxies)
 
 
 # -- the file --------------------------------------------------------------------------------------------------------
@@ -506,7 +547,7 @@ def tailscale_uid(login):
     return "ts:" + hashlib.sha256(login.strip().lower().encode("utf-8")).hexdigest()[:32]
 
 
-def ambient(auth, headers):
+def ambient(auth, headers, client=None, trusted=None):
     """A principal for preferences in a room WITHOUT an identity file (load_for gave None). The room's old gate
     (*_USERS, or open mode's Host allow-list) decides who gets in; this only names whose preferences these are, so the
     room calls it only after that gate admitted the request. Never a grant: it is the owner because the old gate
@@ -514,11 +555,16 @@ def ambient(auth, headers):
 
     auth "tailscale": the one Tailscale-User-Login (None when it is missing, empty, sent twice or holds a control
     character), as Principal(login, "person", owner=True, via="tailscale", uid=tailscale_uid(login)).
-    auth "open": OPEN_OWNER (uid ":open"). Anything else: None (no preferences)."""
+    auth "open": OPEN_OWNER (uid ":open"). Anything else: None (no preferences).
+
+    v0.29: with `trusted` (the room's trusted proxies) and the peer's address in `client`, a login from a peer that
+    isn't one of them counts for nothing (None). Without them, as before: the room checked the peer itself."""
     auth = (auth or "").strip().lower()
     if auth == "open":
         return OPEN_OWNER
     if auth != "tailscale":
+        return None
+    if trusted is not None and client is not None and not peer_trusted(client, trusted):
         return None
     values = Identity.header_values(headers, "Tailscale-User-Login")
     if len(values) != 1 or not isinstance(values[0], str):
@@ -553,7 +599,7 @@ class Identity:
     header (`--accept-app-caps`, Tailscale v1.92+): an older Serve passes a client's own copy straight through."""
 
     def __init__(self, path, room, auth="tailscale", header="", signin=False, secure=True, cookie_domain="",
-                 accept_caps=False):
+                 accept_caps=False, trusted=None):
         if room not in ACTIONS:
             raise IdentityError("unknown room %r" % room)
         if auth not in ("tailscale", "header", "open"):
@@ -564,6 +610,10 @@ class Identity:
             raise IdentityError("MACHIYA_COOKIE_DOMAIN must be a domain name, not %r" % cookie_domain)
         self.path, self.room, self.auth, self.header = path, room, auth, header
         self.signin, self.secure, self.cookie_domain, self.accept_caps = signin, secure, cookie_domain, accept_caps
+        # v0.29: the room's trusted proxies (a tuple of networks; () = any peer). With them, an identity header from a
+        # peer that isn't one counts for nothing here too, so a room that forgets to strip it can't be fooled. None
+        # (the default) leaves the check to the room, as before.
+        self.trusted = None if trusted is None else tuple(trusted)
         self.lock = threading.Lock()
         self.checked = 0.0
         self.config, self.key = read_file(path)
@@ -571,6 +621,7 @@ class Identity:
         self.signin_names = Throttle(5, 900)
         self.signin_addrs = Throttle(20, 900)
         self.pair_addrs = Throttle(5, 600)
+        self.spent = {}                 # v0.29: device id -> when its code expires; a code works once in this room
 
     def _stamp(self, config):
         """The identity file's and the session key's (inode, mtime, size): a change to either is a reload."""
@@ -621,23 +672,27 @@ class Identity:
         """headers: http.server's message (or a mapping with .get). client: the peer address. Never raises: anything
         unreadable is a 401."""
         try:
-            return self._resolve(headers)
+            return self._resolve(headers, client)
         except Exception as e:          # a request thread must never die on hostile input
             print("identity: refused an unreadable request (%s)" % type(e).__name__, file=sys.stderr, flush=True)
             return Result(None, 401, "unreadable identity")
 
-    def _resolve(self, headers):
+    def _resolve(self, headers, client=""):
         config, key = self.current()
-        names = ["Authorization", "Tailscale-User-Login", "Tailscale-App-Capabilities"]
-        if self.auth == "header":
-            names.append(self.header)
+        # v0.29: an untrusted peer's identity headers are as if it never sent them (Authorization isn't one of them)
+        believed = self.trusted is None or peer_trusted(client, self.trusted)
+        names = ["Authorization"]
+        if believed:
+            names += ["Tailscale-User-Login", "Tailscale-App-Capabilities"]
+            if self.auth == "header":
+                names.append(self.header)
         for name in names:
             if len(self.header_values(headers, name)) > 1:
                 return Result(None, 401, "%s twice" % name)
         auth = headers.get("Authorization")
         if auth is not None:            # present, even empty, it's a proof to check, never one to skip
             return self._bearer(config, key, auth.strip())
-        if self.auth == "tailscale":
+        if self.auth == "tailscale" and believed:
             login = (headers.get("Tailscale-User-Login") or "").strip()
             if login:
                 name = config.by_login.get(login.lower())
@@ -647,7 +702,7 @@ class Identity:
             caps = headers.get("Tailscale-App-Capabilities")
             if caps and self.accept_caps:
                 return self._capability(config, caps)
-        elif self.auth == "header":
+        elif self.auth == "header" and believed:
             login = (headers.get(self.header) or "").strip()
             if login:
                 name = config.by_proxy.get(login)
@@ -690,6 +745,12 @@ class Identity:
             if payload.get("u") != raw["uid"] or not whole(payload.get("e")) or payload["e"] != raw["epoch"] \
                     or not isinstance(device, str) or device in raw["revoked"]:
                 return Result(None, 401, "device signed out")
+            until = payload.get("x", DEVICE_LEGACY_UNTIL)       # v0.29: no expiry yet = the legacy date
+            if not whole(until):
+                return Result(None, 401, "unknown device token")
+            if until <= now():
+                return Result(None, 401, "device token expired on %s: pair the device again" % time.strftime(
+                    "%Y-%m-%d", time.gmtime(until)))
             return Result(config.principals[name].with_via("device:" + device))
         return Result(None, 401, "unknown token")
 
@@ -813,15 +874,24 @@ class Identity:
         if not HASHING.acquire(blocking=False):
             self.pair_addrs.forgive(client)
             return Result(None, 429, "busy; try again in a moment"), ""
+        with self.lock:
+            self.spent = {d: x for d, x in self.spent.items() if x > t}
+            spent = set(self.spent)
         try:
-            found = next((e for e in config.pairing if e["expires"] > t and check_password(code, e["code"])), None)
+            found = next((e for e in config.pairing if e["expires"] > t and e["device"] not in spent
+                          and check_password(code, e["code"])), None)
         finally:
             HASHING.release()
         if not found:
             return Result(None, 401, "unknown or expired code"), ""
+        with self.lock:                 # v0.29: spent; a second use (a race included) finds nothing
+            if found["device"] in self.spent:
+                return Result(None, 401, "unknown or expired code"), ""
+            self.spent[found["device"]] = found["expires"]
         name = found["principal"]
+        issued = now()
         payload = {"p": name, "u": config.raw[name]["uid"], "d": found["device"], "e": config.raw[name]["epoch"],
-                   "iat": now()}
+                   "iat": issued, "x": issued + DEVICE_DAYS * 86400}
         token = "mcd_" + sign(key, "device", payload)
         return Result(config.principals[name].with_via("device:" + found["device"])), token
 
@@ -847,8 +917,9 @@ def load_for(room, env=None, bind="0.0.0.0", secure=True):
     behind = (env.get(prefix + "_BIND_BEHIND_PROXY") or "").strip().lower() in ("1", "on", "true", "yes")
     check_bind(auth, bind, behind)
     caps = (env.get(prefix + "_ACCEPT_APP_CAPS") or "").strip().lower() in ("1", "on", "true", "yes")
+    trusted = trusted_proxies(env.get(prefix + "_TRUSTED_PROXIES"), prefix + "_TRUSTED_PROXIES")    # v0.29
     return Identity(path, room, auth, (env.get(prefix + "_AUTH_HEADER") or "").strip(), signin, secure,
-                    (env.get("MACHIYA_COOKIE_DOMAIN") or "").strip(), caps)
+                    (env.get("MACHIYA_COOKIE_DOMAIN") or "").strip(), caps, trusted)
 
 
 # -- writing the file (the CLI) --------------------------------------------------------------------------------------

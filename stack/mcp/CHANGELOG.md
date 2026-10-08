@@ -1,5 +1,9 @@
 # Changelog: machiya-mcp
 
+## 0.8.2
+
+- vaultkit re-vendored (vaultkit 0.23.0 → 0.29.0): identity headers are believed only from the trusted proxies inside vaultkit itself, single-use pairing codes, the indexing speedups, and the shared hover and card styles. Base images pinned by digest.
+
 ## 0.8.1
 
 - **`MCP_NOTES_KNOWN_HOSTS`**: a known_hosts file with the forge's host key. Set, the write clone's ssh accepts only that key (`StrictHostKeyChecking=yes`). Unset, it still trusts the first key it sees (`accept-new`), so set it. A `GIT_SSH_COMMAND` of your own still wins. The key and file paths are quoted now, so a space can't split them.

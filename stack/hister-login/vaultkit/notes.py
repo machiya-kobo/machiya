@@ -1,9 +1,11 @@
 """Notes: reading them off disk and the fields every view uses (title, tags, stage, type, summary)."""
+import copy
 import datetime
 import html
 import os
 import re
 import stat
+import time
 
 from .front import FRONT_RE, PHONE_CONFLICT, _str, note_front, tags_of
 
@@ -27,17 +29,43 @@ def read_notes(root):
     Symlinks are never followed (v0.22, KURA-2): a symlinked note is skipped (os.walk already doesn't descend into a
     symlinked folder), and the file is opened with O_NOFOLLOW, so a committed `x.md -> /proc/self/environ` reads
     nothing."""
-    out = []
+    out, was, now = [], _READ.get(os.path.abspath(root), {}), {}
+    racy_after = time.time_ns() - RACY_NS
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in SKIP_DIRS]
         for name in filenames:
             if name.endswith(".md") and PHONE_CONFLICT not in name:
                 full = os.path.join(dirpath, name)
-                text = read_file(full)
-                if text is None:
+                try:
+                    st = os.lstat(full)
+                except OSError:
                     continue
-                out.append((os.path.relpath(full, root), note_front(text) or {}, text))
+                if not stat.S_ISREG(st.st_mode):        # a symlink or not a file: read_file would refuse it too
+                    continue
+                key = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+                hit = was.get(full)
+                if hit and hit[0] == key:
+                    fm, text = hit[1], hit[2]
+                else:
+                    text = read_file(full)
+                    if text is None:
+                        continue
+                    fm = note_front(text) or {}
+                # a file changed this close to now could change again within the same timestamp tick, unseen: read
+                # it again next time (git's "racy" rule)
+                now[full] = (None if max(st.st_mtime_ns, st.st_ctime_ns) >= racy_after else key, fm, text)
+                out.append((os.path.relpath(full, root), copy.deepcopy(fm), text))
+    _READ[os.path.abspath(root)] = now
     return out
+
+
+# v0.28: what read_notes last read under each root, by file: (stat key, frontmatter, text). A file whose device, inode,
+# size, modification and change times are all unchanged isn't read or parsed again (the change time can't be set back
+# by a tool that keeps the modification time). Each call replaces its root's entry, so a deleted note drops out.
+# File timestamps come from a coarse clock (a few milliseconds a tick), so a file changed within RACY_NS of a read
+# isn't trusted from the cache: an edit in the same tick could keep size and every time the same.
+_READ = {}
+RACY_NS = 2 * 10 ** 9
 
 
 def read_file(path):
