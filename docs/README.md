@@ -28,6 +28,8 @@ Start with the [README](../README.md) for what Machiya is, then:
   - `smallweb/`: Gemini and Gopher search for Shiori, and saving the pages Shiori asks for into Hister
   - `feed-import/`: what you read and star in a feed reader, into Hister
   - `code-import/`: your Forgejo and GitHub repos, into Hister for Shiori's Code view ([docs](services/code-import.md))
+  - `shiori-feed/`: an RSS feed of any Hister search, for Shiori's Subscribe ([docs](services/shiori-feed.md))
+  - `shiori-ai/`: page summaries and web-search answers for Shiori on the web ([docs](services/shiori-ai.md))
   - `vault-mirror/`: one shared clone of the vault
 - **[plugins/machiya/](../plugins/machiya/)**: a Claude Code plugin: the MCP server plus skills for the backlog, the weekly review, recall, garden suggestions and tidying labels.
 - **[compose/](../compose/)**: the reference compose, and [compose/dev/](../compose/dev/), the dev stack on synthetic data ([docs/dev-stack.md](dev-stack.md)).

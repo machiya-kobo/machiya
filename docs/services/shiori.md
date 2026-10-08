@@ -18,10 +18,10 @@ To capture pages in other browsers, use Hister's own extension.
 - **Search from Safari:** keep DuckDuckGo as Safari's engine, and address-bar searches open Shiori's combined results.
 - **A note** opens in Obsidian to edit (`obsidian://open?vault=personal&file=…`), or in Kura to read. Its #tags link to Kura's tag pages.
 - **Remember What You Open:** opened results go into Hister history by URL.
-- **Summaries and answers:** Shiori's AI features, Claude on request. Notes are always refused, by host (`kura.`, `konbini.`, `niwa.`) and by label `vault`.
+- **Summaries and answers:** Shiori's AI features, Claude on request; on the hosted pages through [shiori-ai](shiori-ai.md). Notes are always refused, by host (`kura.`, `konbini.`, `niwa.`) and by label `vault`.
 - **Settings are per device.**
 - **The notes' homes** are set when the hosted pages are built: Kura's address in `SHIORI_NIWA_URL` (the name is older than Kura), Konbini's in `SHIORI_KONBINI_URL`.
-- **RSS for any Hister query:** `/shiori/feed`, from a small feed service next to Hister (not part of this repository).
+- **RSS for any Hister query:** `/shiori/feed`, from [shiori-feed](shiori-feed.md), next to Hister.
 
 ## How it talks to the rest
 
