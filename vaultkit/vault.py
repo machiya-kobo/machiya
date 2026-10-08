@@ -173,10 +173,12 @@ class Vault:
 
     # -- rendering -----------------------------------------------------
 
-    def render(self, note, base, retro=False, mode="garden", prefix=""):
+    def render(self, note, base, retro=False, mode="garden", prefix="", remote_images="load"):
         """prefix (v0.8): a path put before /n/ and /a/ (Kura's other vaults: "/v/work"); "" = unchanged output.
         The result is clean (v0.13, vaultkit.sanitize): raw HTML in a note never runs; "- [ ]" / "- [x]" items are
-        checkboxes (class "task"), and bare URLs in the text are links."""
+        checkboxes (class "task"), and bare URLs in the text are links. remote_images (v0.29): "click" for a page,
+        where an image from another site waits for a click (a link on a retro page); "load" (the default): as before,
+        for API answers and anything another program renders."""
         self.index()
         body = FRONT_RE.sub("", note.text, count=1)
 
@@ -219,7 +221,8 @@ class Vault:
         out = TASK_RE.sub(lambda m: '<li class="task">%s<input type="checkbox"%s disabled> '
                           % (m.group(1) or "", " checked" if m.group(2) != " " else ""), out)
         out = SMALLWEB_AUTOLINK_RE.sub(lambda m: '<a href="%s">%s</a>' % (m.group(1), m.group(1)), out)
-        out = clean(out, autolink=True)
+        mode_img = "link" if remote_images == "click" and retro else remote_images
+        out = clean(out, autolink=True, remote_images=mode_img, own="%s%s/a/" % (base, prefix))
         if retro:
             out = out.replace("<table>", '<table border="1" cellpadding="4" cellspacing="0">')
         return out

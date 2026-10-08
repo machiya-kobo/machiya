@@ -368,6 +368,85 @@ class SanitizeTest(unittest.TestCase):
         self.assertNotIn("<a", self.clean("<p>https://e.example</p>"))   # off unless asked
 
 
+class NoteClassesAndRemoteImagesTest(unittest.TestCase):
+    """v0.29: a note's class attributes pass only from an allow-list, and an image from another site waits for a click
+    on pages that ask for it (the owner, 2026-10-08), while vault images render exactly as before."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.tmp, "img"))
+        with open(os.path.join(self.tmp, "img", "pic.png"), "wb") as f:
+            f.write(b"\x89PNG\r\n\x1a\n")
+        self.v = vaultkit.Vault(self.tmp, git=lambda *a: "")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def render(self, text, base="", **kw):
+        return self.v.render(vaultkit.Note("N.md", {}, text), base, **kw)
+
+    def test_class_allow_list(self):
+        from vaultkit.sanitize import clean, keep_class
+        self.assertEqual(keep_class("task"), "task")
+        self.assertEqual(keep_class("  wikilink  "), "wikilink")
+        self.assertEqual(keep_class("language-python"), "language-python")
+        self.assertIsNone(keep_class("task evil"))                                # one stranger drops it all
+        self.assertIsNone(keep_class("callout-warning"))
+        self.assertIsNone(keep_class(""))
+        self.assertEqual(clean('<div class="pill on">x</div>'), "<div>x</div>")
+        self.assertEqual(clean('<span class="seed">s</span>'), '<span class="seed">s</span>')
+        out = self.render("```python\nprint(1)\n```\n\n- [ ] t\n\n[[N]]")
+        self.assertIn('<code class="language-python">', out)                      # vaultkit's own classes stay
+        self.assertIn('<li class="task">', out)
+        self.assertNotIn('class="pill"', self.render('<span class="pill">fake pill</span>'))
+
+    def test_remote_images_load_as_before_by_default(self):
+        md = "![a cat](https://cats.example/c.png) and <img src=\"http://x.example/y.gif\" alt=\"y\">"
+        out = self.render(md)
+        self.assertIn('<img alt="a cat" src="https://cats.example/c.png">', out)
+        self.assertIn('<img src="http://x.example/y.gif" alt="y">', out)
+        self.assertNotIn("remote-img", out)
+
+    def test_remote_images_wait_for_a_click(self):
+        out = self.render("![a cat](https://cats.example/c.png)", remote_images="click")
+        self.assertNotIn("<img", out)
+        self.assertIn('<span class="remote-img" data-src="https://cats.example/c.png" data-alt="a cat">', out)
+        self.assertIn('<span class="remote-img-url">https://cats.example/c.png</span>', out)
+        self.assertIn('<button type="button" class="remote-img-load">Load image</button>', out)
+        retro = self.render("![a cat](https://cats.example/c.png)", remote_images="click", retro=True)
+        self.assertIn('<a href="https://cats.example/c.png">[a cat]</a>', retro)          # no script: a link
+        self.assertNotIn("<img", retro)
+
+    def test_vault_images_are_untouched(self):
+        for base in ("", "https://niwa.example"):
+            plain = self.render("![[pic.png]] and ![p](img/pic.png)", base)
+            click = self.render("![[pic.png]] and ![p](img/pic.png)", base, remote_images="click")
+            self.assertEqual(plain, click)
+            self.assertIn('<img src="%s/a/img/pic.png"' % base, click)
+
+    def test_placeholder_escapes_and_refuses_odd_schemes(self):
+        from vaultkit.sanitize import clean
+        out = clean('<img src="https://e.example/x.png?a=1&b=&quot;2" alt="<b>hi</b>">', remote_images="click")
+        self.assertIn('data-src="https://e.example/x.png?a=1&amp;b=&quot;2"', out)
+        self.assertIn("&lt;b&gt;hi&lt;/b&gt;", out)
+        self.assertNotIn("<b>", out)
+        self.assertEqual(clean('<img src="javascript:alert(1)">', remote_images="click"), "<img>")   # as before
+        with self.assertRaises(ValueError):
+            clean("x", remote_images="maybe")
+
+    def test_the_page_script_and_style_exist(self):
+        js = open(os.path.join(ROOT, "ui", "machiya.js"), encoding="utf-8").read()
+        css = open(os.path.join(ROOT, "ui", "machiya.css"), encoding="utf-8").read()
+        self.assertIn('closest(".remote-img-load")', js)
+        self.assertIn('referrerPolicy = "no-referrer"', js)
+        for rule in (".remote-img {", ".remote-img-url {", ".remote-img-load {"):
+            self.assertIn(rule, css)
+        block = css[css.index(".remote-img {"):css.index(".tag {")]
+        for colour in ("var(--fg2)", "var(--muted)", "var(--house)"):     # tested text colours only
+            self.assertIn(colour, block)
+        self.assertNotRegex(block, r"#[0-9a-fA-F]{3,8}\b")
+
+
 class RenderSafetyTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
