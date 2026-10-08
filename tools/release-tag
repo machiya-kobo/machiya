@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# release-tag - make a Machiya release tag: annotated, made as the GitHub bot user machiya-bot, and SSH-signed with this
+# machine's own machiya-bot key (owner, 2026-10-07: release tags only; commits stay unsigned; docs/release-signing.md).
+#
+#   tools/release-tag [-C <repo>] <tag> [<commit>] [-m <message>]     e.g. tools/release-tag -C ~/git/kura v0.10.1
+#
+# The key comes from pass ($MACHIYA_SIGNING_PASS, else hosts/<this host>/machiya-bot-signing-key, read with hpass) and is
+# rendered into a 0700 directory on tmpfs ($XDG_RUNTIME_DIR, /run/user/<uid>, else $TMPDIR on macOS) only while git signs,
+# then removed. It never lands in a repo's config. The tag is checked against release/allowed_signers before it is
+# kept; push it yourself (git push origin <tag>, and to Forgejo).
+set -euo pipefail
+BOT_NAME=machiya-bot
+BOT_EMAIL=339386069+machiya-bot@users.noreply.github.com
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+signers="$here/release/allowed_signers"
+repo=. msg=""
+usage() { sed -n '4,4p' "$0" | sed 's/^# *//' >&2; exit 2; }
+args=()
+while (($#)); do
+    case $1 in
+        -C) repo=$2; shift 2 ;;
+        -m) msg=$2; shift 2 ;;
+        -h|--help) usage ;;
+        -*) echo "release-tag: unknown option $1" >&2; usage ;;
+        *) args+=("$1"); shift ;;
+    esac
+done
+((${#args[@]} >= 1 && ${#args[@]} <= 2)) || usage
+tag=${args[0]} commit=${args[1]:-HEAD}
+[[ $tag =~ ^([a-z-]+-)?v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "release-tag: $tag is not [<prefix>-]vX.Y.Z" >&2; exit 1; }
+[[ -f $signers ]] || { echo "release-tag: no $signers" >&2; exit 1; }
+git -C "$repo" rev-parse -q --verify "refs/tags/$tag" >/dev/null && { echo "release-tag: $tag already exists (a release tag never moves)" >&2; exit 1; }
+commit=$(git -C "$repo" rev-parse --verify "$commit^{commit}")
+git -C "$repo" fetch -q origin main
+git -C "$repo" merge-base --is-ancestor "$commit" origin/main || { echo "release-tag: $commit is not on origin/main (push main first)" >&2; exit 1; }
+
+host=$(hostname -s | tr '[:upper:]' '[:lower:]')
+entry=${MACHIYA_SIGNING_PASS:-hosts/$host/machiya-bot-signing-key}
+hpass=$(command -v hpass || echo "$HOME/.local/bin/hpass")
+base=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+[[ -d $base && -w $base ]] || base=${TMPDIR:-/tmp}
+dir=$(mktemp -d "${base%/}/machiya-sign.XXXXXX"); chmod 700 "$dir"
+trap 'rm -rf "$dir"' EXIT
+(umask 077; "$hpass" show "$entry" >"$dir/key") || { echo "release-tag: can't read $entry from pass" >&2; exit 1; }
+
+GIT_COMMITTER_NAME=$BOT_NAME GIT_COMMITTER_EMAIL=$BOT_EMAIL \
+    git -C "$repo" -c gpg.format=ssh -c user.signingkey="$dir/key" tag -s -m "${msg:-$tag}" "$tag" "$commit"
+if ! git -C "$repo" -c gpg.ssh.allowedSignersFile="$signers" tag -v "$tag" >/dev/null 2>&1; then
+    git -C "$repo" tag -d "$tag" >/dev/null
+    echo "release-tag: $tag did not verify against $signers (is this machine's key listed?); tag removed" >&2; exit 1
+fi
+echo "release-tag: $tag signed by $BOT_NAME and verified; now: git -C $repo push origin $tag (and to Forgejo)"

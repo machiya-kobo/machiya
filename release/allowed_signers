@@ -1,0 +1,6 @@
+# allowed_signers: the SSH keys that sign Machiya release tags (and Shiori's SHA256SUMS), all as the GitHub bot user
+# machiya-bot (owner, 2026-10-07: release tags only, SSH, one key per signing machine; docs/release-signing.md).
+# Verify a tag:   git -c gpg.ssh.allowedSignersFile=release/allowed_signers tag -v v1.2.3
+# Verify a file:  ssh-keygen -Y verify -f allowed_signers -I 339386069+machiya-bot@users.noreply.github.com -n file -s SHA256SUMS.sig < SHA256SUMS
+339386069+machiya-bot@users.noreply.github.com namespaces="git,file" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEP6EFSy8erWzr6L8I378EDRGlG086wyhRF5k+64IcXn machiya-bot release signing (claude VM)
+339386069+machiya-bot@users.noreply.github.com namespaces="git,file" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIQ3hThshRIveiqvgW6oagiQuVgVMFlyOow/YKs9UPH+ machiya-bot release signing (MacBook)
