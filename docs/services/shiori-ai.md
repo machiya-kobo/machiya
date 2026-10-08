@@ -12,7 +12,7 @@ Summarize a saved page, or answer a web search, from Shiori on the web. shiori-a
 |---|---|---|
 | **Call** | `POST /shiori/ai/summarize {url, refresh}` | `POST /shiori/ai/answer {q, refresh}` |
 | **Reads** | Hister's stored copy of the page (`/api/preview`) | SearXNG's first 8 web results: titles and snippets only |
-| **Never** | fetches the page; sends a note or code | fetches a page; takes Hister syntax (`label:`, `url:`, `metadata.`) |
+| **Never** | fetches the page; sends a note, code or a local file | fetches a page; reads Hister; takes Hister syntax (`label:`, `url:`, `metadata.`) |
 | **Answers** | a sentence and two to four points | two sentences and up to three points, citing `[1]`, `[2]` |
 | **Cache** | per page and capture | 24 hours per search |
 
@@ -27,10 +27,11 @@ flowchart LR
     a -->|"Messages API · key from a file"| c["Anthropic"]
 ```
 
-## Your notes stay home
+## Your notes, code and files stay home
 
-- A page on a note host (`SHIORI_AI_NOTE_HOSTS`: `kura`, `konbini`, `niwa`) is refused before Hister is even asked.
-- A page labeled `vault`, or with `metadata.source` `vault` or `code`, is refused after.
+- A page on a note host (`SHIORI_AI_NOTE_HOSTS`: `kura`, `konbini`, `niwa`), or any address that isn't http(s) (Hister's local files are `file://`), is refused before Hister is even asked.
+- A page labeled `vault`, with `metadata.source` `vault` or `code`, or of type `local`, is refused after.
+- AI Answer reads only SearXNG's web results, and drops any on a note host.
 - The log has counts: never a URL, a search, a title or text.
 
 ## Who may use it

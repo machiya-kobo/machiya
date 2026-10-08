@@ -11,12 +11,14 @@ Shiori's hosted pages call it on their own origin (docs/ai.md in Shiori's reposi
        sends only the query, so this is no general LLM proxy.
   GET  /healthz (also /shiori/ai/healthz) -> 200 {"ok": true} (no gate)
 Errors are JSON {"error", "message"}: 400 bad_request, 403 forbidden (the gate, or not Shiori's own page), 403 note /
-code, 404 not_indexed / not_found, 405, 422 empty / no_results, 429 cap or busy (+ Retry-After), 502 engine /
+code / local, 404 not_indexed / not_found, 405, 422 empty / no_results, 429 cap or busy (+ Retry-After), 502 engine /
 declined, 503 unavailable, 504 searx.
 
 Rules:
-  - Notes and code never reach the engine: a note host (SHIORI_AI_NOTE_HOSTS) is refused BEFORE Hister is asked, and
-    label/source `vault` or source `code` after. Runs only on request. Daily request and input-token caps (UTC day).
+  - Notes, code and local files never reach the engine. Summarize: anything but an http(s) URL (Hister's local files
+    are file://) and a note host (SHIORI_AI_NOTE_HOSTS) are refused BEFORE Hister is asked; label/source `vault`,
+    source `code` and type `local` after. Answer: only SearXNG's http(s) web results, never a note host's; Hister is
+    never asked. Runs only on request. Daily request and input-token caps (UTC day).
   - The gate (SHIORI_AI_AUTH: tailscale | proxy | open), as shiori-feed's; POSTs also need Shiori's own page
     (Sec-Fetch-Site same-origin, or Origin = https://<Host>).
   - Secrets come from files: the Anthropic key (SHIORI_AI_KEY_FILE, read per request) and the Hister token
@@ -517,8 +519,8 @@ class AI:
                 continue
             url, title = str(r.get("url") or ""), plain(r.get("title"), 200)
             if not title or len(url) > URL_MAX or CTRL.search(url) \
-                    or urllib.parse.urlsplit(url).scheme not in ("http", "https"):
-                continue
+                    or urllib.parse.urlsplit(url).scheme not in ("http", "https") or self.is_note_host(url):
+                continue                                    # only web pages: never a file, a note host's page, …
             out.append({"n": len(out) + 1, "title": title, "url": url, "content": plain(r.get("content"), 500)})
             if len(out) == ANSWER_RESULTS:
                 break
@@ -579,6 +581,8 @@ class AI:
     def summarize(self, url, refresh):
         if len(url) > URL_MAX or CTRL.search(url):
             raise Fail(400, "bad_request", "That isn't a page address.")
+        if urllib.parse.urlsplit(url).scheme.lower() not in ("http", "https"):   # file:// (Hister's local files) and the rest
+            raise Fail(403, "local", "Your files aren't sent to a cloud engine.")
         if self.is_note_host(url):                                          # notes never reach Hister's text or the engine
             raise Fail(403, "note", "Notes aren't sent to a cloud engine.")
         if not self.cfg.hister:
@@ -588,8 +592,10 @@ class AI:
         meta = details.get("metadata") if isinstance(details.get("metadata"), dict) else {}
         if details.get("label") == "vault" or meta.get("source") == "vault":
             raise Fail(403, "note", "Notes aren't sent to a cloud engine.")
-        if meta.get("source") == "code":                                    # code: on-device AI only
+        if meta.get("source") == "code" or details.get("source") == "code":  # code-import's documents: on-device AI only
             raise Fail(403, "code", "Code isn't sent to a cloud engine.")
+        if "local" in (page.get("type"), details.get("type")) or meta.get("source") == "local":     # a local file
+            raise Fail(403, "local", "Your files aren't sent to a cloud engine.")
         try:
             updated = int(page.get("updated") or page.get("added") or 0)
         except (TypeError, ValueError):

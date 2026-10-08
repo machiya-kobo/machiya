@@ -4,7 +4,7 @@ Summarize a saved page, or answer a web search, from Shiori on the web. **shiori
 
 - **Summarize** reads the copy of a page that [Hister](../../docs/services/hister.md) already stored. It never fetches the page.
 - **AI Answer** answers from [SearXNG](../../docs/services/searxng.md)'s result snippets: the first 8 web results. It never fetches a page either, and the client sends only the search, so it is no general chatbot proxy.
-- **Your notes and code never leave.** A note's address is refused before Hister is asked, and a page labeled `vault` or from code-import is refused after.
+- **Your notes, code and files never leave.** A note's address, or anything but an http(s) page (Hister's local files are `file://`), is refused before Hister is asked. A page labeled `vault`, from code-import (`metadata.source:code`) or of type `local` is refused after. AI Answer never reads Hister, and drops any result that isn't an http(s) web page or that sits on a note host.
 
 It is one stdlib Python file with one SQLite file for its caches and counters. Shiori's apps run their AI on the device and don't use it.
 
@@ -25,7 +25,7 @@ Errors are JSON `{error, message}`:
 |---|---|---|
 | 400 | `bad_request` | not JSON, over 8 KB, no `url`/`q`, a search over 300 characters or with Hister syntax (`label:`, `url:`, `metadata.`) |
 | 403 | `forbidden` | the gate, or not Shiori's own page (below) |
-| 403 | `note`, `code` | a note or a code document |
+| 403 | `note`, `code`, `local` | a note, a code document, or a local file (Shiori's Files) |
 | 404 | `not_indexed`, `not_found` | Hister has no copy; no such endpoint |
 | 422 | `empty`, `no_results` | no readable text; the web found nothing |
 | 429 | `cap`, `busy` | today's cap is used up (`Retry-After`: midnight UTC); over `SHIORI_AI_PER_MINUTE` |
