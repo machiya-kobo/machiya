@@ -66,17 +66,26 @@ class HisterHeaders(Scratch):
         for url in ("http://hister.example.ts.net/mcp", "http://10.0.0.5:4433/mcp", "ftp://127.0.0.1/", "", "not a url"):
             self.assertEqual(self.headers(HISTER_TOKEN_FILE=self.token_file, HISTER_MCP_URL=url), {}, url)
 
+    # plugin 0.4.1: pass is read only for the entry HISTER_TOKEN_PASS names (the per-host copies are retired)
+    ENTRY = "hosts/example/hister-token"
+
     def test_pass_only_for_a_production_https_address(self):
-        self.assertEqual(self.headers(HISTER_MCP_URL="https://hister.example.ts.net/mcp"), {"X-Access-Token": PROD})
+        self.assertEqual(self.headers(HISTER_TOKEN_PASS=self.ENTRY, HISTER_MCP_URL="https://hister.example.ts.net/mcp"),
+                         {"X-Access-Token": PROD})
         for url in ("http://127.0.0.1:19224/mcp", "https://127.0.0.1/mcp", "https://localhost/mcp",
                     "https://claude.example.ts.net:19204/mcp", "https://claude.example.ts.net:19224/mcp",
                     "http://hister.example.ts.net/mcp", "https://user:pw@hister.example.ts.net/mcp", None):
-            self.assertEqual(self.headers(HISTER_MCP_URL=url), {}, url)
+            self.assertEqual(self.headers(HISTER_TOKEN_PASS=self.ENTRY, HISTER_MCP_URL=url), {}, url)
+
+    def test_no_named_entry_no_pass(self):
+        # plugin 0.4.1: without HISTER_TOKEN_PASS nothing is read from pass, even for a production address
+        self.assertEqual(self.headers(HISTER_MCP_URL="https://hister.example.ts.net/mcp"), {})
 
     def test_the_address_claude_code_connects_to_wins(self):
-        self.assertEqual(self.headers(HISTER_MCP_URL="https://hister.example.ts.net/mcp",
+        self.assertEqual(self.headers(HISTER_TOKEN_PASS=self.ENTRY, HISTER_MCP_URL="https://hister.example.ts.net/mcp",
                                       CLAUDE_CODE_MCP_SERVER_URL="http://127.0.0.1:19224/mcp"), {})
-        self.assertEqual(self.headers(CLAUDE_CODE_MCP_SERVER_URL="https://hister.example.ts.net/mcp"), {"X-Access-Token": PROD})
+        self.assertEqual(self.headers(HISTER_TOKEN_PASS=self.ENTRY, CLAUDE_CODE_MCP_SERVER_URL="https://hister.example.ts.net/mcp"),
+                         {"X-Access-Token": PROD})
 
     def test_not_a_token_sends_nothing(self):
         with open(self.token_file, "w") as f:
