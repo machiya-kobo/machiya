@@ -15,7 +15,7 @@
   /* Shiori's pill colours (Tokyo Night Day): Pages, Notes, Web, Small Web, Code */
   /* Pages takes Day's own blue (#2e7de9), not the apps' darker #155fc5: it only colours large headings here (3.1:1, enough
      for large text), and #155fc5 is as dark as Day's blue text, so it didn't stand out from it */
-  --pill-pages: #2e7de9; --pill-notes: #9a5000; --pill-web: #7a5e36; --pill-smallweb: #0d6e5c; --pill-code: #bd204c;
+  --pill-pages: #2e7de9; --pill-notes: #9a5000; --pill-web: #7a5e36; --pill-smallweb: #0d6e5c; --pill-code: #bd204c; --pill-konbini: #802cee;
   --on-blue: #ffffff;
   --shadow: 0 2px 4px rgba(55,96,191,.10), 0 18px 48px rgba(55,96,191,.18);
 }
@@ -28,7 +28,7 @@
     --fg: #c0caf5; --fg2: #a9b1d6;
     --blue: #7aa2f7; --orange: #ff9e64; --green: #9ece6a; --magenta: #bb9af7; --cyan: #7dcfff;
     /* Shiori's pill colours (Tokyo Night) */
-    --pill-pages: #7aa2f7; --pill-notes: #ff9e64; --pill-web: #e0af68; --pill-smallweb: #1abc9c; --pill-code: #f7768e;
+    --pill-pages: #7aa2f7; --pill-notes: #ff9e64; --pill-web: #e0af68; --pill-smallweb: #1abc9c; --pill-code: #f7768e; --pill-konbini: #bb9af7;
     --on-blue: #1a1b26;
     --shadow: 0 2px 4px rgba(0,0,0,.4), 0 18px 48px rgba(0,0,0,.45);
     color-scheme: dark;
@@ -42,7 +42,7 @@
   --fg: #c0caf5; --fg2: #a9b1d6;
   --blue: #7aa2f7; --orange: #ff9e64; --green: #9ece6a; --magenta: #bb9af7; --cyan: #7dcfff;
   /* Shiori's pill colours (Tokyo Night) */
-  --pill-pages: #7aa2f7; --pill-notes: #ff9e64; --pill-web: #e0af68; --pill-smallweb: #1abc9c; --pill-code: #f7768e;
+  --pill-pages: #7aa2f7; --pill-notes: #ff9e64; --pill-web: #e0af68; --pill-smallweb: #1abc9c; --pill-code: #f7768e; --pill-konbini: #bb9af7;
   --on-blue: #1a1b26;
   --shadow: 0 2px 4px rgba(0,0,0,.4), 0 18px 48px rgba(0,0,0,.45);
   color-scheme: dark;
@@ -186,6 +186,7 @@ p { margin: 0; text-wrap: pretty; }
 .feature:has(.tag.kura) { --c: var(--pill-notes); }
 .feature:has(.tag.web) { --c: var(--pill-web); }
 .feature:has(.tag.code) { --c: var(--pill-code); }
+.feature:has(.tag.konbini) { --c: var(--pill-konbini); }
 .feature h2 { color: var(--c); }
 .feature .tag { color: var(--fg2); }
 .feature-shot { margin: 0; }
