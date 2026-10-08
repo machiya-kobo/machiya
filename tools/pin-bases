@@ -14,6 +14,7 @@ Registry access is anonymous (the token flow every public registry offers); the 
 """
 import json
 import os
+import time
 import re
 import sys
 import urllib.error
@@ -42,9 +43,16 @@ def split(ref):
     return registry, repo, tag
 
 
-def _get(url, headers):
-    req = urllib.request.Request(url, headers=headers, method="HEAD")
-    return urllib.request.urlopen(req, timeout=30)
+def _get(url, headers, tries=5):
+    """HEAD with patience: a public registry rate-limits anonymous callers (429), so wait as it asks and try again."""
+    for attempt in range(tries):
+        try:
+            return urllib.request.urlopen(urllib.request.Request(url, headers=headers, method="HEAD"), timeout=30)
+        except urllib.error.HTTPError as err:
+            if err.code != 429 or attempt == tries - 1:
+                raise
+            wait = err.headers.get("Retry-After", "")
+            time.sleep(min(int(wait), 60) if wait.isdigit() else 2 ** (attempt + 1))
 
 
 def digest(registry, repo, tag):
@@ -107,7 +115,13 @@ def main(argv):
             paths += [os.path.join(root, f) for f in files if f == "Dockerfile" or f.startswith("Dockerfile.")]
     stale = 0
     for path in sorted(paths):
-        for n, old, new in pin_file(path, check):
+        try:
+            changes = pin_file(path, check)
+        except (urllib.error.URLError, OSError, KeyError) as err:
+            print("%s: couldn't ask the registry (%s); try again in a minute" % (path, getattr(err, "code", None) or err),
+                  file=sys.stderr)
+            return 2
+        for n, old, new in changes:
             stale += 1
             print("%s:%d\n  - %s\n  + %s" % (path, n, old.strip(), new.strip()))
     if check and stale:
