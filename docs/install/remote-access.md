@@ -27,8 +27,8 @@ Hister and SearXNG have no sign-in of their own. Serve them (4433, 8888) and add
 
 **4. Name the proxy** in `KURA_TRUSTED_PROXIES`, `NIWA_TRUSTED_PROXIES` and `KONBINI_TRUSTED_PROXIES`. The apps believe the login header only from that address, and Kura and Konbini refuse to start without it. Behind `tailscale serve` it isn't `127.0.0.1`:
 
-- **Docker:** the gateway of the stack's network, like `172.18.0.1/32`. Print it with `docker network inspect machiya_default --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'`.
-- **Rootless Podman:** each app sees its own address, and that changes every time the container is made again. Name the stack's network instead, like `10.89.1.0/24`: `podman network inspect machiya_default --format '{{range .Subnets}}{{.Subnet}}{{end}}'`. Any container in the stack could then send the header.
+- **Docker:** the gateway of the stack's network. The reference compose pins that network to `172.31.251.0/24`, so it's `172.31.251.1/32` (set `MACHIYA_SUBNET` in `.env` if that range is taken on your machine, and use its `.1`). Check with `docker network inspect machiya_default --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'`.
+- **Rootless Podman:** each app sees its own address, and that changes every time the container is made again. Name the stack's network instead: `172.31.251.0/24` with the reference compose (or your `MACHIYA_SUBNET`). Any container in the stack could then send the header.
 
 The network can get another address after `docker compose down`, so check the value after one.
 

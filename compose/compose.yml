@@ -140,6 +140,7 @@ services:
       - NIWA_KURA_URL=${KURA_PUBLIC_URL:-http://localhost:8083}
       - NIWA_KONBINI_URL=${KONBINI_PUBLIC_URL:-http://localhost:8081}   # the address of browser links
       - NIWA_KONBINI_API_URL=${KONBINI_INTERNAL_URL:-http://konbini:8081}   # the address Niwa itself calls Konbini on
+      - NIWA_KONBINI_TOKEN_FILE=${NIWA_KONBINI_TOKEN:+/run/secrets/konbini-token}   # set NIWA_KONBINI_TOKEN to a token file when Konbini wants sign-in (its project badges)
       - NIWA_GOPHER_PUBLIC_PORT=${NIWA_GOPHER_PORT:-7070}                 # the port gopher menus advertise
       - MACHIYA_ROOMS=${MACHIYA_ROOMS:-}
       - MACHIYA_SOURCE_URL=${MACHIYA_SOURCE_URL:-}
@@ -147,6 +148,7 @@ services:
       - TZ=${TZ:-UTC}
     volumes:
       - ${NIWA_DATA:-./data/niwa}:/data
+      - ${NIWA_KONBINI_TOKEN:-/dev/null}:/run/secrets/konbini-token:ro
       - ${VAULT_GIT:-/dev/null}:${VAULT_GIT:-/vault-git-unused}
       - ${MACHIYA_IDENTITY_DIR:-/dev/null}:${MACHIYA_IDENTITY_DIR:-/identity-unused}:ro
     ports:
@@ -318,7 +320,8 @@ services:
     restart: unless-stopped
 
 networks:
-  default: {}
+  default:                                          # pinned, so the gateway (the address tailscale serve's connections
+    ipam: {config: [{subnet: "${MACHIYA_SUBNET:-172.31.251.0/24}"}]}   # come from, for *_TRUSTED_PROXIES) is always .1
   smallweb:                                         # smallweb (.3) and its proxy only; .2 is the sidecar's: pin every member
     ipam: {config: [{subnet: 172.31.250.0/29}]}
   machiya-mcp:                                      # machiya-mcp (.11) and its proxy only; .10 is the sidecar's: pin every member
