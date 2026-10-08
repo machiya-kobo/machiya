@@ -1,5 +1,10 @@
 # Changelog: machiya-mcp
 
+## 0.8.1
+
+- **`MCP_NOTES_KNOWN_HOSTS`**: a known_hosts file with the forge's host key. Set, the write clone's ssh accepts only that key (`StrictHostKeyChecking=yes`). Unset, it still trusts the first key it sees (`accept-new`), so set it. A `GIT_SSH_COMMAND` of your own still wins. The key and file paths are quoted now, so a space can't split them.
+- **The notes write clone never checks out a symlink.** The first clone writes `core.symlinks=false` before its checkout (before, only the first sync set it, after the clone had checked links out), and every git call the server makes carries it too. A link committed upstream is a plain file holding its target's path.
+
 ## 0.8.0
 
 - **Room tokens beside the Tailscale header** (decided 2026-10-05: rooms and tools stop taking Hister's raw token; the agents' VM is a tagged node with no Tailscale login). With `MCP_AUTH_URL` (hister-login's internal address), `MCP_PUBLIC_URL` and `MCP_HISTER_USERS`, a caller may send `Authorization: Bearer mht_…`, a room token hister-login issued for this server; it acts as that Hister user. A bad, revoked or other service's token is 401 and never falls back to the header; without a token the header decides as before. `MCP_TOKEN_FILE` (this server's own credential for the rooms) should then hold a room token for Kura, Konbini and Niwa too. vaultkit re-vendored (`histerauth.TokenGate`).

@@ -21,6 +21,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import sys
 import threading
 import time
@@ -32,7 +33,7 @@ import envelope                                   # noqa: E402
 from backend import HISTER_ORIGIN, Backend, BackendError, SecretFile   # noqa: E402
 from rooms import ToolError, cross, hister, hister_write, konbini, kura, niwa, prompts, vault  # noqa: E402
 
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHANGELOG = os.path.join(HERE, "CHANGELOG.md")    # /app/CHANGELOG.md in the image; GET /api/changelog serves it
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26")
@@ -200,6 +201,32 @@ def backup_window(value):
     return DAYS.index(m.group(1).lower()), start, end
 
 
+def notes_ssh(key, known_hosts, environ=None):
+    """The notes write clone's {"GIT_SSH_COMMAND": …}, or None for ssh's own defaults. An explicit GIT_SSH_COMMAND in
+    the environment wins. 0.8.1: with MCP_NOTES_KNOWN_HOSTS the forge's host key must be in that file
+    (StrictHostKeyChecking=yes); without it, ssh trusts the first key it sees (accept-new), as before."""
+    environ = os.environ if environ is None else environ
+    if "GIT_SSH_COMMAND" in environ or not (key or known_hosts):
+        return None
+    cmd = ["ssh"] + (["-i", key, "-o", "IdentitiesOnly=yes"] if key else [])
+    if known_hosts:
+        cmd += ["-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=" + known_hosts]
+    else:
+        cmd += ["-o", "StrictHostKeyChecking=accept-new"]
+    return {"GIT_SSH_COMMAND": " ".join(shlex.quote(c) for c in cmd)}
+
+
+def no_symlinks_env(environ=None):
+    """GIT_CONFIG_* that add core.symlinks=false to every git command of the write clone (`git -c`, through the
+    environment: its fetches and rebases run in vaultkit's GitSync, which takes an env but no argv). 0.8.1."""
+    environ = os.environ if environ is None else environ
+    try:
+        n = max(0, int(environ.get("GIT_CONFIG_COUNT") or 0))
+    except ValueError:
+        n = 0
+    return {"GIT_CONFIG_COUNT": str(n + 1), "GIT_CONFIG_KEY_%d" % n: "core.symlinks", "GIT_CONFIG_VALUE_%d" % n: "false"}
+
+
 class Config:
     def __init__(self, env):
         self.auth = auth_mode(env.get("MCP_AUTH"), (env.get("MACHIYA_IDENTITY_FILE") or "").strip())
@@ -229,6 +256,9 @@ class Config:
         self.notes_sparse = [x for x in env.get("MCP_NOTES_SPARSE", "").split(",") if x]
         self.notes_subdir = env.get("MCP_NOTES_SUBDIR", "")
         self.notes_ssh_key = env.get("MCP_NOTES_SSH_KEY", "")
+        self.notes_known_hosts = (env.get("MCP_NOTES_KNOWN_HOSTS") or "").strip()
+        if self.notes_dir and self.notes_known_hosts and not os.path.isfile(self.notes_known_hosts):
+            raise SystemExit("machiya-mcp: MCP_NOTES_KNOWN_HOSTS: no file at %s" % self.notes_known_hosts)
         # One clock setting: MCP_TZ covers the notes' dates and the backup window; MCP_NOTES_TZ overrides the notes' only.
         self.tz = env.get("MCP_TZ") or env.get("MCP_NOTES_TZ") or "UTC"
         self.notes_tz = env.get("MCP_NOTES_TZ") or self.tz
@@ -314,12 +344,11 @@ class Server:
         self.notes, self.features = None, set()
         if config.notes_dir:
             import notes_writer       # needs vaultkit (markdown, pyyaml) and git: only when the write clone is configured
-            # An explicit GIT_SSH_COMMAND (compose sets one with its known_hosts file) wins over the bare key setting.
-            ssh = ({"GIT_SSH_COMMAND": "ssh -i %s -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" % config.notes_ssh_key}
-                   if config.notes_ssh_key and "GIT_SSH_COMMAND" not in os.environ else None)
+            git_env = dict(no_symlinks_env(), **(notes_ssh(config.notes_ssh_key, config.notes_known_hosts) or {}))
             if config.notes_url:
-                notes_writer.bootstrap(config.notes_dir, config.notes_url, config.notes_reference, config.notes_sparse, ssh)
-            self.notes = notes_writer.NotesWriter(config.notes_dir, config.notes_subdir, env=ssh, tz=config.notes_tz,
+                notes_writer.bootstrap(config.notes_dir, config.notes_url, config.notes_reference, config.notes_sparse,
+                                       git_env)
+            self.notes = notes_writer.NotesWriter(config.notes_dir, config.notes_subdir, env=git_env, tz=config.notes_tz,
                                                   rules=notes_writer.Rules(**config.notes_rules))
             self.features.add("notes_write")
         self.rate_lock = threading.Lock()

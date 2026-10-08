@@ -210,6 +210,7 @@ No proof, or a bad one, gets **401** and never falls through to a login. A princ
 |---|---|---|
 | `MCP_NOTES_DIR` | none | the notes write clone. Setting it turns the write tools on; the first start clones `MCP_NOTES_REPO_URL`, borrowing `MCP_NOTES_REFERENCE`'s objects. Needs git, ssh and vaultkit, which the image carries. Unset: the server stays read-and-board only and needs no vaultkit |
 | `MCP_NOTES_REPO_URL`, `MCP_NOTES_REFERENCE`, `MCP_NOTES_SSH_KEY` | none | where to clone from, a local repo to borrow objects from, the ssh key |
+| `MCP_NOTES_KNOWN_HOSTS` | none | a known_hosts file holding the forge's host key (0.8.1). Set, ssh accepts only that key (`StrictHostKeyChecking=yes`). Unset, ssh trusts the first key it sees (`accept-new`), so set it. A `GIT_SSH_COMMAND` in the environment overrides both settings |
 | `MCP_NOTES_SUBDIR` | repo root | the vault folder inside the write clone |
 | `MCP_NOTES_SPARSE` | none | the sparse-checkout paths. When the vault isn't at the repository root, set this and `MCP_NOTES_SUBDIR` to the folder |
 | `MCP_NOTES_TZ` | `MCP_TZ` | the time zone for the notes' dates |

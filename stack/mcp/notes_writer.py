@@ -149,15 +149,23 @@ def sections(lines):
 
 
 def bootstrap(repo, url, reference="", sparse=(), env=None):
-    """Clone the vault repo once (borrowing the mirror's objects when there is one); a no-op when it's there."""
+    """Clone the vault repo once (borrowing the mirror's objects when there is one); a no-op when it's there.
+    core.symlinks=false from the start (0.8.1): a link committed upstream is checked out as a plain file, even by the
+    first checkout, and the clone keeps the setting for every later fetch and rebase."""
     if os.path.isdir(os.path.join(repo, ".git")):
         return
     os.makedirs(os.path.dirname(repo.rstrip("/")) or ".", exist_ok=True)
-    cmd = ["git", "clone", "-q"] + (["--reference", reference, "--no-checkout"] if reference else []) + [url, repo]
-    subprocess.run(cmd, check=True, timeout=1800, env=dict(os.environ, **(env or {})))
+    subprocess.run(clone_argv(url, repo, reference), check=True, timeout=1800, env=dict(os.environ, **(env or {})))
     if reference:
         borrow(repo, reference, tuple(sparse))
-        subprocess.run(["git", "-C", repo, "checkout", "-q"], check=True, timeout=600, env=dict(os.environ, **(env or {})))
+        subprocess.run(["git", "-C", repo, "-c", "core.symlinks=false", "checkout", "-q"], check=True, timeout=600,
+                       env=dict(os.environ, **(env or {})))
+
+
+def clone_argv(url, repo, reference=""):
+    """`git clone` for the write clone: core.symlinks=false is written to the new clone's config before its checkout."""
+    return (["git", "clone", "-q", "-c", "core.symlinks=false"]
+            + (["--reference", reference, "--no-checkout"] if reference else []) + ["--", url, repo])
 
 
 class NotesWriter:

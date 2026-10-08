@@ -100,6 +100,77 @@ class RootVault(unittest.TestCase):
         self.assertTrue(out["commit"])
 
 
+class Bootstrap(unittest.TestCase):
+    """0.8.1: the write clone never checks out a symlink, from its first checkout on, and its ssh trusts a known_hosts
+    file when one is given (MCP_NOTES_KNOWN_HOSTS)."""
+
+    def origin_with_a_link(self, tmp):
+        seed, origin = os.path.join(tmp, "seed"), os.path.join(tmp, "origin.git")
+        subprocess.run(["git", "init", "-q", "-b", "main", seed], check=True, env=GIT_ENV)
+        os.makedirs(os.path.join(seed, "Inbox"))
+        with open(os.path.join(seed, "Inbox", "Note.md"), "w") as f:
+            f.write("# Note\n")
+        os.symlink("/etc/passwd", os.path.join(seed, "Inbox", "Link.md"))
+        git(seed, "add", "-A")
+        git(seed, "commit", "-q", "-m", "seed")
+        subprocess.run(["git", "clone", "-q", "--bare", seed, origin], check=True, env=GIT_ENV)
+        return seed, origin
+
+    def test_clone_argv(self):
+        self.assertEqual(notes_writer.clone_argv("ssh://git@forge/v.git", "/data/notes"),
+                         ["git", "clone", "-q", "-c", "core.symlinks=false", "--", "ssh://git@forge/v.git", "/data/notes"])
+        self.assertEqual(notes_writer.clone_argv("u", "r", "/mirror"),
+                         ["git", "clone", "-q", "-c", "core.symlinks=false", "--reference", "/mirror", "--no-checkout",
+                          "--", "u", "r"])
+
+    def test_a_committed_link_is_a_plain_file(self):
+        tmp = tempfile.mkdtemp(prefix="notes-boot-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        seed, origin = self.origin_with_a_link(tmp)
+        for name, reference, env in (("plain", "", None), ("borrowed", seed, None),          # the clone's own -c
+                                     ("plain-env", "", mcp.no_symlinks_env({})), ("borrowed-env", seed, mcp.no_symlinks_env({}))):
+            repo = os.path.join(tmp, name)
+            notes_writer.bootstrap(repo, origin, reference, (), env)
+            link = os.path.join(repo, "Inbox", "Link.md")
+            self.assertFalse(os.path.islink(link), name)
+            with open(link) as f:
+                self.assertEqual(f.read(), "/etc/passwd", name)                  # the link's text, not its target
+            self.assertEqual(git(repo, "config", "--local", "core.symlinks").strip(), "false", name)
+
+    def test_every_git_call_gets_no_symlinks(self):
+        self.assertEqual(mcp.no_symlinks_env({}), {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.symlinks",
+                                                   "GIT_CONFIG_VALUE_0": "false"})
+        self.assertEqual(mcp.no_symlinks_env({"GIT_CONFIG_COUNT": "2"}),           # the operator's own entries stay
+                         {"GIT_CONFIG_COUNT": "3", "GIT_CONFIG_KEY_2": "core.symlinks", "GIT_CONFIG_VALUE_2": "false"})
+        tmp = tempfile.mkdtemp(prefix="notes-env-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        subprocess.run(["git", "init", "-q", tmp], check=True, env=GIT_ENV)
+        out = subprocess.run(["git", "-C", tmp, "config", "core.symlinks"], capture_output=True, text=True,
+                             env=dict(GIT_ENV, **mcp.no_symlinks_env({}))).stdout.strip()
+        self.assertEqual(out, "false")
+
+    def test_ssh_known_hosts(self):
+        ssh = lambda key, kh, environ=None: mcp.notes_ssh(key, kh, {} if environ is None else environ)
+        self.assertEqual(ssh("/run/secrets/key", ""),
+                         {"GIT_SSH_COMMAND": "ssh -i /run/secrets/key -o IdentitiesOnly=yes "
+                                             "-o StrictHostKeyChecking=accept-new"})
+        self.assertEqual(ssh("/run/secrets/key", "/etc/machiya/known_hosts"),
+                         {"GIT_SSH_COMMAND": "ssh -i /run/secrets/key -o IdentitiesOnly=yes "
+                                             "-o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/machiya/known_hosts"})
+        self.assertEqual(ssh("", "/kh"), {"GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/kh"})
+        self.assertEqual(ssh("/my key", "/a b/kh")["GIT_SSH_COMMAND"],
+                         "ssh -i '/my key' -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "
+                         "-o 'UserKnownHostsFile=/a b/kh'")
+        self.assertIsNone(ssh("", ""))
+        self.assertIsNone(ssh("/k", "/kh", {"GIT_SSH_COMMAND": "ssh -F /etc/ssh/forge"}))   # an explicit command wins
+
+    def test_known_hosts_must_exist(self):
+        with self.assertRaises(SystemExit) as cm:
+            mcp.Config({"MCP_AUTH": "open", "MCP_LOG": os.devnull, "MCP_NOTES_DIR": "/nonexistent/notes",
+                        "MCP_NOTES_KNOWN_HOSTS": "/nonexistent/known_hosts"})
+        self.assertIn("MCP_NOTES_KNOWN_HOSTS", str(cm.exception))
+
+
 class Vendored(unittest.TestCase):
     def test_the_vendored_vaultkit_matches_its_manifest(self):
         import vaultkit.verify
