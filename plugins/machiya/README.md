@@ -39,7 +39,7 @@ MACHIYA_TOKEN_FILE=~/.config/machiya/mcp-room-token plugins/machiya/install.sh
 
 ## `bin/hister-headers`
 
-No longer used by the plugin (it connects no Hister MCP), kept for a person who adds Hister's MCP by hand for their own use (never for an AI client). It prints the header that carries the owner's Hister token, and refuses to send a production token anywhere it shouldn't go (sweep MACH-M-1): with `HISTER_TOKEN_FILE` set it uses that file only (missing or unreadable: no header, never a fallback), and that token goes over plain http only to loopback; the `hpass` fallback (`$HISTER_TOKEN_PASS`, else a per-host entry) applies only when `HISTER_MCP_URL` is an https address that is not loopback and not on a dev-stack port (19200–19226). Anything else prints `{}`: no header.
+No longer used by the plugin (it connects no Hister MCP), kept for a person who adds Hister's MCP by hand for their own use (never for an AI client). It prints the header that carries the owner's Hister token, and refuses to send a production token anywhere it shouldn't go (sweep MACH-M-1): with `HISTER_TOKEN_FILE` set it uses that file only (missing or unreadable: no header, never a fallback), and that token goes over plain http only to loopback; the `hpass` fallback (the entry `$HISTER_TOKEN_PASS` names; no default entry since plugin 0.4.1) applies only when `HISTER_MCP_URL` is an https address that is not loopback and not on a dev-stack port (19200–19226). Anything else prints `{}`: no header.
 
 ## The dev stack
 

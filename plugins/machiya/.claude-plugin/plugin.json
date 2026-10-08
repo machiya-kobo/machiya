@@ -1,6 +1,6 @@
 {
   "name": "machiya",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Machiya for Claude Code: the Machiya MCP server (board, notes, saved pages without notes or code, page labels and collections, garden suggestions; Hister's own MCP denied), and the skills that work across rooms: backlog-add, weekly-review, recall, garden-suggest, tidy-collections.",
   "author": {
     "name": "Machiya"
