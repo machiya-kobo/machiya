@@ -63,6 +63,47 @@ flowchart LR
 
 ## Quickstart
 
+### Already have Hister and SearXNG?
+
+Search them together with [Shiori](https://github.com/machiya-kobo/shiori). Turn on SearXNG's JSON results (`formats: [html, json]` under `search:` in its `settings.yml`), then run:
+
+```bash
+docker run -d --name shiori -p 8080:8080 -p 8081:8081 \
+  -e SHIORI_HISTER_URL=http://hister.example:4433 \
+  -e SHIORI_SEARXNG_URL=http://searxng.example:8080 \
+  ghcr.io/machiya-kobo/shiori-web
+```
+
+Open <http://localhost:8080> to search, or <http://localhost:8081> for the web app. If your Hister has users, sign in with your Hister account.
+
+Starting from nothing? `compose/shiori.yml` runs Hister, SearXNG and Shiori together:
+
+```bash
+git clone https://github.com/machiya-kobo/machiya.git && cd machiya/compose
+echo "SEARXNG_SECRET=$(openssl rand -hex 32)" >> .env
+mkdir -p data/hister
+docker compose -f shiori.yml up -d
+```
+
+**Add more.** Each extra is its own app with a public image on `ghcr.io/machiya-kobo`. Run it, then give Shiori its address:
+
+| To search | Run | Then set on Shiori |
+|---|---|---|
+| Your Obsidian notes | [Kura](https://github.com/machiya-kobo/kura), on your vault | `SHIORI_KURA_URL` (and Shiori's name for Kura in Kura's `KURA_ALLOWED_HOSTS`) |
+| Your projects | [Konbini](https://github.com/machiya-kobo/konbini), on the same vault | `SHIORI_KONBINI_URL` |
+| Your code on Forgejo or GitHub | [code-import](stack/code-import/README.md), which copies your repos into Hister | nothing: the Code tab appears |
+| The small web (Gemini, Gopher) | [smallweb](stack/smallweb/README.md) | `SHIORI_SMALLWEB_URL` |
+
+| To get | Run | Then set on Shiori |
+|---|---|---|
+| Subscribe to a search as RSS | [shiori-feed](docs/services/shiori-feed.md) | `SHIORI_FEED_URL` |
+| AI Answer and Summarize | [shiori-ai](docs/services/shiori-ai.md), with an Anthropic API key | `SHIORI_AI_URL` |
+| One sign-in for every app | [hister-login](docs/services/hister-login.md) | `SHIORI_LOGIN_URL` |
+
+Want them all? Run the full stack below.
+
+### Full Machiya stack
+
 Run the whole stack on one machine, on your own vault. It listens on `127.0.0.1` only, so there's nothing to sign in to. You need `git` and Docker with Compose 2.20+, or rootless Podman 4.9+ set up as in [the sample vault](docs/install/sample-vault.md#what-you-need).
 
 **1. Get the code**
@@ -113,7 +154,7 @@ docker compose up -d --build --wait
 
 The **Rooms** menu in each app's header moves between them.
 
-### Next
+#### Next
 
 - **Try it on invented notes first:** [the sample vault](docs/install/sample-vault.md), about ten minutes.
 - **Use it from your phone and laptop:** [remote access](docs/install/remote-access.md).

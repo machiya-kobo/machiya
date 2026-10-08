@@ -1,0 +1,64 @@
+# Just Shiori: Hister, SearXNG and Shiori's search page and web app, nothing else. The quickest way to try Shiori.
+#
+#   cd compose
+#   echo "SEARXNG_SECRET=$(openssl rand -hex 32)" >> .env
+#   mkdir -p data/hister             # yours, not root's: Docker would create it as root and Hister couldn't write it
+#   docker compose -f shiori.yml up -d
+#
+# Then open http://localhost:8080 to search, or http://localhost:8081 for the web app. Hister is at http://localhost:4433:
+# save pages to it with its browser extension (docs/install/README.md), or import your bookmarks there.
+# Every port binds 127.0.0.1, so there's nothing to sign in to. Add Kura, Konbini and the rest from compose.yml, then set
+# their SHIORI_*_URL here (Shiori's README, "Add more"). `docker compose` works the same as `podman compose`.
+name: shiori
+
+services:
+  hister:
+    image: ghcr.io/asciimoo/hister:v0.20.0          # pinned: pre-1.0, breaking releases
+    user: "${MACHIYA_UID:-1000}:${MACHIYA_GID:-1000}"   # so ./data/hister stays yours (the image's own user is 65532)
+    userns_mode: ${MACHIYA_USERNS:-}
+    environment:
+      - HISTER__SERVER__BASE_URL=${HISTER_PUBLIC_URL:-http://localhost:4433}
+      - HISTER__APP__SEARCH_URL=${SEARXNG_PUBLIC_URL:-http://localhost:8888}/search?q={query}
+    volumes:
+      - ../config/hister/config.yml:/hister/config.yml:ro
+      - ${HISTER_DATA:-./data/hister}:/hister/data
+    ports: ["127.0.0.1:${HISTER_PORT:-4433}:4433"]
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:2026.9.25-12f8b6515      # pinned; its settings.yml here turns on the JSON results Shiori reads
+    environment:
+      - SEARXNG_SECRET=${SEARXNG_SECRET:?set SEARXNG_SECRET in .env (see the top of shiori.yml)}
+      - SEARXNG_LIMITER=false                       # every port binds 127.0.0.1; the repo's limiter.toml lets only Tailscale in
+      - SEARXNG_BASE_URL=${SEARXNG_PUBLIC_URL:-http://localhost:8888}/
+    volumes:
+      - ../config/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ../config/searxng/limiter.toml:/etc/searxng/limiter.toml:ro
+      - ../config/searxng/plugins/image_proxy_json.py:/usr/local/searxng/searx/plugins/image_proxy_json.py:ro
+    ports: ["127.0.0.1:${SEARXNG_PORT:-8888}:8080"]
+    depends_on: [valkey]
+    restart: unless-stopped
+
+  valkey:                                           # SearXNG's limiter store
+    image: docker.io/valkey/valkey:8-alpine
+    restart: unless-stopped
+
+  shiori:
+    image: ghcr.io/machiya-kobo/shiori-web:${SHIORI_VERSION:-1.1.0}
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    environment:
+      - SHIORI_HISTER_URL=http://hister:4433
+      - SHIORI_SEARXNG_URL=http://searxng:8080
+      - SHIORI_SEARCH_PAGE_URL=${SHIORI_SEARCH_PAGE_URL:-http://localhost:8080/}
+      - SHIORI_APP_URL=${SHIORI_APP_URL:-http://localhost:8081/}
+      # Add more (each optional; unset hides the tab or feature): SHIORI_KURA_URL (and add its host name to Kura's
+      # KURA_ALLOWED_HOSTS, for example KURA_ALLOWED_HOSTS=kura), SHIORI_KONBINI_URL,
+      # SHIORI_SMALLWEB_URL, SHIORI_FEED_URL, SHIORI_AI_URL, SHIORI_LOGIN_URL
+    ports:
+      - "127.0.0.1:${SHIORI_SEARCH_PORT:-8080}:8080"   # the search page
+      - "127.0.0.1:${SHIORI_APP_PORT:-8081}:8081"      # the web app
+    depends_on: [hister, searxng]
+    restart: unless-stopped
