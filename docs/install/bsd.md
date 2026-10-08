@@ -86,6 +86,8 @@ useradd -d /var/db/kura -s /sbin/nologin -L daemon -c "Machiya Kura" _kura
 install -d -o kura -g kura -m 0700 /var/db/kura        # OpenBSD: -o _kura -g _kura
 ```
 
+Repeat for `niwa` and `konbini` (OpenBSD: `_niwa` and `_konbini`).
+
 `useradd` warns that the home directory doesn't exist and `-m` wasn't given. That's harmless: the `install -d` right after it creates the directory.
 
 **The service user must own its clone.** git refuses a repository owned by someone else ("dubious ownership").
@@ -95,10 +97,13 @@ install -d -o kura -g kura -m 0700 /var/db/kura        # OpenBSD: -o _kura -g _k
 Clone a release tag of the app, owned by root and read-only for the service:
 
 ```sh
-git clone --branch vX.Y.Z --depth 1 https://github.com/machiya-kobo/kura.git /usr/local/share/kura-src   # NetBSD: /usr/pkg/share/…
-ln -s /usr/local/share/kura-src/app /usr/local/share/kura       # the rc.d scripts run /usr/local/share/<app>/<app>.py
-cd /usr/local/share/kura && /usr/local/lib/machiya-venv/bin/python3 -m vaultkit.verify   # the vendored vaultkit is unedited
+SHARE=/usr/local/share                                 # NetBSD: SHARE=/usr/pkg/share
+git clone --branch vX.Y.Z --depth 1 https://github.com/machiya-kobo/kura.git $SHARE/kura-src
+ln -s $SHARE/kura-src/app $SHARE/kura                  # the rc.d scripts run $SHARE/<app>/<app>.py
+cd $SHARE/kura && /usr/local/lib/machiya-venv/bin/python3 -m vaultkit.verify   # the vendored vaultkit is unedited
 ```
+
+Repeat for `niwa` and `konbini`.
 
 The rc.d scripts expect the app files directly in `/usr/local/share/<app>/` (NetBSD: `/usr/pkg/share/<app>/`), which the link gives. Or point `<app>_code` (FreeBSD and NetBSD) or the flags (OpenBSD) at `.../app`.
 
@@ -117,9 +122,12 @@ Every app keeps its own clone under its data directory.
 - **Niwa and Konbini** write (garden fields, board frontmatter), so each gets a **deploy key with write access**:
 
   ```sh
+  install -d -o niwa -g niwa -m 0700 /var/db/niwa/.ssh
   su -m niwa -c 'ssh-keygen -t ed25519 -N "" -f /var/db/niwa/.ssh/deploy_key'     # add the .pub as a deploy key
   su -m niwa -c 'ssh-keyscan git.example.net >> /var/db/niwa/.ssh/known_hosts'
   ```
+
+  The same for `konbini`, with its own key (OpenBSD: `_niwa` and `_konbini`).
 
   Then in the env file:
   ```
@@ -127,7 +135,10 @@ Every app keeps its own clone under its data directory.
   ```
 
   - **Niwa** clones by itself at first start (`NIWA_REPO_URL`).
-  - **Konbini** expects an existing clone at `KANBAN_REPO`. Clone it once as the service user, before the first start: `su -m konbini -c 'git clone ssh://git@git.example.net/owner/vault.git /var/db/konbini/repo'` (OpenBSD: `_konbini`).
+  - **Konbini** expects an existing clone at `KANBAN_REPO`. Clone it once as the service user, with its key, before the first start (OpenBSD: `_konbini`):
+    ```sh
+    su -m konbini -c 'GIT_SSH_COMMAND="ssh -i /var/db/konbini/.ssh/deploy_key -o IdentitiesOnly=yes -o UserKnownHostsFile=/var/db/konbini/.ssh/known_hosts" git clone ssh://git@git.example.net/owner/vault.git /var/db/konbini/repo'
+    ```
 
 ## 6. The env file
 
@@ -218,10 +229,12 @@ NetBSD and OpenBSD have no supervisor in base. Restart from cron (`crontab -e` a
 Serve each app from loopback with HTTPS on the tailnet:
 
 ```sh
-tailscale serve --bg --https=443 http://127.0.0.1:8080                              # Kura (Niwa: 8082): node name
-tailscale serve --bg --service=svc:<service> --https=443 http://127.0.0.1:8080       # or as a Tailscale Service
+tailscale serve --bg --https=443 http://127.0.0.1:8080                              # Kura, on the machine's name
+tailscale serve --bg --https=8082 http://127.0.0.1:8082                             # Niwa, on another port of that name
+tailscale serve --bg --service=svc:<service> --https=443 http://127.0.0.1:8081       # or Konbini as a Tailscale Service
 ```
 
+- A machine name has one port 443, so only one app gets it. Serving another there replaces it: give the others their own `--https=` port, or a Service each.
 - A Service needs its definition, an autoApprover and a grant in the tailnet policy. Give it a name that isn't already served elsewhere.
 - `tailscale serve status` doesn't list a Service's serve config: it prints "No serve config" while the Service works. Verify with `curl https://<service>.<tailnet>.ts.net/api/status` from another device.
 - **Niwa's gemini and gopher** go through serve as plain TCP. This also maps gopher's port 70 without root (ports below 1024 need root on NetBSD and OpenBSD).
@@ -245,7 +258,7 @@ block return in quick on egress proto tcp to port { 8080 8081 8082 1965 7070 }
 
 ## 10. Monitoring, upgrades, removal
 
-- **Health:** Kura and Niwa answer `GET /api/status` without the owner gate. Konbini answers `GET /healthz`. Probe them through the tailnet URL. The answer has `ready`, and an `error` that's `null` unless something is broken.
+- **Health:** Kura and Niwa answer `GET /api/status` without the owner gate. Konbini answers `GET /healthz`. Probe them through the tailnet URL. Kura's and Niwa's answer has `ready`, and an `error` that's `null` unless something is broken; Konbini's is `ok`.
 - **Upgrade the app** as root (the checkout is root's, and git refuses another owner's):
   1. `git fetch --tags && git checkout <tag>` in the code directory;
   2. `/usr/local/lib/machiya-venv/bin/python3 -m vaultkit.verify`;
@@ -263,7 +276,8 @@ Skip this if you're the only user, on the tailnet: `*_USERS` (§6) is enough. Fo
 
 ```sh
 mkdir -p /usr/local/etc/machiya                                   # NetBSD, OpenBSD: /etc/machiya
-cd /usr/local/share/kura && /usr/local/lib/machiya-venv/bin/python3 -m vaultkit.identity --file /usr/local/etc/machiya/identity.toml setup --tailscale you@example.com
+cd /usr/local/share/kura                                          # NetBSD: /usr/pkg/share/kura
+/usr/local/lib/machiya-venv/bin/python3 -m vaultkit.identity --file /usr/local/etc/machiya/identity.toml setup --tailscale you@example.com
 ```
 
 - Each app runs as its own user. So give the file and its `session.key` a group the three users share, mode `0640`: `chgrp machiya` and `chmod 0640` both. Make the group and add `kura`, `niwa` and `konbini` to it (on OpenBSD `_kura` and so on).
