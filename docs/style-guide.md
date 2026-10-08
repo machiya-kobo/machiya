@@ -5,7 +5,7 @@ How a Machiya app looks, taken from Shiori, the front door. Every app shares the
 ## The rules
 
 1. **Colour means where a thing comes from.** Notes are Kura orange, cards Konbini magenta, the published garden Niwa green, your pages and the house blue, and the small web teal. A hue that already has a meaning is never reused for something else. A new kind of thing takes a neutral, or needs a design decision.
-2. **Outlined means you can open it, filled means it's a state.** A pill or link chip is drawn in its colour's outline; the selected pill is filled. A state chip (a stage, a status, a count) is a soft fill.
+2. **Outlined, as Shiori draws them.** Pills and chips are drawn in their colour's outline on no fill. Only the selected pill is filled. A chip that opens something fills lightly on hover. A fill of a colour behind text in that same colour always pulls it under 4.5:1, so there are no filled chips (v0.26.2).
 3. **Tint only what's yours, in a mixed list.** The default card is plain. A tinted card says "this one is yours, from that room" among other things, as Shiori's All tab mixes your notes and pages into the web's results.
 4. **Every text stays at 4.5:1**, in all ten themes, dark and light, on every surface it's drawn on. The tests check the shared components; anything new gets a check too.
 5. **Title Case labels, short words, one field first.** As in [voice.md](voice.md).
@@ -28,8 +28,8 @@ The row of choices above a list: Shiori's All · Pages · Notes · Web tabs, Niw
 
 ## Chips
 
-- **State:** `.chip` with `--chip` set: a soft fill of its colour, with the colour as text. Use it for a stage (Seedling, Budding, Evergreen), a status, a priority, a count.
-- **Link:** `.chip.link`, outlined in `currentColor`; hovering fills it lightly. Use it for anything that opens something: "Kura", "Obsidian", "Konbini", a label. Obsidian, which isn't a room, is neutral (`--fg2`).
+- **State:** `.chip` with `--chip` set: outlined in its colour, the colour as text, no fill. Use it for a stage (Seedling, Budding, Evergreen), a status, a priority, a count.
+- **Link:** `.chip.link`: the same outline, plus a light fill on hover and a pointer. Use it for anything that opens something: "Kura", "Obsidian", "Konbini", a label. Obsidian, which isn't a room, is neutral (`--fg2`).
 - **Tag:** `.tag`, a neutral outline for the vault's tags.
 
 ## Tinted items

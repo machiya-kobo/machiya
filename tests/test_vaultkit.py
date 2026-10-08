@@ -652,6 +652,16 @@ class ShellTest(unittest.TestCase):
         self.assertLess(html.index("/static/machiya.css"), html.index("</head>"))
         self.assertRegex(html, r'/static/machiya\.css\?v=[0-9a-f]{10}"')              # versioned by content
 
+    def test_chips_have_no_fill_of_their_own_colour(self):
+        """v0.26.2 (niwa's audit): a chip's text is its colour, and every accent is only guaranteed 4.5:1 on the bare page,
+        panel or tint, so a chip draws an outline and no fill (an 18% fill failed 95 of 140 theme and colour pairs)."""
+        import re
+        css = open(os.path.join(ROOT, "ui", "machiya.css"), encoding="utf-8").read()
+        rule = re.search(r"\n\.chip \{([^}]*)\}", css).group(1)
+        self.assertIn("background: transparent", rule)
+        self.assertIn("border: 1px solid currentColor", rule)
+        self.assertNotIn("color-mix", rule)
+
     def test_tab_icon_is_the_small_variant(self):
         """v0.26.1 (the style guide's icons): the browser tab gets the room's small icon, an SVG with the detail that
         doesn't read at 16 px dropped, plus a 16/32/48 .ico for browsers without SVG favicons; the home-screen icon stays

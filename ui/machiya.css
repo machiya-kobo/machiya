@@ -500,16 +500,18 @@ body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
   .tabbar .rooms .menu { top: auto; bottom: calc(100% + 14px); right: 0; }
 }
 
-/* ---- chips and tags: filled for state, outlined for tags --------------------------------------------------- */
-.chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: var(--r-pill);
-  font-size: var(--fs-xs); font-weight: 500; background: color-mix(in srgb, var(--chip, var(--muted)) 18%, transparent);
+/* ---- chips and tags (Shiori, v0.26.2): outlined in their colour on no fill. Every accent is 4.5:1 on the page, a
+   panel and a tint, and a fill of its own colour behind it always pulls it under (18% failed 95 of 140 theme and
+   colour pairs, niwa's audit), so only the current pill is filled. A chip that opens something is a .chip.link. ---- */
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: var(--r-pill);
+  font-size: var(--fs-xs); font-weight: 500; background: transparent; border: 1px solid currentColor;
   color: var(--chip, var(--muted)); white-space: nowrap; }
 .tag { display: inline-block; padding: 0 7px; border: 1px solid var(--line2); border-radius: var(--r-pill);
   font-size: var(--fs-xs); color: var(--fg2); white-space: nowrap; }
 a.tag:hover { border-color: var(--room); color: var(--fg); text-decoration: none; }
 .thing { color: var(--thing, var(--house)); }
-/* link chips (Shiori, v0.26): outlined in their own colour, for a chip that opens something ("Kura", "Obsidian", a label) */
-.chip.link { background: transparent; border: 1px solid currentColor; }
+/* link chips (Shiori, v0.26): a chip that opens something ("Kura", "Obsidian", a label): a light fill on hover */
+.chip.link { cursor: pointer; }
 a.chip.link:hover, a.chip.link:focus-visible { background: color-mix(in srgb, currentColor 14%, transparent); text-decoration: none; }
 
 /* ---- filter pills (Shiori's tab pills, v0.26): outlined in their colour, the current one filled ----------------- */
