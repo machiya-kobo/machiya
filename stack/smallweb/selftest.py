@@ -47,6 +47,7 @@ def check_egress():
     try:
         raw = smolnet.connect("www.cloudflare.com", 443, smallweb.SOCKS, 10)
         ctx = ssl.create_default_context()
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2    # as web.py and smolnet.py
         with ctx.wrap_socket(raw, server_hostname="www.cloudflare.com") as t:
             t.sendall(b"GET /cdn-cgi/trace HTTP/1.0\r\nHost: www.cloudflare.com\r\n\r\n")
             body = smolnet.read_all(t, 1 << 16).decode("utf-8", "replace")
