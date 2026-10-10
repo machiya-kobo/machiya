@@ -59,6 +59,8 @@ def board_roundup(ctx, args):
 # ---- writes. Every one goes through ctx.write: a fixed route, only the route's own fields. ---------------
 
 TAG = re.compile(r"^(topic|machine)/[a-z0-9][a-z0-9._-]{0,40}$")
+TOPIC_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")     # a topic name without the prefix, as Konbini's new_topics takes it
+NEW_TOPICS_MIN = (0, 22, 0)                                 # the first Konbini that creates a topic named in new_topics
 LOG_GAP = 600      # seconds: one board_log per card per caller
 
 
@@ -72,6 +74,27 @@ def card_row(ctx, card):
     r = {k: card.get(k) for k in ROW}
     r["url"] = "%s/p/%s" % (ctx.public("konbini"), card.get("slug"))
     return r
+
+
+def new_topic_names(args, maxitems):
+    """new_topics: topic names the owner has just approved, without the topic/ prefix (a leading topic/ is tolerated)."""
+    names = []
+    for t in arg_list(args, "new_topics", maxitems, 46):
+        name = t[6:] if t.startswith("topic/") else t
+        if not TOPIC_NAME.match(name):
+            raise ToolError("new_topics: %r is not a topic name (lower case letters, digits . _ -, up to 40 characters)" % t)
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def require_new_topics(ctx):
+    """An older Konbini ignores new_topics and would 409 after the card was created: check first."""
+    version = str(ctx.get("konbini", "/api/status").get("version") or "")
+    m = re.match(r"(\d+)\.(\d+)\.(\d+)", version)
+    if not m or tuple(int(x) for x in m.groups()) < NEW_TOPICS_MIN:
+        raise ToolError("this Konbini (%s) does not create topics from new_topics yet (it needs 0.22.0): nothing was created"
+                        % (version or "version unknown"))
 
 
 def patch(ctx, slug, body):
@@ -107,6 +130,7 @@ def board_add_backlog(ctx, args):
     area = arg_str(args, "area", maxlen=40).lower()
     summary = one_line(arg_str(args, "summary", maxlen=400), "summary", 200)
     topics = [t[6:] if t.startswith("topic/") else t for t in arg_list(args, "topics", 5, 41)]
+    new_topics = new_topic_names(args, 5)
     if not (title and area and summary):
         raise ToolError("title, area and summary are required")
     cards = ctx.get("konbini", "/api/cards")["cards"]
@@ -115,9 +139,13 @@ def board_add_backlog(ctx, args):
         raise ToolError("unknown area %r; a new area is the owner's to create. Existing areas: %s" % (area, ", ".join(sorted(areas))),
                         needs_owner=True)
     known = {t for c in cards for t in (c.get("topics") or [])}
-    unknown = [t for t in topics if t not in known]
+    unknown = [t for t in topics if t not in known and t not in new_topics]
     if unknown:
-        raise ToolError("unknown topic(s) %s; a new topic/* tag is the owner's to create" % ", ".join(unknown), needs_owner=True)
+        raise ToolError("unknown topic(s) %s; a new topic/* tag is the owner's to create: ask the owner, and after a yes call again "
+                        "with the name in new_topics" % ", ".join(unknown), needs_owner=True)
+    made = [t for t in dict.fromkeys(topics) if t not in known]       # new topics the owner approved, and the card uses
+    if made:
+        require_new_topics(ctx)
     similar = [dict(card_row(ctx, c), kind="card") for c in similar_cards(title, cards)][:5]
     kura_checked = ctx.has("kura")
     if kura_checked:
@@ -138,7 +166,10 @@ def board_add_backlog(ctx, args):
     card = ctx.write("konbini", "POST", "/api/cards", {"title": title, "area": area, "board": "backlog", "summary": summary})
     out = {"created": True, "card": card_row(ctx, card), "kura_checked": kura_checked}
     if topics:
-        out["card"] = patch(ctx, card["slug"], {"tags_add": ["topic/" + t for t in topics]})
+        body = {"tags_add": ["topic/" + t for t in topics]}
+        if made:
+            body["new_topics"] = made
+        out["card"] = patch(ctx, card["slug"], body)
     return out
 
 
@@ -224,7 +255,14 @@ def board_tag(ctx, args):
         if not TAG.match(t):
             raise ToolError("%r: only existing topic/<name> and machine/<name> tags can be changed here; "
                             "area/*, status and other tags (and new topics) are the owner's" % t, needs_owner=not t.startswith(("topic/", "machine/")))
-    return patch(ctx, arg_slug(args, "slug"), {"tags_add": add, "tags_remove": remove})
+    new_topics = new_topic_names(args, 10)
+    unused = [t for t in new_topics if "topic/" + t not in add]
+    if unused:
+        raise ToolError("new_topics lists %s but add does not include it as topic/<name>" % ", ".join(unused))
+    body = {"tags_add": add, "tags_remove": remove}
+    if new_topics:
+        body["new_topics"] = new_topics
+    return patch(ctx, arg_slug(args, "slug"), body)
 
 
 def board_log(ctx, args):
@@ -269,10 +307,14 @@ TOOLS = [
           "date": s("Any date in the period, YYYY-MM-DD (default today)")}, handler=board_roundup),
     tool("board_add_backlog",
          "Add a backlog card (a stub note in the vault). Checks for a similar card or note first and returns those instead of "
-         "creating, unless even_if_similar is true. The area and topics must already exist: a new one is the owner's to create "
-         "(the call says so). Summary is one line.",
+         "creating, unless even_if_similar is true. The area and topics must already exist: a new area is the owner's to create "
+         "(the call says so). A new topic: ask the owner first; pass its name in new_topics only after a yes in the conversation, "
+         "never infer it. Summary is one line.",
          {"title": s("Card title"), "area": s("An existing area, e.g. tools"), "summary": s("One line"),
-          "topics": {"type": "array", "items": {"type": "string"}, "description": "Existing topics, without topic/"},
+          "topics": {"type": "array", "items": {"type": "string"}, "description": "Topics, without topic/"},
+          "new_topics": {"type": "array", "items": {"type": "string"},
+                         "description": "Topics in topics that do not exist yet, which the owner has just approved (without topic/). "
+                                        "Only after a yes in the conversation; never infer it"},
           "even_if_similar": {"type": "boolean", "description": "Create even if similar cards or notes exist"}},
          ["title", "area", "summary"], WRITE, board_add_backlog, BOARD_WRITE),
     tool("board_move", "Move a card to a column. Done cards should get a one-line log (log). Archiving needs confirm=true after the owner agrees.",
@@ -294,8 +336,11 @@ TOOLS = [
     tool("board_set_dependencies", "Add or remove what a card depends on (card slugs or titles). A self-dependency is refused.",
          {"slug": SLUG, "add": {"type": "array", "items": {"type": "string"}}, "remove": {"type": "array", "items": {"type": "string"}}},
          ["slug"], IDEMPOTENT, board_set_dependencies, BOARD_WRITE),
-    tool("board_tag", "Add or remove existing topic/<name> or machine/<name> tags. Area tags, new topics and status tags are the owner's.",
-         {"slug": SLUG, "add": {"type": "array", "items": {"type": "string"}}, "remove": {"type": "array", "items": {"type": "string"}}},
+    tool("board_tag", "Add or remove topic/<name> or machine/<name> tags. Area tags and status tags are the owner's. A topic that does not "
+                      "exist yet: ask the owner first; pass its name in new_topics only after a yes in the conversation, never infer it.",
+         {"slug": SLUG, "add": {"type": "array", "items": {"type": "string"}}, "remove": {"type": "array", "items": {"type": "string"}},
+          "new_topics": {"type": "array", "items": {"type": "string"},
+                         "description": "Topics in add that do not exist yet, which the owner has just approved (without topic/)"}},
          ["slug"], IDEMPOTENT, board_tag, BOARD_WRITE),
     tool("board_log", "Add a one-line milestone to a card's log (one per card per 10 minutes; milestones, not steps).",
          {"slug": SLUG, "message": s("The log line, up to 300 characters")}, ["slug", "message"], WRITE, board_log, BOARD_WRITE),

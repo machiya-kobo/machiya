@@ -1,5 +1,9 @@
 # Changelog: machiya-mcp
 
+## 0.9.0
+
+- **New topics, after the owner says yes.** `board_add_backlog` and `board_tag` take `new_topics` (topic names without `topic/`). A topic that does not exist yet is created with the call only when it is listed there and used by the card; without it the call is still refused as a question for the owner. The tool descriptions tell the model to ask first and pass `new_topics` only after a yes in the conversation. New areas stay the owner's. Needs Konbini 0.22.0: `board_add_backlog` checks the version first and creates nothing on an older one.
+
 ## 0.8.3
 
 - Base image re-pinned to the current digest (security fixes in the base layers). No other changes.

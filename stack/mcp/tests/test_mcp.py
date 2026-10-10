@@ -90,7 +90,7 @@ def rooms():
         "/api/folders": {"folders": []},
     })
     konbini = Fake({
-        "/api/status": {"ok": True, "head": "abc"},
+        "/api/status": {"ok": True, "head": "abc", "version": "0.22.0"},
         "/api/cards": {"cards": [CARD, dict(CARD, slug="kura", title="Kura", stream="", board="ready", path="Projects/Kura.md", areas=["ops"], topics=[])]},
         "/api/cards/alpha": dict(CARD),
         "/api/cards/alpha/events": {"events": [{"ts": "t", "type": "edit"}] * 30},
@@ -571,6 +571,18 @@ class BoardWrites(Base):
         self.assertEqual(self.konbini_writes()[-1]["body"], {"tags_add": ["topic/zzz"], "tags_remove": []})
         self.assertNotIn("confirm_new_tags", json.dumps(self.konbini_writes()))
 
+    def test_a_new_topic_the_owner_approved_goes_in_new_topics(self):
+        r = call(self.server, "board_tag", {"slug": "alpha", "add": ["topic/zzz"], "new_topics": ["zzz"]})
+        self.assertFalse(r.get("isError"))
+        self.assertEqual(self.konbini_writes()[-1]["body"], {"tags_add": ["topic/zzz"], "tags_remove": [], "new_topics": ["zzz"]})
+        self.assertNotIn("confirm_new_tags", json.dumps(self.konbini_writes()))
+
+    def test_new_topics_must_be_names_that_add_uses(self):
+        for args in ({"add": ["topic/zzz"], "new_topics": ["other"]}, {"add": ["topic/Zzz"], "new_topics": ["Zzz"]},
+                     {"add": ["machine/box"], "new_topics": ["machine/box"]}, {"add": ["topic/a b"], "new_topics": ["a b"]}):
+            self.assertTrue(call(self.server, "board_tag", dict(args, slug="alpha"))["isError"], args)
+        self.assertFalse(self.konbini_writes())
+
     def test_refusals_from_the_board_are_owner_questions_but_validation_errors_are_not(self):
         r = call(self.server, "board_set_next", {"slug": "locked", "next": "x"})
         self.assertTrue(body(r)["needs_owner"])
@@ -625,6 +637,38 @@ class AddBacklog(Base):
         call(self.server, "board_add_backlog", dict(self.ARGS, topics=["hister", "topic/hister"]))
         last = self.fakes["konbini"].writes()[-1]
         self.assertEqual((last["method"], last["path"], last["body"]), ("PATCH", "/api/cards/new-idea", {"tags_add": ["topic/hister", "topic/hister"]}))
+
+    def test_a_new_topic_the_owner_approved_is_made_with_the_card(self):
+        r = data(call(self.server, "board_add_backlog", dict(self.ARGS, topics=["brandnew", "hister"], new_topics=["brandnew"])))
+        self.assertTrue(r["created"])
+        last = self.fakes["konbini"].writes()[-1]
+        self.assertEqual((last["method"], last["path"], last["body"]),
+                         ("PATCH", "/api/cards/new-idea", {"tags_add": ["topic/brandnew", "topic/hister"], "new_topics": ["brandnew"]}))
+
+    def test_new_topics_that_the_card_does_not_use_or_that_exist_are_not_sent(self):
+        call(self.server, "board_add_backlog", dict(self.ARGS, topics=["hister"], new_topics=["hister", "unused"]))
+        self.assertEqual(self.fakes["konbini"].writes()[-1]["body"], {"tags_add": ["topic/hister"]})
+
+    def test_only_the_listed_topic_is_new_the_other_is_still_the_owners(self):
+        r = call(self.server, "board_add_backlog", dict(self.ARGS, topics=["brandnew", "other"], new_topics=["brandnew"]))
+        self.assertTrue(r["isError"])
+        self.assertTrue(body(r)["needs_owner"])
+        self.assertIn("other", body(r)["error"])
+        self.assertFalse(self.fakes["konbini"].writes())
+
+    def test_malformed_new_topics_create_nothing(self):
+        for bad in (["Bad Name"], ["a/b"], ["x" * 41]):
+            r = call(self.server, "board_add_backlog", dict(self.ARGS, topics=["brandnew"], new_topics=bad))
+            self.assertTrue(r["isError"], bad)
+        self.assertFalse(self.fakes["konbini"].writes())
+
+    def test_an_older_konbini_is_refused_before_anything_is_created(self):
+        for status in ({"ok": True, "version": "0.21.0"}, {"ok": True}):
+            self.fakes["konbini"].routes["/api/status"] = status
+            r = call(self.server, "board_add_backlog", dict(self.ARGS, topics=["brandnew"], new_topics=["brandnew"]))
+            self.assertTrue(r["isError"], status)
+            self.assertIn("0.22.0", body(r)["error"])
+        self.assertFalse(self.fakes["konbini"].writes())
 
     def test_unknown_area_or_topic_is_the_owners_and_creates_nothing(self):
         for extra in ({"area": "brandnew"}, {"topics": ["nonexistent"]}):

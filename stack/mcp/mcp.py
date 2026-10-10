@@ -33,7 +33,7 @@ import envelope                                   # noqa: E402
 from backend import HISTER_ORIGIN, Backend, BackendError, SecretFile   # noqa: E402
 from rooms import ToolError, cross, hister, hister_write, konbini, kura, niwa, prompts, vault  # noqa: E402
 
-VERSION = "0.8.3"
+VERSION = "0.9.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHANGELOG = os.path.join(HERE, "CHANGELOG.md")    # /app/CHANGELOG.md in the image; GET /api/changelog serves it
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26")
@@ -635,7 +635,7 @@ class Ctx:
 
 # The only writes this server can make: (room, method, path pattern) -> the body fields the route may carry. A
 # tool that asks for anything else is a bug and fails inside the server (docs/services/mcp.md, Safety).
-PATCH_KEYS = {"board", "status", "next", "waiting", "priority", "stream", "goal", "due", "dependsOn", "tags_add", "tags_remove"}
+PATCH_KEYS = {"board", "status", "next", "waiting", "priority", "stream", "goal", "due", "dependsOn", "tags_add", "tags_remove", "new_topics"}
 ROUTES = (("konbini", "PATCH", r"/api/cards/[^/]+", PATCH_KEYS),
           ("konbini", "POST", r"/api/cards", {"title", "area", "board", "summary"}),
           ("konbini", "POST", r"/api/cards/[^/]+/events", {"type", "body"}),

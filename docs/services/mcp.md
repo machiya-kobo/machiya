@@ -40,9 +40,9 @@ Each room is an optional URL: `KONBINI_URL`, `KURA_URL`, `NIWA_URL`, `HISTER_URL
 - **`board_add_backlog`** first looks for a similar card and a similar note, and returns them with `created: false` unless `even_if_similar` is true.
   - A similar card: the same slug or title, one inside the other, nearly the same spelling, or a significant word in common.
   - A similar note: a Kura title search for each significant word.
-  - The area and topics must already exist. A new one is refused as a question for you, and nothing is created.
+  - The area must already exist, and so must the topics unless you said yes to a new one: the model then passes it in `new_topics` and the topic is created with the card. Otherwise it is refused as a question for you and nothing is created. Needs Konbini 0.22.0.
 - **`board_move`** to `archived` needs `confirm: true`. The model should set it only after you agree. `log` adds a one-line event in the same call (for `done`: what shipped).
-- **`board_tag`** changes only existing `topic/<name>` and `machine/<name>` tags. `area/*`, `status/*`, `type/*` and new topics are yours to set.
+- **`board_tag`** changes `topic/<name>` and `machine/<name>` tags. A topic that does not exist yet is created only when you said yes and the model lists it in `new_topics`; the board logs a `topic_created` event on the card. `area/*`, `status/*` and `type/*` are yours to set.
 - **`board_log`**: one line per card per 10 minutes. Milestones, not steps.
 
 ### Notes
