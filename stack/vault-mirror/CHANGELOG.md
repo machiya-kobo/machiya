@@ -1,5 +1,9 @@
 # Changelog: vault-mirror
 
+## 0.1.4
+
+- Base image re-pinned to the current digest (security fixes in the base layers). No other changes.
+
 ## 0.1.3
 
 - **Runs as uid 1000 by itself.** The image now has `USER 1000:1000` (before, only the reference compose's `user:` kept it off root). It writes only under `/data`: the clone and `status.json`. If you ran it as root, `chown -R 1000:1000` the `/data` volume before you upgrade, or the mirror can't write.
