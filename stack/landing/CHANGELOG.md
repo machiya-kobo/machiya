@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.6.5
+
+- Base image re-pinned to the current digest (security fixes in the base layers). No other changes.
+
 ## 0.6.4
 
 - vaultkit re-vendored (vaultkit 0.27.4 → 0.29.0): identity headers are believed only from the trusted proxies inside vaultkit itself, single-use pairing codes, the indexing speedups, and the shared hover and card styles. Base images pinned by digest.
