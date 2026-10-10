@@ -1457,6 +1457,30 @@ class SharedUITest(unittest.TestCase):
         self.assertTrue(row.startswith(bar) and row.endswith("</div></header>\n"))
         self.assertNotIn("searchrow", self.shell.header("kura", [("/", "home", "Home")], "home", {}))
 
+    def test_header_below_slot_and_cls(self):
+        nav = [("/", "home", "Home")]
+        plain = self.shell.header("kura", nav, "home", {})
+        self.assertTrue(plain.startswith('<header class="top"><div class="topbar">'))
+        self.assertNotIn("below", plain)
+        bar = self.shell.search_bar("", "/search", "Search Notes", "Search")
+        h = self.shell.header("kura", nav, "home", {}, search=bar, below="<p>stats</p>", cls='page"<b')
+        self.assertTrue(h.startswith('<header class="top page&quot;&lt;b">'))
+        self.assertTrue(h.endswith('</div><div class="below"><p>stats</p></div></header>\n'))   # after the search row, inside the header
+        self.assertLess(h.index('class="searchrow"'), h.index('class="below"'))
+        without = self.shell.header("kura", nav, "home", {}, search=bar)
+        self.assertEqual(without.replace("</header>", '<div class="below"><p>stats</p></div></header>'),
+                         self.shell.header("kura", nav, "home", {}, search=bar, below="<p>stats</p>"))
+
+    def test_one_row_header_from_1100px(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        css = open(os.path.join(root, "ui", "machiya.css")).read()
+        i = css.index("@media (min-width: 1100px) {\n  header.top { display: flex;")
+        block = css[i:css.index("\n}\n", i)]
+        for rule in ("header.top > .topbar { display: contents; }", "header.top > .searchrow {", "header.top > .below {"):
+            self.assertIn(rule, block)
+        js = open(os.path.join(root, "ui", "machiya.js")).read()
+        self.assertIn('setProperty("--hdr-h"', js)
+
     def test_service_worker_and_offline_row(self):
         js = self.shell.service_worker("abc123", ["/static/kura.css?v=1", "/offline"], notes={"match": "^/n/", "limit": 200},
                                        network=["^/search"], pins="/api/offline")

@@ -835,3 +835,14 @@ document.addEventListener("click", (event) => {
   img.referrerPolicy = "no-referrer";
   box.replaceWith(img);
 });
+
+/* The pinned header's height as --hdr-h on <html> (v0.30): an app's sticky row under it (Konbini's lane headings) uses it
+   instead of measuring the header itself. Follows the one-row layout, the phone layout and the app's own row. */
+(function () {
+  const h = document.querySelector("header.top");
+  if (!h) return;
+  const set = () => document.documentElement.style.setProperty("--hdr-h", Math.ceil(h.getBoundingClientRect().height) + "px");
+  set();
+  if (window.ResizeObserver) new ResizeObserver(set).observe(h);
+  else window.addEventListener("resize", set);
+})();

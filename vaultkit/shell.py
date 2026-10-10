@@ -332,9 +332,11 @@ def switcher(room, links, cls="rooms", settings=False, who=""):
             % (cls, GLYPH["rooms"], "".join(rows), "<hr>" if nb else "", "".join(nb), ("<hr>" + home) if home else "", gear))
 
 
-def header(room, nav, current, links, subtitle="", tools="", settings=True, who="", search=""):
+def header(room, nav, current, links, subtitle="", tools="", settings=True, who="", search="", below="", cls=""):
     """nav = [(href, key, label)]; tools = extra HTML before the switcher; who = the signed-in name (v0.13): a person
-    button before the gear, to the Account settings; search = search_bar(...) (v0.17): the pill under the top bar."""
+    button before the gear, to the Account settings; search = search_bar(...) (v0.17): the pill under the top bar, and in it
+    from 1100px (v0.30); below = the app's own HTML for a row inside the header under the search (a stats or alert row);
+    cls = extra classes on the header element (a page's state)."""
     _, name, seal, _ = room_info(room)
     items = "".join(('<b class="here">%s</b>' % e(label)) if key == current else '<a href="%s">%s</a>' % (e(href), e(label))
                     for href, key, label in nav)
@@ -342,10 +344,11 @@ def header(room, nav, current, links, subtitle="", tools="", settings=True, who=
     if who and settings:
         gear = ('<a class="iconbtn who" href="/settings#account" title="Signed in as %s" aria-label="Signed in as %s">%s</a>'
                 % (e(who), e(who), GLYPH["person"])) + gear
-    return ('<header class="top"><div class="topbar"><a class="brand" href="/">%s'
-            '<span class="word">%s</span></a>%s<nav class="nav">%s</nav><div class="tools">%s%s%s</div></div>%s</header>\n'
-            % (mark(room), e(name), ('<span class="subtitle">%s</span>' % e(subtitle)) if subtitle else "", items, tools,
-               switcher(room, links), gear, ('<div class="searchrow">%s</div>' % search) if search else ""))
+    return ('<header class="top%s"><div class="topbar"><a class="brand" href="/">%s'
+            '<span class="word">%s</span></a>%s<nav class="nav">%s</nav><div class="tools">%s%s%s</div></div>%s%s</header>\n'
+            % ((" " + e(cls)) if cls else "", mark(room), e(name), ('<span class="subtitle">%s</span>' % e(subtitle)) if subtitle else "",
+               items, tools, switcher(room, links), gear, ('<div class="searchrow">%s</div>' % search) if search else "",
+               ('<div class="below">%s</div>' % below) if below else ""))
 
 
 def tabbar(tabs, current, room, links, icons=None, who=""):

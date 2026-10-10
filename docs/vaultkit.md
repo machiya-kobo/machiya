@@ -57,6 +57,8 @@ note's commit time in seconds. On 3,000 notes and 400 commits, a re-index after 
 - **Pairing and devices:** a pairing code works once per room; a paired device's token lasts 90 days (older ones until 2027-01-06).
 - **Room tokens:** rooms explain hister-login 0.6.0's `token-expired`.
 
+**One top menu** (v0.30, owner 2026-10-10). `shell.header()` takes `below=` (an app's own HTML for a row inside the pinned header, under the search: Konbini's stats and alert row, replacing a string replace) and `cls=` (extra classes on the header). From 1100px `ui/machiya.css` lays the header out as one row: mark, wordmark, tabs, the search pill centred, then the tools (the app's chip, Rooms, person, gear); narrower, and on phones, the pill stays the second row as before. The markup is unchanged (the pill is still the `.searchrow` after the top bar), so no app changes to get the layout. `ui/machiya.js` publishes the pinned header's height as `--hdr-h` on `<html>`, so an app's sticky row under it needn't measure it. Apps that don't use `header()` (genkan) copy the same CSS and follow the same rule.
+
 **A note is data, never code** (v0.13). `render()` returns clean HTML (`vaultkit.sanitize.clean`): raw HTML in a note
 keeps only known tags and attributes; scripts, styles, frames, forms and event handlers are dropped, and a link or
 image keeps only an `http(s)`, `mailto`, `obsidian`, `gemini` or `gopher` URL (or a relative one). `- [ ]` / `- [x]`
