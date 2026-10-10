@@ -1,6 +1,7 @@
-# Version updates for what Dependabot can see: the pinned GitHub Actions and the base images (python, nginx, hister)
-# whose digests tools/pin-bases pins. The pip installs are inline in the Dockerfiles, so they are not covered here.
-# Dependabot only opens PRs; merging one means pulling it onto main like any other commit (tests green first).
+# Version updates for the pinned GitHub Actions. Dependabot only opens PRs; merging one means pulling it onto main
+# like any other commit (tests green first).
+# Not covered: the Dockerfile base images (public.ecr.aws answers Dependabot's shared runners with 429, so its docker
+# job fails; tools/pin-bases keeps those digests current instead) and the inline pip pins (not visible to it).
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -11,14 +12,4 @@ updates:
       prefix: "machiya: "
     groups:
       actions:
-        patterns: ["*"]
-  - package-ecosystem: docker
-    directories:
-      - "/stack/*"
-    schedule:
-      interval: weekly
-    commit-message:
-      prefix: "machiya: "
-    groups:
-      base-images:
         patterns: ["*"]
