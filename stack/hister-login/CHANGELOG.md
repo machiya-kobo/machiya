@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.5.6
+
+- vaultkit re-vendored (0.29.0 → 0.30.0): from 1100px the header is one row, as in the other rooms; narrower and on phones nothing changes.
+
 ## 0.5.5
 
 - Base image re-pinned to the current digest (security fixes in the base layers). No other changes.
