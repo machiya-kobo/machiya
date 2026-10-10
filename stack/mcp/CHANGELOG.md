@@ -1,5 +1,9 @@
 # Changelog: machiya-mcp
 
+## 0.8.3
+
+- Base image re-pinned to the current digest (security fixes in the base layers). No other changes.
+
 ## 0.8.2
 
 - vaultkit re-vendored (vaultkit 0.23.0 → 0.29.0): identity headers are believed only from the trusted proxies inside vaultkit itself, single-use pairing codes, the indexing speedups, and the shared hover and card styles. Base images pinned by digest.
