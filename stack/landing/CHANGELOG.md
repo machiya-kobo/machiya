@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.6.6
+
+- vaultkit re-vendored (0.29.0 → 0.30.0): from 1100px the header is one row with the search pill between the tabs and the icons, as in the other rooms. Narrower and on phones nothing changes.
+
 ## 0.6.5
 
 - Base image re-pinned to the current digest (security fixes in the base layers). No other changes.
