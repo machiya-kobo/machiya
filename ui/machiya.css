@@ -538,7 +538,7 @@ header.top {
      the tools still fit at 1100px */
   .topbar > .subtitle { flex: 0 1 auto; max-width: clamp(96px, 14vw, 320px); }
   .tools > * { order: 1; }
-  header.top > .searchrow { order: 2; flex: 0 .2 auto; width: clamp(240px, 100vw - 720px, 560px); min-width: 200px;
+  header.top > .searchrow { order: 2; flex: 0 .2 auto; width: clamp(180px, 75vw - 540px, 420px); min-width: 150px;
     margin: 0; padding: 6px 0; }
   .tools > :is(.rooms, .who, .gear) { order: 3; }
   /* the tools' own 10px gap, inside the header's 16px one */

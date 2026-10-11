@@ -1478,7 +1478,7 @@ class SharedUITest(unittest.TestCase):
         block = css[i:css.index("\n}\n", i)]
         for rule in ("header.top > .topbar, .topbar > .tools { display: contents; }", "header.top > .searchrow {", "header.top > .below {",
                      ".topbar > .subtitle { flex: 0 1 auto; max-width: clamp(", ".topbar > .nav { flex: 1 0 auto; }",
-                     "width: clamp(240px, 100vw - 720px, 560px)", ".tools > :is(.rooms, .who, .gear) { order: 3; }"):
+                     "width: clamp(180px, 75vw - 540px, 420px)", ".tools > :is(.rooms, .who, .gear) { order: 3; }"):
             self.assertIn(rule, block)
         js = open(os.path.join(root, "ui", "machiya.js")).read()
         self.assertIn('setProperty("--hdr-h"', js)
