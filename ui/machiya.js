@@ -14,7 +14,8 @@
 //     brings a page back with its menu open.
 //  4. "/" focuses the search page's field, or opens the room's search page (form.search's action), unless you're typing.
 //  5. updates (v0.6): when a new service worker is waiting, a "New Version · Reload" toast; Reload tells it to take
-//     over (postMessage {type: "SKIP_WAITING"}) and reloads once it has. Checks for updates on return to the app.
+//     over (postMessage {type: "SKIP_WAITING"}) and reloads once it has. Refreshing the page does the same (v0.31.1).
+//     Checks for updates on return to the app.
 //  6. the settings that follow the person (v0.21, docs/contracts/prefs.md): with <meta name="machiya-prefs"
 //     content="/api/prefs"> (shell.page(prefs_url=)), the Shared settings (theme, palette, text_size, apps_hidden)
 //     and the room's own (<meta name="machiya-app-prefs">, shell.APP_PREFS) are kept in the account. The rules:
@@ -598,9 +599,15 @@ if ("serviceWorker" in navigator) {
     document.body.append(d);
   };
   navigator.serviceWorker.addEventListener("controllerchange", () => { if (asked) location.reload(); });
+  // a refresh, plain or hard, is a yes to the waiting version too (v0.31.1, owner 2026-10-11): it takes over at once; a
+  // page the old worker served loads once more, a hard refresh (no controller: straight from the network) needn't
+  const refreshed = (performance.getEntriesByType("navigation")[0] || {}).type === "reload";
   navigator.serviceWorker.getRegistration().then((reg) => {
     if (!reg) return;
-    if (reg.waiting && navigator.serviceWorker.controller) toast(reg.waiting);
+    if (reg.waiting && refreshed) {
+      asked = !!navigator.serviceWorker.controller;
+      reg.waiting.postMessage({ type: "SKIP_WAITING" });
+    } else if (reg.waiting && navigator.serviceWorker.controller) toast(reg.waiting);
     reg.addEventListener("updatefound", () => {
       const w = reg.installing;
       if (w) w.addEventListener("statechange", () => {

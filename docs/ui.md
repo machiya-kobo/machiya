@@ -82,7 +82,7 @@ Inside `.card`, `.settings .group`, `.signin .group`, `.rooms .menu`, `.update-t
 - What each room searches: Konbini its cards, Niwa its published notes, Kura every note (it already has search; move it onto the shared field).
 
 **Update toast (PWA card).**
-- machiya.js shows "New Version · Reload" when a new service worker is waiting. Reload posts `{type: "SKIP_WAITING"}`, and the page reloads once the new worker controls it. machiya.js also checks for an update when the app comes back to the foreground (at most once a minute), since iOS rarely closes installed apps.
+- machiya.js shows "New Version · Reload" when a new service worker is waiting. Reload posts `{type: "SKIP_WAITING"}`, and the page reloads once the new worker controls it. Refreshing the page, plain or hard, does the same (v0.31.1, owner 2026-10-11): a page the old worker served loads once more, a hard refresh (already from the network) doesn't. machiya.js also checks for an update when the app comes back to the foreground (at most once a minute), since iOS rarely closes installed apps.
 - Your `sw.js` must:
   1. **not** call `self.skipWaiting()` in `install` (the new worker waits for the user);
   2. handle the message: `self.addEventListener("message", (e) => { if (e.data && e.data.type === "SKIP_WAITING") self.skipWaiting(); });`
@@ -139,7 +139,7 @@ machiyaSW({"version": "<room build>-<core hash>", "precache": [...], "notes": {"
 - `notes-v1` keeps the `limit` most recently read notes (a read moves a note to the end). Pinned notes are never evicted.
 
 **Rules:**
-- **Updates:** a new worker waits for the "New Version · Reload" toast (`SKIP_WAITING`), then `clients.claim()`.
+- **Updates:** a new worker waits for the "New Version · Reload" toast or a refresh of the page (`SKIP_WAITING`), then `clients.claim()`.
 - **What gets stored:** only `ok`, same-origin, not redirected responses. A `Cache-Control: no-store` answer is never stored, and it drops any stored copy of that URL.
 - **Navigations are network-first for at most `timeout`.** An edit shows up at once online. On a timeout, a network error or a 5xx, the stored copy is shown, marked `<body data-offline="<time>">` for the room's offline banner, else `/offline`. An answer that arrives late still refreshes the stored copy.
 

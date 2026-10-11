@@ -1482,6 +1482,9 @@ class SharedUITest(unittest.TestCase):
             self.assertIn(rule, block)
         js = open(os.path.join(root, "ui", "machiya.js")).read()
         self.assertIn('setProperty("--hdr-h"', js)
+        # v0.31.1: a refresh of the page applies a waiting version too, not only the toast's Reload (owner, 2026-10-11)
+        self.assertIn('getEntriesByType("navigation")[0] || {}).type === "reload"', js)
+        self.assertIn("if (reg.waiting && refreshed) {", js)
 
     def test_service_worker_and_offline_row(self):
         js = self.shell.service_worker("abc123", ["/static/kura.css?v=1", "/offline"], notes={"match": "^/n/", "limit": 200},
