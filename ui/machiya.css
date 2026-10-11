@@ -523,22 +523,28 @@ header.top {
 /* The top bar never shows a search field (v0.16.4); since v0.17 the pill is the header's second row (.searchrow). */
 .topbar form.search { display: none; }
 
-/* One row from 1100px (v0.30, owner 2026-10-10): the search pill sits between the tabs and the tools, centred, as Shiori's field.
-   The top bar's children become the header's own flex items (display: contents), so the .searchrow, a sibling of the top bar,
-   can take its place in the same row without any change of markup; narrower, and on phones, it stays the second row. An
+/* One row from 1100px (v0.30, owner 2026-10-10; v0.31, owner 2026-10-11): brand, subtitle and tabs on the left; at the right
+   the room's own tools (Kura's vault pill, genkan's status pill), then the search pill, then the Rooms house, the person and
+   the gear. The pill's width depends only on the window, so the pill, the house and the gear sit in the same place in every
+   room. The top bar and its tools become the header's own flex items (display: contents), so the .searchrow, a sibling of the
+   top bar, takes its place in the row without any change of markup; narrower, and on phones, it stays the second row. An
    app's own row (`below=`) keeps the full width under it. */
 @media (min-width: 1100px) {
   header.top { display: flex; flex-wrap: wrap; align-items: center; column-gap: var(--sp-4); }
-  header.top > .topbar { display: contents; }
+  header.top > .topbar, .topbar > .tools { display: contents; }
   header.top > .brand, header.top .topbar > .brand { min-height: 48px; }
-  .topbar > .nav { flex: none; }
-  /* a long subtitle (a note's title) is cut with an ellipsis instead of wrapping the row: sized so seven tabs, the field at its
-     160px minimum and the tools still fit at 1100px */
+  .topbar > .nav { flex: 1 0 auto; }                         /* the tabs take the free space, so everything after sits right */
+  /* a long subtitle (a note's title) is cut with an ellipsis instead of wrapping the row: sized so seven tabs, the field and
+     the tools still fit at 1100px */
   .topbar > .subtitle { flex: 0 1 auto; max-width: clamp(96px, 14vw, 320px); }
-  .topbar > .tools { order: 2; margin-left: auto; }          /* without a search pill the tools stay at the right */
-  header.top:has(> .searchrow) .topbar > .tools { margin-left: 0; }   /* with one, the pill's own auto margins centre it */
-  header.top > .searchrow { order: 1; flex: 1 1 160px; min-width: 160px; max-width: 560px; margin: 0 auto; padding: 6px 0; }
-  header.top > .below { order: 3; flex: 1 0 100%; }
+  .tools > * { order: 1; }
+  header.top > .searchrow { order: 2; flex: 0 .2 auto; width: clamp(240px, 100vw - 720px, 560px); min-width: 200px;
+    margin: 0; padding: 6px 0; }
+  .tools > :is(.rooms, .who, .gear) { order: 3; }
+  /* the tools' own 10px gap, inside the header's 16px one */
+  .tools > :not(.rooms, .who, .gear) + :not(.rooms, .who, .gear), .tools > :is(.rooms, .who, .gear) + :is(.who, .gear) {
+    margin-left: -6px; }
+  header.top > .below { order: 4; flex: 1 0 100%; }
 }
 
 /* ---- tab bar (phones and the installed app) ---------------------------------------------------------------- */
