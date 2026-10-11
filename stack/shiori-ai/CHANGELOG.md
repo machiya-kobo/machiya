@@ -1,5 +1,11 @@
 # Changelog: shiori-ai
 
+## 0.2.2
+
+(There is no 0.2.1 release: a tag of that name was pushed by mistake on an unrelated commit and never built.)
+
+- **AI Answer's language.** The answer is written in the language the search is written in; a search too short to tell (a name, a dish) gets the reader's first language from `Accept-Language` (else English), never the results' language. Cached answers are kept per language, so earlier answers are not reused.
+
 ## 0.2.0
 
 - **Room tokens**, as smallweb and the other services take them: with `SHIORI_AI_AUTH_URL` (hister-login's internal address), `SHIORI_AI_PUBLIC_URL` (the address the tokens are issued for) and `SHIORI_AI_HISTER_USERS`, a caller may send `Authorization: Bearer mht_…` (or `X-Machiya-Token`) in `tailscale` or `proxy` mode. hister-login confirms each token (a good answer is kept 30 s, a refusal 5 s). A request with a token is decided by the token alone, and a bad or another room's token is refused. A request a token lets in skips the same-origin check: a bearer token isn't a cookie another site's page can ride on. Notes, code and local files are still refused, whoever asks. Tokens are never logged.

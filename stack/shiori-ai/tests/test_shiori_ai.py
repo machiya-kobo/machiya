@@ -279,6 +279,23 @@ class TestAnswer(Base):
         self.assertTrue(res["cached"])
         self.assertEqual(len(seen("engine")), 1)
 
+    def test_answer_language_is_the_searchs_else_the_readers(self):
+        self.call("POST", "/shiori/ai/answer", {"q": "dak galbi"}, {"Accept-Language": "fr;q=0.5, ko-KR, en;q=0.8"})
+        system = seen("engine")[0][3]["system"]
+        self.assertIn("BCP 47 code: ko-KR", system)
+        self.assertIn("Never take the language from the results", system)
+        self.assertNotIn("{lang}", system)
+        self.call("POST", "/shiori/ai/answer", {"q": "dak galbi"})                      # another language: not the cached one
+        self.assertEqual(len(seen("engine")), 2)
+        self.assertIn("BCP 47 code: en)", seen("engine")[1][3]["system"])
+        self.assertTrue(self.call("POST", "/shiori/ai/answer", {"q": "dak galbi"})[2]["cached"])
+
+    def test_reader_language(self):
+        for header, want in (("de-DE,de;q=0.9,en;q=0.8", "de-DE"), ("fr;q=0.5, ko", "ko"), ("", "en"), (None, "en"),
+                             ("*", "en"), ("en-US;q=0", "en"), ('x<script>, "pt-BR"', "en"), ("zh-Hant-TW", "zh-Hant-TW"),
+                             ("ja;q=abc, it;q=0.1", "it")):
+            self.assertEqual(sa.reader_language(header), want, header)
+
     def test_refusals(self):
         for q in ("label:books", "url:x", "metadata.source:vault", "a" * 301, "line\nbreak"):
             self.assertEqual(self.call("POST", "/shiori/ai/answer", {"q": q})[0], 400, q)

@@ -57,7 +57,7 @@ from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.2.0"
+VERSION = "0.2.2"
 
 TEXT_MAX, BODY_MAX, URL_MAX, MAX_TOKENS, ENGINE_TIMEOUT = 60000, 8192, 4096, 300, 90
 HISTER_TIMEOUT, HISTER_MAX = 20, 16 << 20          # one stored page, with its HTML
@@ -101,7 +101,30 @@ ANSWER_SYSTEM = ("You answer a web search for the person who searched, using onl
                  "Leave out background the search didn't ask about. After each claim, cite "
                  "the results it comes from as [1], [2] and so on, by their numbers. If the results don't answer the "
                  "search, say so in one sentence. Plain text: no headings, no Markdown, no preamble. Write in the "
-                 "language of the search.")
+                 "language the search itself is written in. If the search is only a name, a dish, a product or a few "
+                 "words whose language is unclear, write in the reader's language (BCP 47 code: {lang}). Never take "
+                 "the language from the results.")
+LANG_TAG = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8}){0,3}$")
+
+
+def reader_language(header):
+    """The reader's first language from Accept-Language (the highest q, the first on a tie) as a BCP 47 tag, else "en".
+    The answer follows the search's own language; this is only for a search too short to tell (2026-10-11: a dish's
+    name came back in the results' language)."""
+    best, best_q = None, 0.0
+    for part in (header or "").split(",")[:20]:
+        tag, _, params = part.strip().partition(";")
+        q = 1.0
+        for p in params.split(";"):
+            k, _, v = p.strip().partition("=")
+            if k.strip().lower() == "q":
+                try:
+                    q = float(v)
+                except ValueError:
+                    q = 0.0
+        if q > best_q and LANG_TAG.match(tag.strip()):
+            best, best_q = tag.strip(), q
+    return best or "en"
 
 
 class Fail(Exception):
@@ -492,18 +515,18 @@ class Store:
                       (self.cfg.cache_max,))
 
     @staticmethod
-    def answer_key(q):
-        return PROMPT_VERSION + " ".join(q.lower().split())
+    def answer_key(q, lang="en"):
+        return PROMPT_VERSION + lang.lower() + "|" + " ".join(q.lower().split())      # a reader's language is its own answer
 
-    def answer_get(self, q):
+    def answer_get(self, q, lang="en"):
         with self.lock, self.db() as c:
             return c.execute("SELECT answer, sources, model FROM answers WHERE key = ? AND created > ?",
-                             (self.answer_key(q), time.time() - ANSWER_TTL)).fetchone()
+                             (self.answer_key(q, lang), time.time() - ANSWER_TTL)).fetchone()
 
-    def answer_put(self, q, answer, sources, model):
+    def answer_put(self, q, answer, sources, model, lang="en"):
         with self.lock, self.db() as c:
             c.execute("INSERT OR REPLACE INTO answers VALUES (?, ?, ?, ?, ?)",
-                      (self.answer_key(q), answer, json.dumps(sources, ensure_ascii=False), model, time.time()))
+                      (self.answer_key(q, lang), answer, json.dumps(sources, ensure_ascii=False), model, time.time()))
             c.execute("DELETE FROM answers WHERE created <= ?", (time.time() - ANSWER_TTL,))
             c.execute("DELETE FROM answers WHERE rowid NOT IN (SELECT rowid FROM answers ORDER BY created DESC LIMIT ?)",
                       (self.cfg.cache_max,))
@@ -741,7 +764,7 @@ class AI:
         return {"summary": out, "engine": "anthropic", "model": model, "partial": partial, "cached": False,
                 "updated": updated}
 
-    def answer(self, q, refresh):
+    def answer(self, q, refresh, lang="en"):
         if len(q) > Q_MAX:
             raise Fail(400, "bad_request", "The search is too long (300 characters at most).")
         if CTRL.search(q):
@@ -751,7 +774,7 @@ class AI:
         if not self.cfg.searxng:
             raise Fail(503, "unavailable", "Answers aren't set up here.")
         if not refresh:
-            hit = self.store.answer_get(q)
+            hit = self.store.answer_get(q, lang)
             if hit:
                 log("answer: cached")
                 return {"answer": hit[0], "sources": json.loads(hit[1]), "engine": "anthropic", "model": hit[2],
@@ -763,10 +786,10 @@ class AI:
         log("answer: engine call %d/%d today, %d results" % (n, self.cfg.daily_requests, len(results)))
         blocks = "\n\n".join("[%d] %s\n%s\n%s" % (r["n"], fence(r["title"]), fence(r["url"]), fence(r["content"]))
                              for r in results)
-        out, model = self.engine("answer", ANSWER_SYSTEM, "Search: %s\n<results>\n%s\n</results>" % (fence(q), blocks),
+        out, model = self.engine("answer", ANSWER_SYSTEM.replace("{lang}", lang), "Search: %s\n<results>\n%s\n</results>" % (fence(q), blocks),
                                  ANSWER_TOKENS, 3)
         sources = [{"n": r["n"], "title": r["title"], "url": r["url"]} for r in results]
-        self.store.answer_put(q, out, sources, model)
+        self.store.answer_put(q, out, sources, model, lang)
         return {"answer": out, "sources": sources, "engine": "anthropic", "model": model, "cached": False}
 
 
@@ -868,8 +891,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.fail(Fail(429, "busy", "Too many requests. Try again in a minute.", {"Retry-After": str(wait)}))
         refresh = req.get("refresh") is True
         try:
-            out = self.ai.summarize(value.strip(), refresh) if route == "/summarize" else self.ai.answer(value.strip(),
-                                                                                                         refresh)
+            out = self.ai.summarize(value.strip(), refresh) if route == "/summarize" else self.ai.answer(
+                value.strip(), refresh, reader_language(self.headers.get("Accept-Language")))
         except Fail as f:
             if f.code in (502, 503, 504):
                 self.server.upstream_failed("%d %s" % (f.code, f.error))
