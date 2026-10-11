@@ -853,3 +853,21 @@ document.addEventListener("click", (event) => {
   if (window.ResizeObserver) new ResizeObserver(set).observe(h);
   else window.addEventListener("resize", set);
 })();
+
+/* The footer at the bottom of the window when the page is shorter than it, and right after the content when it's longer
+   (v0.31.3, owner 2026-10-11). The free height goes above the footer as margin, so nothing else in the page moves (a flex
+   column would stop the main's margins collapsing). The body is at least the window's height, so the margin never changes
+   the body's size and the observer doesn't loop. */
+(function () {
+  const foot = document.querySelector(".foot");
+  if (!foot || foot.parentElement !== document.body) return;
+  const place = () => {
+    foot.style.marginTop = "";
+    const end = foot.getBoundingClientRect().bottom + window.scrollY + parseFloat(getComputedStyle(document.body).paddingBottom);
+    const gap = Math.floor(document.documentElement.clientHeight - end);
+    if (gap > 0) foot.style.marginTop = parseFloat(getComputedStyle(foot).marginTop) + gap + "px";
+  };
+  place();
+  if (window.ResizeObserver) new ResizeObserver(place).observe(document.body);
+  window.addEventListener("resize", place);
+})();

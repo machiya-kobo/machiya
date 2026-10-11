@@ -540,6 +540,8 @@ header.top {
   .tools > * { order: 1; }
   header.top > .searchrow { order: 2; flex: 0 .2 auto; width: clamp(180px, 75vw - 540px, 420px); min-width: 150px;
     margin: 0; padding: 6px 0; }
+  /* the field's text is the tabs' (v0.31.3, owner 2026-10-11); the line keeps the 16px field's height, so the pill doesn't shrink */
+  header.top > .searchrow form.search.searchbar input { font-size: var(--fs-s); font-weight: 500; line-height: calc(var(--fs-l) * 1.4); }
   .tools > :is(.rooms, .who, .gear) { order: 3; }
   /* the tools' own 10px gap, inside the header's 16px one */
   .tools > :not(.rooms, .who, .gear) + :not(.rooms, .who, .gear), .tools > :is(.rooms, .who, .gear) + :is(.who, .gear) {
@@ -793,10 +795,12 @@ form.search.searchbar { display: block; max-width: 720px; }
 form.search.searchbar .field { position: relative; }
 form.search.searchbar input { width: 100%; max-width: none; height: auto; padding: 10px 44px 10px 16px; border-radius: 999px;
   border: 1px solid var(--line2); background: var(--dark); color: var(--menu-fg, var(--fg)); font: inherit; font-size: var(--fs-l);
-  box-shadow: var(--shadow-1); transition: none; }
+  line-height: 1.4; box-shadow: var(--shadow-1); transition: none; }   /* 1.4: Shiori Search's field height (v0.31.3) */
 form.search.searchbar input::placeholder { color: var(--muted); opacity: .9; }
 form.search.searchbar input:focus { outline: none; border-color: var(--room); }
-form.search.searchbar input:focus-visible { outline: 2px solid var(--room); outline-offset: 2px; }
+/* focused, one solid 2px ring on the field's edge, as Shiori Search's (v0.31.3, owner 2026-10-11; was the border plus a ring
+   2px outside it) */
+form.search.searchbar input:focus-visible { outline: 2px solid var(--room); outline-offset: -2px; }
 form.search.searchbar input::-webkit-search-cancel-button { display: none; }
 /* the clear X (shown once there's text) and, on phones, a magnifier that submits (v0.17.1, as Kagi's field) */
 form.search.searchbar .clear, form.search.searchbar .go { position: absolute; top: 50%; transform: translateY(-50%); width: 32px; height: 32px;
