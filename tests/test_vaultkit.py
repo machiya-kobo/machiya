@@ -1479,7 +1479,7 @@ class SharedUITest(unittest.TestCase):
         for rule in ("header.top > .topbar, .topbar > .tools { display: contents; }", "header.top > .searchrow {", "header.top > .below {",
                      ".topbar > .subtitle { flex: 0 1 auto; max-width: clamp(", ".topbar > .nav { flex: 1 0 auto; }",
                      "width: clamp(180px, 75vw - 540px, 420px)", ".tools > :is(.rooms, .who, .gear) { order: 3; }",
-                     "searchbar input { font-size: var(--fs-s); font-weight: 500;"):
+                     "header.top > .searchrow form.search.searchbar input { font-size: 15px; }"):
             self.assertIn(rule, block)
         js = open(os.path.join(root, "ui", "machiya.js")).read()
         self.assertIn('setProperty("--hdr-h"', js)
@@ -1487,6 +1487,7 @@ class SharedUITest(unittest.TestCase):
         self.assertIn('getEntriesByType("navigation")[0] || {}).type === "reload"', js)
         # v0.31.3 (owner, 2026-10-11): the field's focus is one ring on its edge, as Shiori Search's; a short page's footer sits at the window's bottom
         self.assertIn("form.search.searchbar input:focus-visible { outline: 2px solid var(--room); outline-offset: -2px; }", css)
+        self.assertIn("height: 38px; padding: 0 44px 0 16px;", css)   # v0.31.4: 38px, Shiori Search's field as Safari draws it
         self.assertIn('if (!foot || foot.parentElement !== document.body) return;', js)
         self.assertIn("if (reg.waiting && refreshed) {", js)
 
