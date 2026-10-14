@@ -1414,7 +1414,7 @@ class PalettesTest(unittest.TestCase):
         self.assertEqual(ctx.palette, "nord")
         page = sh.page(ctx, "kura", "t", "")
         self.assertIn('class="theme-day palette-nord room-kura"', page)
-        self.assertIn('<meta name="theme-color" content="#e5e9f0">', page)
+        self.assertIn('<meta name="theme-color" content="#eceff4">', page)
         self.assertIn('class="theme-system room-kura"', sh.page(sh.prefs(""), "kura", "t", ""))   # Tokyo Night: no class
         self.assertEqual(sh.prefs("palette=<script>").palette, "tokyo-night")                      # unknown: the default
         self.assertEqual(sh.prefs("palette=nord; machiya_palette=ayu").palette, "ayu")              # shared cookie wins
@@ -1422,8 +1422,8 @@ class PalettesTest(unittest.TestCase):
         m = sh.manifest_colors("system", {"Sec-CH-Prefers-Color-Scheme": "light"}, "gruvbox")
         self.assertEqual((m["background_color"], m["user_preferences"]["color_scheme_dark"]["background_color"]),
                          ("#fbf1c7", "#282828"))
-        self.assertEqual(sh.manifest_colors("night", None, "dracula")["theme_color"], "#21222c")
-        self.assertEqual(sh.manifest_colors("night", None, "nope")["theme_color"], "#16161e")
+        self.assertEqual(sh.manifest_colors("night", None, "dracula")["theme_color"], "#282a36")
+        self.assertEqual(sh.manifest_colors("night", None, "nope")["theme_color"], "#1a1b26")
         section = sh.appearance_section(ctx)
         self.assertEqual(section[0], "Display")
         self.assertIn('<option value="nord" selected>Nord</option>', section[1][0])
@@ -1509,10 +1509,14 @@ class SharedUITest(unittest.TestCase):
                      "html.dialog-open header.top, html.dialog-open .tabbar { visibility: hidden; }",
                      ".sround.save { background: var(--room); color: var(--bg); }"):
             self.assertIn(rule, css)
-        # v0.32.2 (owner, 2026-10-14): the installed app's header fades out of the status bar's colour (theme-color = --dark)
-        self.assertIn("header.top { background: linear-gradient(to bottom, var(--dark) 0%, color-mix(in srgb, var(--dark) 0%, transparent) 70%),", css)
+        # v0.32.2 (owner, 2026-10-14): the installed app's header fades out of the status bar's colour. v0.32.3: that
+        # colour is the page's --bg (theme-color too), and the frost is annai's
+        self.assertIn("header.top { background: linear-gradient(to bottom, var(--bg) 0%, color-mix(in srgb, var(--bg) 0%, transparent) 70%),", css)
+        self.assertIn("color-mix(in srgb, var(--bg) 70%, transparent);\n    -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); }", css)
+        self.assertNotIn("var(--dark) 0%", css)
         self.assertNotIn("padding-top: calc(var(--sat) + 24px)", css)
-        self.assertEqual(self.shell._colors("tokyo-night", "dark")["theme_color"], "#16161e")   # the gradient's first colour, --dark
+        self.assertEqual(self.shell._colors("tokyo-night", "dark")["theme_color"], "#1a1b26")   # the gradient's first colour, --bg
+        self.assertIn('getPropertyValue("--bg")', js)
         # v0.31.5 (owner, 2026-10-14): with the Rooms sheet open, only Rooms is lit, not the page's tab too
         self.assertIn('.tabbar:has(> details[open]) > a:is(.here, [aria-current="page"]) { background: none; color: var(--fg); }', css)
 

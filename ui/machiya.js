@@ -116,9 +116,9 @@ function apply(key, value) {
   if (key === "theme" || key === "palette") barColour();
   document.dispatchEvent(new CustomEvent("machiya:setting", { detail: { key, value } }));
 }
-// the browser's bar follows a theme changed on the page: the new palette's --dark, as the server would have sent it
+// the browser's bar follows a theme changed on the page: the new palette's --bg, as the server would have sent it (v0.32.3)
 function barColour() {
-  const colour = getComputedStyle(document.body).getPropertyValue("--dark").trim();
+  const colour = getComputedStyle(document.body).getPropertyValue("--bg").trim();
   if (!colour) return;
   const metas = [...document.querySelectorAll('meta[name="theme-color"]')];
   metas.slice(1).forEach((m) => m.remove());

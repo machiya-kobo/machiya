@@ -585,13 +585,16 @@ body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
 }
 
 /* The installed app's header (v0.32.2, owner 2026-10-14: annai's, "looks good"). Without black-translucent (v0.32) the
-   app sits under an opaque status bar in theme-color, the palette's --dark; a frosted header right under it made a hard,
-   square edge. So in the installed app the header is frosted at every width (the phones' solid one, v0.16.3, was against
-   iOS 26's edge blur, which is gone) and its top fades out of the status bar's colour, the blur showing through below. */
+   app sits under an opaque status bar; a frosted header right under it made a hard, square edge. So in the installed app
+   the header is frosted at every width (the phones' solid one, v0.16.3, was against iOS 26's edge blur, which is gone)
+   and its top fades out of the status bar's colour, the blur showing through below. v0.32.3 (ops, from the owner's
+   genkan in Solarized light): iOS painted the bar in the page's --bg, not theme-color, so a fade from --dark left a grey
+   band with a square edge; the fade starts at --bg (theme-color is --bg too) and the frost is annai's, 70% and
+   saturate(180%) blur(20px). */
 @media (display-mode: standalone) {
-  header.top { background: linear-gradient(to bottom, var(--dark) 0%, color-mix(in srgb, var(--dark) 0%, transparent) 70%),
-      color-mix(in srgb, var(--bg) 88%, transparent);
-    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  header.top { background: linear-gradient(to bottom, var(--bg) 0%, color-mix(in srgb, var(--bg) 0%, transparent) 70%),
+      color-mix(in srgb, var(--bg) 70%, transparent);
+    -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); }
 }
 
 /* ---- chips and tags (Shiori, v0.26.2): outlined in their colour on no fill. Every accent is 4.5:1 on the page, a

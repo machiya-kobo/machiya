@@ -195,7 +195,7 @@ def security_headers(csp=CSP):
 COLOR_HINT = "Sec-CH-Prefers-Color-Scheme"
 def _colors(palette, mode):
     v = palettes.PALETTES.get(palette, palettes.PALETTES[palettes.DEFAULT])[3][mode]
-    return {"background_color": v["bg"], "theme_color": v["dark"]}
+    return {"background_color": v["bg"], "theme_color": v["bg"]}   # v0.32.3: the bar is the page's --bg (iOS paints it so anyway)
 
 
 NIGHT = _colors(palettes.DEFAULT, "dark")
