@@ -539,9 +539,19 @@ async function openSettingsSheet(url, opener) {
   if (sheetOpen) return;
   sheetOpen = true;
   let main = null;
+  // an app that draws its pages in the browser (genkan) gives its Settings itself: window.machiyaSettingsHTML() returns
+  // the <main class="settings"> (an element or its HTML) or nothing; otherwise the server's /settings is fetched
+  const toMain = (x) => {
+    if (!x) return null;
+    if (typeof x === "string") return new DOMParser().parseFromString(x, "text/html").querySelector("main.settings");
+    return x.matches && x.matches("main.settings") ? x : (x.querySelector ? x.querySelector("main.settings") : null);
+  };
   try {
-    const res = await fetch(url.pathname + url.search, { credentials: "same-origin", headers: { Accept: "text/html" } });
-    if (res.ok) main = new DOMParser().parseFromString(await res.text(), "text/html").querySelector("main.settings");
+    if (typeof window.machiyaSettingsHTML === "function") main = toMain(await window.machiyaSettingsHTML(url));
+    if (!main) {
+      const res = await fetch(url.pathname + url.search, { credentials: "same-origin", headers: { Accept: "text/html" } });
+      if (res.ok) main = toMain(await res.text());
+    }
   } catch { main = null; }
   if (!main) { sheetOpen = false; location.href = url.href; return; }
 

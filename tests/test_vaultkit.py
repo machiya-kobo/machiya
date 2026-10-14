@@ -1501,7 +1501,8 @@ class SharedUITest(unittest.TestCase):
                       'dlg.addEventListener("cancel", (ev) => { ev.preventDefault(); finish(false); });',
                       'if (ev.target === dlg) { finish(false); return; }', 'url.pathname !== "/settings" || location.pathname === "/settings"',
                       'if (sheet) sheet.preview(key, value, cookie); else keep(key, value, cookie);', 'el.id = "msheet-" + el.id;',
-                      'dlg.querySelector("#msheet-title").focus({ preventScroll: true });'):
+                      'dlg.querySelector("#msheet-title").focus({ preventScroll: true });',
+                      'if (typeof window.machiyaSettingsHTML === "function") main = toMain(await window.machiyaSettingsHTML(url));'):
             self.assertIn(piece, js)
         for rule in ("dialog.msheet::backdrop { background: rgb(0 0 0 / .45); -webkit-backdrop-filter: none; backdrop-filter: none; }",
                      "grid-template-columns: minmax(0, 1fr); grid-auto-rows: max-content;",
