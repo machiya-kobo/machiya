@@ -1490,6 +1490,8 @@ class SharedUITest(unittest.TestCase):
         self.assertIn("height: 38px; padding: 0 44px 0 16px;", css)   # v0.31.4: 38px, Shiori Search's field as Safari draws it
         self.assertIn('if (!foot || foot.parentElement !== document.body) return;', js)
         self.assertIn("if (reg.waiting && refreshed) {", js)
+        # v0.31.5 (owner, 2026-10-14): with the Rooms sheet open, only Rooms is lit, not the page's tab too
+        self.assertIn('.tabbar:has(> details[open]) > a:is(.here, [aria-current="page"]) { background: none; color: var(--fg); }', css)
 
     def test_service_worker_and_offline_row(self):
         js = self.shell.service_worker("abc123", ["/static/kura.css?v=1", "/offline"], notes={"match": "^/n/", "limit": 200},

@@ -583,6 +583,10 @@ body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
      4.5:1 on --bg, and --hl or --dark is 3.6-4.5:1 for it) */
   .tabbar > a.here, .tabbar > a[aria-current="page"] { background: var(--tab-on); color: var(--room); }
   .tabbar > a.here > span, .tabbar > a[aria-current="page"] > span { color: var(--menu-fg, var(--fg)); }
+  /* one lit tab at a time (v0.31.5, owner 2026-10-14): while a tab's sheet is open (Rooms), that tab is the lit one and
+     the page's own tab goes plain, as on iOS; closing the sheet lights it again */
+  .tabbar:has(> details[open]) > a:is(.here, [aria-current="page"]) { background: none; color: var(--fg); }
+  .tabbar:has(> details[open]) > a:is(.here, [aria-current="page"]) > span { color: inherit; }
   .tabbar > a:hover { text-decoration: none; }
   .tabbar .rooms .menu { top: auto; bottom: calc(100% + 14px); right: 0; }
 }
