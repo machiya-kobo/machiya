@@ -1509,6 +1509,10 @@ class SharedUITest(unittest.TestCase):
                      "html.dialog-open header.top, html.dialog-open .tabbar { visibility: hidden; }",
                      ".sround.save { background: var(--room); color: var(--bg); }"):
             self.assertIn(rule, css)
+        # v0.32.2 (owner, 2026-10-14): the installed app's header fades out of the status bar's colour (theme-color = --dark)
+        self.assertIn("header.top { background: linear-gradient(to bottom, var(--dark) 0%, color-mix(in srgb, var(--dark) 0%, transparent) 70%),", css)
+        self.assertNotIn("padding-top: calc(var(--sat) + 24px)", css)
+        self.assertEqual(self.shell._colors("tokyo-night", "dark")["theme_color"], "#16161e")   # the gradient's first colour, --dark
         # v0.31.5 (owner, 2026-10-14): with the Rooms sheet open, only Rooms is lit, not the page's tab too
         self.assertIn('.tabbar:has(> details[open]) > a:is(.here, [aria-current="page"]) { background: none; color: var(--fg); }', css)
 
