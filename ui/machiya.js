@@ -37,6 +37,8 @@
 //     histerauth's signin_meta()): a same-origin fetch answered 401 with a JSON "signin" address sends the whole page
 //     there, with return= this page (API calls are never redirected by the server, so the page has to go itself); and
 //     every Rooms menu gains a "Sign Out" row, a form posting to that path (so 7. applies to it too).
+// 10. the Settings sheet (v0.32, owner 2026-10-14): the gear and every link to /settings open Settings as a sheet over the
+//     page, ✕ Cancel and ✓ Save in its header; changes preview at once and are kept only on Save (below).
 //  9. pull to refresh (2026-10-05), only in an installed app (display-mode: standalone, or iOS's navigator.standalone),
 //     which has no reload button: at the top of the page, a drag down brings the content down after the finger, with a
 //     reload mark in the gap under the header; letting go past PULL.threshold holds it open, spinning, and reloads, and
@@ -58,6 +60,7 @@ const TEXT_SIZES = ["xsmall", "small", "standard", "large", "xlarge"];
 // the switcher's rows (vaultkit/prefs.py APPS; a test checks they match): apps_hidden <-> show_<app>
 const APPS = ["shiori", "konbini", "niwa", "kura", "hister", "searxng", "machiya"];
 const rawFetch = window.fetch ? window.fetch.bind(window) : null;   // 6. never takes the page to sign in (8.)
+let sheetDevice = null;                               // 10. the open sheet's This Device size, not yet saved ("" = off)
 
 function load() {
   try { return JSON.parse(localStorage.getItem(storeKey) || "{}"); } catch { return {}; }
@@ -90,6 +93,7 @@ function cookieOf(key) {
   return readCookie("machiya_" + key) ?? readCookie(key);
 }
 function deviceSize() {
+  if (sheetDevice !== null) return sheetDevice;
   const v = cookieOf("textSizeDevice");
   return TEXT_SIZES.includes(v) ? v : "";
 }
@@ -257,13 +261,20 @@ function store(name, value) {
 const PENDING = "machiyaPrefsPending";                // changes not yet sent: {key: value or null}
 const SEEN = "machiyaPrefsSeen";                      // the account's last answer here: {rev, prefs, updated}
 
-// the Shared section's state line: "unavailable" while the account doesn't answer, back when it does
-const stateLine = document.querySelector(".prefs-state");
-const stateWas = stateLine ? [stateLine.dataset.prefsState, stateLine.innerHTML] : null;
+// the Shared section's state line (the page's, or an open sheet's): "unavailable" while the account doesn't answer, back
+// when it does
+const stateWas = typeof WeakMap === "function" ? new WeakMap() : null;
+let lastReach = null;
 function reachable(ok) {
-  if (!stateLine || !stateWas || stateWas[0] !== "account") return;
-  stateLine.dataset.prefsState = ok ? stateWas[0] : "unavailable";
-  if (ok) stateLine.innerHTML = stateWas[1]; else stateLine.textContent = stateLine.dataset.unavailable || "";
+  lastReach = ok;
+  for (const line of document.querySelectorAll(".prefs-state")) {
+    if (!stateWas) return;
+    if (!stateWas.has(line)) stateWas.set(line, [line.dataset.prefsState, line.innerHTML]);
+    const was = stateWas.get(line);
+    if (was[0] !== "account") continue;
+    line.dataset.prefsState = ok ? was[0] : "unavailable";
+    if (ok) line.innerHTML = was[1]; else line.textContent = line.dataset.unavailable || "";
+  }
 }
 
 async function call(method, body, etag) {
@@ -394,56 +405,68 @@ window.addEventListener("pageshow", (ev) => { if (ev.persisted) { refresh(); syn
 if (prefsUrl) sync();
 
 // "Use This Device's Size" (This Device): the device's own text size, a cookie the rooms share, never sent anywhere
-const deviceToggle = document.querySelector("[data-device-size]");
-const deviceSelect = document.querySelector("[data-device-size-value]");
+const deviceRows = [];                                // [toggle, select]: the page's, and an open sheet's
 function syncDeviceControls() {
-  if (!deviceToggle) return;
   const d = deviceSize();
-  deviceToggle.checked = !!d;
-  const row = deviceSelect && deviceSelect.closest(".item");
-  if (row) row.hidden = !d;
-  if (deviceSelect && d) deviceSelect.value = d;
+  for (const [toggle, select] of deviceRows) {
+    toggle.checked = !!d;
+    const row = select && select.closest(".item");
+    if (row) row.hidden = !d;
+    if (select && d) select.value = d;
+  }
 }
-if (deviceToggle) {
+function keepDevice(v) {                              // v: a size, or "" for none
+  if (v) setCookie("textSizeDevice", v); else dropCookie("textSizeDevice");
+  appliedNow.textSizeDevice = v;
+  apply("textSizeDevice", v);
+  syncDeviceControls();
+  tell();
+}
+// sheet: the open Settings sheet (10.), which only previews; without it, every change is kept at once (the /settings page)
+function bindDevice(root, sheet) {
+  const toggle = root.querySelector("[data-device-size]");
+  if (!toggle) return;
+  const select = root.querySelector("[data-device-size-value]");
+  deviceRows.push([toggle, select]);
   syncDeviceControls();
   const set = () => {
-    if (deviceToggle.checked) {
-      const v = TEXT_SIZES.includes(deviceSelect && deviceSelect.value) ? deviceSelect.value : current("textSize");
-      setCookie("textSizeDevice", v);
-      appliedNow.textSizeDevice = v;
-      apply("textSizeDevice", v);
-    } else {
-      dropCookie("textSizeDevice");
-      appliedNow.textSizeDevice = "";
-      apply("textSizeDevice", "");
-    }
-    syncDeviceControls();
-    tell();
+    const v = !toggle.checked ? "" : TEXT_SIZES.includes(select && select.value) ? select.value : current("textSize");
+    if (sheet) sheet.device(v); else keepDevice(v);
   };
-  deviceToggle.addEventListener("change", set);
-  if (deviceSelect) deviceSelect.addEventListener("change", () => { if (deviceToggle.checked) set(); });
+  toggle.addEventListener("change", set);
+  if (select) select.addEventListener("change", () => { if (toggle.checked) set(); });
 }
+bindDevice(document, null);
 
-// the /settings page
-for (const el of document.querySelectorAll("[data-set]")) {
-  const key = el.dataset.set;
-  const cookie = "cookie" in el.dataset;
-  if (key in settings && !cookie) {                   // cookie-backed values come server-rendered
-    if (el.type === "checkbox") el.checked = !!settings[key]; else el.value = settings[key];
-  }
-  el.addEventListener("change", () => {
-    const value = el.type === "checkbox" ? el.checked : el.value;
-    const all = load();
-    all[key] = value;
-    save(all);
-    if (key.startsWith("show_")) settings[key] = value;
-    if (cookie || shared(key) || (appSpec[key] && appSpec[key].cookie)) setCookie(key, value);
-    if (Object.hasOwn(appliedNow, key) || key.startsWith("show_")) appliedNow[key] = value;
-    apply(key, value);
-    changed(key);
-    tell();
-  });
+// the /settings page: every [data-set] control. keep() is what a change does there, and what Save does in the sheet.
+function keep(key, value, cookie) {
+  const all = load();
+  all[key] = value;
+  save(all);
+  if (key.startsWith("show_")) settings[key] = value;
+  if (cookie || shared(key) || (appSpec[key] && appSpec[key].cookie)) setCookie(key, value);
+  if (Object.hasOwn(appliedNow, key) || key.startsWith("show_")) appliedNow[key] = value;
+  apply(key, value);
+  changed(key);
+  tell();
 }
+function bindSettings(root, sheet) {
+  // the values this browser keeps (an earlier sheet may have saved since the page loaded); the Apps switches as above
+  const now = Object.assign(load(), Object.fromEntries(Object.entries(settings).filter(([k]) => k.startsWith("show_"))));
+  for (const el of root.querySelectorAll("[data-set]")) {
+    const key = el.dataset.set;
+    const cookie = "cookie" in el.dataset;
+    if (key in now && !cookie) {                      // cookie-backed values come server-rendered
+      if (el.type === "checkbox") el.checked = !!now[key]; else el.value = now[key];
+    }
+    if (sheet) sheet.shown(key, el.type === "checkbox" ? el.checked : el.value);
+    el.addEventListener("change", () => {
+      const value = el.type === "checkbox" ? el.checked : el.value;
+      if (sheet) sheet.preview(key, value, cookie); else keep(key, value, cookie);
+    });
+  }
+}
+bindSettings(document, null);
 
 // 3. menus. Why they close on the way out (2026-10-05): a tap on Settings in the Rooms menu followed the link with the
 // <details> still open, and the back/forward cache (always on in an installed app on iOS) brought the page back exactly
@@ -498,6 +521,142 @@ document.addEventListener("keydown", (ev) => {
   }
 });
 
+// 10. the Settings sheet (v0.32, owner 2026-10-14; ops' convention, from annai). The gear, and every link to /settings (the
+// Rooms menu's Settings row, the person button's #account, a room's own), opens Settings as a sheet over the page, as
+// Shiori's apps do: ✕ Cancel at the left, the title, ✓ Save at the right, 44px circles. What you change shows at once
+// (theme, palette, text size, the Apps switches; a room's own settings through machiya:setting) but is kept only on Save:
+// the cookies, localStorage and the account (6.) change then, as a change on the page would have. Cancel, Esc, a tap on
+// the backdrop, or the page going away (3.) put the page back as it was. A setting only the server draws (a board option,
+// Kura's vault name) reloads the page after Save. The sheet is /settings' own <main> (its ids prefixed msheet-), so a
+// room changes nothing; /settings itself stays a page (no JavaScript, or opened directly) and keeps each change at once.
+// If /settings can't be fetched (offline, signed out) the link is followed instead.
+const SHEET_ICON = {
+  cancel: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  save: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg>',
+};
+let sheetOpen = false;
+async function openSettingsSheet(url, opener) {
+  if (sheetOpen) return;
+  sheetOpen = true;
+  let main = null;
+  try {
+    const res = await fetch(url.pathname + url.search, { credentials: "same-origin", headers: { Accept: "text/html" } });
+    if (res.ok) main = new DOMParser().parseFromString(await res.text(), "text/html").querySelector("main.settings");
+  } catch { main = null; }
+  if (!main) { sheetOpen = false; location.href = url.href; return; }
+
+  const dlg = document.createElement("dialog");
+  dlg.className = "msheet";
+  dlg.setAttribute("aria-labelledby", "msheet-title");
+  dlg.innerHTML = '<div class="shead"><button type="button" class="sround cancel" aria-label="Cancel" title="Cancel">'
+    + SHEET_ICON.cancel + '</button><h2 id="msheet-title" tabindex="-1">Settings</h2>'
+    + '<button type="button" class="sround save" aria-label="Save" title="Save">' + SHEET_ICON.save + "</button></div>";
+  const body = document.createElement("div");
+  body.className = "settings sbody";
+  for (const n of [...main.childNodes]) {
+    if (n.nodeType === 1 && n.matches("h1.sechead")) continue;          // the page's hidden heading: the sheet has a title
+    body.append(document.importNode(n, true));
+  }
+  // one page, two copies of Settings' ids would clash (Konbini's board is <main id="board">, Settings' heading too)
+  for (const el of body.querySelectorAll("[id]")) el.id = "msheet-" + el.id;
+  for (const attr of ["for", "aria-labelledby", "aria-describedby", "aria-controls"]) {
+    for (const el of body.querySelectorAll("[" + attr + "]")) {
+      el.setAttribute(attr, el.getAttribute(attr).split(/\s+/).filter(Boolean).map((t) => "msheet-" + t).join(" "));
+    }
+  }
+  for (const a of body.querySelectorAll('a[href^="#"]')) {
+    if (a.getAttribute("href").length > 1) a.setAttribute("href", "#msheet-" + a.getAttribute("href").slice(1));
+  }
+  dlg.append(body);
+
+  const shownAt = new Map();                          // key -> the value the control showed when the sheet opened
+  const changes = new Map();                          // key -> {value, cookie}: previewed, not kept
+  let device = null;                                  // This Device's size, previewed ("" = off); null: untouched
+  const deviceWas = deviceSize();
+  let done = false;
+  const sheet = {
+    shown(key, value) { if (!shownAt.has(key)) shownAt.set(key, value); },
+    preview(key, value, cookie) { changes.set(key, { value, cookie }); apply(key, value); },
+    device(v) { device = v; sheetDevice = v; apply("textSizeDevice", v); syncDeviceControls(); },
+  };
+  const putBack = () => {
+    sheetDevice = null;
+    for (const key of changes.keys()) apply(key, shownAt.get(key));
+    if (device !== null) apply("textSizeDevice", deviceWas);
+  };
+  const keepAll = () => {
+    sheetDevice = null;
+    let reload = false;
+    for (const [key, { value, cookie }] of changes) {
+      if (value === shownAt.get(key)) { apply(key, value); continue; }   // changed, then changed back
+      keep(key, value, cookie);
+      if (!shared(key)) reload = true;
+    }
+    if (device !== null && device !== deviceWas) keepDevice(device);
+    return reload;
+  };
+  const finish = (saved) => {
+    if (done) return;
+    done = true;
+    const reload = saved ? keepAll() : (putBack(), false);
+    if (dlg.open) dlg.close();
+    if (reload) location.reload();
+  };
+  dlg.querySelector(".sround.cancel").addEventListener("click", () => finish(false));
+  dlg.querySelector(".sround.save").addEventListener("click", () => finish(true));
+  dlg.addEventListener("cancel", (ev) => { ev.preventDefault(); finish(false); });     // Esc
+  dlg.addEventListener("click", (ev) => {
+    if (ev.target === dlg) { finish(false); return; }                                  // the backdrop
+    const a = ev.target.closest && ev.target.closest('a[href^="#msheet-"]');           // a link to a section in the sheet
+    if (!a) return;
+    ev.preventDefault();
+    const to = body.querySelector("#" + CSS.escape(a.getAttribute("href").slice(1)));
+    if (to) to.scrollIntoView({ block: "start" });
+  });
+  dlg.addEventListener("close", () => {                  // closed some other way (3.: a link in it, the page going away)
+    finish(false);
+    for (let i = deviceRows.length - 1; i >= 0; i--) if (dlg.contains(deviceRows[i][0])) deviceRows.splice(i, 1);
+    dlg.remove();
+    sheetOpen = false;
+    if (opener && opener.isConnected && typeof opener.focus === "function") opener.focus({ preventScroll: true });
+  });
+
+  document.body.append(dlg);
+  bindSettings(body, sheet);
+  bindDevice(body, sheet);
+  bindOffline(body);
+  bindSignout(body);
+  if (lastReach !== null) reachable(lastReach);
+  dlg.showModal();
+  // the title, not the first button: a ring on Cancel looked like a pressed button
+  dlg.querySelector("#msheet-title").focus({ preventScroll: true });
+  if (url.hash.length > 1) {
+    const to = body.querySelector("#" + CSS.escape("msheet-" + decodeURIComponent(url.hash.slice(1))));
+    if (to) to.scrollIntoView({ block: "start" });
+  }
+}
+document.addEventListener("click", (ev) => {
+  const a = ev.target && ev.target.closest ? ev.target.closest("a[href]") : null;
+  if (!a || ev.defaultPrevented || ev.button || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+  if ((a.target && a.target !== "_self") || a.hasAttribute("download") || a.closest("dialog")) return;
+  let url;
+  try { url = new URL(a.href, location.href); } catch { return; }
+  if (url.origin !== location.origin || url.pathname !== "/settings" || location.pathname === "/settings") return;
+  if (typeof HTMLDialogElement !== "function" || !window.DOMParser || !window.fetch || !window.CSS) return;
+  ev.preventDefault();
+  closeMenus(false);                                     // the Rooms menu it was opened from
+  openSettingsSheet(url, a);
+}, true);
+// while any dialog is open, <html class="dialog-open"> (machiya.css: on phones the header and tab bar hide, since iOS
+// drew their blur over the sheet's top; the page under it doesn't scroll)
+(() => {
+  const html = document.documentElement;
+  if (!html || !document.body || typeof MutationObserver !== "function") return;
+  const mark = () => html.classList.toggle("dialog-open", !!document.querySelector("dialog[open]"));
+  new MutationObserver(mark).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["open"] });
+  mark();
+})();
+
 // Hister sign-in (8.): only with <meta name="machiya-signin">
 const signinMeta = document.querySelector('meta[name="machiya-signin"]');
 const signoutPath = signinMeta ? signinMeta.content || "/signout" : "";
@@ -545,16 +704,22 @@ function askWorker(msg) {
   });
 }
 // sign-out (7.): the offline copies go first; at most a second's wait, then the form goes anyway
-for (const form of document.querySelectorAll('form[action="/signout"], form.signout')) {
-  form.addEventListener("submit", (ev) => {
-    if (form.dataset.cleared) return;
-    ev.preventDefault();
-    const go = () => { form.dataset.cleared = "1"; form.submit(); };
-    Promise.race([askWorker({ type: "CLEAR_OFFLINE" }), new Promise((r) => setTimeout(r, 1000))]).then(go, go);
-  });
+function bindSignout(root) {
+  for (const form of root.querySelectorAll('form[action="/signout"], form.signout')) {
+    if (form.dataset.signoutBound) continue;
+    form.dataset.signoutBound = "1";
+    form.addEventListener("submit", (ev) => {
+      if (form.dataset.cleared) return;
+      ev.preventDefault();
+      const go = () => { form.dataset.cleared = "1"; form.submit(); };
+      Promise.race([askWorker({ type: "CLEAR_OFFLINE" }), new Promise((r) => setTimeout(r, 1000))]).then(go, go);
+    });
+  }
 }
-const offlineRow = document.querySelector(".offline-copies");
-if (offlineRow) {
+bindSignout(document);
+function bindOffline(root) {
+  const offlineRow = root.querySelector(".offline-copies");
+  if (!offlineRow) return;
   const count = offlineRow.querySelector("[data-offline-count]");
   const button = offlineRow.querySelector("[data-clear-offline]");
   const show = async () => {
@@ -577,6 +742,7 @@ if (offlineRow) {
   });
   (navigator.serviceWorker ? navigator.serviceWorker.ready : Promise.resolve()).then(show, show);
 }
+bindOffline(document);
 
 // updates: the app's service worker waits (no skipWaiting in install) and takes over on {type: "SKIP_WAITING"}
 if ("serviceWorker" in navigator) {

@@ -872,3 +872,38 @@ html.pull-settle .pull { transition: transform .2s cubic-bezier(.25, .8, .3, 1),
   border: 0; border-radius: 8px; background: none; color: var(--menu-fg, var(--fg)); font: 500 var(--fs-s) var(--font);
   text-align: left; cursor: pointer; }
 .rooms .menu form.signout button:hover { background: var(--hl); }
+
+/* ---- the Settings sheet (v0.32, owner 2026-10-14; machiya.js 10.): Settings over the page, ✕ Cancel at the left, the
+   title, ✓ Save at the right, as Shiori's apps and annai do. Centred on wider screens; the whole screen on phones. -------- */
+dialog.msheet { padding: 0; border: 1px solid var(--line2); border-radius: var(--r-l); background: var(--bg); color: var(--fg);
+  width: min(640px, calc(100vw - 32px)); max-width: none; max-height: min(88vh, 960px); overflow: hidden;
+  box-shadow: 0 18px 48px rgb(0 0 0 / .35); }
+dialog.msheet[open] { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+/* no blur behind it: an installed iOS app drew the backdrop's blur over the sheet's own top edge */
+dialog.msheet::backdrop { background: rgb(0 0 0 / .45); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.msheet .shead { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: var(--sp-2);
+  padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.msheet .shead h2 { margin: 0; text-align: center; font-size: 17px; font-weight: 600; color: var(--fg); outline: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sround { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%;
+  cursor: pointer; font: inherit; }
+.sround svg { width: 20px; height: 20px; }
+.sround.cancel { background: color-mix(in srgb, var(--muted) 24%, transparent); color: var(--fg); }
+.sround.save { background: var(--room); color: var(--bg); }
+.sround:focus-visible { outline: 2px solid var(--room); outline-offset: 2px; }
+/* one column that can't grow past the sheet: a long <select> option once pushed annai's sheet off the screen's right edge;
+   rows as tall as their content, so a short sheet scrolls rather than squeezing a group (they clip their overflow) */
+.msheet .sbody { display: grid; grid-template-columns: minmax(0, 1fr); grid-auto-rows: max-content; align-content: start;
+  max-width: none; margin: 0;
+  padding: 0 var(--sp-4) var(--sp-5); overflow-y: auto; overscroll-behavior: contain; }
+.msheet .sbody > h2:first-child { margin-top: var(--sp-4); }
+html.dialog-open { overflow: hidden; }                 /* the page under a sheet doesn't scroll */
+@media (max-width: 760px) {
+  dialog.msheet { width: 100%; height: 100dvh; max-height: none; margin: 0; inset: 0; border: 0; border-radius: 0; box-shadow: none; }
+  .msheet .shead { padding-top: calc(10px + var(--sat)); padding-left: calc(12px + var(--sal)); padding-right: calc(12px + var(--sar)); }
+  .msheet .sbody { padding-bottom: calc(var(--sp-6) + var(--sab)); padding-left: calc(var(--sp-4) + var(--sal));
+    padding-right: calc(var(--sp-4) + var(--sar)); }
+  /* iOS also drew the header's and the tab bar's blur over a sheet in the top layer: they hide while one is open */
+  html.dialog-open header.top, html.dialog-open .tabbar { visibility: hidden; }
+}
+

@@ -1103,11 +1103,17 @@ class ShellPagesTest(unittest.TestCase):
         self.assertIn('<a href="/settings#account" class="who">', page)
         self.assertIn("<small>signed in</small>", page)
 
-    def test_status_bar_follows_the_theme(self):
-        day = self.shell.page(self.shell.Prefs("day"), "kura", "t", "")
-        self.assertIn('status-bar-style" content="default"', day)
-        for theme in ("night", "system"):
-            self.assertIn('status-bar-style" content="black-translucent"', self.shell.page(self.shell.Prefs(theme), "kura", "t", ""))
+    def test_no_status_bar_style(self):
+        # v0.32 (owner, 2026-10-14): no apple-mobile-web-app-status-bar-style. With black-translucent the installed app drew
+        # under the status bar, and iOS 26 laid its own edge blur over the top of the page; without it the page starts under
+        # an opaque bar in the theme colour (theme-color, per scheme when the theme follows the system)
+        for theme in ("day", "night", "system"):
+            page = self.shell.page(self.shell.Prefs(theme), "kura", "t", "")
+            self.assertNotIn("status-bar-style", page)
+            self.assertIn('<meta name="theme-color"', page)
+        system = self.shell.page(self.shell.Prefs("system"), "kura", "t", "")
+        self.assertIn('media="(prefers-color-scheme: dark)"', system)
+        self.assertIn('media="(prefers-color-scheme: light)"', system)
 
     def test_appearance_footnote(self):
         ctx = self.shell.Prefs()
@@ -1490,6 +1496,18 @@ class SharedUITest(unittest.TestCase):
         self.assertIn("height: 38px; padding: 0 44px 0 16px;", css)   # v0.31.4: 38px, Shiori Search's field as Safari draws it
         self.assertIn('if (!foot || foot.parentElement !== document.body) return;', js)
         self.assertIn("if (reg.waiting && refreshed) {", js)
+        # v0.32 (owner, 2026-10-14): Settings as a sheet: Cancel and Save, a preview kept only on Save, the phone's full screen
+        for piece in ('class="sround cancel" aria-label="Cancel" title="Cancel"', 'class="sround save" aria-label="Save" title="Save"',
+                      'dlg.addEventListener("cancel", (ev) => { ev.preventDefault(); finish(false); });',
+                      'if (ev.target === dlg) { finish(false); return; }', 'url.pathname !== "/settings" || location.pathname === "/settings"',
+                      'if (sheet) sheet.preview(key, value, cookie); else keep(key, value, cookie);', 'el.id = "msheet-" + el.id;',
+                      'dlg.querySelector("#msheet-title").focus({ preventScroll: true });'):
+            self.assertIn(piece, js)
+        for rule in ("dialog.msheet::backdrop { background: rgb(0 0 0 / .45); -webkit-backdrop-filter: none; backdrop-filter: none; }",
+                     "grid-template-columns: minmax(0, 1fr); grid-auto-rows: max-content;",
+                     "html.dialog-open header.top, html.dialog-open .tabbar { visibility: hidden; }",
+                     ".sround.save { background: var(--room); color: var(--bg); }"):
+            self.assertIn(rule, css)
         # v0.31.5 (owner, 2026-10-14): with the Rooms sheet open, only Rooms is lit, not the page's tab too
         self.assertIn('.tabbar:has(> details[open]) > a:is(.here, [aria-current="page"]) { background: none; color: var(--fg); }', css)
 

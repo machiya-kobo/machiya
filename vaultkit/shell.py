@@ -457,12 +457,11 @@ def page(ctx, room, title, body, tabs=(), current="", links=None, head="", style
         '<link rel="alternate icon" href="/static/icons/%s.ico" sizes="16x16 32x32 48x48">\n'
         '<link rel="apple-touch-icon" href="/static/icons/%s-apple-180.png">\n'
         '<meta name="apple-mobile-web-app-capable" content="yes">\n<meta name="mobile-web-app-capable" content="yes">\n'
-        '<meta name="apple-mobile-web-app-status-bar-style" content="%s">\n'
         '<meta name="apple-mobile-web-app-title" content="%s">\n%s%s%s%s'
         '</head>\n<body class="theme-%s%s room-%s" data-room="%s" data-text="%s"%s>\n%s\n%s\n</body>\n</html>\n'
     ) % (e(title), scheme, colors,
          '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">\n' if manifest else "",
-         room, room, room, "default" if theme == "day" else "black-translucent", e(name),
+         room, room, room, e(name),
          (prefs_meta(prefs_url) + app_prefs_meta(room)) if prefs_url else "", css, js, head, theme,
          "" if palette == palettes.DEFAULT else " palette-" + palette, room, room, e(text),
          (' data-cookie-domain="%s"' % e(COOKIE_DOMAIN)) if COOKIE_DOMAIN else "", body,
@@ -658,7 +657,8 @@ def settings_page(sections, room):
     """sections: [(title, [row html…], footnote or "")], or (title, rows, footnote, extra html) for a section with a
     line of its own under the footnote (appearance's state line); None entries are skipped. The sections are shown in
     ORDER (Appearance, the room's own in the order given, Rooms, This Device, Account, About), so a room may pass
-    them in any order. machiya.js saves every change."""
+    them in any order. machiya.js saves every change here; opened from a link it is the Settings sheet (v0.32), which keeps
+    them on Save."""
     flat = []
     for sec in sections:
         if sec:

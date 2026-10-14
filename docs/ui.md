@@ -26,6 +26,18 @@ This is how the web rooms (Kura, Niwa, Konbini) put the [design language](design
 6. **CSS**: load machiya.css first, then your own. Delete your copies of the tokens, base, header, tab bar, chips, settings and footer rules, and keep only the room's own layout (Kura's three columns, Niwa's garden, Konbini's lanes). Use the tokens (`--room`, `--house`, `--fs-*`, `--sp-*`, `--r-*`) and the `.is-note` / `.is-card` / `.is-garden` classes with `.thing`, so things wear their room's colour.
 7. **Verify**: take screenshots before and after (desktop and phone, both themes). Check no page is wider than the viewport at 390px, and that there are no console errors.
 
+## The Settings sheet (v0.32)
+
+The owner's convention (2026-10-14, from annai, relayed by ops): every app's Settings is one iOS-style sheet. In the rooms the gear, the Rooms menu's Settings row, the person button (`/settings#account`) and any other link to `/settings` open it over the page; machiya.js fetches `/settings` and shows its `<main>` in a `<dialog class="msheet">`, so a room changes nothing (its ids are prefixed `msheet-` there, since Konbini's board and Settings' Board heading share one).
+
+- **Header:** a round grey ✕ (Cancel) at the left, the title in the middle, a round ✓ (Save) filled with the room's colour at the right; 44px circles, `aria-label`/`title` "Cancel" and "Save". There is no ✕-only close.
+- **Changes preview, Save keeps them.** Theme, mode, text size, the Apps switches and a room's own settings (through `machiya:setting`) show at once, but nothing is written until Save: then the cookies, localStorage and the account change exactly as a change on the page would. Cancel, Esc, a tap on the backdrop, or anything else that closes it (a link in it, the page going away) puts the page back as it was. When Save keeps a setting only the server draws (a room's own, such as a Konbini board option or Kura's vault name) the page reloads.
+- **Phones:** the sheet is the whole screen (safe areas padded inside it); its backdrop is never blurred; while any dialog is open, `<html class="dialog-open">` hides the header and the tab bar and stops the page scrolling. On opening, the title has the focus, not Cancel (a ring on Cancel looked like a pressed button).
+- **Layout:** the sheet's body is one `minmax(0, 1fr)` column with rows as tall as their content, so a long option can't widen the sheet and a short window scrolls rather than squeezing a group.
+- `/settings` stays a page: without JavaScript, or opened directly (a bookmark, a reload). There it keeps each change at once, as before, with no Cancel or Save. Offline, or when `/settings` can't be fetched, the link is followed.
+
+No `apple-mobile-web-app-status-bar-style` (v0.32, owner 2026-10-14): with `black-translucent` the installed app drew under the status bar, and iOS 26 lays its own Liquid Glass edge blur over the top of such a page, which no CSS or element can lift. Without it, the page starts under an opaque status bar tinted by `theme-color` (one per scheme when the theme follows the system). iOS reads this only when the app is added to the Home Screen, so an installed room must be removed and added again once.
+
 ## Settings: Appearance, per-app, This Device
 
 The owner's rule (2026-10-05): settings that affect every app follow the signed-in person to every app and every device. The contract (schema, API, conflict rule, migration) is [contracts/prefs.md](contracts/prefs.md); this is the web rooms' side.
