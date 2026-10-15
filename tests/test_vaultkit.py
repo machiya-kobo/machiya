@@ -1110,7 +1110,7 @@ class ShellPagesTest(unittest.TestCase):
         self.assertIn("background: color-mix(in srgb, var(--bg) 70%, transparent);\n    -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);", css)
         self.assertNotIn("var(--tab-bg) 70%", css)
         for rule in (".tabbar > a, .tabbar > button, .tabbar > details > summary {",
-                     ".tabbar .seal.icon { width: 22px; height: 22px; background-size: var(--tab-zoom, 100%); }",
+                     ".tabbar .seal.icon { width: 22px; height: 22px; background-size: var(--tab-zoom, 100%); border-radius: 22%; }",
                      '.tabbar .seal.icon[data-room="niwa"] { --tab-zoom: 138%; }',
                      ".tabbar > details > .menu { top: auto; bottom: calc(100% + 14px); right: 0; }"):
             self.assertIn(rule, css)

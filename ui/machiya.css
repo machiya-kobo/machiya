@@ -568,10 +568,11 @@ body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
   .tabbar > a > span, .tabbar > button > span, .tabbar > details > summary > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
   .tabbar svg { width: 22px; height: 22px; }
   /* the first tab is the app (v0.35, owner 2026-10-14): its icon, the size of the others' glyphs */
-  .tabbar .seal.icon { width: 22px; height: 22px; background-size: var(--tab-zoom, 100%); }
+  .tabbar .seal.icon { width: 22px; height: 22px; background-size: var(--tab-zoom, 100%); border-radius: 22%; }
   /* every app's artwork the same size in the tab bar (v0.35.2, owner 2026-10-14: annai's looked smaller than genkan's).
      The icons' tiles are the bar's own dark, so only the artwork shows, and it fills 60-67% of the rooms' tiles but 83% of
-     genkan's; each room's icon is zoomed so its artwork is genkan's size (the tile's edge, cut off, is the same dark) */
+     genkan's; each room's icon is zoomed so its artwork is genkan's size. The zoom cuts off the tile's rounded corners, which
+     showed as a square dark tile on Day's light bar (niwa), so the box rounds them itself, as the icons do (112/512, 22%; v0.35.3) */
   .tabbar .seal.icon[data-room="kura"] { --tab-zoom: 124%; }
   .tabbar .seal.icon[data-room="konbini"] { --tab-zoom: 126%; }
   .tabbar .seal.icon[data-room="niwa"] { --tab-zoom: 138%; }
