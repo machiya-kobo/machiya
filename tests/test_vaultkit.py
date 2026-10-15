@@ -1510,10 +1510,11 @@ class SharedUITest(unittest.TestCase):
                      ".sround.save { background: var(--room); color: var(--bg); }"):
             self.assertIn(rule, css)
         # v0.33.0 (owner, 2026-10-14): under the see-through status bar the installed app's header is plain frost to the
-        # top edge (annai's), no fade; on iOS its contents start 24px lower, past iOS 26's edge blur ("names lower")
+        # top edge (annai's), no fade; on iOS its contents start 12px lower (v0.33.1; 24 left a large gap), past iOS 26's edge blur
         self.assertIn("header.top { background: color-mix(in srgb, var(--bg) 70%, transparent);\n    -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); }", css)
         self.assertNotIn("linear-gradient(to bottom, var(--bg) 0%", css)
-        self.assertIn("@supports (-webkit-touch-callout: none) {\n  @media (display-mode: standalone) { header.top { padding-top: calc(var(--sat) + 24px); } }", css)
+        self.assertIn("@supports (-webkit-touch-callout: none) {\n  @media (display-mode: standalone) { header.top { padding-top: calc(var(--sat) + 12px); } }", css)
+        self.assertNotIn("calc(var(--sat) + 24px)", css)
         self.assertEqual(self.shell._colors("tokyo-night", "dark")["theme_color"], "#1a1b26")   # the gradient's first colour, --bg
         self.assertIn('getPropertyValue("--bg")', js)
         # v0.31.5 (owner, 2026-10-14): with the Rooms sheet open, only Rooms is lit, not the page's tab too

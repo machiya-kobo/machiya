@@ -588,14 +588,15 @@ body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
    "Yes, bring it back everywhere"): the see-through (black-translucent) status bar is back, so the installed app draws
    under the clock and the header is plain frost to the top edge, annai's (--bg at 70%, saturate(180%) blur(20px)); the
    v0.32.2/v0.32.3 fade out of an opaque bar is gone. iOS 26 lays its own edge blur over the top ~110 points of such an
-   app, so on iOS the header's contents start 24px lower, past most of it, and the names stay sharp (the owner chose
-   "names lower"; v0.16.8 did the same). -webkit-touch-callout limits the drop to iOS WebKit. */
+   app, so on iOS the header's contents start lower, past most of it, and the names stay sharp (the owner chose
+   "names lower"). 12px since v0.33.1: 24px (v0.16.8's) left "a rather large gap" under the clock, and at 12 the
+   names were still sharp (owner, on genkan). -webkit-touch-callout limits the drop to iOS WebKit. */
 @media (display-mode: standalone) {
   header.top { background: color-mix(in srgb, var(--bg) 70%, transparent);
     -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); }
 }
 @supports (-webkit-touch-callout: none) {
-  @media (display-mode: standalone) { header.top { padding-top: calc(var(--sat) + 24px); } }
+  @media (display-mode: standalone) { header.top { padding-top: calc(var(--sat) + 12px); } }
 }
 
 /* ---- chips and tags (Shiori, v0.26.2): outlined in their colour on no fill. Every accent is 4.5:1 on the page, a
