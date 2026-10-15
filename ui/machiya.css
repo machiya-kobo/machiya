@@ -556,8 +556,10 @@ body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
   .tabbar { display: flex; gap: 4px; position: fixed; z-index: 15;
     left: calc(8px + var(--sal)); right: calc(8px + var(--sar)); bottom: calc(10px + var(--sab));
     padding: 6px; border-radius: 999px; border: 1px solid var(--line2);
-    background: color-mix(in srgb, var(--tab-bg) 70%, transparent);
-    backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%);
+    /* the header's frost (v0.35.2, owner 2026-10-14: "I want the bottom menu to match the top menu for frosted"): the
+       page's --bg at 70%, saturate(180%) blur(20px), as header.top in the installed app; was --tab-bg (--dark or --hl) */
+    background: color-mix(in srgb, var(--bg) 70%, transparent);
+    -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
     box-shadow: 0 8px 24px rgb(0 0 0 / 0.25); }
   .tabbar > a, .tabbar > button, .tabbar > details > summary { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center;
     gap: 2px; padding: 6px 2px; border-radius: 999px; color: var(--fg); font-size: 11px; font-weight: 500; white-space: nowrap;
@@ -566,7 +568,13 @@ body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
   .tabbar > a > span, .tabbar > button > span, .tabbar > details > summary > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
   .tabbar svg { width: 22px; height: 22px; }
   /* the first tab is the app (v0.35, owner 2026-10-14): its icon, the size of the others' glyphs */
-  .tabbar .seal.icon { width: 22px; height: 22px; }
+  .tabbar .seal.icon { width: 22px; height: 22px; background-size: var(--tab-zoom, 100%); }
+  /* every app's artwork the same size in the tab bar (v0.35.2, owner 2026-10-14: annai's looked smaller than genkan's).
+     The icons' tiles are the bar's own dark, so only the artwork shows, and it fills 60-67% of the rooms' tiles but 83% of
+     genkan's; each room's icon is zoomed so its artwork is genkan's size (the tile's edge, cut off, is the same dark) */
+  .tabbar .seal.icon[data-room="kura"] { --tab-zoom: 124%; }
+  .tabbar .seal.icon[data-room="konbini"] { --tab-zoom: 126%; }
+  .tabbar .seal.icon[data-room="niwa"] { --tab-zoom: 138%; }
   .tabbar > a > .seal.icon, .tabbar > a.here > .seal.icon { flex: none; max-width: none; color: transparent; }   /* the icon, never its kanji */
   .tabbar > details { flex: 1 1 0; min-width: 0; position: relative; display: flex; }
   .tabbar > details > summary::-webkit-details-marker { display: none; }

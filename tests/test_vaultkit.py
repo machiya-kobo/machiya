@@ -1106,7 +1106,12 @@ class ShellPagesTest(unittest.TestCase):
         self.assertIn('<button type="button" data-x><span>Vault</span></button>', bar)
         self.assertIn("<span>Home</span>", self.shell.tabbar([("/", "kura", "Home")], "", "kura", links, brand=False))
         css = open(os.path.join(ROOT, "ui", "machiya.css"), encoding="utf-8").read()
-        for rule in (".tabbar > a, .tabbar > button, .tabbar > details > summary {", ".tabbar .seal.icon { width: 22px; height: 22px; }",
+        # v0.35.2: the bar wears the header's frost, and each app's artwork is the same size
+        self.assertIn("background: color-mix(in srgb, var(--bg) 70%, transparent);\n    -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);", css)
+        self.assertNotIn("var(--tab-bg) 70%", css)
+        for rule in (".tabbar > a, .tabbar > button, .tabbar > details > summary {",
+                     ".tabbar .seal.icon { width: 22px; height: 22px; background-size: var(--tab-zoom, 100%); }",
+                     '.tabbar .seal.icon[data-room="niwa"] { --tab-zoom: 138%; }',
                      ".tabbar > details > .menu { top: auto; bottom: calc(100% + 14px); right: 0; }"):
             self.assertIn(rule, css)
 
