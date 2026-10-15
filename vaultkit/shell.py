@@ -351,12 +351,25 @@ def header(room, nav, current, links, subtitle="", tools="", settings=True, who=
                ('<div class="below">%s</div>' % below) if below else ""))
 
 
-def tabbar(tabs, current, room, links, icons=None, who=""):
-    """Phones: the room's own tabs (at most four: [(href, key, label)]) plus a Rooms tab when there are rooms."""
+def tabbar(tabs, current, room, links, icons=None, who="", brand=True):
+    """Phones: the room's own tabs (at most four) plus a Rooms tab when there are rooms. A tab is (href, key, label), or
+    the room's own HTML for a tab that isn't a link (v0.35: a <button> that opens something, or a
+    <details data-menu><summary>…</summary><nav class="menu">…</nav></details> sheet), drawn like the others.
+    brand (v0.35, owner 2026-10-14): the first tab is the app itself, its icon and name, to its home page; give the
+    room's home as the first tab and its icon and label are replaced."""
     icons = icons or {}
-    out = ['<a href="%s"%s>%s<span>%s</span></a>' % (e(href), ' class="here" aria-current="page"' if key == current else "",
-                                                     icons.get(key, GLYPH.get(key, "")), e(label))
-           for href, key, label in tabs[:4]]
+    _, name, _, _ = room_info(room)
+    out = []
+    for i, tab in enumerate(tabs[:4]):
+        if isinstance(tab, str):
+            out.append(tab)
+            continue
+        href, key, label = tab
+        icon = icons.get(key, GLYPH.get(key, ""))
+        if brand and i == 0:
+            icon, label = mark(room), name
+        out.append('<a href="%s"%s>%s<span>%s</span></a>' % (e(href), ' class="here" aria-current="page"' if key == current else "",
+                                                            icon, e(label)))
     menu = switcher(room, links, cls="rooms", settings=True, who=who)
     if menu:
         out.append(menu.replace('<summary title="Rooms" aria-label="Rooms">%s</summary>' % GLYPH["rooms"],

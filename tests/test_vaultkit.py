@@ -1093,6 +1093,23 @@ class ShellPagesTest(unittest.TestCase):
         self.assertNotIn("Tailscale", off)
         self.assertIn("Konbini can&#x27;t be reached", off)
 
+    def test_tabbar_brand_and_own_tabs(self):
+        # v0.35 (owner, 2026-10-14): the first tab is the app, its icon and name, to its home page; a room's own tab may be
+        # a button or a sheet, drawn like the others
+        links = {"kura": "https://k", "niwa": "https://n"}
+        bar = self.shell.tabbar([("/", "kura", "Home"), ("/recent", "recent", "Recent"),
+                                 '<button type="button" data-x><span>Vault</span></button>'], "kura", "kura", links)
+        self.assertTrue(bar.startswith('<nav class="tabbar" aria-label="Sections"><a href="/" class="here" aria-current="page">'
+                                       '<span class="seal icon" data-room="kura"'))
+        self.assertIn("</span><span>Kura</span></a>", bar)
+        self.assertNotIn("<span>Home</span>", bar)
+        self.assertIn('<button type="button" data-x><span>Vault</span></button>', bar)
+        self.assertIn("<span>Home</span>", self.shell.tabbar([("/", "kura", "Home")], "", "kura", links, brand=False))
+        css = open(os.path.join(ROOT, "ui", "machiya.css"), encoding="utf-8").read()
+        for rule in (".tabbar > a, .tabbar > button, .tabbar > details > summary {", ".tabbar .seal.icon { width: 22px; height: 22px; }",
+                     ".tabbar > details > .menu { top: auto; bottom: calc(100% + 14px); right: 0; }"):
+            self.assertIn(rule, css)
+
     def test_who_is_signed_in(self):
         links = {"kura": "https://k", "niwa": "https://n"}
         head = self.shell.header("kura", [], "", links, who="me<")
@@ -1484,16 +1501,19 @@ class SharedUITest(unittest.TestCase):
         block = css[i:css.index("\n}\n", i)]
         for rule in ("header.top > .topbar, .topbar > .tools { display: contents; }", "header.top > .searchrow {", "header.top > .below {",
                      ".topbar > .subtitle { flex: 0 1 auto; max-width: clamp(", ".topbar > .nav { flex: 1 0 auto; }",
-                     "width: clamp(180px, 75vw - 540px, 420px)", ".tools > :is(.rooms, .who, .gear) { order: 3; }",
-                     "header.top > .searchrow form.search.searchbar input { font-size: 15px; }"):
+                     "width: clamp(180px, 75vw - 540px, 420px)", ".tools > :is(.rooms, .who, .gear) { order: 3; }"):
             self.assertIn(rule, block)
+        self.assertNotIn("font-size: 15px", block)   # v0.35: annai's 16px at every width
         js = open(os.path.join(root, "ui", "machiya.js")).read()
         self.assertIn('setProperty("--hdr-h"', js)
         # v0.31.1: a refresh of the page applies a waiting version too, not only the toast's Reload (owner, 2026-10-11)
         self.assertIn('getEntriesByType("navigation")[0] || {}).type === "reload"', js)
         # v0.31.3 (owner, 2026-10-11): the field's focus is one ring on its edge, as Shiori Search's; a short page's footer sits at the window's bottom
         self.assertIn("form.search.searchbar input:focus-visible { outline: 2px solid var(--room); outline-offset: -2px; }", css)
-        self.assertIn("height: 38px; padding: 0 44px 0 16px;", css)   # v0.31.4: 38px, Shiori Search's field as Safari draws it
+        # v0.35 (owner, 2026-10-14): annai's field, 44px on --card at 16px, everywhere (v0.31.4's was 38px on --dark)
+        self.assertIn("height: 44px; padding: 0 44px 0 16px; border-radius: 999px;\n  border: 1px solid var(--line2); background: var(--card); color: var(--menu-fg, var(--fg)); font: inherit; font-size: 16px;", css)
+        self.assertIn("form.search.searchbar input::placeholder { color: var(--menu-muted, var(--muted)); opacity: 1; }", css)
+        self.assertNotIn("height: 38px", css)
         self.assertIn('if (!foot || foot.parentElement !== document.body) return;', js)
         self.assertIn("if (reg.waiting && refreshed) {", js)
         # v0.32 (owner, 2026-10-14): Settings as a sheet: Cancel and Save, a preview kept only on Save, the phone's full screen
