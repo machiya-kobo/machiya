@@ -1310,7 +1310,7 @@ class PalettesTest(unittest.TestCase):
                         failures.append("%s %s: %s, --%s on --%s, %.2f:1" % (key, mode, what, fg, bg, got))
         self.assertEqual(failures, [], "%d pairs under their minimum" % len(failures))
 
-    PANELS = (".card", ".settings .group", ".signin .group", ".rooms .menu", ".update-toast", ".nbody pre", ".tinted")
+    PANELS = (".card", ".settings .group", ".signin .group", ".rooms .menu", ".tabsheet .menu", ".update-toast", ".nbody pre", ".tinted")
 
     def test_tinted_items_keep_their_text_readable(self):
         """v0.26 (Shiori's design language, owner 2026-10-07): a tinted item is its room colour's panel shade mixed into
