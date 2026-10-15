@@ -597,6 +597,21 @@ body.theme-day .tabbar { --tab-bg: var(--hl); --tab-on: var(--dark); }
 }
 @supports (-webkit-touch-callout: none) {
   @media (display-mode: standalone) { header.top { padding-top: calc(var(--sat) + 12px); } }
+  /* v0.34.0 (owner, 2026-10-14, settled on genkan: "Better"): on a phone, iOS 26 softens the top ~90 points, and a name
+     row 12px down was "still a big gap" while one higher went soft. So a header with a search box drops its name row (the
+     Home Screen icon names the app) and starts the box at --sat + 32px (.searchrow's 2px included), past the blur, under
+     empty frost. A room's own buttons (Konbini's New Card, Kura's vaults) sit beside the box, centred on it ("Beside the
+     search box"); Rooms, the person and the gear are in the tab bar. A header without a search box keeps its name row. */
+  @media (display-mode: standalone) and (max-width: 760px) {
+    header.top:has(> .searchrow) { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px;
+      padding-top: calc(var(--sat) + 30px); }
+    header.top:has(> .searchrow) > .topbar, header.top:has(> .searchrow) > .topbar > .tools { display: contents; }
+    header.top:has(> .searchrow) > .topbar > :not(.tools),
+    header.top:has(> .searchrow) > .topbar > .tools > :is(.rooms, .who, .gear) { display: none; }
+    header.top:has(> .searchrow) > .searchrow { order: 1; flex: 1 1 0; min-width: 0; }
+    header.top:has(> .searchrow) > .topbar > .tools > * { order: 2; flex: none; margin-bottom: 8px; }
+    header.top:has(> .searchrow) > .below { order: 3; flex: 1 0 100%; }
+  }
 }
 
 /* ---- chips and tags (Shiori, v0.26.2): outlined in their colour on no fill. Every accent is 4.5:1 on the page, a

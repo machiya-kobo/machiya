@@ -1515,6 +1515,14 @@ class SharedUITest(unittest.TestCase):
         self.assertNotIn("linear-gradient(to bottom, var(--bg) 0%", css)
         self.assertIn("@supports (-webkit-touch-callout: none) {\n  @media (display-mode: standalone) { header.top { padding-top: calc(var(--sat) + 12px); } }", css)
         self.assertNotIn("calc(var(--sat) + 24px)", css)
+        # v0.34.0 (owner, 2026-10-14): on an iPhone, a header with a search box drops its name row; the box starts at
+        # --sat + 32px under empty frost, the room's own buttons beside it; a header without one keeps its name row
+        for rule in ("@media (display-mode: standalone) and (max-width: 760px) {",
+                     "header.top:has(> .searchrow) { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px;\n      padding-top: calc(var(--sat) + 30px); }",
+                     "header.top:has(> .searchrow) > .topbar, header.top:has(> .searchrow) > .topbar > .tools { display: contents; }",
+                     "header.top:has(> .searchrow) > .topbar > .tools > :is(.rooms, .who, .gear) { display: none; }",
+                     "header.top:has(> .searchrow) > .searchrow { order: 1; flex: 1 1 0; min-width: 0; }"):
+            self.assertIn(rule, css)
         self.assertEqual(self.shell._colors("tokyo-night", "dark")["theme_color"], "#1a1b26")   # the gradient's first colour, --bg
         self.assertIn('getPropertyValue("--bg")', js)
         # v0.31.5 (owner, 2026-10-14): with the Rooms sheet open, only Rooms is lit, not the page's tab too
