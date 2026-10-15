@@ -1103,13 +1103,13 @@ class ShellPagesTest(unittest.TestCase):
         self.assertIn('<a href="/settings#account" class="who">', page)
         self.assertIn("<small>signed in</small>", page)
 
-    def test_no_status_bar_style(self):
-        # v0.32 (owner, 2026-10-14): no apple-mobile-web-app-status-bar-style. With black-translucent the installed app drew
-        # under the status bar, and iOS 26 laid its own edge blur over the top of the page; without it the page starts under
-        # an opaque bar in the theme colour (theme-color, per scheme when the theme follows the system)
-        for theme in ("day", "night", "system"):
+    def test_status_bar_style(self):
+        # v0.32 dropped apple-mobile-web-app-status-bar-style; v0.33.0 brings black-translucent back (owner, 2026-10-14:
+        # "Yes, bring it back everywhere"), the installed app drawing under the clock; Day keeps the default bar, whose
+        # clock is dark (as before v0.32)
+        for theme, style in (("day", "default"), ("night", "black-translucent"), ("system", "black-translucent")):
             page = self.shell.page(self.shell.Prefs(theme), "kura", "t", "")
-            self.assertNotIn("status-bar-style", page)
+            self.assertIn('<meta name="apple-mobile-web-app-status-bar-style" content="%s">' % style, page)
             self.assertIn('<meta name="theme-color"', page)
         system = self.shell.page(self.shell.Prefs("system"), "kura", "t", "")
         self.assertIn('media="(prefers-color-scheme: dark)"', system)
@@ -1509,12 +1509,11 @@ class SharedUITest(unittest.TestCase):
                      "html.dialog-open header.top, html.dialog-open .tabbar { visibility: hidden; }",
                      ".sround.save { background: var(--room); color: var(--bg); }"):
             self.assertIn(rule, css)
-        # v0.32.2 (owner, 2026-10-14): the installed app's header fades out of the status bar's colour. v0.32.3: that
-        # colour is the page's --bg (theme-color too), and the frost is annai's
-        self.assertIn("header.top { background: linear-gradient(to bottom, var(--bg) 0%, color-mix(in srgb, var(--bg) 0%, transparent) 70%),", css)
-        self.assertIn("color-mix(in srgb, var(--bg) 70%, transparent);\n    -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); }", css)
-        self.assertNotIn("var(--dark) 0%", css)
-        self.assertNotIn("padding-top: calc(var(--sat) + 24px)", css)
+        # v0.33.0 (owner, 2026-10-14): under the see-through status bar the installed app's header is plain frost to the
+        # top edge (annai's), no fade; on iOS its contents start 24px lower, past iOS 26's edge blur ("names lower")
+        self.assertIn("header.top { background: color-mix(in srgb, var(--bg) 70%, transparent);\n    -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); }", css)
+        self.assertNotIn("linear-gradient(to bottom, var(--bg) 0%", css)
+        self.assertIn("@supports (-webkit-touch-callout: none) {\n  @media (display-mode: standalone) { header.top { padding-top: calc(var(--sat) + 24px); } }", css)
         self.assertEqual(self.shell._colors("tokyo-night", "dark")["theme_color"], "#1a1b26")   # the gradient's first colour, --bg
         self.assertIn('getPropertyValue("--bg")', js)
         # v0.31.5 (owner, 2026-10-14): with the Rooms sheet open, only Rooms is lit, not the page's tab too
