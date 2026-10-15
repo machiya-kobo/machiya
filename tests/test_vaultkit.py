@@ -1521,7 +1521,10 @@ class SharedUITest(unittest.TestCase):
                      "header.top:has(> .searchrow) { display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px;\n      padding-top: calc(var(--sat) + 30px); }",
                      "header.top:has(> .searchrow) > .topbar, header.top:has(> .searchrow) > .topbar > .tools { display: contents; }",
                      "header.top:has(> .searchrow) > .topbar > .tools > :is(.rooms, .who, .gear) { display: none; }",
-                     "header.top:has(> .searchrow) > .searchrow { order: 1; flex: 1 1 0; min-width: 0; }"):
+                     "header.top:has(> .searchrow) > .searchrow { order: 1; flex: 1 1 0; min-width: 0; }",
+                     # v0.34.1: the rooms' Back button stays, left of the box
+                     "header.top:has(> .searchrow) > .topbar > :not(.tools, .back),",
+                     "header.top:has(> .searchrow) > .topbar > .back { order: 0; flex: none; margin-bottom: 8px; }"):
             self.assertIn(rule, css)
         self.assertEqual(self.shell._colors("tokyo-night", "dark")["theme_color"], "#1a1b26")   # the gradient's first colour, --bg
         self.assertIn('getPropertyValue("--bg")', js)
