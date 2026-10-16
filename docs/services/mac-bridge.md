@@ -16,6 +16,7 @@ Shiori for Classic Macintosh's way into Hister and Kura. A Mac Plus with MacTCP 
 | Headers in | `Authorization`, `Accept`, `If-None-Match`, `Origin: hister://`; everything else is dropped, identity headers and cookies included |
 | Headers out | a short allow-list; never `Set-Cookie` |
 | Size, time | 512 KB (larger answers get `413`), 20 s |
+| Long pages (0.2.0) | with `part=N` on `/api/preview` or `/api/note`, the bridge reads up to 8 MiB upstream, keeps only the reader's tags (links with `http(s)`/relative `href`, image `alt`; never scripts, styles, `data:` or `javascript:`), and answers one part of about 16 KB: `{title, content\|html, part, parts, …}`. Past the last part: `400`. Without `part`, the reply passes through as before |
 | Logs | path, status and time; never headers, query strings or bodies |
 
 ## Credentials
@@ -30,4 +31,4 @@ The Mac holds one room token (`mht_`, [identity.md](../identity.md#room-tokens))
 
 ## Settings
 
-`BRIDGE_HISTER_URL`, `BRIDGE_KURA_URL` (fixed upstreams; `BRIDGE_ALLOW_HTTP_UPSTREAM=1` for one on the same Docker network), `BRIDGE_ALLOW`, `BRIDGE_DENY`, `BRIDGE_AUTH_URL`, `BRIDGE_PUBLIC_URL` (the origin registered as `classic-bridge`), `BRIDGE_HISTER_USERS`, `BRIDGE_HISTER_TOKEN_FILE`, `BRIDGE_VAULTS`, and optionally `BRIDGE_MAX_BYTES`, `BRIDGE_TIMEOUT`, `BRIDGE_HISTER_PORT`, `BRIDGE_KURA_PORT`. Details: the [bridge's README](https://github.com/machiya-kobo/shiori/tree/main/classic/bridge).
+`BRIDGE_HISTER_URL`, `BRIDGE_KURA_URL` (fixed upstreams; `BRIDGE_ALLOW_HTTP_UPSTREAM=1` for one on the same Docker network), `BRIDGE_ALLOW`, `BRIDGE_DENY`, `BRIDGE_AUTH_URL`, `BRIDGE_PUBLIC_URL` (the origin registered as `classic-bridge`), `BRIDGE_HISTER_USERS`, `BRIDGE_HISTER_TOKEN_FILE`, `BRIDGE_VAULTS`, and optionally `BRIDGE_MAX_BYTES`, `BRIDGE_PAGED_MAX_BYTES` (8 MiB), `BRIDGE_PART_BYTES` (16384), `BRIDGE_TIMEOUT`, `BRIDGE_HISTER_PORT`, `BRIDGE_KURA_PORT`. Details: the [bridge's README](https://github.com/machiya-kobo/shiori/tree/main/classic/bridge).
