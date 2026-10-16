@@ -62,7 +62,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.5.7"
+VERSION = "0.6.0"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -992,28 +992,58 @@ def room_name(s, origin):
     return urlsplit(origin).netloc or origin
 
 
+IDLE_AFTER = 7 * 86400     # the sessions page folds away a session not seen for a week, and a token unused after a week
+
+
+def idle_session(row, me, at=None):
+    """A session the sessions page folds away: not seen for IDLE_AFTER, and not this device's."""
+    return (at or now()) - row["last_seen"] >= IDLE_AFTER and row["hister_hash"] != me["hister_hash"]
+
+
+def idle_token(tok, at=None):
+    """A room token never used in the IDLE_AFTER since it was made."""
+    return not tok["last_used"] and (at or now()) - tok["created_at"] >= IDLE_AFTER
+
+
+def days_ago(t, at=None):
+    days = ((at or now()) - t) // 86400
+    return "today" if days < 1 else "yesterday" if days < 2 else "%d days ago" % days
+
+
+def folded(heading, noun, items, last="", note=""):
+    """A section folded shut (works without JavaScript): its heading, a summary with the count, the rows inside."""
+    if not items:
+        return ""
+    return ('<h2>%s</h2><details class="group"><summary class="item"><span>%d %s</span><small class="value">Show'
+            '</small></summary>%s%s</details>%s' % (heading, len(items), noun if len(items) > 1 else noun[:-1],
+                                                    "".join(items), last, note))
+
+
 def sessions_page(s, headers, me, rows, done="", tokens=(), new_token=None):
-    items = []
-    for r in rows:
+    at = now()
+    active, idle = [], []
+    for r in rows:      # newest first (of_user)
         this = r["sid_hash"] == me["sid_hash"]
         when = time.strftime("%Y-%m-%d %H:%M", time.gmtime(r["last_seen"]))
         rooms = ", ".join(room_name(s, o) for o in r.get("rooms") or ())
-        items.append(
-            '<div class="item"><span>%s<br><small class="value">%s · last seen %s UTC%s%s</small></span>'
+        (idle if idle_session(r, me, at) else active).append(
+            '<div class="item"><span>%s<br><small class="value">%s · last seen %s UTC (%s)%s%s</small></span>'
             '<form method="post" action="/machiya/sessions"><input type="hidden" name="id" value="%d">'
             '<button type="submit" name="do" value="one">Sign&nbsp;Out</button></form></div>'
             % (e(r["label"] or r["kind"]), "app" if r["kind"] == "app" else "browser", e(when),
-               " · this device" if this else "", (" · " + e(rooms)) if rooms else "", r["rowid"]))
+               days_ago(r["last_seen"], at), " · this device" if this else "", (" · " + e(rooms)) if rooms else "",
+               r["rowid"]))
     note = '<div class="machiya-banner" role="status">%s</div>' % e(done) if done else ""
-    toks = []
-    for t in tokens:
-        used = time.strftime("%Y-%m-%d", time.gmtime(t["last_used"])) if t["last_used"] else "never"
-        toks.append(
-            '<div class="item"><span>%s<br><small class="value">%s · made %s · last used %s · id %s</small></span>'
+    used, unused = [], []
+    for t in sorted(tokens, key=lambda t: (t["last_used"], t["created_at"]), reverse=True):
+        when = ("last used " + days_ago(t["last_used"], at)) if t["last_used"] else "never used"
+        (unused if idle_token(t, at) else used).append(
+            '<div class="item"><span>%s<br><small class="value">%s · made %s · %s · id %s</small></span>'
             '<form method="post" action="/machiya/sessions"><input type="hidden" name="token" value="%s">'
             '<button type="submit" name="do" value="token-revoke">Revoke</button></form></div>'
             % (e(t["label"]), e(", ".join(room_name(s, o) for o in t["audiences"])),
-               e(time.strftime("%Y-%m-%d", time.gmtime(t["created_at"]))), e(used), e(t["id"]), e(t["id"])))
+               e(time.strftime("%Y-%m-%d", time.gmtime(t["created_at"]))), e(when), e(t["id"]), e(t["id"])))
+    # a new token goes at the top of the page, where the answer opens: it is shown this once
     shown = ""
     if new_token and new_token.get("value"):
         shown = ('<div class="machiya-banner" role="status">New token for %s. Copy it now: it isn&#x27;t shown '
@@ -1022,22 +1052,29 @@ def sessions_page(s, headers, me, rows, done="", tokens=(), new_token=None):
         shown = '<p class="signin-error" role="alert">%s</p>' % e(new_token["error"])
     boxes = "".join('<label class="item"><span>%s</span><input type="checkbox" name="room" value="%s"></label>'
                     % (e(ROOM_NAMES.get(k, k.capitalize())), e(k)) for k in sorted(s.rooms))
+    idle_out = ('<div class="item"><span>All Idle Sessions</span><form method="post" action="/machiya/sessions">'
+                '<button type="submit" name="do" value="idle">Sign&nbsp;Out Idle</button></form></div>')
     body = (
-        '<main class="settings sessions"><h1 class="sechead">Signed In as %s</h1>%s'
+        '<main class="settings sessions"><h1 class="sechead">Signed In as %s</h1>%s%s'
         '<h2>Sessions</h2><div class="group">%s<div class="item"><span>All Sessions</span>'
         '<form method="post" action="/machiya/sessions"><button type="submit" name="do" value="all">'
         'Sign&nbsp;Out Everywhere</button></form></div></div>'
-        '<p class="footnote">Signing out ends a session in Hister and every room within a minute.</p>'
-        '<h2>Room Tokens</h2>%s<div class="group">%s</div>'
-        '<p class="footnote">For scripts and agents. Each opens only the rooms it names, never Hister.</p>'
-        '<form class="group" method="post" action="/machiya/sessions">'
+        '<p class="footnote">Signing out ends a session in Hister and every room within a minute.</p>%s'
+        '<h2>Room Tokens</h2><div class="group">%s</div>'
+        '<p class="footnote">For scripts and agents. Each opens only the rooms it names, never Hister.</p>%s'
+        '<h2>New Token</h2><form class="group" method="post" action="/machiya/sessions">'
         '<label class="item"><span>Name</span><input name="label" required maxlength="80" '
         'placeholder="pm on the laptop"></label>%s'
         '<div class="item"><span></span><button type="submit" name="do" value="token-new">New Token</button></div>'
         '</form>'
         '</main>'
-    ) % (e(me["username"]), note, "".join(items) or '<div class="item"><span>None</span></div>', shown,
-         "".join(toks) or '<div class="item"><span>None</span></div>', boxes)
+    ) % (e(me["username"]), shown, note, "".join(active),
+         folded("Idle a Week or More", "Sessions", idle, idle_out,
+                '<p class="footnote">Not seen for a week. Each ends by itself 30 days after it was last seen.</p>'),
+         "".join(used) or '<div class="item"><span>None</span></div>',
+         folded("Never Used", "Tokens", unused, "",
+                '<p class="footnote">Made over a week ago and never used: revoke one if nothing needs it.</p>'),
+         boxes)
     return render(headers, "Sessions · Machiya", body)
 
 
@@ -1602,7 +1639,8 @@ class Public(Handler):
             return self.unavailable("user-handling-off" if outcome == "off" else "down")
         if outcome != "ok":
             return self.redirect("/machiya/signin?" + urlencode({"return": lg.s.public_url + "/machiya/sessions"}))
-        done = {"one": "Signed that session out.", "token": "Revoked that token."}.get(self.query().get("done"), "")
+        done = {"one": "Signed that session out.", "token": "Revoked that token.",
+                "idle": "Signed the idle sessions out."}.get(self.query().get("done"), "")
         rows = lg.store.of_user(row["user_id"])
         for r in rows:
             r["rooms"] = lg.store.rooms_of(r["sid_hash"])
@@ -1694,6 +1732,17 @@ class Public(Handler):
         if form.get("do") == "token-revoke":
             lg.store.revoke_token(form.get("token", ""), me["username"])
             return self.redirect("/machiya/sessions?done=token")
+        if form.get("do") == "idle":
+            # every session folded under Idle: not this device's, and not one whose Hister session another, live id
+            # still uses
+            rows = lg.store.of_user(me["user_id"])
+            live = {r["hister_hash"] for r in rows if not idle_session(r, me)}
+            ended = set()
+            for r in rows:
+                if r["hister_hash"] not in live and r["hister_hash"] not in ended:
+                    ended.add(r["hister_hash"])
+                    lg.end_hister(r["hister_session"])
+            return self.redirect("/machiya/sessions?done=idle")
         if form.get("do") == "all":
             seen = set()
             for r in lg.store.of_user(me["user_id"]):

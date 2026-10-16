@@ -1,5 +1,11 @@
 # Changelog: hister-login
 
+## 0.6.0
+
+- The sessions page shows a new room token at the top, where the page opens after New Token: it was in the Room Tokens section, far down a long page, and easy to miss (it is shown once).
+- Sessions not seen for a week fold under Idle a Week or More, with a count, and Sign Out Idle ends them all (never this device's, nor a Hister session a live one shares). Each session says how long ago it was seen.
+- Room tokens are listed by last use, and ones never used in their first week fold under Never Used. New Token has its own heading.
+
 ## 0.5.7
 
 - vaultkit re-vendored (0.29.0 → 0.30.1); 0.5.6 was tagged but never built.

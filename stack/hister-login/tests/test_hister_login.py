@@ -905,6 +905,49 @@ class RoomSessionTest(HelperBase):
         self.assertEqual(self.room_check(value, NIWA_O)[0], 401)
         self.assertNotIn(value, self.err.getvalue())
 
+    def test_sessions_page_folds_idle_sessions_and_unused_tokens(self):
+        session, sid, _ = self.sign_in()
+        old = self.fake.signed_in()
+        self.public("POST", "/machiya/api/app-session", {"Content-Type": "application/json"},
+                    json.dumps({"hister": old, "label": "Old iPad app"}))
+        week = hl.IDLE_AFTER + 60
+        self.login.store.q("UPDATE sessions SET last_seen = last_seen - ? WHERE label = 'Old iPad app'", (week,))
+        self.login.store.add_token("mht_" + "a" * 43, "owner", "never used", ["https://kura.example.test"], user_id=1)
+        self.login.store.add_token("mht_" + "b" * 43, "owner", "made today", ["https://kura.example.test"], user_id=1)
+        self.login.store.q("UPDATE tokens SET created_at = created_at - ? WHERE label = 'never used'", (week,))
+        cookie = {"Cookie": "machiya_sso=" + sid}
+        status, _, body = self.public("GET", "/machiya/sessions", cookie)
+        self.assertEqual(status, 200)
+        page = body.decode()
+        idle = page.split("Idle a Week or More")[1].split("</details>")[0]
+        self.assertIn("Old iPad app", idle)
+        self.assertNotIn("this device", idle)                       # this device is never folded away
+        self.assertIn("this device", page.split("<h2>Sessions</h2>")[1].split("<details")[0])
+        unused = page.split("Never Used")[1].split("</details>")[0]
+        self.assertIn("never used", unused)
+        self.assertNotIn("made today", unused)                      # a new token isn't a revoke candidate yet
+        # Sign Out Idle: the idle session goes, this one stays
+        form = urlencode({"do": "idle"})
+        post = dict(cookie, Origin=PUBLIC, **{"Content-Type": "application/x-www-form-urlencoded"})
+        self.assertEqual(self.public("POST", "/machiya/sessions", dict(post, Origin="https://evil.example"), form)[0],
+                         403)
+        status, headers, _ = self.public("POST", "/machiya/sessions", post, form)
+        self.assertEqual((status, dict(headers)["Location"]), (303, "/machiya/sessions?done=idle"))
+        self.assertNotIn(old, self.fake.sessions)
+        self.assertIn(session, self.fake.sessions)
+        status, _, body = self.public("GET", "/machiya/sessions?done=idle", cookie)
+        self.assertIn(b"Signed the idle sessions out.", body)
+        self.assertNotIn(b"Idle a Week or More", body)              # nothing left to fold
+
+    def test_a_new_token_is_shown_at_the_top(self):
+        _, sid, _ = self.sign_in()
+        form = urlencode([("do", "token-new"), ("label", "pm"), ("room", "niwa")]).encode()
+        post = {"Cookie": "machiya_sso=" + sid, "Origin": PUBLIC, "Content-Type": "application/x-www-form-urlencoded",
+                "Content-Length": str(len(form))}
+        status, _, body = self.public("POST", "/machiya/sessions", post, form)
+        self.assertEqual(status, 200)
+        self.assertLess(body.index(b'class="token-value"'), body.index(b"<h2>Sessions</h2>"))
+
     def test_token_cli(self):
         out = os.path.join(self.tmp, "pm-token")
         env = {"HISTER_LOGIN_DB": self.settings.db, "MACHIYA_ROOMS": self.EXTRA["MACHIYA_ROOMS"]}
