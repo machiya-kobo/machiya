@@ -12,7 +12,7 @@ Agentically coded with [Claude Code](https://docs.anthropic.com/en/docs/claude-c
 <a href="https://machiya-kobo.github.io/">Website</a> · <a href="#apps">Apps</a> · <a href="#architecture">Architecture</a> · <a href="#quickstart">Quickstart</a> · <a href="docs/install/sample-vault.md">Sample vault</a> · <a href="docs/install/">Install</a> · <a href="#license">License</a>
 </p>
 
-<p align="center"><a href="site/img/hero-dark.webp"><img src="site/img/hero-dark.webp" alt="Shiori searching for washi: a saved page, a note and a web result in one list, with the saved page open on the right" width="100%"></a><br>Shiori: your pages, notes and the web in one search</p>
+<p align="center"><a href="site/img/hero-dark.webp"><img src="site/img/hero-dark.webp" alt="Shiori searching for washi: web results with your saved pages and a note woven in, and a saved page open on the right" width="100%"></a><br>Shiori: your pages, notes and the web in one search</p>
 
 <table>
   <tr>
