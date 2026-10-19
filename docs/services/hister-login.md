@@ -1,12 +1,12 @@
 # hister-login: Hister's users as the one sign-in
 
-[Hister](hister.md) has users of its own (`app.user_handling: true`, v0.20.0+), with a password sign-in and OIDC. hister-login makes a Hister sign-in count in every Machiya app (these docs call them rooms: Kura, Niwa, Konbini and the landing page).
+hister-login makes a [Hister](hister.md) sign-in count in every Machiya app (these docs call them rooms: [Kura](https://github.com/machiya-kobo/kura), [Niwa](https://github.com/machiya-kobo/niwa), [Konbini](https://github.com/machiya-kobo/konbini) and the landing page). It uses Hister's own users (`app.user_handling: true`, v0.20.0+), with a password sign-in and OIDC.
 
-- Sign in once, in any room, in Shiori's hosted pages or in Hister. Every room then knows you, each through a host-only cookie of its own.
+- Sign in once, in any room, in [Shiori](https://github.com/machiya-kobo/shiori)'s hosted pages or in Hister. Every room then knows you, each through a host-only cookie of its own.
 - Sign out anywhere, and every room forgets you within 30 seconds.
 - Hister is not patched.
 
-Code: [stack/hister-login/](../../stack/hister-login/) (settings in its README). The rooms' side is vaultkit's `histerauth.py` (`<ROOM>_AUTH=hister`, [identity.md](../identity.md#hister-sign-in-authhister)).
+Code: [stack/hister-login/](../../stack/hister-login/) (settings in its README). The rooms' side is [vaultkit](../vaultkit.md)'s `histerauth.py` (`<ROOM>_AUTH=hister`, [identity.md](../identity.md#hister-sign-in-authhister)).
 
 It's optional. Without it, a room keeps its Tailscale gate or the identity file. A room in `hister` mode without the helper runs on its Tailscale identity alone.
 
@@ -83,10 +83,10 @@ Signing out ends the session everywhere.
 
 ### Room tokens
 
-Room tokens (`mht_…`, [identity.md](../identity.md#room-tokens)) are for pm, machiya-mcp, landing, Niwa→Konbini, scripts and extensions, in place of Hister's raw token.
+Room tokens (`mht_…`, [identity.md](../identity.md#room-tokens)) are for pm, [machiya-mcp](mcp.md), landing, Niwa→Konbini, scripts and extensions, in place of Hister's raw token.
 
 - Each acts as one Hister user.
-- Each opens only the rooms it names, plus machiya-mcp and smallweb (named in `HISTER_LOGIN_TOKEN_SERVICES`). Never Hister.
+- Each opens only the rooms it names, plus machiya-mcp and [smallweb](../../stack/smallweb) (named in `HISTER_LOGIN_TOKEN_SERVICES`). Never Hister.
 - Make them on the sessions page, or with `hister_login.py token mint`.
 
 ### Sessions page

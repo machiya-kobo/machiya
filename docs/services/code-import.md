@@ -1,6 +1,6 @@
 # code-import (the Code area's importer)
 
-code-import copies your repos on **Forgejo** and **GitHub** into [Hister](hister.md). Shiori searches them as its **Code** area, and a result opens the forge's own page.
+code-import copies your repos on **Forgejo** and **GitHub** into [Hister](hister.md). [Shiori](https://github.com/machiya-kobo/shiori) searches them as its **Code** area, and a result opens the forge's own page.
 
 - **Code:** [stack/code-import/](../../stack/code-import/). Its README has the settings, the metadata table and the tests.
 - **Status:** phase 1. What it sends follows the Hister contract's [code documents](../contracts/hister.md#code-documents-metadatasourcecode) section.
@@ -89,7 +89,7 @@ The `@code` alias is for Hister's own UI, not for AI clients.
 - **Tokens, all read-only, each in its own file.** Render them from your secret store to a tmpfs file, never into the environment.
   - A Forgejo (or Gitea) token of the account that owns the repos, scopes `read:repository`, `read:issue`, `read:user`, `read:organization`.
   - One fine-grained GitHub token per resource owner (a user or an org), with Metadata, Contents, Issues and Pull requests set to read, and an expiry. Never a classic token.
-  - Your Hister token, as for feed-import.
+  - Your Hister token, as for [feed-import](../../stack/feed-import).
 - **Compose:** the reference compose has it as the `code` profile ([compose/compose.yml](../../compose/compose.yml); token files in `compose/secrets/`, settings in `.env`). By hand, add a `code-import` service beside Hister (and feed-import):
   - the image built from `stack/code-import/Dockerfile` (context: the repo root), a non-root user, a small memory limit, a `/data` volume, no ports;
   - Hister's network;

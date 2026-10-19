@@ -3,7 +3,7 @@
 **Every note in the vault, with working links.** Kura is the vault's web home and its read service:
 - a reader (three columns on wide screens: folders, notes, preview; one column plus a tab bar on phones)
 - full-text search
-- a JSON API that Shiori uses for notes
+- a JSON API that [Shiori](https://github.com/machiya-kobo/shiori) uses for notes
 - the push of every note into Hister
 
 - **URL:** `https://kura.example.ts.net` (for example its own Tailscale Service). Only you can read it.

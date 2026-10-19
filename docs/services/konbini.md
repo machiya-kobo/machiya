@@ -7,7 +7,7 @@
 - The notes are the source of truth. SQLite is a cache that a rebuild recreates from the clone, and git is the backup.
 
 - **URL:** `https://konbini.example.ts.net` (board)
-- **Repo:** [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini) (app in `app/`, vendors vaultkit)
+- **Repo:** [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini) (app in `app/`, vendors [vaultkit](../vaultkit.md))
 - **CLI:** `pm` (`pm ls`, `pm show`, `pm move`, `pm next`, `pm claim`, `pm log`, `pm new`)
 
 ## What it does
@@ -17,12 +17,12 @@
 - Board edits change frontmatter lines only. Konbini commits them under a configurable author in batches, after about 2 minutes idle, then pushes.
 - Events go to `.board/events/*.jsonl` in the vault repo.
 - Calendar, roundups (day, week, month, year), the stream, writing kits and post tracking for the blog.
-- Link rot for links in card notes: Wayback, an optional cold archive, and Hister copies (only you see them; modern pages only). Niwa checks published notes itself.
+- Link rot for links in card notes: Wayback, an optional cold archive, and Hister copies (only you see them; modern pages only). [Niwa](https://github.com/machiya-kobo/niwa) checks published notes itself.
 - "Needs a look" shows the health of an optional vault sync bridge.
 
 ## API
 
-See [contracts/konbini-api.md](../contracts/konbini-api.md). Other services read `/api/cards`: Shiori does, and so can a dashboard.
+See [contracts/konbini-api.md](../contracts/konbini-api.md). Other services read `/api/cards`: [Shiori](https://github.com/machiya-kobo/shiori) does, and so can a dashboard.
 
 ## Scope
 

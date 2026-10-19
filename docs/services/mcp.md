@@ -6,13 +6,13 @@
 - search and read saved pages, label them and keep their collections;
 - suggest notes for the garden.
 
-It calls the apps' HTTP APIs and changes none of them. (Below, the apps it reaches, Konbini, Kura, Niwa and Hister, are its rooms.)
+It calls the apps' HTTP APIs and changes none of them. (Below, the apps it reaches, [Konbini](https://github.com/machiya-kobo/konbini), [Kura](https://github.com/machiya-kobo/kura), [Niwa](https://github.com/machiya-kobo/niwa) and Hister, are its rooms.)
 
 AI clients read saved pages here (`pages_search`, `pages_read`), never through Hister's own MCP, which returns notes and code documents to anyone who asks. Here "code and notes stay out of AI" is enforced in code, not in a prompt.
 
 - **Code:** [`stack/mcp/`](../../stack/mcp/) in this repo (stdlib Python, no dependencies).
 - **Tests:** `python3 -m unittest discover -s tests` from `stack/mcp/`, with `markdown` and `pyyaml` installed. They use fake rooms, a stateful fake Hister, and real git repos for the notes tools.
-- **Vendored vaultkit:** `stack/mcp/vaultkit/`, copied with `./vendor.sh stack/mcp vX.Y.Z` from the repo root. The image build runs `python3 -m vaultkit.verify`, so an edited copy fails. The server imports it only for the notes write tools (when `MCP_NOTES_DIR` is set), the identity file, and `GET /api/changelog` (`vaultkit.changelog`). `/api/status` reads the vaultkit tag from the manifest.
+- **Vendored [vaultkit](../vaultkit.md):** `stack/mcp/vaultkit/`, copied with `./vendor.sh stack/mcp vX.Y.Z` from the repo root. The image build runs `python3 -m vaultkit.verify`, so an edited copy fails. The server imports it only for the notes write tools (when `MCP_NOTES_DIR` is set), the identity file, and `GET /api/changelog` (`vaultkit.changelog`). `/api/status` reads the vaultkit tag from the manifest.
 - **Changes:** [CHANGELOG.md](../../stack/mcp/CHANGELOG.md).
 - **Endpoint:** `POST /mcp`: legacy Streamable HTTP, plain JSON replies, no session, no SSE; protocol 2025-03-26 to 2025-11-25.
 - `GET /healthz`, `/api/status` and `/api/changelog` (the server's `CHANGELOG.md` as `text/markdown`, for the [landing page](landing.md)) need no identity.
@@ -105,7 +105,7 @@ A note that already has an open suggestion isn't suggested again: the tool repor
 Only you. Without the identity file, `MCP_AUTH` decides:
 
 - **`tailscale`** (default): a request needs a `Tailscale-User-Login` listed in `MCP_USERS` (empty = nobody).
-  - With `MCP_AUTH_URL` set, a request may instead carry a **room token** that hister-login issued for this server (`Authorization: Bearer mht_…`), acting as one of `MCP_HISTER_USERS` ([identity.md](../identity.md#room-tokens)). This is for an agent on a tagged machine, which has no Tailscale login. It never gets Hister's raw token.
+  - With `MCP_AUTH_URL` set, a request may instead carry a **room token** that [hister-login](hister-login.md) issued for this server (`Authorization: Bearer mht_…`), acting as one of `MCP_HISTER_USERS` ([identity.md](../identity.md#room-tokens)). This is for an agent on a tagged machine, which has no Tailscale login. It never gets Hister's raw token.
   - A bad, revoked or other service's token gets 401. It never falls back to the header.
 - **`open`** (localhost or a trusted LAN; warns at startup) ignores the header and logs the caller as `local`.
 
@@ -141,7 +141,7 @@ No proof, or a bad one, gets **401** and never falls through to a login. A princ
 ### Notes and pages stay apart
 
 - Every Hister query this server sends ends ` -label:vault -metadata.source:vault -metadata.source:code -label:konbini`.
-- It never changes documents labeled `vault`, code documents (`metadata.source:code`, [code-import](code-import.md)), or documents on a room's own host. `pages_set_label` refuses those hosts, the same rule as Shiori's AI features.
+- It never changes documents labeled `vault`, code documents (`metadata.source:code`, [code-import](code-import.md)), or documents on a room's own host. `pages_set_label` refuses those hosts, the same rule as [Shiori](https://github.com/machiya-kobo/shiori)'s AI features.
 - Collections whose expansion names the vault are hidden.
 - **Page reads check every document again** before any of it reaches the model (`rooms/hister.py`, `readable`). It withholds a note, a card (`label:konbini`), a code document, a room's host, a non-page URL, or a document whose shape the server doesn't recognize (no `metadata` field, say, after a Hister upgrade). `pages_search` says how many it withheld.
 - `pages_read` looks the URL up and refuses anything but a page.

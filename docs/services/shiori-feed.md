@@ -1,6 +1,6 @@
 # shiori-feed
 
-Subscribe to any Hister search in your feed reader. Shiori's **Subscribe** gives you a feed address for a search, a label or a collection (all your collections at once as OPML), and shiori-feed answers it with the newest matching pages in [Hister](hister.md).
+Subscribe to any Hister search in your feed reader. [Shiori](https://github.com/machiya-kobo/shiori)'s **Subscribe** gives you a feed address for a search, a label or a collection (all your collections at once as OPML), and shiori-feed answers it with the newest matching pages in [Hister](hister.md).
 
 - **Code:** [stack/shiori-feed/](../../stack/shiori-feed/). Its README has the settings, the endpoint's limits and the tests.
 - **Status:** 0.1.0. In daily use since 2026-09-28 as a script; published as a component in 0.1.0.

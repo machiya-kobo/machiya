@@ -25,15 +25,15 @@ Every page is modern HTML5.
 
 - Niwa commits only the garden fields (`publish`, `growth`, `confidence`, `garden_pin`) and its events.
 - Events go to `.garden/events/*.jsonl`, union-merged. Niwa still reads older events from `.board/events`.
-- It commits to its own read-write clone, as `garden`, in batches. vaultkit's GitSync rebases, replays frontmatter three-way on a conflict, and pushes.
+- It commits to its own read-write clone, as `garden`, in batches. [vaultkit](../vaultkit.md)'s GitSync rebases, replays frontmatter three-way on a conflict, and pushes.
 - You publish from the web UI. Agents get 403 and may only suggest (`POST /api/suggest`).
 
 ## Without the others
 
 | Missing | What changes |
 |---|---|
-| Konbini | no column badges, no "in bloom", the stream shows only the garden half (planted, tended, stages, suggestions, dead links); the gemini and gopher streams always show only that half |
-| Kura | no links for you to the full note |
+| [Konbini](https://github.com/machiya-kobo/konbini) | no column badges, no "in bloom", the stream shows only the garden half (planted, tended, stages, suggestions, dead links); the gemini and gopher streams always show only that half |
+| [Kura](https://github.com/machiya-kobo/kura) | no links for you to the full note |
 | Hister | no private link copies, no reading line |
 
 ## What is served, and what is public
@@ -86,4 +86,4 @@ Before you turn it on:
 - `days` is 1 to 365.
 - `agent` is the suggestion's `X-Agent`, or the login for a web-UI suggestion. `date` is a day.
 - The open set is each note's latest suggestion that no unsuggest or publish followed.
-- machiya-mcp's `garden_suggest` reads it to avoid repeats. Access is the same as Niwa's other reads.
+- [machiya-mcp](mcp.md)'s `garden_suggest` reads it to avoid repeats. Access is the same as Niwa's other reads.

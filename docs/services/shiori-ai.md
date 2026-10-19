@@ -1,6 +1,6 @@
 # shiori-ai
 
-Summarize a saved page, or answer a web search, from Shiori on the web. shiori-ai is the server side of **Summarize** and **AI Answer** on Shiori's hosted pages. It asks Claude through the Anthropic API, only when you ask, within daily caps.
+Summarize a saved page, or answer a web search, from [Shiori](https://github.com/machiya-kobo/shiori) on the web. shiori-ai is the server side of **Summarize** and **AI Answer** on Shiori's hosted pages. It asks Claude through the Anthropic API, only when you ask, within daily caps.
 
 - **Code:** [stack/shiori-ai/](../../stack/shiori-ai/). Its README has the settings, every error and the tests.
 - **Status:** 0.1.0. In daily use since 2026-09-29 as a script; published as a component in 0.1.0.

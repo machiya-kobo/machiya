@@ -2,9 +2,9 @@
 
 The whole stack's front door, in two pages:
 - **`/`**, a launcher that searches everything and shows what's going on today;
-- **`/status`**, which links every app and shows how each is doing: the rooms (Shiori, Konbini, Niwa, Kura), the engines (Hister, SearXNG) and the stack's own services (machiya-mcp, smallweb, vault-mirror, feed-import, code-import).
+- **`/status`**, which links every app and shows how each is doing: the rooms ([Shiori](https://github.com/machiya-kobo/shiori), [Konbini](https://github.com/machiya-kobo/konbini), [Niwa](https://github.com/machiya-kobo/niwa), [Kura](https://github.com/machiya-kobo/kura)), the engines (Hister, SearXNG) and the stack's own services ([machiya-mcp](mcp.md), [smallweb](../../stack/smallweb), [vault-mirror](../../stack/vault-mirror), [feed-import](../../stack/feed-import), [code-import](code-import.md)).
 
-Code: [stack/landing/](../../stack/landing/) (settings in its README). It shares the other apps' look (vaultkit's shell, phone tab bar, Rooms menu, Settings, themes and palettes), with the Machiya icon as its mark.
+Code: [stack/landing/](../../stack/landing/) (settings in its README). It shares the other apps' look ([vaultkit](../vaultkit.md)'s shell, phone tab bar, Rooms menu, Settings, themes and palettes), with the Machiya icon as its mark.
 
 ## The launcher (`/`)
 
@@ -84,7 +84,7 @@ It goes only to Kura, Konbini and Niwa at their configured https address, and ne
 - Without the token, or when refused, the WIP and vault counts and Today's room sections are left out quietly. Kura's open `vault_count` still shows.
 
 **Other tokens.** None by default.
-- `LANDING_TOKEN_FILE` goes to Kura, Niwa and Konbini over https only. Use a room token from hister-login (`mht_…`, [identity.md](../identity.md#room-tokens)) for your reads, and Hister's token then goes to Hister only. Or, for rooms with an identity file, that file's token.
+- `LANDING_TOKEN_FILE` goes to Kura, Niwa and Konbini over https only. Use a room token from [hister-login](hister-login.md) (`mht_…`, [identity.md](../identity.md#room-tokens)) for your reads, and Hister's token then goes to Hister only. Or, for rooms with an identity file, that file's token.
 - `LANDING_CHANGELOG_TOKEN_FILE` goes only to the changelog URLs.
 
 ## Recent deploys: where they come from

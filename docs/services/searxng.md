@@ -1,6 +1,6 @@
 # SearXNG (engine: the web)
 
-[SearXNG](https://github.com/searxng/searxng) is the web half of Shiori's searches and Hister's fallback. Machiya uses the upstream image, pinned, with one small local plugin. [Reference config](../../config/searxng/).
+[SearXNG](https://github.com/searxng/searxng) is the web half of [Shiori](https://github.com/machiya-kobo/shiori)'s searches and Hister's fallback. Machiya uses the upstream image, pinned, with one small local plugin. [Reference config](../../config/searxng/).
 
 - **URL:** `https://searxng.example.ts.net`, for example its own Tailscale Service. It's the one Machiya engine you can share with other people, a household say. `search.example.ts.net` is Shiori's page, not SearXNG.
 - **Formats:** `html` + `json`. Shiori reads JSON.

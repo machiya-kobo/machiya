@@ -1,14 +1,14 @@
 # Hister (engine: your pages)
 
 [Hister](https://github.com/asciimoo/hister) indexes every page you visit or save. Pages come in from:
-- the browser extensions and Shiori;
+- the browser extensions and [Shiori](https://github.com/machiya-kobo/shiori);
 - importers, for saves from other tools;
-- Kura, which pushes every note in as `label:vault`.
+- [Kura](https://github.com/machiya-kobo/kura), which pushes every note in as `label:vault`.
 
 Machiya runs Hister unchanged. This repo holds its [reference config](../../config/hister/), and [contracts/hister.md](../contracts/hister.md) says how the other services use it.
 
 - **URL:** `https://hister.example.ts.net`, for example a Tailscale Service on its own sidecar. Only you can reach it.
-- **Image:** `ghcr.io/asciimoo/hister`, pinned (tested with v0.20.0). It's pre-1.0 and releases break things. When you bump it, bump Konbini's `HISTER_VERSION` too: Konbini ships the `hister` CLI for link rot.
+- **Image:** `ghcr.io/asciimoo/hister`, pinned (tested with v0.20.0). It's pre-1.0 and releases break things. When you bump it, bump [Konbini](https://github.com/machiya-kobo/konbini)'s `HISTER_VERSION` too: Konbini ships the `hister` CLI for link rot.
 - **Deployment:** its own stack. That stack can also run Shiori's hosted pages and optional helpers. Hister needs none of them.
 
 ## Access
@@ -31,7 +31,7 @@ If you connect Hister's MCP to something else, follow [contracts/hister.md](../c
 - `app.search_url` points at SearXNG for anything Hister doesn't know. This goes one way only: SearXNG must never query Hister.
 - The social extractors (twitter, mastodon, bluesky) stay **off**. They split feeds into a document per post and replace a re-added document's text.
 - `ytdlp` stays off, so the server never contacts YouTube.
-- **Skip rules** (`skip-rules.txt`) keep pages out, including every page on your own `*.ts.net` names. So the extension never captures Konbini, Niwa or Kura. Vault documents carry `metadata.ignore_skip_rules`.
+- **Skip rules** (`skip-rules.txt`) keep pages out, including every page on your own `*.ts.net` names. So the extension never captures Konbini, [Niwa](https://github.com/machiya-kobo/niwa) or Kura. Vault documents carry `metadata.ignore_skip_rules`.
 - **Priority rules** (`priority-rules.txt`) are Bleve regexps over the whole URL. Don't use `^` or `$`: a `$` made every search return 0. The boost gets weaker with each extra pattern.
 - Both rule files are loaded into Hister's configuration from the reference files.
 - **Labels:** your own flat topic labels, `@` aliases, and `vault` for notes.

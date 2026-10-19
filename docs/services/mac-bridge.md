@@ -1,6 +1,6 @@
 # mac-bridge
 
-Shiori for Classic Macintosh's way into Hister and Kura. A Mac Plus with MacTCP can't speak TLS, and the apps answer only over https, so this small proxy takes plain HTTP from the Mac on the home network and makes the https call for it.
+[Shiori](https://github.com/machiya-kobo/shiori) for Classic Macintosh's way into Hister and [Kura](https://github.com/machiya-kobo/kura). A Mac Plus with MacTCP can't speak TLS, and the apps answer only over https, so this small proxy takes plain HTTP from the Mac on the home network and makes the https call for it.
 
 - **Code:** [machiya-kobo/shiori `classic/bridge/`](https://github.com/machiya-kobo/shiori/tree/main/classic/bridge) (stdlib Python, tests, Dockerfile). Image: `mac-bridge`, tags `mac-bridge-vX.Y.Z`.
 - **Where:** the LAN address of the machine that runs Hister, never the tailnet or the internet. One port per app: `8070` Hister, `8071` Kura.
@@ -21,7 +21,7 @@ Shiori for Classic Macintosh's way into Hister and Kura. A Mac Plus with MacTCP 
 
 ## Credentials
 
-The Mac holds one room token (`mht_`, [identity.md](../identity.md#room-tokens)) with two scopes: `kura`, and `classic-bridge` (a token service in hister-login's `HISTER_LOGIN_TOKEN_SERVICES`).
+The Mac holds one room token (`mht_`, [identity.md](../identity.md#room-tokens)) with two scopes: `kura`, and `classic-bridge` (a token service in [hister-login](hister-login.md)'s `HISTER_LOGIN_TOKEN_SERVICES`).
 
 - **Kura's port** passes the token on; Kura checks its own scope.
 - **Hister's port** checks the token with [hister-login](hister-login.md) (`GET /v1/check`) and only then adds Hister's own token, which stays on the server and never crosses the LAN.
