@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.6.1
+
+- Every preferences write logs one line: who wrote it (the room, the hosted pages' host, or the credential's kind: app session, room token, Hister token, browser cookie), the client's User-Agent, the keys sent, the keys whose value changed, and the rev. Key names only, never values. The owner's theme kept going back to Dracula, and nothing showed which client wrote it.
+
 ## 0.6.0
 
 - The sessions page shows a new room token at the top, where the page opens after New Token: it was in the Room Tokens section, far down a long page, and easy to miss (it is shown once).

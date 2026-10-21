@@ -62,7 +62,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -1191,13 +1191,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
             changes, refused = vsignin.parse_put(self.headers, body)
             if refused:
                 return self.reply(refused)
+            before = lg.prefs.snapshot(key)
             try:
-                return self.reply(vsignin.prefs_answer(200, *lg.prefs.write(key, changes)))
+                after = lg.prefs.write(key, changes)
             except vprefs.PrefsError as ex:
                 return self.json(400, {"error": str(ex)})
+            self.log_prefs_write(kind, cookie, rooms, origins, changes, before, after)
+            return self.reply(vsignin.prefs_answer(200, *after))
         except (sqlite3.Error, OSError) as ex:
             LOG("hister-login: the prefs file failed: %s" % type(ex).__name__)
             return self.json(503, {"error": "preferences unavailable"})
+
+    def log_prefs_write(self, kind, cookie, rooms, origins, changes, before, after):
+        """One line per prefs PUT: who wrote (the room, the hosted pages' host or the credential's kind, and the
+        client's User-Agent), the keys sent and the keys whose value changed, and the rev. Key names only, never values:
+        enough to tell which client keeps writing a setting back."""
+        if rooms:
+            via = "room " + rooms[0]
+        elif cookie and origins:
+            via = "pages " + origins[0]
+        elif cookie:
+            via = "browser cookie"
+        else:
+            via = {"sid": "app session", "rtoken": "room token"}.get(kind, "hister token")
+        changed = sorted(k for k in changes if before[1].get(k) != after[1].get(k))
+        ua = "".join(c for c in (self.headers.get("User-Agent") or "-") if " " <= c <= "~")[:100]
+        LOG("hister-login: prefs write via %s keys=%s changed=%s rev %s->%s ua=%s"
+            % (via, ",".join(sorted(changes))[:200] or "-", ",".join(changed)[:200] or "-", before[0], after[0], ua))
 
     def prefs_origins(self):
         s = self.login.s

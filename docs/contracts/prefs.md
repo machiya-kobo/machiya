@@ -83,6 +83,8 @@ Anything else is **400**. At most 100 keys per person, and a body of at most 512
 | the Tailscale fallback, `open` mode | no: 503 or the room's own store |
 | a room with no helper (identity file, Tailscale, open, or hister mode without `*_AUTH_URL`) | the room's own store, with the same API and the same client rules |
 
+**Each write is logged by key name** (hister-login 0.6.1): one line with the writer (the room, the hosted pages' host or the credential's kind), its User-Agent, the keys sent and the keys that changed, and the rev; never a value.
+
 **Sign-out leaves preferences alone**: they are account data, not session data. `hister_login.py prefs delete --user NAME` removes them, for an account that is deleted (and might be made again under the same name).
 
 ## The forwarding rule (rooms and landing in hister mode)

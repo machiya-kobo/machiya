@@ -987,6 +987,24 @@ class RoomSessionTest(HelperBase):
         status, _, out = self.internal("GET", "/v1/prefs", dict(h, **{"X-Machiya-Room": NIWA_O}))
         self.assertEqual((status, json.loads(out)["reason"]), (401, "wrong-room"))
 
+    def test_prefs_write_is_logged_by_key_and_client(self):
+        _, _, nonce, code, _ = self.trip()
+        rs = self.redeem(code, nonce=nonce)[1]["session"]
+        h = {"X-Machiya-Session": rs, "X-Machiya-Room": KURA_O, "Content-Type": "application/json",
+             "User-Agent": "konbini/0.27 (vaultkit)"}
+        for prefs in ({"palette": "dracula", "theme": "night"}, {"palette": "tokyo-night", "theme": "night"}):
+            body = json.dumps({"prefs": prefs}).encode()
+            status, _, _ = self.internal("PUT", "/v1/prefs", dict(h, **{"Content-Length": str(len(body))}), body)
+            self.assertEqual(status, 200)
+        lines = [l for l in self.err.getvalue().splitlines() if "prefs write" in l]
+        self.assertEqual(lines[-2:], [
+            "hister-login: prefs write via room %s keys=palette,theme changed=palette,theme rev 0->1 "
+            "ua=konbini/0.27 (vaultkit)" % KURA_O,
+            "hister-login: prefs write via room %s keys=palette,theme changed=palette rev 1->2 "
+            "ua=konbini/0.27 (vaultkit)" % KURA_O])
+        self.assertNotIn("tokyo-night", self.err.getvalue())        # key names only, never values
+        self.assertNotIn("dracula", self.err.getvalue())
+
     # the hosted pages' hosts (proxied origins)
 
     def test_proxied_origin_round_trip(self):
