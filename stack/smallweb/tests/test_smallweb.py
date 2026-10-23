@@ -272,6 +272,8 @@ def fake_resolve(host, port, type=0, **kw):
 
 HISTER_DOCS = []
 HISTER_TOKENS = []                               # the X-Access-Token each save carried (None: none)
+HISTER_HELD = set()                              # URLs GET /api/document finds (only_new)
+HISTER_LOOKUPS = []                              # (url asked, X-Access-Token) per GET /api/document
 
 
 class HisterFake(BaseHTTPRequestHandler):
@@ -285,6 +287,15 @@ class HisterFake(BaseHTTPRequestHandler):
         self.send_response(406 if "/skipme" in doc["url"] else 201)          # 406: one of Hister's skip rules
         self.send_header("Content-Length", "0")
         self.end_headers()
+
+    def do_GET(self):
+        url = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("url", [""])[0]
+        HISTER_LOOKUPS.append((url, self.headers.get("X-Access-Token")))
+        body = json.dumps({"url": url}).encode() if url in HISTER_HELD else b""
+        self.send_response(500 if "lookup-fails" in url else 200 if body else 404)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 GEM_PAGES, GOPHER_PAGES = {}, {}                  # filled below, once the ports are known
@@ -754,10 +765,10 @@ class Gateway(unittest.TestCase):
     def docs_for(self, fragment):
         return [d for _, d in HISTER_DOCS if fragment in d["url"]]
 
-    def assert_not_saved(self, url, why):
+    def assert_not_saved(self, url, why, **extra):
         smallweb.hister_state["last_error"] = None
         n, saved = len(HISTER_DOCS), smallweb.store.save_count()
-        code, out = self.save(url)
+        code, out = self.save(url, **extra)
         self.assertEqual(code, 202, url)
         self.assertIn(why, smallweb.hister_state["last_error"] or "", url)
         self.assertEqual((len(HISTER_DOCS), smallweb.store.save_count()), (n, saved), url)
@@ -847,6 +858,45 @@ class Gateway(unittest.TestCase):
         self.assertEqual(len(self.docs_for("/skipme")), 1)                              # sent, and Hister said 406
         status = json.loads(get("/api/status", user=None)[2])
         self.assertEqual((status["hister"]["saved"], status["error"], smallweb.hister_state["fails"]), (saved, None, 0))
+
+    def test_api_save_only_new(self):
+        HISTER_DOCS.clear()
+        HISTER_HELD.clear()
+        HISTER_HELD.update({WEB + "/ok?t=held", WEB + "/ok", WEB + "/ok?t=utm"})
+        WEB_REQUESTS.clear()
+        held = smallweb.hister_state["held"]
+        # held under the asked URL: not fetched, not saved, not an error
+        self.assertEqual(self.save(WEB + "/ok?t=held", only_new=True)[0], 202)
+        self.assertEqual((WEB_REQUESTS, self.docs_for("/ok")), ([], []))
+        # asked in Hister's form: no fragment (smallweb's canonical URL), no utm parameters
+        self.assertEqual(self.save(WEB + "/ok?t=utm&utm_source=feed#x", only_new=True)[0], 202)
+        self.assertEqual(HISTER_LOOKUPS[-1], (WEB + "/ok?t=utm", TOKEN))
+        # the asked URL is new, but it redirects to one Hister holds: fetched, not saved
+        self.assertEqual(self.save(WEB + "/to-ok", only_new=True)[0], 202)
+        self.assertEqual([p for p, _, _ in WEB_REQUESTS], ["/to-ok", "/ok"])
+        self.assertEqual([u for u, _ in HISTER_LOOKUPS[-2:]], [WEB + "/to-ok", WEB + "/ok"])
+        self.assertEqual(self.docs_for("/ok"), [])
+        status = json.loads(get("/api/status", user=None)[2])
+        self.assertEqual((status["hister"]["only_new"], status["hister"]["held"], status["error"]), (True, held + 3, None))
+        # new: saved, with via and query in the metadata
+        code, out = self.save(WEB + "/ok?t=new", origin="https://shiori.test", only_new=True, via="web-result",
+                              query="  old   macs " + "x" * 300)
+        self.assertEqual((code, out["url"]), (202, WEB + "/ok?t=new"))
+        meta = self.docs_for("/ok?t=new")[0]["metadata"]
+        self.assertEqual((meta["source"], meta["smallweb_via"]), ("smallweb", "web-result"))
+        self.assertEqual(meta["smallweb_query"], ("old macs " + "x" * 300)[:200])
+        # a failed lookup never risks a replace
+        self.assert_not_saved(WEB + "/ok?t=lookup-fails", "Hister's lookup answered 500", only_new=True)
+        # without only_new nothing is looked up, as before (Add Page replaces on purpose)
+        n = len(HISTER_LOOKUPS)
+        self.assertEqual(self.save(WEB + "/ok?t=held")[0], 202)
+        self.assertEqual((len(HISTER_LOOKUPS), len(self.docs_for("/ok?t=held"))), (n, 1))
+        self.assertNotIn("smallweb_via", self.docs_for("/ok?t=held")[0]["metadata"])
+        # refusals
+        for extra in ({"via": "Web Result"}, {"via": "x" * 33}, {"via": 5}, {"query": ["a"]}):
+            self.assertEqual(self.save(WEB + "/ok?t=bad", wait=False, **extra)[0], 400, extra)
+        self.assertEqual(self.save(CAP + "/saveme", wait=False, only_new=True)[0], 400)   # http(s) only
+        HISTER_HELD.clear()
 
     def test_gopher(self):
         code, _, body = page(HOLE_URL)

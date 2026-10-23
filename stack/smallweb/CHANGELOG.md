@@ -1,5 +1,11 @@
 # Changelog: smallweb
 
+## 0.4.0
+
+- **`POST /api/save` takes `"only_new": true`** (http(s) only), for Shiori's Save Web Results You Open: the page is saved only if Hister holds neither the asked URL (looked up before fetching) nor the final one (after redirects), in Hister's form of the URL (no fragment, no `utm_*`). A held page counts in `/api/status`'s new `hister.held`; a failed lookup saves nothing (`hister.last_error`), so an automatic save never replaces a page. Without it, saves work as before.
+- **`via` and `query`** (optional) go into the saved page's metadata as `smallweb_via` (1 to 32 of `a-z0-9-`) and `smallweb_query` (cut at 200 characters).
+- `/api/status`'s `hister` has `only_new: true`, so a client can tell this smallweb from an older one that would ignore the field.
+
 ## 0.3.3
 
 - **Form posts are checked against `SMALLWEB_PUBLIC_URL`.** With it set, a post (Accept Certificate, a same-origin save) must come from that origin. Before, smallweb compared the `Origin` or `Referer` to the request's own `Host`, and DNS rebinding sets both, so in open mode another site could post as smallweb. Without `SMALLWEB_PUBLIC_URL` the `Host` check stays: set it.

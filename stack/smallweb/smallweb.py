@@ -10,6 +10,8 @@
   CHANGELOG.md for the landing page's recent deploys (open, like /api/status).
 - POST /api/save {"url"}  a page Shiori asks to have saved: gemini/gopher as a /page read would, or an http(s) page
   fetched once (web.py: private addresses refused unless SMALLWEB_FETCH_ALLOW names them). Never a web proxy.
+  "only_new": true (http(s)) saves it only if Hister holds neither the asked nor the final URL (Shiori's Save Web
+  Results You Open: an opened result never replaces a page Hister has); "via" and "query" go in its metadata.
 
 Egress goes through SMALLWEB_SOCKS (e.g. socks5h://proxy:1080) when set, so capsule hosts never see the server's own IP.
 Gemini certificates are trusted on first use (known hosts in the sqlite file under SMALLWEB_DATA). Private, in
@@ -27,7 +29,7 @@ import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, quote, urljoin, urlsplit
+from urllib.parse import parse_qs, parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import engines   # noqa: E402
@@ -36,7 +38,7 @@ import smolnet   # noqa: E402
 import web       # noqa: E402
 from store import Store   # noqa: E402
 
-VERSION = "0.3.3"
+VERSION = "0.4.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -180,7 +182,8 @@ store = Store(os.path.join(DATA, "smallweb.sqlite3"))
 polite = smolnet.Polite({e["host"]: ENGINE_GAP for e in engines.ENGINES.values()})
 web_polite = smolnet.Polite(default=web.GAP)          # http(s) saves: one connection per host, 1.5 s apart
 health = {k: {"last_ok": None, "last_error": None} for k in engines.ORDER}
-hister_state = {"last_error": None, "fails": 0}      # fails: consecutive saves that didn't reach Hister
+hister_state = {"last_error": None, "fails": 0, "held": 0}   # fails: consecutive saves that didn't reach Hister;
+#                                                              held: only_new saves left alone, Hister had the page
 pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
 save_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)      # POST /api/save: fetched in the background
 save_state = {"pending": 0, "lock": threading.Lock()}
@@ -585,6 +588,7 @@ def save_to_hister(s):
             "smallweb_fetched": int(time.time())}
     if s["cert"]:
         meta["smallweb_cert_sha256"] = s["cert"]
+    meta.update(s.get("meta") or {})
     doc = {"url": s["url"], "title": s["title"], "text": s["text"],
            "html": s.get("html") or "<!DOCTYPE html><html><head><title>%s</title></head><body><article>%s</article>"
                                     "</body></html>" % (render.e(s["title"]), s["body"]),
@@ -613,10 +617,44 @@ def note_save(url, what):
     sys.stderr.write("smallweb save %s: %s\n" % (url, what))
 
 
-def save_web(url, title=""):
+def hister_norm(url):
+    """The URL as Hister stores it (document.normalizeWebURL in v0.20.0; feed-import's hister.norm): no fragment, and
+    no utm / utm_* query parameters; when one is dropped the query is re-encoded as Go's url.Values.Encode does."""
+    u = urlsplit(url)
+    query = u.query
+    if query:
+        pairs = parse_qsl(query, keep_blank_values=True)
+        kept = [(k, v) for k, v in pairs if not (k == "utm" or k.startswith("utm_"))]
+        if len(kept) != len(pairs):
+            kept.sort(key=lambda kv: kv[0])
+            query = urlencode(kept)
+    return urlunsplit((u.scheme, u.netloc, u.path, query, ""))
+
+
+def held(url):
+    """only_new: True when Hister already holds this page, or can't say (a failed lookup never risks a replace)."""
+    req = urllib.request.Request(HISTER + "/api/document?url=" + quote(hister_norm(url), safe=""),
+                                 headers=dict(hister_headers(), Accept="application/json"))
+    try:
+        with HISTER_OPENER.open(req, timeout=15):
+            pass
+    except urllib.error.HTTPError as ex:
+        if ex.code == 404:
+            return False
+        note_save(url, "not saved: Hister's lookup answered %d" % ex.code)
+        return True
+    except (urllib.error.URLError, OSError) as ex:
+        note_save(url, "not saved: Hister's lookup failed: %s" % ex)
+        return True
+    hister_state["held"] += 1
+    return True
+
+
+def save_web(url, title="", only_new=False, meta=None):
     """An http(s) page Shiori asked to have saved: fetched once (checked, web.fetch), read, and sent to Hister under
-    its final URL. A private address is `blocked: private address`, not a failure."""
-    if not HISTER:
+    its final URL. A private address is `blocked: private address`, not a failure. only_new: never a page Hister
+    holds, under the asked URL (checked before fetching) or the final one."""
+    if not HISTER or (only_new and held(url)):
         return
     try:
         r = web.fetch(url, FETCH_ALLOW, SOCKS, web_polite, USER_AGENT)
@@ -624,16 +662,26 @@ def save_web(url, title=""):
         return note_save(url, "blocked: %s" % ex)
     except web.WebError as ex:
         return note_save(url, str(ex))
+    if only_new and hister_norm(r.url) != hister_norm(url) and held(r.url):
+        return
     page_title, text, html = web.read_page(r.body, r.mime, r.charset, r.url, title)
     save_to_hister({"url": r.url, "title": page_title, "text": text, "html": html, "scheme": urlsplit(r.url).scheme,
-                    "mime": r.mime, "cert": None, "sha": hashlib.sha256(r.body).hexdigest()})
+                    "mime": r.mime, "cert": None, "sha": hashlib.sha256(r.body).hexdigest(), "meta": meta})
 
 
-def queue_save(url, title=""):
+VIA = re.compile(r"[a-z0-9-]{1,32}")
+
+
+def queue_save(url, title="", only_new=False, via="", query=""):
     """POST /api/save: fetch a page Shiori opened directly (in a Gemini app, so it never passed through /page) and
-    save it exactly as a /page read would; or an http(s) page (Shiori's Add Page), which a browser page can't fetch
-    itself. -> (status, body)."""
+    save it exactly as a /page read would; or an http(s) page (Shiori's Add Page, or a web result opened with Save
+    Web Results You Open: only_new), which a browser page can't fetch itself. -> (status, body)."""
     url = (url or "").strip()
+    if not isinstance(via, str) or (via and not VIA.fullmatch(via)):
+        return 400, {"error": "via must be 1 to 32 of a-z, 0-9 and -"}
+    if not isinstance(query, str):
+        return 400, {"error": "query must be text"}
+    meta = {k: v for k, v in (("smallweb_via", via), ("smallweb_query", " ".join(query.split())[:200])) if v}
     if url.split(":", 1)[0].lower() in web.DEFAULT_PORT:
         try:
             url = web.check(url, FETCH_ALLOW)
@@ -642,7 +690,9 @@ def queue_save(url, title=""):
         except web.Blocked:
             return 400, {"error": "a private vault's address is never saved"}
         title = " ".join(str(title or "").split())[:500]
-        work = lambda: save_web(url, title)         # noqa: E731
+        work = lambda: save_web(url, title, only_new, meta)         # noqa: E731
+    elif only_new:
+        return 400, {"error": "only_new is for http:// and https:// pages"}
     else:
         try:
             url = smolnet.canonical(url)
@@ -652,7 +702,7 @@ def queue_save(url, title=""):
         def work():
             p = open_page(url)
             if p.save:
-                save_to_hister(p.save)
+                save_to_hister(dict(p.save, meta=meta))
     with save_state["lock"]:
         if save_state["pending"] >= MAX_PENDING:
             return 429, {"error": "too many saves waiting; try again later"}
@@ -697,6 +747,7 @@ def status():
             "version": VERSION, "auth": AUTH, "socks": bool(SOCKS),
             "sources": {k: dict(v) for k, v in health.items()},
             "hister": {"enabled": bool(HISTER), "token": HISTER_TOKEN is not None, "saved": store.save_count(), "queued": save_state["pending"],
+                       "only_new": True, "held": hister_state["held"],
                        "last_error": hister_state["last_error"]},
             "known_hosts": store.tofu_count()}
 
@@ -929,7 +980,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(400, {"error": "invalid JSON"})
             if not isinstance(data, dict):
                 return self.send_json(400, {"error": "the body must be a JSON object or a form"})
-            code, body = queue_save(str(data.get("url") or ""), data.get("title") or "")
+            code, body = queue_save(str(data.get("url") or ""), data.get("title") or "",
+                                    data.get("only_new") in (True, "1", "true"), data.get("via") or "",
+                                    data.get("query") or "")
             return self.send_json(code, body)
         if not own:
             return self.send(403, "cross-site form post refused\n", "text/plain")

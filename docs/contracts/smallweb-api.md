@@ -87,19 +87,24 @@ A page read through `/page` is saved (in the background) with `POST http://histe
 - Find them in Hister with `metadata.source:smallweb`. `gemini://` and `gopher://` URLs are accepted by Hister (`201`), and `%23` in a selector is kept.
 - The skip rule for your own `*.ts.net` pages (`^https?://([^/]*\.)?example\.ts\.net…`, see `config/hister/skip-rules.txt`) keeps the extension from saving the proxy URLs.
 
-## `POST /api/save {"url": "…", "title": "…"}`
+## `POST /api/save {"url": "…", "title": "…", "only_new": true, "via": "…", "query": "…"}`
 
-Two callers:
+Three callers:
 - Shiori's "In a Gemini App" setting: a page opened directly in a Gemini client never passes through `/page`, so Shiori asks smallweb to save it (`gemini://`, `gopher://`).
 - Shiori's Add Page action and share target: an `http://` or `https://` page. A browser page can't download other sites (CORS), and Hister's `POST /api/add` with only a URL doesn't fetch the page, so smallweb fetches it and sends Hister the page.
+- Shiori's hosted pages with Save Web Results You Open on (0.4.0; off by default): a web result the owner opens, sent with `"only_new": true, "via": "web-result"` and the search as `query`.
 
 The request:
 - Owner-only. The request's `Origin` must be one of: smallweb's own; `hister://` (the native apps); or one listed in `SMALLWEB_ORIGINS` (Shiori's hosted pages, which reach smallweb through a `/smallweb/` route on the web server that hosts them, e.g. `https://shiori.example.ts.net`). With no `Origin`, the request is refused.
 - The body is JSON (`Content-Type: application/json`, an object) or a form. `url` is required. `title` is optional and used for http(s) only, when the page has no title of its own.
+- `only_new` (0.4.0; JSON `true`, or `1`/`true` in a form; http(s) only): save the page only if Hister holds **neither** the asked URL **nor** the final one, so an automatic save never replaces a page Hister has (its `api/add` replaces the metadata). smallweb asks `GET /api/document?url=` in Hister's own form of the URL (no fragment, no `utm`/`utm_*` parameters): for the asked URL before fetching, and for the final URL after any redirect. A page Hister holds isn't saved and counts in `/api/status`'s `hister.held`. A lookup that fails (Hister down, any answer but `200`/`404`) isn't saved either and goes in `hister.last_error`. Without `only_new` nothing is looked up, as before: Add Page replaces on purpose.
+- `via` (0.4.0, optional): 1 to 32 of `a-z`, `0-9` and `-`, saved as `metadata.smallweb_via` (Shiori sends `web-result`). `query` (optional): the search that found the page, whitespace collapsed, cut at 200 characters, saved as `metadata.smallweb_query`. `metadata.source` stays `smallweb`: smallweb fetched it.
+- A client shows an option that sends `only_new` only when `/api/status` has `hister.enabled` and `hister.only_new` both `true`. An older smallweb ignores the field and would replace the page.
 - Answers `202 {"queued": true, "url": "<canonical>"}` at once; the fetch and the save happen in the background. The canonical URL:
   - gemini and gopher: as in `/api/search`;
   - http(s): lowercase scheme and host (an international name in its `xn--` form), no default port (`80`, `443`), no fragment, non-ASCII in the path and query percent-encoded.
 - `400 {"error": "…"}`:
+  - `only_new` with a `gemini://` or `gopher://` URL; a `via` that isn't 1 to 32 of `a-z`, `0-9`, `-`; a `query` that isn't text;
   - a URL that isn't `gemini://`, `gopher://`, `http://` or `https://`;
   - http(s): a user name or password in the URL (`user@`), more than 2048 characters, spaces or control characters, no host, an IP literal in a private range (below, unless `SMALLWEB_FETCH_ALLOW` lists it), or a path that is a private Kura vault's address (below);
   - a body that isn't a JSON object or a form.
@@ -158,7 +163,8 @@ Errors, per save:
 ```json
 {"ok": true, "ready": true, "error": null, "version": "0.2.0", "auth": "tailscale", "socks": true,
  "sources": {"tlgs": {"last_ok": 1767225600, "last_error": null}, "kennedy": {…}, "veronica": {…}},
- "hister": {"enabled": true, "saved": 12, "queued": 0, "last_error": null}, "known_hosts": 7}
+ "hister": {"enabled": true, "token": true, "saved": 12, "queued": 0, "only_new": true, "held": 3, "last_error": null},
+ "known_hosts": 7}
 ```
 
 - `ready` is always `true` once smallweb answers. `error` is `null` unless smallweb itself is broken: the data dir isn't writable, the SOCKS proxy failed twice in a row, or Hister saves failed three times in a row (Hister's own 406/422 answers don't count). A monitoring probe on this endpoint fails on it. An engine or a capsule being down is not an error: see `sources.*.last_error`.
