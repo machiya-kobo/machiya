@@ -1,5 +1,9 @@
 # Changelog: smallweb
 
+## 0.4.1
+
+- The python:3.13-alpine base is re-pinned to its current digest. 0.4.0 was tagged but never built (push-image refused its stale pin), so 0.4.1 is the first release with `only_new`.
+
 ## 0.4.0
 
 - **`POST /api/save` takes `"only_new": true`** (http(s) only), for Shiori's Save Web Results You Open: the page is saved only if Hister holds neither the asked URL (looked up before fetching) nor the final one (after redirects), in Hister's form of the URL (no fragment, no `utm_*`). A held page counts in `/api/status`'s new `hister.held`; a failed lookup saves nothing (`hister.last_error`), so an automatic save never replaces a page. Without it, saves work as before.
