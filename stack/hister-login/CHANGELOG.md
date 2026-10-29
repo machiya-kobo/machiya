@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.7.1
+
+- The image's Python base is re-pinned to today's digest. 0.7.0 was tagged but never built: its pin had gone stale.
+
 ## 0.7.0
 
 - An OAuth 2.1 server for one public MCP connector (Claude Duet reading saved pages and notes; owner, 2026-10-28). It's off until `HISTER_LOGIN_OAUTH_PORT` is set, and runs on a port of its own that answers only `/oauth/…` and `/.well-known/oauth-authorization-server`.
