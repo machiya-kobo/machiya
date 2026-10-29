@@ -1,7 +1,7 @@
 # hister-login (machiya-kobo/machiya stack/hister-login): Hister's users as the one sign-in for the Machiya rooms.
 # Stdlib Python plus vaultkit (vendored here at a tag with ../../vendor.sh, like the other consumers: markdown + pyyaml).
 # Build context: this directory. Runs as uid 1000; the SQLite state lives in /data (mount /srv/hister-login there).
-FROM public.ecr.aws/docker/library/python:3.13-slim@sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39
+FROM public.ecr.aws/docker/library/python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
 RUN pip install --no-cache-dir "markdown>=3.11" pyyaml==6.0.3 \
  && useradd --uid 1000 --home-dir /data --no-create-home --shell /usr/sbin/nologin hister-login
 WORKDIR /app

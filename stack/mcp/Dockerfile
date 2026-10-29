@@ -1,7 +1,7 @@
 # machiya-mcp (machiya-kobo/machiya stack/mcp): Machiya's MCP server. Stdlib Python for the server itself; the notes write tools
 # also need git, ssh and vaultkit (vendored here at a tag with ../../vendor.sh, like the other consumers: markdown +
 # pyyaml). Build context: this directory. Runs as uid 1000; the audit log and the notes write clone live in /data.
-FROM public.ecr.aws/docker/library/python:3.13-slim@sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39
+FROM public.ecr.aws/docker/library/python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
 RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client ca-certificates tzdata \
  && rm -rf /var/lib/apt/lists/* \
  && pip install --no-cache-dir "markdown>=3.11" pyyaml==6.0.3 \
