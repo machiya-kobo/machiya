@@ -93,7 +93,28 @@ Room tokens (`mht_…`, [identity.md](../identity.md#room-tokens)) are for pm, [
 
 `/machiya/sessions` lists:
 - every browser and app signed in through the helper, and the rooms each browser has opened, with "Sign Out" for one and "Sign Out Everywhere";
-- the room tokens (made, last used, Revoke; New Token).
+- the room tokens (made, last used, Revoke; New Token);
+- the connectors you allowed through the OAuth server (where each returns to, what it reads, last used, Revoke), when that server is on.
+
+### The OAuth server
+
+**One public MCP connector** (0.7.0; the owner's decision of 2026-10-28): Claude Duet, which runs in Anthropic's cloud, searches and reads your saved pages and default-vault notes through a read-only [machiya-mcp](mcp.md) on a Tailscale Funnel host. The helper is that connector's OAuth 2.1 server. Hister, Kura and the helper's other ports stay tailnet-only.
+
+- **Its own port** (`HISTER_LOGIN_OAUTH_PORT`; off when unset). Funnel sends it `/oauth/` and `/.well-known/oauth-authorization-server`; everything else on that host goes to the connector. It answers nothing else.
+- **Registration is open** (RFC 7591, so Duet's own "Add custom connector" form works), but a client may only name return addresses in `HISTER_LOGIN_OAUTH_REDIRECTS` (Claude's callback). At most 10 an hour; one nobody allowed is forgotten after a day.
+- **Allowing it takes you.** `/oauth/authorize` checks the request first:
+  - an unknown client or a return address it didn't register gets a page, never a redirect;
+  - S256 PKCE is required;
+  - the `resource` must be the connector's.
+- **Then it signs you in on that host** with the usual room trip through the helper's sign-in on Hister's host. That host is tailnet-only, so only a tailnet device can finish it. The host's sign-in lasts an hour and opens no room.
+- **Allow or Deny:** only users in `HISTER_LOGIN_OAUTH_USERS` see the page.
+- **Tokens:**
+  - The code (`mha_`) lasts 60 s and works once.
+  - The access token (`mho_`) lasts an hour, bound to the connector's address.
+  - The refresh token (`mhf_`) changes on every use, and a spent one coming back revokes the connector. So does a spent code.
+  - A connector ends after 30 days unused, 90 in all, or when you revoke it on the sessions page.
+- **Only the connector checks a token:** `/v1/check` with `X-Machiya-Room: mcp-public` answers the user, the scopes (`pages:read notes:read`), the resource and the client. An access token is no use in a room, at Hister or for the settings, and the connector can't pass anything else as one.
+- **Kept as hashes, never logged:** tokens, codes, the state and the verifier.
 
 ### Apps
 

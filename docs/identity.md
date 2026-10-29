@@ -275,6 +275,7 @@ Send it as `Authorization: Bearer mht_…`, from a file, never in a URL or argv.
 | landing's owner reads | `LANDING_TOKEN_FILE` = a room token | kura, niwa, konbini |
 | an agent → machiya-mcp, smallweb | a room token (the machiya plugin's `MACHIYA_TOKEN_FILE`) | machiya-mcp, smallweb |
 | everything that calls **Hister** (Kura's push, the rooms' own Hister calls, importers, scripts) | Hister's token, unchanged | Hister |
+| Claude Duet → the public connector (`mcp-public`, 2026-10-28) | an OAuth access token (`mho_`, an hour) from hister-login's [OAuth server](services/hister-login.md#the-oauth-server), allowed by you from a tailnet device | that connector only: saved pages and default-vault notes, read-only; no room, never Hister |
 
 ### Moving to it (readers first, writers after)
 

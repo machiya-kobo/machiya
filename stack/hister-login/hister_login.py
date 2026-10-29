@@ -25,6 +25,13 @@ Two ports:
            POST /v1/signout,
            GET /v1/nginx (nginx auth_request), GET /healthz (the rooms': 503 unless the helper AND Hister are fine),
            GET/PUT /v1/prefs (0.2.0: a room's /api/prefs, forwarded with the caller's own credential)
+  oauth    (HISTER_LOGIN_OAUTH_PORT, off when unset; 0.7.0): an OAuth 2.1 server for one public MCP connector, on the
+           connector's own host (HISTER_LOGIN_OAUTH_ISSUER, Tailscale Funnel sends it /oauth/… and the metadata):
+           GET /.well-known/oauth-authorization-server, POST /oauth/register (dynamic registration, redirects only from
+           HISTER_LOGIN_OAUTH_REDIRECTS), GET/POST /oauth/authorize (the owner signs in through the usual room trip,
+           which only a tailnet device can finish, then Allow or Deny), GET /oauth/callback, POST /oauth/token
+           (S256 PKCE; mho_ access tokens for 1 h, mhf_ refresh tokens that rotate), POST /oauth/revoke,
+           /oauth/static/…; nothing else. The connector asks /v1/check about an mho_, naming itself in X-Machiya-Room
 
 State: one SQLite file (HISTER_LOGIN_DB). An id is stored only as its SHA-256; the Hister session it maps to is
 stored raw (the helper must present it to Hister). The settings that follow each Hister user are a second file
@@ -62,7 +69,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.6.1"
+VERSION = "0.7.0"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -166,6 +173,55 @@ class Settings:
         self.providers = [p.strip().lower() for p in (env.get("HISTER_LOGIN_PROVIDERS") or "").split(",")
                           if p.strip()]
         self.oidc_label = (env.get("HISTER_LOGIN_OIDC_LABEL") or "Tailscale").strip()
+        self.oauth(env)
+
+    def oauth(self, env):
+        """0.7.0: the OAuth server's settings. Off (oauth_port None) without HISTER_LOGIN_OAUTH_PORT; with it, a bad
+        setting refuses to start: the issuer is the connector's own https origin (never http, even on a loopback host:
+        the sign-in trip returns only to https addresses, histerauth.safe_return), the resource an address on it, every
+        redirect an exact https address, and the users named."""
+        self.oauth_port, self.oauth_origin, self.oauth_resource = None, None, ""
+        self.oauth_redirects, self.oauth_users = [], []
+        raw = (env.get("HISTER_LOGIN_OAUTH_PORT") or "").strip()
+        if not raw:
+            return
+        if not re.fullmatch(r"[0-9]{1,5}", raw):
+            raise SystemExit("hister-login: HISTER_LOGIN_OAUTH_PORT must be a port number")
+        issuer = (env.get("HISTER_LOGIN_OAUTH_ISSUER") or "").strip().rstrip("/")
+        origin = histerauth.origin_of(issuer)
+        if not origin or origin != issuer.lower() or not origin.startswith("https://"):
+            raise SystemExit("hister-login: HISTER_LOGIN_OAUTH_ISSUER must be the connector's own address, "
+                             "https://host[:port] (no path)")
+        if origin == self.origin or origin in self.proxied or origin in self.rooms.values():
+            raise SystemExit("hister-login: HISTER_LOGIN_OAUTH_ISSUER must be a host of its own, not Hister's, a "
+                             "room's or the hosted pages'")
+        resource = (env.get("HISTER_LOGIN_OAUTH_RESOURCE") or "").strip()
+        u = urlsplit(resource)
+        if histerauth.origin_of(resource) != origin or not u.path.startswith("/") or u.query or u.fragment \
+                or "#" in resource or "?" in resource:
+            raise SystemExit("hister-login: HISTER_LOGIN_OAUTH_RESOURCE must be the connector's address on the "
+                             "issuer's host, %s/mcp" % origin)
+        redirects = [r.strip() for r in (env.get("HISTER_LOGIN_OAUTH_REDIRECTS") or "").split(",") if r.strip()]
+        for r in redirects:
+            p = urlsplit(r)
+            if p.scheme != "https" or not p.hostname or "*" in r or p.fragment or "#" in r or "@" in p.netloc \
+                    or any(ord(c) < 33 or ord(c) == 127 or c == "\\" for c in r):
+                raise SystemExit("hister-login: HISTER_LOGIN_OAUTH_REDIRECTS is a list of exact https addresses, "
+                                 "not %r" % r)
+        users = [x.strip() for x in (env.get("HISTER_LOGIN_OAUTH_USERS") or "").split(",") if x.strip()]
+        if not users or "*" in users:
+            raise SystemExit("hister-login: HISTER_LOGIN_OAUTH_USERS names the Hister users who may add a connector "
+                             "(never *)")
+        if not redirects:
+            LOG("hister-login: HISTER_LOGIN_OAUTH_REDIRECTS is empty: every registration is refused")
+        self.oauth_port, self.oauth_origin, self.oauth_resource = int(raw), origin, resource
+        self.oauth_redirects, self.oauth_users = redirects, users
+        self.oauth_secure = True
+        name = histerauth.HOST_PREFIX + self.sso + "_oauth"
+        self.oauth_cookie, self.oauth_state = name, name + "_state"
+        p = urlsplit(origin)
+        self.return_hosts = sorted(set(self.return_hosts) | {p.hostname + ("" if p.port in (None, 443)
+                                                                            else ":%d" % p.port)})
 
 
 def token_rooms(env):
@@ -329,9 +385,70 @@ CREATE TABLE IF NOT EXISTS ended (
   sid_hash TEXT PRIMARY KEY,
   at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS oauth_clients (
+  client_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  redirect_uris TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  approved_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS oauth_codes (
+  code_hash TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  redirect_uri TEXT NOT NULL,
+  challenge TEXT NOT NULL,
+  resource TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  username TEXT NOT NULL,
+  user_id INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER NOT NULL,
+  grant_id TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS oauth_grants (
+  grant_id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  username TEXT NOT NULL,
+  user_id INTEGER NOT NULL DEFAULT 0,
+  scope TEXT NOT NULL,
+  resource TEXT NOT NULL,
+  refresh_hash TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_used INTEGER NOT NULL,
+  refresh_expires INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS oauth_grants_refresh ON oauth_grants (refresh_hash);
+CREATE TABLE IF NOT EXISTS oauth_access (
+  token_hash TEXT PRIMARY KEY,
+  grant_id TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oauth_spent (
+  refresh_hash TEXT PRIMARY KEY,
+  grant_id TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
 """
 CODE_TTL = 60                           # a code's life: the browser is on its way back already
 ROOM_SEEN_EVERY = 60
+
+# 0.7.0: the OAuth server (HISTER_LOGIN_OAUTH_PORT). Its prefixes are new, so no other credential is ever read as one
+CLIENT_PREFIX, OCODE_PREFIX, ACCESS_PREFIX, REFRESH_PREFIX = "mhk_", "mha_", "mho_", "mhf_"
+CLIENT_RE = re.compile(r"mhk_[A-Za-z0-9_-]{22}\Z")     # a client_id: public, 16 random bytes
+OCODE_RE = re.compile(r"mha_[A-Za-z0-9_-]{43}\Z")
+ACCESS_RE = re.compile(r"mho_[A-Za-z0-9_-]{43}\Z")
+REFRESH_RE = re.compile(r"mhf_[A-Za-z0-9_-]{43}\Z")
+OAUTH_PREFIXES = (CLIENT_PREFIX, OCODE_PREFIX, ACCESS_PREFIX, REFRESH_PREFIX)
+OAUTH_SCOPES = ("pages:read", "notes:read")
+OAUTH_CALLBACK = "/oauth/callback"
+OAUTH_CODE_TTL = 60
+ACCESS_TTL = 3600
+REFRESH_IDLE, REFRESH_MAX = 30 * 86400, 90 * 86400
+OAUTH_SIGNIN_TTL = 3600                 # the connector host's own sign-in: long enough to say Allow, no longer
+REGISTER_PER_HOUR = 10
+UNUSED_CLIENT_TTL = 86400               # a client nobody ever allowed is forgotten after a day
+OAUTH_ROOM = "mcp-public"              # the connector names itself so in X-Machiya-Room (it has no room session)
+CHALLENGE_RE = re.compile(r"[A-Za-z0-9._~-]{43,128}\Z")    # RFC 7636: the verifier's alphabet and length
 
 
 class Store:
@@ -355,7 +472,8 @@ class Store:
                 self.db.execute("PRAGMA journal_mode=WAL")
             self.db.execute("PRAGMA busy_timeout=3000")
             self.db.executescript(SCHEMA)
-            self.db.execute("PRAGMA user_version=2")    # 2 (0.3.0): room sessions, codes, room tokens, ended
+            self.db.execute("PRAGMA user_version=3")    # 2 (0.3.0): room sessions, codes, room tokens, ended;
+            #                                             3 (0.7.0): the OAuth server's clients, codes and grants
 
     def q(self, sql, args=()):
         with self.lock:
@@ -434,10 +552,12 @@ class Store:
 
     # room sessions (0.3.0)
 
-    def create_room(self, parent, audience):
+    def create_room(self, parent, audience, ttl=0):
         rsid = histerauth.ROOM_PREFIX + b64e(secrets.token_bytes(32))
         t = now()
         expires = parent["created_at"] + CAP_DAYS * 86400
+        if ttl:
+            expires = min(expires, t + ttl)
         self.q("INSERT INTO room_sessions VALUES (?,?,?,?,?,?)", (sha(rsid), parent["sid_hash"], audience, t, t,
                                                                    expires))
         return rsid, max(expires - t, 60)
@@ -524,6 +644,140 @@ class Store:
         with self.lock:
             return self.db.execute(sql, args).rowcount
 
+    # the OAuth server (0.7.0): clients by id (public), codes, grants and tokens only as hashes
+
+    def add_client(self, name, redirect_uris):
+        client_id = CLIENT_PREFIX + b64e(secrets.token_bytes(16))
+        self.q("INSERT INTO oauth_clients VALUES (?,?,?,?,0)", (client_id, name, json.dumps(redirect_uris), now()))
+        return client_id
+
+    def client(self, client_id):
+        if not isinstance(client_id, str) or not CLIENT_RE.match(client_id):
+            return None
+        rows = self.q("SELECT * FROM oauth_clients WHERE client_id = ?", (client_id,))
+        if not rows:
+            return None
+        row = dict(rows[0])
+        row["redirect_uris"] = json.loads(row["redirect_uris"])
+        return row
+
+    def clients_since(self, t):
+        return self.q("SELECT count(*) FROM oauth_clients WHERE created_at > ?", (t,))[0][0]
+
+    def create_ocode(self, client_id, redirect_uri, challenge, resource, scope, username, user_id):
+        code = OCODE_PREFIX + b64e(secrets.token_bytes(32))
+        self.q("INSERT INTO oauth_codes VALUES (?,?,?,?,?,?,?,?,?,'')", (
+            sha(code), client_id, redirect_uri, challenge, resource, scope, username, user_id,
+            now() + OAUTH_CODE_TTL))
+        self.q("UPDATE oauth_clients SET approved_at = ? WHERE client_id = ?", (now(), client_id))
+        return code
+
+    def take_ocode(self, code):
+        """The code's row, once. A code that comes back after it was spent revokes the grant it made (RFC 6749
+        4.1.2: someone else has it); None then, and when unknown or expired."""
+        if not isinstance(code, str) or not OCODE_RE.match(code):
+            return None
+        with self.lock:
+            row = self.db.execute("SELECT * FROM oauth_codes WHERE code_hash = ?", (sha(code),)).fetchone()
+            if row is None:
+                return None
+            row = dict(row)
+            if row["grant_id"]:
+                self._drop_grant(row["grant_id"])
+                LOG("hister-login: oauth: a spent code came back; its grant was revoked")
+                return None
+            self.db.execute("UPDATE oauth_codes SET grant_id = '-' WHERE code_hash = ?", (row["code_hash"],))
+        return row if row["expires_at"] > now() else None
+
+    def create_grant(self, code_row):
+        """A spent code's grant: -> (access, refresh)."""
+        grant_id = secrets.token_hex(8)
+        refresh = REFRESH_PREFIX + b64e(secrets.token_bytes(32))
+        t = now()
+        self.q("INSERT INTO oauth_grants VALUES (?,?,?,?,?,?,?,?,?,?,?)", (
+            grant_id, code_row["client_id"], code_row["username"], code_row["user_id"], code_row["scope"],
+            code_row["resource"], sha(refresh), t, t, t + REFRESH_IDLE, t + REFRESH_MAX))
+        self.q("UPDATE oauth_codes SET grant_id = ? WHERE code_hash = ?", (grant_id, code_row["code_hash"]))
+        return self._access(grant_id), refresh
+
+    def _access(self, grant_id):
+        access = ACCESS_PREFIX + b64e(secrets.token_bytes(32))
+        self.q("INSERT INTO oauth_access VALUES (?,?,?)", (sha(access), grant_id, now() + ACCESS_TTL))
+        return access
+
+    def grant(self, grant_id):
+        rows = self.q("SELECT * FROM oauth_grants WHERE grant_id = ?", (grant_id,))
+        return dict(rows[0]) if rows else None
+
+    def rotate(self, refresh, client_id):
+        """A refresh token for a new pair: -> ("ok", grant, access, refresh) | ("reused",) | ("bad",). The old one
+        is spent; when a spent one comes back, the whole grant goes (OAuth 2.1 4.3.1: one of the two copies is
+        someone else's)."""
+        if not isinstance(refresh, str) or not REFRESH_RE.match(refresh):
+            return ("bad",)
+        h, t = sha(refresh), now()
+        with self.lock:
+            row = self.db.execute("SELECT * FROM oauth_grants WHERE refresh_hash = ?", (h,)).fetchone()
+            if row is None:
+                spent = self.db.execute("SELECT grant_id FROM oauth_spent WHERE refresh_hash = ?", (h,)).fetchone()
+                if spent is None:
+                    return ("bad",)
+                self._drop_grant(spent[0])
+                return ("reused",)
+            row = dict(row)
+            if row["client_id"] != client_id or row["refresh_expires"] <= t or row["expires_at"] <= t:
+                return ("bad",)
+            new = REFRESH_PREFIX + b64e(secrets.token_bytes(32))
+            self.db.execute("INSERT OR REPLACE INTO oauth_spent VALUES (?,?,?)", (h, row["grant_id"], t))
+            self.db.execute("UPDATE oauth_grants SET refresh_hash = ?, last_used = ?, refresh_expires = ? "
+                            "WHERE grant_id = ?", (sha(new), t, min(t + REFRESH_IDLE, row["expires_at"]),
+                                                   row["grant_id"]))
+        return ("ok", row, self._access(row["grant_id"]), new)
+
+    def get_access(self, access):
+        """A live access token's grant (with its client), or None."""
+        if not isinstance(access, str) or not ACCESS_RE.match(access):
+            return None
+        rows = self.q("SELECT g.*, a.expires_at AS access_expires FROM oauth_access a JOIN oauth_grants g "
+                      "ON g.grant_id = a.grant_id WHERE a.token_hash = ?", (sha(access),))
+        if not rows:
+            return None
+        row = dict(rows[0])
+        if row["access_expires"] <= now() or row["expires_at"] <= now():
+            return None
+        if now() - row["last_used"] >= ROOM_SEEN_EVERY:
+            self.q("UPDATE oauth_grants SET last_used = ? WHERE grant_id = ?", (now(), row["grant_id"]))
+        return row
+
+    def revoke_value(self, value):
+        """POST /oauth/revoke: a refresh token ends its grant; an access token only itself."""
+        if isinstance(value, str) and REFRESH_RE.match(value):
+            rows = self.q("SELECT grant_id FROM oauth_grants WHERE refresh_hash = ?", (sha(value),))
+            if rows:
+                self.revoke_grant(rows[0][0])
+        elif isinstance(value, str) and ACCESS_RE.match(value):
+            self.q("DELETE FROM oauth_access WHERE token_hash = ?", (sha(value),))
+
+    def revoke_grant(self, grant_id, username=None):
+        """-> how many (0 or 1). With `username`, only that user's (the sessions page)."""
+        with self.lock:
+            if username is not None and not self.db.execute(
+                    "SELECT 1 FROM oauth_grants WHERE grant_id = ? AND username = ?", (grant_id, username)).fetchone():
+                return 0
+            return self._drop_grant(grant_id)
+
+    def _drop_grant(self, grant_id):
+        """(lock held) a grant with its access tokens and spent refresh tokens."""
+        self.db.execute("DELETE FROM oauth_access WHERE grant_id = ?", (grant_id,))
+        self.db.execute("DELETE FROM oauth_spent WHERE grant_id = ?", (grant_id,))
+        return self.db.execute("DELETE FROM oauth_grants WHERE grant_id = ?", (grant_id,)).rowcount
+
+    def grants_of(self, username):
+        return [dict(r) for r in self.q(
+            "SELECT g.*, c.name, c.redirect_uris FROM oauth_grants g LEFT JOIN oauth_clients c "
+            "ON c.client_id = g.client_id WHERE g.username = ? AND g.expires_at > ? ORDER BY g.created_at",
+            (username, now()))]
+
     def of_user(self, user_id):
         return [dict(r) for r in self.q("SELECT rowid, * FROM sessions WHERE user_id = ? AND expires_at > ? "
                                         "ORDER BY last_seen DESC", (user_id, now()))]
@@ -543,6 +797,15 @@ class Store:
                             (t,))
             self.db.execute("DELETE FROM tokens WHERE expires_at > 0 AND expires_at <= ?", (t,))
             self.db.execute("DELETE FROM ended WHERE at <= ?", (t - OUT_MAX_AGE,))
+            # the OAuth server's: spent codes once they're too old to matter, dead tokens and grants, clients never
+            # allowed after a day
+            self.db.execute("DELETE FROM oauth_codes WHERE expires_at <= ?", (t - 86400,))
+            self.db.execute("DELETE FROM oauth_access WHERE expires_at <= ?", (t,))
+            for (gid,) in self.db.execute("SELECT grant_id FROM oauth_grants WHERE refresh_expires <= ? OR "
+                                          "expires_at <= ?", (t, t)).fetchall():
+                self._drop_grant(gid)
+            self.db.execute("DELETE FROM oauth_clients WHERE approved_at = 0 AND created_at <= ? AND client_id NOT IN "
+                            "(SELECT client_id FROM oauth_grants)", (t - UNUSED_CLIENT_TTL,))
             return n
 
     def count(self):
@@ -584,7 +847,15 @@ class Login:
           - a room session (mhr_) must be one of those origins' (else "wrong-room"), and its helper session alive;
           - a room token (mht_) must name the room's own origin (the first);
           - a browser's helper id (the old shared-domain cookie) and Hister's raw token only while
-            HISTER_LOGIN_LEGACY allows them (else "legacy-off"); an app's id (mhs_, kind app) in every room."""
+            HISTER_LOGIN_LEGACY allows them (else "legacy-off"); an app's id (mhs_, kind app) in every room;
+          - an OAuth access token (mho_, 0.7.0) only from the connector itself (X-Machiya-Room: mcp-public), and
+            nothing else from it; it never goes to Hister. The OAuth server's other values (mhk_, mha_, mhf_) are never
+            credentials.
+          - a room session made for the connector's host (its sign-in, to say Allow) is good in no room."""
+        if isinstance(value, str) and value.startswith(OAUTH_PREFIXES):
+            return self.resolve_oauth(value, rooms) if value.startswith(ACCESS_PREFIX) else ("out", "signed-out")
+        if rooms == [OAUTH_ROOM]:
+            return ("out", "wrong-room")
         if kind == "sid" and isinstance(value, str) and value.startswith(histerauth.ROOM_PREFIX):
             kind = "room"
         if kind == "sid" and isinstance(value, str) and value.startswith(histerauth.RTOKEN_PREFIX):
@@ -593,7 +864,7 @@ class Login:
             room = self.store.get_room(value)
             if room is None:
                 return ("out", "signed-out")
-            if rooms is not None and room["audience"] not in rooms:
+            if room["audience"] == self.s.oauth_origin or rooms is not None and room["audience"] not in rooms:
                 return ("out", "wrong-room")
             parent = self.store.by_hash(room["parent"])
             if parent is None:
@@ -629,6 +900,35 @@ class Login:
         if rooms is not None:
             self.legacy_seen("Hister's raw token", rooms)
         return ("ok", {"username": answer[1], "user_id": answer[2], "kind": "hister-token", "via": "token"})
+
+    def resolve_oauth(self, value, rooms):
+        """An access token (mho_) asked about by the connector: ("ok", info with its scopes, resource and client) or
+        ("out", reason). A user since taken out of HISTER_LOGIN_OAUTH_USERS is out at once."""
+        if self.s.oauth_port is None or rooms != [OAUTH_ROOM]:
+            return ("out", "wrong-room")
+        row = self.store.get_access(value)
+        if row is None:
+            return ("out", "signed-out")
+        if row["username"] not in self.s.oauth_users:
+            return ("out", "not-allowed")
+        return ("ok", {"username": row["username"], "user_id": row["user_id"], "kind": "oauth", "via": "oauth",
+                       "scopes": row["scope"], "resource": row["resource"], "client_id": row["client_id"]})
+
+    def oauth_signed_in(self, headers):
+        """The connector host's sign-in cookie -> ("ok", helper row) | ("out", None) | ("down"/"off", None): a room
+        session made for that host only, its helper session alive and checked as every room's is."""
+        for value in histerauth.HisterAuth.cookie_values(headers.get("Cookie"), self.s.oauth_cookie)[:4]:
+            room = self.store.get_room(value)
+            if room is None or room["audience"] != self.s.oauth_origin:
+                continue
+            parent = self.store.by_hash(room["parent"])
+            if parent is None:
+                continue
+            outcome, row = self.check_row(parent)
+            if outcome == "ok":
+                row = dict(row, room_hash=room["rsid_hash"])
+            return outcome, row
+        return "out", None
 
     def legacy_seen(self, what, rooms):
         """Say (at most hourly per room and kind) that a room still got a legacy credential: the gate before
@@ -831,7 +1131,8 @@ class Login:
             return ret
         if state:
             code = self.store.create_code(row["sid_hash"], origin, state, ret)
-            return origin + histerauth.CALLBACK_PATH + "?" + urlencode({"code": code})
+            path = OAUTH_CALLBACK if origin == self.s.oauth_origin else histerauth.CALLBACK_PATH
+            return origin + path + "?" + urlencode({"code": code})
         if origin in self.s.proxied:
             return origin + "/machiya/start?" + urlencode({"return": ret})
         return ret
@@ -853,7 +1154,7 @@ class Login:
             return 401, {"reason": "bad-code"}
         if outcome != "ok":
             return 503, {"reason": "user-handling-off" if outcome == "off" else "hister-unavailable"}
-        rsid, max_age = self.store.create_room(parent, room)
+        rsid, max_age = self.store.create_room(parent, room, OAUTH_SIGNIN_TTL if room == self.s.oauth_origin else 0)
         return 200, {"session": rsid, "return": row["return_url"], "username": parent["username"],
                      "user_id": parent["user_id"], "max_age": max_age, "prefs": self.shared_prefs(parent["username"])}
 
@@ -957,6 +1258,8 @@ def signin_target(s, ret, app):
             return ROOM_NAMES.get(key, key.capitalize())
     if origin in s.proxied:
         return "Shiori"
+    if origin == s.oauth_origin:
+        return "Add a Connector"
     return ""
 
 
@@ -989,6 +1292,8 @@ def room_name(s, origin):
             return ROOM_NAMES.get(key, key.capitalize())
     if origin in s.proxied:
         return "Shiori (%s)" % urlsplit(origin).hostname.split(".")[0]
+    if origin == s.oauth_origin:
+        return "Connector sign-in"
     return urlsplit(origin).netloc or origin
 
 
@@ -1019,7 +1324,34 @@ def folded(heading, noun, items, last="", note=""):
                                                     "".join(items), last, note))
 
 
-def sessions_page(s, headers, me, rows, done="", tokens=(), new_token=None):
+def connectors_section(s, grants, at=None):
+    """The sessions page's Connectors (0.7.0): each app allowed through the OAuth server, with Revoke."""
+    if s.oauth_port is None:
+        return ""
+    items = []
+    for g in grants:
+        try:
+            host = urlsplit(json.loads(g["redirect_uris"] or "[]")[0]).hostname or "?"
+        except (ValueError, IndexError, TypeError):
+            host = "?"
+        items.append(
+            '<div class="item"><span>%s<br><small class="value">returns to %s · %s · allowed %s · last used %s</small>'
+            '</span><form method="post" action="/machiya/sessions"><input type="hidden" name="grant" value="%s">'
+            '<button type="submit" name="do" value="connector-revoke">Revoke</button></form></div>'
+            % (e(g["name"] or "An app"), e(host), e(scope_words(g["scope"])),
+               e(time.strftime("%Y-%m-%d", time.gmtime(g["created_at"]))), days_ago(g["last_used"], at),
+               e(g["grant_id"])))
+    return ('<h2>Connectors</h2><div class="group">%s</div><p class="footnote">Apps you allowed to read your saved '
+            'pages and notes through %s. Revoke one and it stops within a minute.</p>'
+            % ("".join(items) or '<div class="item"><span>None</span></div>', e(urlsplit(s.oauth_origin).hostname)))
+
+
+def scope_words(scope):
+    words = {"pages:read": "reads saved pages", "notes:read": "reads notes"}
+    return ", ".join(words.get(x, x) for x in scope.split())
+
+
+def sessions_page(s, headers, me, rows, done="", tokens=(), new_token=None, grants=()):
     at = now()
     active, idle = [], []
     for r in rows:      # newest first (of_user)
@@ -1059,7 +1391,7 @@ def sessions_page(s, headers, me, rows, done="", tokens=(), new_token=None):
         '<h2>Sessions</h2><div class="group">%s<div class="item"><span>All Sessions</span>'
         '<form method="post" action="/machiya/sessions"><button type="submit" name="do" value="all">'
         'Sign&nbsp;Out Everywhere</button></form></div></div>'
-        '<p class="footnote">Signing out ends a session in Hister and every room within a minute.</p>%s'
+        '<p class="footnote">Signing out ends a session in Hister and every room within a minute.</p>%s%s'
         '<h2>Room Tokens</h2><div class="group">%s</div>'
         '<p class="footnote">For scripts and agents. Each opens only the rooms it names, never Hister.</p>%s'
         '<h2>New Token</h2><form class="group" method="post" action="/machiya/sessions">'
@@ -1071,6 +1403,7 @@ def sessions_page(s, headers, me, rows, done="", tokens=(), new_token=None):
     ) % (e(me["username"]), shown, note, "".join(active),
          folded("Idle a Week or More", "Sessions", idle, idle_out,
                 '<p class="footnote">Not seen for a week. Each ends by itself 30 days after it was last seen.</p>'),
+         connectors_section(s, grants, at),
          "".join(used) or '<div class="item"><span>None</span></div>',
          folded("Never Used", "Tokens", unused, "",
                 '<p class="footnote">Made over a week ago and never used: revoke one if nothing needs it.</p>'),
@@ -1172,6 +1505,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._body_read = True
         elif self.command not in ("GET", "HEAD"):
             return self.json(405, {"error": "GET or PUT"}, [("Allow", "GET, PUT")])
+        if isinstance(value, str) and value.startswith(OAUTH_PREFIXES):     # a connector reads pages and notes only
+            return self.json(401, {"error": "sign in", "signin": lg.s.public_url + "/machiya/signin"})
         who = lg.who(kind, value, rooms)
         if who[0] == "out":
             return self.json(401, {"error": "sign in", "signin": lg.s.public_url + "/machiya/signin",
@@ -1242,6 +1577,8 @@ class Internal(Handler):
         """X-Machiya-Room: the asking room's origins (its own first; v0.22 rooms always say), [] from an older room
         or an unreadable header (then only legacy credentials can pass)."""
         values = self.headers.get_all("X-Machiya-Room") or []
+        if len(values) == 1 and values[0].strip() == OAUTH_ROOM:
+            return [OAUTH_ROOM]                     # the connector (0.7.0): by name, it has no origin of its own here
         return histerauth.origins_header(values[0]) if len(values) == 1 else []
 
     def one_credential(self):
@@ -1278,6 +1615,9 @@ class Internal(Handler):
             answer = lg.resolve(cred[0], cred[1], self.rooms())
             if answer[0] == "ok":
                 info = answer[1]
+                if info["kind"] == "oauth":
+                    return self.json(200, {k: info[k] for k in ("username", "user_id", "via", "kind", "scopes",
+                                                                "resource", "client_id")})
                 return self.json(200, {"username": info["username"], "user_id": info["user_id"], "via": info["via"],
                                        "kind": info["kind"], "room": info.get("room"),
                                        "prefs": lg.shared_prefs(info["username"])})
@@ -1660,12 +2000,13 @@ class Public(Handler):
         if outcome != "ok":
             return self.redirect("/machiya/signin?" + urlencode({"return": lg.s.public_url + "/machiya/sessions"}))
         done = {"one": "Signed that session out.", "token": "Revoked that token.",
-                "idle": "Signed the idle sessions out."}.get(self.query().get("done"), "")
+                "idle": "Signed the idle sessions out.", "connector": "Revoked that connector."
+                }.get(self.query().get("done"), "")
         rows = lg.store.of_user(row["user_id"])
         for r in rows:
             r["rooms"] = lg.store.rooms_of(r["sid_hash"])
         self.page(status, sessions_page(lg.s, self.headers, row, rows, done, lg.store.tokens_of(row["username"]),
-                                        new_token))
+                                        new_token, lg.store.grants_of(row["username"])))
 
     def _post(self):
         path = urlsplit(self.path).path
@@ -1752,6 +2093,10 @@ class Public(Handler):
         if form.get("do") == "token-revoke":
             lg.store.revoke_token(form.get("token", ""), me["username"])
             return self.redirect("/machiya/sessions?done=token")
+        if form.get("do") == "connector-revoke":
+            if lg.store.revoke_grant(form.get("grant", ""), me["username"]):
+                LOG("hister-login: oauth: a connector was revoked on the sessions page")
+            return self.redirect("/machiya/sessions?done=connector")
         if form.get("do") == "idle":
             # every session folded under Idle: not this device's, and not one whose Hister session another, live id
             # still uses
@@ -1820,6 +2165,328 @@ class Public(Handler):
         self.json(200, {"sid": sid, "username": answer[1], "user_id": answer[2]})
 
 
+# -- the OAuth server (0.7.0) ----------------------------------------------------------------------------------------
+
+def oauth_render(headers, title, body):
+    """A page on the connector's host: Funnel sends it only /oauth/…, so the shell's files come from /oauth/static/."""
+    return render(headers, title, body).replace(b'"/machiya/static/', b'"/oauth/static/')
+
+
+def oauth_message(headers, heading, text):
+    return oauth_render(headers, heading + " · Machiya", shell.message(heading, text, ()))
+
+
+def consent_page(s, headers, client, req, csrf):
+    fields = [(k, req[k]) for k in ("client_id", "redirect_uri", "response_type", "code_challenge",
+                                     "code_challenge_method", "scope", "state", "resource") if req.get(k)]
+    hidden = "".join('<input type="hidden" name="%s" value="%s">' % (e(k), e(v)) for k, v in fields + [("csrf", csrf)])
+    body = (
+        '<main class="signin"><h1>Allow %s?</h1>'
+        '<p>%s wants to %s, as you. It can&#x27;t change or save anything, and it never sees work or private '
+        'vaults.</p><p>It will send you back to <strong>%s</strong>.</p>'
+        '<form class="group" method="post" action="/oauth/authorize">%s'
+        '<button type="submit" name="decision" value="allow">Allow</button> '
+        '<button type="submit" name="decision" value="deny">Deny</button></form>'
+        '<p class="footnote">Didn&#x27;t just add a connector? Deny. You can revoke it later on the sessions page.'
+        '</p></main>'
+    ) % (e(client["name"]), e(client["name"]), e(scope_words(req["scope"])),
+         e(urlsplit(req["redirect_uri"]).hostname or ""), hidden)
+    return oauth_render(headers, "Allow %s? · Machiya" % client["name"], body)
+
+
+def clean_name(value):
+    """A client's name as the consent page shows it: no control or direction characters, at most 80."""
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]", "", value).strip()[:80]
+
+
+class OAuth(Handler):
+    """The OAuth listener (HISTER_LOGIN_OAUTH_PORT): Funnel sends it /oauth/… and the metadata from the public
+    internet. It answers only its own routes, and hands out nothing but its own codes and tokens: never a Hister
+    session or token, never a room session or room token."""
+
+    def do_GET(self):
+        self.guard(self._get)
+
+    def do_HEAD(self):
+        self.guard(self._get)
+
+    def do_POST(self):
+        self.guard(self._post)
+
+    def issuer(self):
+        return self.login.s.oauth_origin
+
+    def oauth_cookie(self, name, value, max_age):
+        attrs = ["%s=%s" % (name, value), "Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=%d" % max_age]
+        if self.login.s.oauth_secure:
+            attrs.append("Secure")
+        return "; ".join(attrs)
+
+    def fail(self, status, error, text=""):
+        """An OAuth error answer (RFC 6749 5.2) to a client, never a page."""
+        extra = [("Pragma", "no-cache")]
+        if status == 401:
+            extra.append(("WWW-Authenticate", 'Basic realm="oauth"'))
+        return self.json(status, dict({"error": error}, **({"error_description": text} if text else {})), extra)
+
+    def _get(self):
+        path = urlsplit(self.path).path
+        if path == "/.well-known/oauth-authorization-server":
+            return self.metadata()
+        if path.startswith("/oauth/static/"):
+            return self.static(path[len("/oauth/static/"):])
+        if path == "/oauth/authorize":
+            return self.authorize(self.query())
+        if path == OAUTH_CALLBACK:
+            return self.callback()
+        self.json(404, {"error": "not found"})
+
+    def _post(self):
+        path = urlsplit(self.path).path
+        data = self.body()
+        if data is None:
+            return self.json(413, {"error": "request body too large"})
+        if path == "/oauth/register":
+            return self.register(data)
+        if path == "/oauth/token":
+            return self.token(data)
+        if path == "/oauth/revoke":
+            return self.revoke_token(data)
+        if path == "/oauth/authorize":
+            return self.consent(data)
+        self.json(404, {"error": "not found"})
+
+    static = Public.static
+
+    def metadata(self):
+        """RFC 8414."""
+        i = self.issuer()
+        self.json(200, {
+            "issuer": i, "authorization_endpoint": i + "/oauth/authorize", "token_endpoint": i + "/oauth/token",
+            "registration_endpoint": i + "/oauth/register", "revocation_endpoint": i + "/oauth/revoke",
+            "response_types_supported": ["code"], "grant_types_supported": ["authorization_code", "refresh_token"],
+            "code_challenge_methods_supported": ["S256"], "token_endpoint_auth_methods_supported": ["none"],
+            "revocation_endpoint_auth_methods_supported": ["none"], "scopes_supported": list(OAUTH_SCOPES),
+            "authorization_response_iss_parameter_supported": True})
+
+    def form(self, data):
+        try:
+            return {k: v[0] for k, v in parse_qs(data.decode("utf-8"), max_num_fields=16).items()}
+        except (ValueError, UnicodeError):
+            return None
+
+    # registration (RFC 7591): open to anyone, so it only ever names Claude's own redirects
+
+    def register(self, data):
+        lg = self.login
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() != "application/json":
+            return self.json(415, {"error": "invalid_client_metadata", "error_description": "send JSON"})
+        try:
+            meta = json.loads(data)
+        except ValueError:
+            meta = None
+        if not isinstance(meta, dict):
+            return self.json(400, {"error": "invalid_client_metadata", "error_description": "unreadable JSON"})
+        uris = meta.get("redirect_uris")
+        if not isinstance(uris, list) or not 1 <= len(uris) <= 4 or not all(isinstance(u, str) for u in uris):
+            return self.json(400, {"error": "invalid_redirect_uri", "error_description": "one to four redirect_uris"})
+        if any(u not in lg.s.oauth_redirects for u in uris):
+            LOG("hister-login: oauth: refused a registration (a redirect that isn't allowed)")
+            return self.json(400, {"error": "invalid_redirect_uri",
+                                   "error_description": "a redirect_uri this server doesn't allow"})
+        method = meta.get("token_endpoint_auth_method", "none")
+        grants = meta.get("grant_types", ["authorization_code"])
+        types = meta.get("response_types", ["code"])
+        if method != "none" or not isinstance(grants, list) or not isinstance(types, list) \
+                or set(grants) - {"authorization_code", "refresh_token"} or set(types) - {"code"}:
+            return self.json(400, {"error": "invalid_client_metadata", "error_description": "a public client: "
+                                   "token_endpoint_auth_method none, the code flow and refresh tokens"})
+        if lg.store.clients_since(now() - 3600) >= REGISTER_PER_HOUR:
+            return self.json(429, {"error": "invalid_client_metadata", "error_description": "too many "
+                                   "registrations: try again in an hour"}, [("Retry-After", "3600")])
+        name = clean_name(meta.get("client_name")) or "An app"
+        client_id = lg.store.add_client(name, uris)
+        LOG("hister-login: oauth: registered client %s" % client_id)
+        self.json(201, {"client_id": client_id, "client_id_issued_at": now(), "client_name": name,
+                        "redirect_uris": uris, "grant_types": ["authorization_code", "refresh_token"],
+                        "response_types": ["code"], "token_endpoint_auth_method": "none"})
+
+    # the authorization request: checked the same way on the GET and the consent POST
+
+    def checked(self, q):
+        """-> (client, request, None) when the request holds, else (None, None, an answer): an error page for an
+        unknown client or a redirect_uri it didn't register (never a redirect there), else the error sent back to
+        the client's redirect_uri (RFC 6749 4.1.2.1)."""
+        lg = self.login
+        client = lg.store.client(q.get("client_id"))
+        if client is None:
+            return None, None, (400, "Unknown App", "That app isn't registered here. Add the connector again.")
+        redirect = q.get("redirect_uri") or (client["redirect_uris"][0] if len(client["redirect_uris"]) == 1 else "")
+        if redirect not in client["redirect_uris"] or redirect not in lg.s.oauth_redirects:
+            return None, None, (400, "Can't Sign In", "That app's return address doesn't match its registration.")
+        state = q.get("state") or ""
+        req = {"client_id": client["client_id"], "redirect_uri": redirect, "state": state}
+        error = None
+        # the scopes asked for that this server has; other words are ignored, and none of ours means both: the consent
+        # page shows exactly what is granted
+        scope = " ".join(x for x in OAUTH_SCOPES if x in (q.get("scope") or "").split()) or " ".join(OAUTH_SCOPES)
+        if len(state) > 512 or any(ord(c) < 32 or ord(c) == 127 for c in state):
+            req["state"], error = "", "invalid_request"
+        elif q.get("response_type") != "code":
+            error = "unsupported_response_type"
+        elif q.get("code_challenge_method") != "S256" or not CHALLENGE_RE.match(q.get("code_challenge") or ""):
+            error = "invalid_request"          # PKCE is required, and only S256 (OAuth 2.1)
+        elif q.get("resource") and q["resource"] != lg.s.oauth_resource:
+            error = "invalid_target"           # RFC 8707
+        if error:
+            return None, None, ("redirect", self.back(req, {"error": error}))
+        req.update(response_type="code", code_challenge=q["code_challenge"], code_challenge_method="S256",
+                   scope=scope, resource=lg.s.oauth_resource)
+        return client, req, None
+
+    def back(self, req, params):
+        """The client's redirect_uri with `params`, its state and this issuer (RFC 9207)."""
+        params = dict(params, **({"state": req["state"]} if req.get("state") else {}))
+        params["iss"] = self.issuer()
+        sep = "&" if "?" in req["redirect_uri"] else "?"
+        return req["redirect_uri"] + sep + urlencode(params)
+
+    def refuse(self, answer):
+        if answer[0] == "redirect":
+            return self.send(302, [("Location", answer[1]), ("Cache-Control", "no-store"),
+                                   ("Referrer-Policy", "no-referrer")])
+        self.page(answer[0], oauth_message(self.headers, answer[1], answer[2]))
+
+    def csrf(self, row):
+        return b64e(hashlib.sha256(("oauth-consent:" + row["room_hash"]).encode()).digest())
+
+    def authorize(self, q):
+        """GET /oauth/authorize: the request checked, then the owner: signed in on this host (its own room cookie)
+        or sent on the usual room trip to the helper's sign-in, on Hister's host. That host is tailnet-only, so only
+        a tailnet device can finish it. Then Allow or Deny."""
+        lg = self.login
+        client, req, refused = self.checked(q)
+        if refused:
+            return self.refuse(refused)
+        outcome, row = lg.oauth_signed_in(self.headers)
+        if outcome in ("down", "off"):
+            return self.page(503, oauth_message(self.headers, "Sign-In Is Unavailable", "Hister can't be reached right "
+                                                "now. Try again in a minute."))
+        if outcome != "ok":
+            return self.trip(req)
+        if row["username"] not in lg.s.oauth_users:
+            return self.page(403, oauth_message(self.headers, "Not Allowed", "This account can't add connectors."))
+        self.page(200, consent_page(lg.s, self.headers, client, req, self.csrf(row)))
+
+    def trip(self, req):
+        """To the helper's sign-in with a fresh nonce in this host's state cookie (as the hosted pages' start does);
+        it comes back to /oauth/callback with a one-time code, then here again."""
+        lg = self.login
+        nonce = histerauth.new_nonce()
+        ret = self.issuer() + "/oauth/authorize?" + urlencode([(k, req[k]) for k in (
+            "client_id", "redirect_uri", "response_type", "code_challenge", "code_challenge_method", "scope", "state",
+            "resource") if req.get(k)])
+        params = [("return", ret), ("state", histerauth.state_hash(nonce))]
+        if lg.s.auto_provider and lg.s.auto_provider in lg.s.providers:
+            params += [("provider", lg.s.auto_provider), ("auto", "1")]
+        self.send(302, [("Location", lg.s.public_url + "/machiya/signin?" + urlencode(params)),
+                        ("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer"),
+                        ("Set-Cookie", self.oauth_cookie(lg.s.oauth_state, nonce, histerauth.STATE_MAX_AGE))])
+
+    def callback(self):
+        """GET /oauth/callback?code=…: the helper's code traded here (as a room's /v1/redeem), this host's sign-in
+        cookie set (for OAUTH_SIGNIN_TTL), then the authorization request again."""
+        lg = self.login
+        code = self.query().get("code") or ""
+        nonce = next((v for v in histerauth.HisterAuth.cookie_values(self.headers.get("Cookie"), lg.s.oauth_state)[:4]
+                      if histerauth.NONCE_RE.match(v)), "")
+        status, data = lg.redeem(code, self.issuer(), nonce) if code and nonce else (401, {})
+        done = [self.oauth_cookie(lg.s.oauth_state, "", 0)]
+        ret = data.get("return") or ""
+        if status == 200 and histerauth.origin_of(ret) == self.issuer() and urlsplit(ret).path == "/oauth/authorize":
+            cookies = [self.oauth_cookie(lg.s.oauth_cookie, data["session"], data["max_age"])] + done
+            return self.send(302, [("Location", ret), ("Cache-Control", "no-store"),
+                                   ("Referrer-Policy", "no-referrer")] + [("Set-Cookie", c) for c in cookies])
+        if status == 503:
+            return self.page(503, oauth_message(self.headers, "Sign-In Is Unavailable", "Hister can't be reached "
+                                                "right now. Try again in a minute."), [("Set-Cookie", c) for c in done])
+        self.page(401, oauth_message(self.headers, "Sign In", "That sign-in didn't finish. Add the connector again."),
+                  [("Set-Cookie", c) for c in done])
+
+    def consent(self, data):
+        """POST /oauth/authorize: Allow or Deny, from this host's own consent page (same origin, its sign-in, the
+        CSRF token bound to that sign-in), the request checked again."""
+        lg = self.login
+        form = self.form(data)
+        if form is None:
+            return self.json(400, {"error": "unreadable form"})
+        if not vsignin.same_origin(self.headers, lg.s.oauth_secure, (self.issuer(),)):
+            return self.page(403, oauth_message(self.headers, "Refused", "That must come from the Allow page."))
+        outcome, row = lg.oauth_signed_in(self.headers)
+        if outcome != "ok":
+            return self.page(401, oauth_message(self.headers, "Sign In", "Your sign-in here ended. Add the connector "
+                                                "again."))
+        if not secrets.compare_digest(form.get("csrf") or "", self.csrf(row)):
+            return self.page(403, oauth_message(self.headers, "Refused", "That must come from the Allow page."))
+        client, req, refused = self.checked(form)
+        if refused:
+            return self.refuse(refused)
+        if row["username"] not in lg.s.oauth_users:
+            return self.page(403, oauth_message(self.headers, "Not Allowed", "This account can't add connectors."))
+        if form.get("decision") != "allow":
+            return self.refuse(("redirect", self.back(req, {"error": "access_denied"})))
+        code = lg.store.create_ocode(client["client_id"], req["redirect_uri"], req["code_challenge"],
+                                     req["resource"], req["scope"], row["username"], row["user_id"])
+        LOG("hister-login: oauth: %s allowed client %s" % (row["username"], client["client_id"]))
+        self.refuse(("redirect", self.back(req, {"code": code})))
+
+    # the token endpoint (public clients: the client_id and PKCE, no secret)
+
+    def token(self, data):
+        lg = self.login
+        form = self.form(data)
+        if form is None or (self.headers.get("Content-Type") or "").split(";")[0].strip().lower() \
+                != "application/x-www-form-urlencoded":
+            return self.fail(400, "invalid_request", "a form body")
+        client = lg.store.client(form.get("client_id"))
+        if client is None:
+            return self.fail(401, "invalid_client")
+        if form.get("resource") and form["resource"] != lg.s.oauth_resource:
+            return self.fail(400, "invalid_target")
+        grant_type = form.get("grant_type")
+        if grant_type == "authorization_code":
+            row = lg.store.take_ocode(form.get("code"))
+            verifier = form.get("code_verifier") or ""
+            if row is None or row["client_id"] != client["client_id"] or row["redirect_uri"] != form.get(
+                    "redirect_uri", row["redirect_uri"]) or not CHALLENGE_RE.match(verifier) \
+                    or not secrets.compare_digest(b64e(hashlib.sha256(verifier.encode()).digest()), row["challenge"]):
+                return self.fail(400, "invalid_grant")
+            if row["username"] not in lg.s.oauth_users:
+                return self.fail(400, "invalid_grant")
+            access, refresh = lg.store.create_grant(row)
+            scope = row["scope"]
+        elif grant_type == "refresh_token":
+            answer = lg.store.rotate(form.get("refresh_token"), client["client_id"])
+            if answer[0] == "reused":
+                LOG("hister-login: oauth: a spent refresh token came back; its grant was revoked")
+            if answer[0] != "ok" or answer[1]["username"] not in lg.s.oauth_users:
+                return self.fail(400, "invalid_grant")
+            _, grant, access, refresh = answer
+            scope = grant["scope"]
+        else:
+            return self.fail(400, "unsupported_grant_type")
+        self.json(200, {"access_token": access, "token_type": "Bearer", "expires_in": ACCESS_TTL,
+                        "refresh_token": refresh, "scope": scope}, [("Pragma", "no-cache")])
+
+    def revoke_token(self, data):
+        """RFC 7009: 200 whatever the token was, so it tells nobody anything."""
+        form = self.form(data) or {}
+        self.login.store.revoke_value(form.get("token"))
+        self.send(200, [("Cache-Control", "no-store"), ("Content-Type", "application/json")], b"{}")
+
+
 class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -1840,10 +2507,12 @@ def housekeeping(login, stop):
             LOG("hister-login: housekeeping: %s" % type(ex).__name__)
 
 
-def serve(login, bind, port, internal_port):
+def serve(login, bind, port, internal_port, oauth_port=None):
     pub = type("PublicH", (Public,), {"login": login})
     internal = type("InternalH", (Internal,), {"login": login})
     servers = [Server((bind, port), pub), Server((bind, internal_port), internal)]
+    if oauth_port is not None and login.s.oauth_port is not None:
+        servers.append(Server((bind, oauth_port), type("OAuthH", (OAuth,), {"login": login})))
     for srv in servers:
         threading.Thread(target=srv.serve_forever, daemon=True).start()
     return servers
@@ -2014,7 +2683,10 @@ def main():
     LOG("hister-login %s: public :%d, internal :%d, Hister %s, return hosts %s, cookie %s, domain %s"
         % (VERSION, s.port, s.internal_port, s.hister_url, ",".join(s.return_hosts), s.sso,
            s.cookie_domain or "(none)"))
-    servers = serve(login, s.bind, s.port, s.internal_port)
+    if s.oauth_port is not None:
+        LOG("hister-login: OAuth server :%d for %s (%d redirect(s) allowed, users %s)"
+            % (s.oauth_port, s.oauth_resource, len(s.oauth_redirects), ",".join(s.oauth_users)))
+    servers = serve(login, s.bind, s.port, s.internal_port, s.oauth_port)
     stop = threading.Event()
     # PID 1 in its container with no init: without a handler, SIGTERM does nothing and `docker stop` ends in a
     # SIGKILL after 10 s (0.4.2). Stop the housekeeping loop, finish the servers, exit 0.

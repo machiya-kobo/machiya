@@ -57,9 +57,10 @@ class HelperBase(unittest.TestCase):
         self.login.hister.health_at = 0
         self._stderr = sys.stderr
         sys.stderr = self.err
-        self.servers = hl.serve(self.login, "127.0.0.1", 0, 0)
+        self.servers = hl.serve(self.login, "127.0.0.1", 0, 0, 0 if self.settings.oauth_port is not None else None)
         self.pub = self.servers[0].server_address[1]
         self.int = self.servers[1].server_address[1]
+        self.oauth_port = self.servers[2].server_address[1] if len(self.servers) > 2 else None
 
     def tearDown(self):
         for s in self.servers:
@@ -1294,6 +1295,423 @@ class LegacyOptInTest(HelperBase):
 class LegacyTokenOptInTest(LegacyOptInTest):
     MODE = "hister-token"
     EXTRA = {"HISTER_LOGIN_LEGACY": MODE}
+
+
+ISSUER = "https://mcp.example.test"
+RESOURCE = ISSUER + "/mcp"
+REDIRECT = "https://claude.ai/api/mcp/auth_callback"
+OAUTH_ENV = {"HISTER_LOGIN_OAUTH_PORT": "0", "HISTER_LOGIN_OAUTH_ISSUER": ISSUER, "HISTER_LOGIN_OAUTH_RESOURCE": RESOURCE,
+             "HISTER_LOGIN_OAUTH_REDIRECTS": REDIRECT + ",https://claude.com/api/mcp/auth_callback",
+             "HISTER_LOGIN_OAUTH_USERS": "owner"}
+OCOOKIE, OSTATE = "__Host-machiya_sso_oauth", "__Host-machiya_sso_oauth_state"
+
+
+def pkce():
+    verifier = hl.b64e(os.urandom(40))
+    import hashlib
+    return verifier, hl.b64e(hashlib.sha256(verifier.encode()).digest())
+
+
+class OAuthTest(HelperBase):
+    """0.7.0: the OAuth server for the public MCP connector (HISTER_LOGIN_OAUTH_PORT)."""
+    EXTRA = OAUTH_ENV
+
+    def o(self, method, path, headers=None, body=None):
+        return self.req(self.oauth_port, method, path, headers, body)
+
+    def register(self, uris=(REDIRECT,), **meta):
+        body = json.dumps(dict({"redirect_uris": list(uris), "client_name": "Claude",
+                                "token_endpoint_auth_method": "none"}, **meta))
+        status, _, data = self.o("POST", "/oauth/register", {"Content-Type": "application/json"}, body)
+        return status, json.loads(data or b"null")
+
+    def client(self):
+        status, data = self.register()
+        self.assertEqual(status, 201)
+        return data["client_id"]
+
+    def params(self, client_id, challenge, **over):
+        p = {"client_id": client_id, "redirect_uri": REDIRECT, "response_type": "code", "code_challenge": challenge,
+             "code_challenge_method": "S256", "state": "st-123", "resource": RESOURCE,
+             "scope": "pages:read notes:read"}
+        p.update(over)
+        return {k: v for k, v in p.items() if v is not None}
+
+    def signed_in_here(self, params, user="owner"):
+        """The authorize trip: this host -> the helper's sign-in on Hister's host -> /oauth/callback -> authorize.
+        -> (the connector host's sign-in cookie, the helper id, the consent page's status and body)."""
+        status, headers, _ = self.o("GET", "/oauth/authorize?" + urlencode(params))
+        self.assertEqual(status, 302)
+        loc = urlsplit(dict(headers)["Location"])
+        self.assertEqual(loc.scheme + "://" + loc.netloc + loc.path, PUBLIC + "/machiya/signin")
+        nonce = cookie_value(headers, OSTATE)
+        session = self.fake.signed_in(user)
+        status, headers, _ = self.public("GET", loc.path + "?" + loc.query, {"Cookie": "hister=" + session})
+        self.assertEqual(status, 303)
+        sid = cookie_value(headers, "__Host-machiya_sso")
+        back = urlsplit(dict(headers)["Location"])
+        self.assertEqual(back.scheme + "://" + back.netloc + back.path, ISSUER + "/oauth/callback")
+        status, headers, _ = self.o("GET", back.path + "?" + back.query, {"Cookie": OSTATE + "=" + nonce})
+        self.assertEqual(status, 302)
+        room = cookie_value(headers, OCOOKIE)
+        self.assertTrue(hl.histerauth.RSID_RE.match(room))
+        again = urlsplit(dict(headers)["Location"])
+        self.assertEqual(again.path, "/oauth/authorize")
+        status, _, body = self.o("GET", again.path + "?" + again.query, {"Cookie": OCOOKIE + "=" + room})
+        return room, sid, status, body
+
+    def consent(self, room, body, decision="allow", origin=ISSUER, csrf=None):
+        import re
+        fields = dict(re.findall(r'<input type="hidden" name="([^"]+)" value="([^"]*)">', body.decode()))
+        fields = {k: hl.html.unescape(v) for k, v in fields.items()}
+        if csrf is not None:
+            fields["csrf"] = csrf
+        fields["decision"] = decision
+        h = {"Cookie": OCOOKIE + "=" + room, "Content-Type": "application/x-www-form-urlencoded"}
+        if origin:
+            h["Origin"] = origin
+        status, headers, _ = self.o("POST", "/oauth/authorize", h, urlencode(fields))
+        return status, dict(headers).get("Location")
+
+    def code_for(self, client_id=None, verifier_challenge=None, user="owner"):
+        client_id = client_id or self.client()
+        verifier, challenge = verifier_challenge or pkce()
+        room, sid, status, body = self.signed_in_here(self.params(client_id, challenge), user)
+        self.assertEqual(status, 200)
+        status, loc = self.consent(room, body)
+        self.assertEqual(status, 302)
+        q = parse_qs(urlsplit(loc).query)
+        return client_id, verifier, q["code"][0], q, sid
+
+    def token(self, **form):
+        status, headers, body = self.o("POST", "/oauth/token", {"Content-Type": "application/x-www-form-urlencoded"},
+                                       urlencode(form))
+        return status, json.loads(body or b"null"), dict(headers)
+
+    def exchange(self, client_id, code, verifier):
+        return self.token(grant_type="authorization_code", code=code, code_verifier=verifier, client_id=client_id,
+                          redirect_uri=REDIRECT, resource=RESOURCE)
+
+    def oauth_check(self, value, room="mcp-public"):
+        h = {"X-Machiya-Session": value}
+        if room is not None:
+            h["X-Machiya-Room"] = room
+        status, _, body = self.internal("GET", "/v1/check", h)
+        return status, json.loads(body or b"null")
+
+    def test_metadata(self):
+        status, _, body = self.o("GET", "/.well-known/oauth-authorization-server")
+        meta = json.loads(body)
+        self.assertEqual((status, meta["issuer"], meta["token_endpoint"]), (200, ISSUER, ISSUER + "/oauth/token"))
+        self.assertEqual(meta["code_challenge_methods_supported"], ["S256"])
+        self.assertEqual(meta["token_endpoint_auth_methods_supported"], ["none"])
+        self.assertEqual(meta["registration_endpoint"], ISSUER + "/oauth/register")
+
+    def test_the_whole_way_and_the_check_contract(self):
+        client_id, verifier, code, q, _ = self.code_for()
+        self.assertEqual((q["state"], q["iss"]), (["st-123"], [ISSUER]))
+        self.assertTrue(hl.OCODE_RE.match(code))
+        status, tok, headers = self.exchange(client_id, code, verifier)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual((tok["token_type"], tok["expires_in"], tok["scope"]), ("Bearer", 3600, "pages:read notes:read"))
+        self.assertTrue(hl.ACCESS_RE.match(tok["access_token"]) and hl.REFRESH_RE.match(tok["refresh_token"]))
+        status, info = self.oauth_check(tok["access_token"])
+        self.assertEqual(status, 200)
+        self.assertEqual({k: info[k] for k in ("username", "kind", "scopes", "resource", "client_id")},
+                         {"username": "owner", "kind": "oauth", "scopes": "pages:read notes:read",
+                          "resource": RESOURCE, "client_id": client_id})
+        self.assertNotIn("prefs", info)
+        status, new, _ = self.token(grant_type="refresh_token", refresh_token=tok["refresh_token"], client_id=client_id)
+        self.assertEqual(status, 200)
+        self.assertNotEqual(new["refresh_token"], tok["refresh_token"])
+        self.assertEqual(self.oauth_check(new["access_token"])[0], 200)
+
+    def test_scope_is_the_asked_subset(self):
+        client_id = self.client()
+        verifier, challenge = pkce()
+        room, _, status, body = self.signed_in_here(self.params(client_id, challenge, scope="pages:read other"))
+        self.assertIn(b"reads saved pages", body)
+        self.assertNotIn(b"reads notes", body)
+        _, loc = self.consent(room, body)
+        code = parse_qs(urlsplit(loc).query)["code"][0]
+        _, tok, _ = self.exchange(client_id, code, verifier)
+        self.assertEqual(tok["scope"], "pages:read")
+        self.assertEqual(self.oauth_check(tok["access_token"])[1]["scopes"], "pages:read")
+
+    def test_register_refusals(self):
+        self.assertEqual(self.register(["https://evil.example/cb"])[0], 400)
+        self.assertEqual(self.register([REDIRECT, "https://claude.ai.evil.example/api/mcp/auth_callback"])[0], 400)
+        self.assertEqual(self.register([])[0], 400)
+        self.assertEqual(self.register(token_endpoint_auth_method="client_secret_basic")[0], 400)
+        self.assertEqual(self.register(grant_types=["client_credentials"])[0], 400)
+        status, _, _ = self.o("POST", "/oauth/register", {"Content-Type": "text/plain"}, "{}")
+        self.assertEqual(status, 415)
+
+    def test_register_cleans_the_name_and_is_rate_limited(self):
+        status, data = self.register(client_name="Cla\u202eude\x00" + "x" * 200)
+        self.assertEqual((status, data["client_name"]), (201, "Claude" + "x" * 74))
+        for _ in range(9):
+            self.assertEqual(self.register()[0], 201)
+        status, data = self.register()
+        self.assertEqual(status, 429)
+
+    def test_unknown_client_or_redirect_gets_a_page_never_a_redirect(self):
+        client_id = self.client()
+        _, challenge = pkce()
+        for params in (self.params("mhk_" + "A" * 22, challenge),
+                       self.params(client_id, challenge, redirect_uri="https://evil.example/cb"),
+                       self.params(client_id, challenge, redirect_uri="https://claude.com/api/mcp/auth_callback")):
+            status, headers, body = self.o("GET", "/oauth/authorize?" + urlencode(params))
+            self.assertEqual(status, 400)
+            self.assertNotIn("Location", dict(headers))
+            self.assertIn(b"<h2>", body)
+
+    def test_pkce_s256_and_resource_are_required(self):
+        client_id = self.client()
+        _, challenge = pkce()
+        for over, error in (({"code_challenge": None}, "invalid_request"),
+                            ({"code_challenge_method": "plain"}, "invalid_request"),
+                            ({"code_challenge_method": None}, "invalid_request"),
+                            ({"resource": "https://other.example/mcp"}, "invalid_target"),
+                            ({"response_type": "token"}, "unsupported_response_type")):
+            status, headers, _ = self.o("GET", "/oauth/authorize?" + urlencode(self.params(client_id, challenge,
+                                                                                        **over)))
+            self.assertEqual(status, 302, over)
+            loc = urlsplit(dict(headers)["Location"])
+            self.assertEqual(loc.scheme + "://" + loc.netloc + loc.path, REDIRECT)
+            self.assertEqual(parse_qs(loc.query)["error"], [error])
+            self.assertNotIn("code", parse_qs(loc.query))
+
+    def test_wrong_verifier_and_reused_code(self):
+        client_id, verifier, code, _, _ = self.code_for()
+        self.assertEqual(self.exchange(client_id, code, pkce()[0])[1]["error"], "invalid_grant")
+        self.assertEqual(self.exchange(client_id, code, verifier)[1]["error"], "invalid_grant")    # burned
+        client_id, verifier, code, _, _ = self.code_for(client_id)
+        status, tok, _ = self.exchange(client_id, code, verifier)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.exchange(client_id, code, verifier)[1]["error"], "invalid_grant")
+        self.assertEqual(self.oauth_check(tok["access_token"])[0], 401)     # a code back again: its grant is gone
+        self.assertEqual(self.token(grant_type="refresh_token", refresh_token=tok["refresh_token"],
+                                    client_id=client_id)[0], 400)
+
+    def test_code_for_another_client_redirect_or_resource(self):
+        client_id, verifier, code, _, _ = self.code_for()
+        other = self.client()
+        self.assertEqual(self.exchange(other, code, verifier)[1]["error"], "invalid_grant")
+        client_id, verifier, code, _, _ = self.code_for(client_id)
+        status, data, _ = self.token(grant_type="authorization_code", code=code, code_verifier=verifier,
+                                     client_id=client_id, redirect_uri="https://claude.com/api/mcp/auth_callback")
+        self.assertEqual((status, data["error"]), (400, "invalid_grant"))
+        status, data, _ = self.token(grant_type="authorization_code", code=code, code_verifier=verifier,
+                                     client_id=client_id, resource="https://other.example/mcp")
+        self.assertEqual((status, data["error"]), (400, "invalid_target"))
+        self.assertEqual(self.token(grant_type="authorization_code", code=code, code_verifier=verifier,
+                                    client_id="mhk_" + "B" * 22)[0], 401)
+        self.assertEqual(self.token(grant_type="password", client_id=client_id)[1]["error"], "unsupported_grant_type")
+
+    def test_expired_code(self):
+        client_id, verifier, code, _, _ = self.code_for()
+        self.login.store.q("UPDATE oauth_codes SET expires_at = expires_at - 61")
+        self.assertEqual(self.exchange(client_id, code, verifier)[1]["error"], "invalid_grant")
+
+    def test_expired_access_token(self):
+        client_id, verifier, code, _, _ = self.code_for()
+        tok = self.exchange(client_id, code, verifier)[1]
+        self.login.store.q("UPDATE oauth_access SET expires_at = expires_at - 3601")
+        self.assertEqual(self.oauth_check(tok["access_token"])[0], 401)
+
+    def test_a_spent_refresh_token_revokes_the_grant(self):
+        client_id, verifier, code, _, _ = self.code_for()
+        tok = self.exchange(client_id, code, verifier)[1]
+        _, new, _ = self.token(grant_type="refresh_token", refresh_token=tok["refresh_token"], client_id=client_id)
+        status, data, _ = self.token(grant_type="refresh_token", refresh_token=tok["refresh_token"], client_id=client_id)
+        self.assertEqual((status, data["error"]), (400, "invalid_grant"))
+        self.assertEqual(self.oauth_check(new["access_token"])[0], 401)
+        self.assertEqual(self.token(grant_type="refresh_token", refresh_token=new["refresh_token"],
+                                    client_id=client_id)[0], 400)
+
+    def test_refresh_idle_and_absolute_limits(self):
+        client_id, verifier, code, _, _ = self.code_for()
+        tok = self.exchange(client_id, code, verifier)[1]
+        self.login.store.q("UPDATE oauth_grants SET refresh_expires = ?", (hl.now() - 1,))
+        self.assertEqual(self.token(grant_type="refresh_token", refresh_token=tok["refresh_token"],
+                                    client_id=client_id)[0], 400)
+        client_id, verifier, code, _, _ = self.code_for(client_id)
+        tok = self.exchange(client_id, code, verifier)[1]
+        self.login.store.q("UPDATE oauth_grants SET expires_at = ?", (hl.now() - 1,))
+        self.assertEqual(self.oauth_check(tok["access_token"])[0], 401)
+
+    def test_revoke_endpoint(self):
+        client_id, verifier, code, _, _ = self.code_for()
+        tok = self.exchange(client_id, code, verifier)[1]
+        status, _, _ = self.o("POST", "/oauth/revoke", {"Content-Type": "application/x-www-form-urlencoded"},
+                              urlencode({"token": tok["refresh_token"], "client_id": client_id}))
+        self.assertEqual(status, 200)
+        self.assertEqual(self.oauth_check(tok["access_token"])[0], 401)
+        status, _, _ = self.o("POST", "/oauth/revoke", {"Content-Type": "application/x-www-form-urlencoded"},
+                              urlencode({"token": "nonsense"}))
+        self.assertEqual(status, 200)
+
+    def test_check_only_from_the_connector_and_only_its_tokens(self):
+        client_id, verifier, code, _, sid = self.code_for()
+        tok = self.exchange(client_id, code, verifier)[1]
+        for room in (None, "https://kura.example.test", ISSUER, "mcp-public, https://kura.example.test"):
+            self.assertEqual(self.oauth_check(tok["access_token"], room)[0], 401, room)
+        before = self.fake.calls["/api/profile"]
+        status, _, _ = self.internal("GET", "/v1/check", {"X-Access-Token": tok["access_token"],
+                                                          "X-Machiya-Room": "https://kura.example.test"})
+        self.assertEqual(status, 401)
+        self.assertEqual(self.fake.calls["/api/profile"], before)          # never sent to Hister
+        # nothing else passes as the connector: the helper id, a room token, the refresh token, the code
+        rtok = "mht_" + "C" * 43
+        self.login.store.add_token(rtok, "owner", "t", ["https://kura.example.test"])
+        for value in (sid, rtok, tok["refresh_token"], code):
+            self.assertEqual(self.oauth_check(value)[0], 401, value[:4])
+
+    def test_the_connector_hosts_sign_in_is_good_in_no_room(self):
+        client_id = self.client()
+        room, _, _, _ = self.signed_in_here(self.params(client_id, pkce()[1]))
+        for asking in (ISSUER, "https://kura.example.test", "mcp-public"):
+            status, _, _ = self.internal("GET", "/v1/check", {"X-Machiya-Session": room, "X-Machiya-Room": asking})
+            self.assertEqual(status, 401, asking)
+        status, _, _ = self.internal("GET", "/v1/nginx", {"X-Machiya-Session": room, "X-Machiya-Room": ISSUER})
+        self.assertEqual(status, 401)
+        row = self.login.store.get_room(room)
+        self.assertLessEqual(row["expires_at"] - hl.now(), hl.OAUTH_SIGNIN_TTL)
+
+    def test_a_user_not_listed_gets_no_code(self):
+        client_id = self.client()
+        room, _, status, body = self.signed_in_here(self.params(client_id, pkce()[1]), user="other")
+        self.assertEqual(status, 403)
+        self.assertNotIn(b"csrf", body)
+
+    def test_consent_needs_this_page(self):
+        client_id = self.client()
+        room, _, _, body = self.signed_in_here(self.params(client_id, pkce()[1]))
+        self.assertEqual(self.consent(room, body, origin="https://evil.example")[0], 403)
+        self.assertEqual(self.consent(room, body, origin=None)[0], 403)
+        self.assertEqual(self.consent(room, body, csrf="x" * 43)[0], 403)
+        self.assertEqual(self.consent("mhr_" + "D" * 43, body)[0], 401)
+        self.assertEqual(self.login.store.q("SELECT count(*) FROM oauth_codes")[0][0], 0)
+
+    def test_deny(self):
+        client_id = self.client()
+        room, _, _, body = self.signed_in_here(self.params(client_id, pkce()[1]))
+        status, loc = self.consent(room, body, decision="deny")
+        self.assertEqual(status, 302)
+        q = parse_qs(urlsplit(loc).query)
+        self.assertEqual((q["error"], q["state"], q["iss"]), (["access_denied"], ["st-123"], [ISSUER]))
+        self.assertNotIn("code", q)
+
+    def test_only_its_own_routes(self):
+        for path in ("/machiya/sessions", "/machiya/signin", "/v1/check", "/api/oauth/callback", "/machiya/api/prefs",
+                     "/", "/.well-known/oauth-protected-resource", "/mcp"):
+            self.assertEqual(self.o("GET", path)[0], 404, path)
+        for path in ("/machiya/signout", "/v1/redeem", "/mcp"):
+            self.assertEqual(self.o("POST", path, {"Content-Length": "0"}, b"")[0], 404, path)
+        status, headers, _ = self.o("GET", "/oauth/static/machiya.css")
+        self.assertEqual(status, 200)
+
+    def test_consent_page_loads_its_files_from_oauth_static(self):
+        client_id = self.client()
+        _, _, _, body = self.signed_in_here(self.params(client_id, pkce()[1]))
+        self.assertIn(b'"/oauth/static/', body)
+        self.assertNotIn(b'"/machiya/static/', body)
+        self.assertIn(b"Allow Claude?", body)
+        self.assertIn(b"claude.ai", body)
+
+    def test_an_oauth_value_never_reads_prefs(self):
+        client_id, verifier, code, _, _ = self.code_for()
+        tok = self.exchange(client_id, code, verifier)[1]
+        status, _, _ = self.public("GET", "/machiya/api/prefs", {"Authorization": "Bearer " + tok["access_token"]})
+        self.assertEqual(status, 401)
+        status, _, _ = self.internal("GET", "/v1/prefs", {"X-Machiya-Session": tok["access_token"],
+                                                          "X-Machiya-Room": "mcp-public"})
+        self.assertEqual(status, 401)
+
+    def test_sessions_page_lists_and_revokes_a_connector(self):
+        client_id, verifier, code, _, sid = self.code_for()
+        tok = self.exchange(client_id, code, verifier)[1]
+        status, _, body = self.public("GET", "/machiya/sessions", {"Cookie": "__Host-machiya_sso=" + sid})
+        self.assertEqual(status, 200)
+        self.assertIn(b"<h2>Connectors</h2>", body)
+        self.assertIn(b"returns to claude.ai", body)
+        import re
+        grant = re.search(rb'name="grant" value="([0-9a-f]+)"', body).group(1).decode()
+        status, headers, _ = self.public("POST", "/machiya/sessions", {
+            "Cookie": "__Host-machiya_sso=" + sid, "Origin": PUBLIC,
+            "Content-Type": "application/x-www-form-urlencoded"}, urlencode({"do": "connector-revoke", "grant": grant}))
+        self.assertEqual((status, dict(headers)["Location"]), (303, "/machiya/sessions?done=connector"))
+        self.assertEqual(self.oauth_check(tok["access_token"])[0], 401)
+
+    def test_no_secret_in_the_log(self):
+        client_id, verifier, code, q, _ = self.code_for()
+        tok = self.exchange(client_id, code, verifier)[1]
+        self.token(grant_type="refresh_token", refresh_token=tok["refresh_token"], client_id=client_id)
+        self.oauth_check(tok["access_token"])
+        log = self.err.getvalue()
+        for secret in (code, verifier, tok["access_token"], tok["refresh_token"], "st-123"):
+            self.assertNotIn(secret, log)
+        self.assertIn("registered client " + client_id, log)
+
+    def test_cleanup_forgets_unused_clients(self):
+        used, verifier, code, _, _ = self.code_for()
+        unused = self.client()
+        self.login.store.q("UPDATE oauth_clients SET created_at = created_at - 86401")
+        self.login.store.cleanup()
+        self.assertIsNone(self.login.store.client(unused))
+        self.assertIsNotNone(self.login.store.client(used))
+
+
+class OAuthOffTest(HelperBase):
+    def test_off_without_the_port(self):
+        self.assertIsNone(self.oauth_port)
+        self.assertIsNone(self.settings.oauth_port)
+        status, _, _ = self.internal("GET", "/v1/check", {"X-Machiya-Session": "mho_" + "E" * 43,
+                                                          "X-Machiya-Room": "mcp-public"})
+        self.assertEqual(status, 401)
+
+
+class OAuthSettingsTest(unittest.TestCase):
+    def settings(self, **over):
+        env = dict(ENV, **OAUTH_ENV)
+        env.update(over)
+        with redirect_stderr(io.StringIO()):
+            return hl.Settings({k: v for k, v in env.items() if v is not None})
+
+    def test_good(self):
+        s = self.settings()
+        self.assertEqual((s.oauth_origin, s.oauth_resource, s.oauth_users), (ISSUER, RESOURCE, ["owner"]))
+        self.assertIn("mcp.example.test", s.return_hosts)
+        self.assertEqual(s.oauth_cookie, OCOOKIE)
+
+    def test_refused(self):
+        for over in ({"HISTER_LOGIN_OAUTH_ISSUER": None}, {"HISTER_LOGIN_OAUTH_ISSUER": "http://mcp.example.test"},
+                     {"HISTER_LOGIN_OAUTH_ISSUER": ISSUER + "/x"}, {"HISTER_LOGIN_OAUTH_ISSUER": PUBLIC},
+                     {"HISTER_LOGIN_OAUTH_ISSUER": "https://kura.example.test"},
+                     {"HISTER_LOGIN_OAUTH_RESOURCE": None},
+                     {"HISTER_LOGIN_OAUTH_RESOURCE": "https://other.example.test/mcp"},
+                     {"HISTER_LOGIN_OAUTH_RESOURCE": RESOURCE + "?x=1"},
+                     {"HISTER_LOGIN_OAUTH_REDIRECTS": "http://claude.ai/cb"},
+                     {"HISTER_LOGIN_OAUTH_REDIRECTS": "https://*.claude.ai/cb"},
+                     {"HISTER_LOGIN_OAUTH_REDIRECTS": "https://claude.ai/cb#x"},
+                     {"HISTER_LOGIN_OAUTH_USERS": None}, {"HISTER_LOGIN_OAUTH_USERS": "*"},
+                     {"HISTER_LOGIN_OAUTH_USERS": "owner,*"}, {"HISTER_LOGIN_OAUTH_PORT": "eighty"}):
+            with self.assertRaises(SystemExit, msg=over):
+                self.settings(**over)
+
+    def test_never_http_even_on_loopback(self):
+        # the sign-in trip returns only to https addresses (histerauth.safe_return): an http issuer could never finish
+        with self.assertRaises(SystemExit):
+            self.settings(HISTER_LOGIN_OAUTH_ISSUER="http://127.0.0.1:8090",
+                          HISTER_LOGIN_OAUTH_RESOURCE="http://127.0.0.1:8090/mcp")
+        s = self.settings(HISTER_LOGIN_OAUTH_ISSUER="https://127.0.0.1:8090",
+                          HISTER_LOGIN_OAUTH_RESOURCE="https://127.0.0.1:8090/mcp")
+        self.assertIn("127.0.0.1:8090", s.return_hosts)
+
+    def test_empty_redirects_refuse_every_registration(self):
+        self.assertEqual(self.settings(HISTER_LOGIN_OAUTH_REDIRECTS=None).oauth_redirects, [])
 
 
 class PrefsTest(unittest.TestCase):

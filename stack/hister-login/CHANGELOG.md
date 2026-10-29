@@ -1,5 +1,16 @@
 # Changelog: hister-login
 
+## 0.7.0
+
+- An OAuth 2.1 server for one public MCP connector (Claude Duet reading saved pages and notes; owner, 2026-10-28). It's off until `HISTER_LOGIN_OAUTH_PORT` is set, and runs on a port of its own that answers only `/oauth/…` and `/.well-known/oauth-authorization-server`.
+- Apps register themselves (dynamic registration), but only with a return address in `HISTER_LOGIN_OAUTH_REDIRECTS`, at most 10 an hour. A client nobody allowed is forgotten after a day.
+- To allow one, you sign in through the usual room trip on Hister's host (tailnet only), then press Allow. Only users in `HISTER_LOGIN_OAUTH_USERS` can.
+- PKCE with S256 is required. Codes last 60 s and work once. A spent code that comes back revokes what it made.
+- Access tokens (`mho_`) last an hour. Refresh tokens (`mhf_`) change on every use: a spent one coming back revokes the connector. Connectors end after 30 days unused, 90 in all.
+- Only the connector can check an access token: `/v1/check` with `X-Machiya-Room: mcp-public`. Its answer gives the user, the scopes, the resource and the client. Nothing else passes as the connector, and an access token never reaches Hister or the settings.
+- The sessions page lists Connectors, each with Revoke.
+- Tokens and codes are stored only as hashes and never logged.
+
 ## 0.6.1
 
 - Every preferences write logs one line: who wrote it (the room, the hosted pages' host, or the credential's kind: app session, room token, Hister token, browser cookie), the client's User-Agent, the keys sent, the keys whose value changed, and the rev. Key names only, never values. The owner's theme kept going back to Dracula, and nothing showed which client wrote it.

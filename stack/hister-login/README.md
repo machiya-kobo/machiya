@@ -23,6 +23,7 @@ dev/gate0.sh                               # the phase-0 proof: a dev stack, Pla
 | `HISTER_LOGIN_PORT` (8080), public | browsers and apps, through the proxy on Hister's host (Tailscale Serve sends it `/machiya/` and the single path `/api/oauth/callback`; everything else goes to Hister) | `GET /machiya/signin?return=…[&state=…][&app=1][&provider=oidc[&auto=1]]`, `GET /api/oauth/callback` (a shim: Hister's own callback, then an id and the way back), `POST /machiya/signout`, `GET`/`POST /machiya/sessions` (sessions, the rooms each browser opened, room tokens), `POST /machiya/api/app-session`, `GET /machiya/healthz`, `GET`/`PUT /machiya/api/prefs` (0.2.0), `/machiya/static/…` |
 | the same port, for a host in `HISTER_LOGIN_PROXIED_ORIGINS` (0.3.0) | the hosted pages (`search.*`, `shiori.*`), through their nginx, which passes `Host` on | only `GET /machiya/start`, `GET /machiya/callback`, `GET /machiya/signed-out`, `GET`/`PUT /machiya/api/prefs`, `/machiya/static/…`, `POST /machiya/signout`: the helper is that host's room (`__Host-machiya_sso_shiori`) |
 | `HISTER_LOGIN_INTERNAL_PORT` (8081), internal only, never routed by the proxy | the rooms and the hosted pages' nginx | `GET /v1/check`, `POST /v1/redeem` (0.3.0), `POST /v1/signout`, `GET /v1/nginx`, `GET /healthz`, `GET`/`PUT /v1/prefs` (0.2.0) |
+| `HISTER_LOGIN_OAUTH_PORT` (0.7.0; off when unset), public | an MCP connector's client and your browser, through the connector's own host (Funnel sends it `/oauth/` and the metadata) | `GET /.well-known/oauth-authorization-server`, `POST /oauth/register`, `GET`/`POST /oauth/authorize`, `GET /oauth/callback`, `POST /oauth/token`, `POST /oauth/revoke`, `/oauth/static/…`; everything else 404 |
 
 `GET /v1/check` takes one credential, `X-Machiya-Session: mhs_…|mhr_…|mht_…` or `X-Access-Token: <Hister token>`, and
 (0.3.0) the asking room's origins, `X-Machiya-Room: https://kura.example.ts.net[, <origin it also accepts>…]`:
@@ -34,6 +35,7 @@ dev/gate0.sh                               # the phase-0 proof: a dev stack, Pla
 | `mhs_…` of an app | the session is alive (every room) |
 | `mhs_…` of a browser (the old shared-domain cookie) | `domain-cookie` is in `HISTER_LOGIN_LEGACY`, and the session is alive |
 | Hister's token | `hister-token` is in `HISTER_LOGIN_LEGACY`, and Hister says so |
+| `mho_…` (an OAuth access token, 0.7.0) | `X-Machiya-Room` is exactly `mcp-public` (the connector), and it isn't revoked or expired; the answer is `200 {"username", "user_id", "via": "oauth", "kind": "oauth", "scopes": "pages:read notes:read", "resource", "client_id"}`. It never goes to Hister, and `mcp-public` gets nothing else |
 
 | Hister said | Answer |
 |---|---|
@@ -84,6 +86,21 @@ app's or a browser's `mhs_…`, or any other origin gets the 401 of a signed-out
 answer, so that nginx location must also have `proxy_hide_header Set-Cookie;`, or the raw Hister session reaches the
 browser on the hosted pages' host. The nginx side: [docs/services/hister-login.md](../../docs/services/hister-login.md).
 
+**The OAuth server** (0.7.0, [docs/services/hister-login.md](../../docs/services/hister-login.md#the-oauth-server)):
+OAuth 2.1 for public clients, for one MCP connector on a host of its own.
+- `POST /oauth/register` (RFC 7591) takes JSON, with every `redirect_uris` entry in `HISTER_LOGIN_OAUTH_REDIRECTS`, auth method `none`, at most 10 an hour. It answers a `mhk_…` client_id.
+- `GET /oauth/authorize`:
+  - An unknown client, or a redirect it didn't register, gets an error page and is never redirected.
+  - S256 PKCE is required, and `resource` must be `HISTER_LOGIN_OAUTH_RESOURCE` when sent.
+  - With no sign-in on that host, it makes the usual room trip (a nonce in `__Host-machiya_sso_oauth_state`, back through `/oauth/callback` to a `__Host-machiya_sso_oauth` room session that lasts an hour and is good in no room).
+  - Then it shows Allow or Deny. The POST must be same-origin, with a CSRF token bound to that sign-in.
+- Allow answers `mha_…`, which lasts 60 s and works once. The redirect carries `code`, `state` and `iss`.
+- `POST /oauth/token` takes a form:
+  - `authorization_code` with the verifier gives `mho_…` for 3600 s and `mhf_…`;
+  - `refresh_token` rotates. A spent refresh token, or a spent code, revokes the grant.
+- `POST /oauth/revoke` (RFC 7009) answers 200 whatever it was sent.
+- Scopes are `pages:read` and `notes:read`. Words it doesn't know are dropped, and asking for none of these grants both: the consent page shows what is granted.
+
 ## Settings
 
 | Setting | Default | Meaning |
@@ -103,6 +120,11 @@ browser on the hosted pages' host. The nginx side: [docs/services/hister-login.m
 | `HISTER_LOGIN_DB` | `/data/hister-login.sqlite3` | the state (0600, WAL) |
 | `HISTER_LOGIN_PREFS_DB` | `prefs.sqlite3` beside `HISTER_LOGIN_DB` | each user's settings (0600; 0.2.0). Back it up with the state |
 | `HISTER_LOGIN_BIND`, `HISTER_LOGIN_PORT`, `HISTER_LOGIN_INTERNAL_PORT` | `0.0.0.0`, 8080, 8081 | |
+| `HISTER_LOGIN_OAUTH_PORT` | none (off) | the OAuth server's port (0.7.0). With it, the four below are checked, and a bad one refuses to start |
+| `HISTER_LOGIN_OAUTH_ISSUER` | required with the port | the connector's own origin, `https://mcp-public.example.ts.net` (no path; never http, since the sign-in trip returns only to https addresses; a dev stack uses an https name for it too). Not Hister's, a room's or the hosted pages'. Added to the return hosts |
+| `HISTER_LOGIN_OAUTH_RESOURCE` | required with the port | the MCP address on that host, `https://mcp-public.example.ts.net/mcp`: every token is bound to it |
+| `HISTER_LOGIN_OAUTH_REDIRECTS` | none (every registration refused) | the exact https return addresses a client may register, comma-separated. For Claude: `https://claude.ai/api/mcp/auth_callback,https://claude.com/api/mcp/auth_callback` |
+| `HISTER_LOGIN_OAUTH_USERS` | required with the port | Hister usernames who may allow a connector (never `*`); checked again on every token and check |
 
 ## State
 
@@ -117,6 +139,15 @@ holds); apps sign in again, and room tokens must be made again.
 it goes with its helper id), `codes` (a code's SHA-256, its helper id, origin, the state, the return address; 60 s),
 `tokens` (a room token's SHA-256, the user, a label, the origins, made, last used, an optional expiry) and `ended` (ids
 signed out on purpose, 30 days).
+
+0.7.0 adds the OAuth server's tables:
+- `oauth_clients`: the client_id (public), the name, the redirects, made, first allowed;
+- `oauth_codes`: a code's SHA-256 and what it's bound to, kept a day so a spent code that comes back is known;
+- `oauth_grants`: one per connector allowed, with the current refresh token's SHA-256 and its limits;
+- `oauth_access`: an access token's SHA-256, for an hour;
+- `oauth_spent`: spent refresh tokens' SHA-256, so reuse is caught.
+
+Lose the file and every connector must be added again.
 
 The settings are a second file, `prefs.sqlite3` (vaultkit's `prefs.Store`): per user key `hi:<sha256(username)[:32]>`, each setting's value and `updated` time, and a revision. Losing it means each device fills the account in again from what it has (the contract's "fill the blanks"). On the command line, where the helper runs:
 
