@@ -1,5 +1,11 @@
 # Changelog: machiya-mcp
 
+## 0.10.0
+
+- **The public connector** (owner, 2026-10-28): `MCP_AUTH=oauth` serves Claude Duet, read-only, from a Tailscale Funnel host. Only `Authorization: Bearer mho_…`, an OAuth access token hister-login issued for this server's resource, gets in (checked at `MCP_AUTH_URL` as the room `mcp-public`, cached 30 s); a login header, room token, identity-file token or Hister's token never does. No token or a bad one is 401 with `WWW-Authenticate: Bearer resource_metadata=…`, a missing scope 403 `insufficient_scope`. `GET /.well-known/oauth-protected-resource` (RFC 9728) names `MCP_OAUTH_ISSUER`. Only the tools in `MCP_TOOLS` exist, some of `pages_search`, `pages_read`, `notes_search` and `notes_read`; no resources, no prompts. It refuses to start with `MCP_NOTES_DIR`, `KONBINI_URL`, `NIWA_URL`, the identity file, or any other tool. `/api/status` and `/api/changelog` are 404 there, `/healthz` says ok, and reads default to 60 a minute. The audit log names the caller `oauth:<user>/<client_id>`.
+- `MCP_TOOLS` works in every mode: only the named tools exist, and a name that isn't a tool refuses to start.
+- `MCP_ALLOW_CIDRS` (with `MCP_CLIENT_ADDR_HEADER` and `MCP_TRUSTED_PROXIES`): `/mcp` only from those client addresses, for a proxy that passes the real one.
+
 ## 0.9.0
 
 - **New topics, after the owner says yes.** `board_add_backlog` and `board_tag` take `new_topics` (topic names without `topic/`). A topic that does not exist yet is created with the call only when it is listed there and used by the card; without it the call is still refused as a question for the owner. The tool descriptions tell the model to ask first and pass `new_topics` only after a yes in the conversation. New areas stay the owner's. Needs Konbini 0.22.0: `board_add_backlog` checks the version first and creates nothing on an older one.

@@ -15,6 +15,9 @@ Settings that describe a particular vault or routine are optional and neutral by
 |---|---|---|
 | `MCP_AUTH_URL` | none | hister-login's internal address (`http://hister-login:8081`): callers may also send a **room token** (`Authorization: Bearer mht_…`) made for this server, beside the Tailscale header (0.8.0); an agent on a tagged machine has no Tailscale login. Needs `MCP_PUBLIC_URL` (the address the token names) and `MCP_HISTER_USERS` |
 | `MCP_PUBLIC_URL`, `MCP_HISTER_USERS` | none | with `MCP_AUTH_URL`: this server's public address, and the Hister usernames a room token may act as (never `*`) |
+| `MCP_AUTH=oauth` | | the public, read-only connector (0.10.0): only an OAuth access token from hister-login (`Bearer mho_…`) gets in, and only the tools in `MCP_TOOLS` (some of `pages_search`, `pages_read`, `notes_search`, `notes_read`) exist. Needs `MCP_PUBLIC_URL` (`https://host`), `MCP_OAUTH_ISSUER`, `MCP_AUTH_URL` and `MCP_HISTER_USERS`; refuses to start with a write room or the notes clone ([docs](../../docs/services/mcp.md#the-public-connector)) |
+| `MCP_TOOLS` | all | only these tools exist (any mode) |
+| `MCP_ALLOW_CIDRS`, `MCP_CLIENT_ADDR_HEADER` | none | `/mcp` only from these client addresses, read from the header, believed only from `MCP_TRUSTED_PROXIES` |
 | `MCP_TZ` | `UTC` | time zone of the notes' dates and of the backup window (`MCP_NOTES_TZ` overrides the notes' only) |
 | `MCP_HISTER_BACKUP_WINDOW` | none | a weekly slot, `Sat 03:10-03:40` (local time, within one day), when Hister is stopped for its backup: Hister writes pause |
 | `MCP_NOTES_NEVER_WRITE` | `Templates/,Archive/` | paths the notes write tools never create or change |
