@@ -69,7 +69,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.7.1"
+VERSION = "0.7.2"
 SID_PREFIX = histerauth.SID_PREFIX
 SID_RE = histerauth.SID_RE
 HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
@@ -1236,7 +1236,7 @@ def signin_page(s, headers, ret, app, error="", state=""):
         'maxlength="1024" autocomplete="current-password"></label>'
         '<button type="button">Sign In</button></div>'
         '<div class="empty">%s</div>'
-        '<p class="footnote">One sign-in for Hister and every Machiya app on this device, until you sign out.</p>'
+        '<p class="footnote">One sign-in for Nogon and every Machiya app on this device, until you sign out.</p>'
         '<noscript><p class="signin-error">The password form needs JavaScript.</p></noscript>'
         '</main>'
     ) % (e(heading), alert, e(nxt), oauth)
@@ -1269,7 +1269,7 @@ def confirm_page(headers, ret, provider=""):
     fields = [("return", ret), ("app", "1")] + ([("provider", provider)] if provider else [])
     body = (
         '<main class="signin"><h1>Sign In to the App?</h1>'
-        '<p>An app on this device (%s) wants to sign in to Hister and Machiya as you. '
+        '<p>An app on this device (%s) wants to sign in to Nogon and Machiya as you. '
         'Continue only if you just started this.</p>'
         '<form class="group" method="post" action="/machiya/signin">%s<button type="submit">Continue</button></form>'
         '<p class="footnote">Didn\'t start a sign-in? Close this page.</p></main>'
@@ -1391,9 +1391,9 @@ def sessions_page(s, headers, me, rows, done="", tokens=(), new_token=None, gran
         '<h2>Sessions</h2><div class="group">%s<div class="item"><span>All Sessions</span>'
         '<form method="post" action="/machiya/sessions"><button type="submit" name="do" value="all">'
         'Sign&nbsp;Out Everywhere</button></form></div></div>'
-        '<p class="footnote">Signing out ends a session in Hister and every room within a minute.</p>%s%s'
+        '<p class="footnote">Signing out ends a session in Nogon and every room within a minute.</p>%s%s'
         '<h2>Room Tokens</h2><div class="group">%s</div>'
-        '<p class="footnote">For scripts and agents. Each opens only the rooms it names, never Hister.</p>%s'
+        '<p class="footnote">For scripts and agents. Each opens only the rooms it names, never Nogon.</p>%s'
         '<h2>New Token</h2><form class="group" method="post" action="/machiya/sessions">'
         '<label class="item"><span>Name</span><input name="label" required maxlength="80" '
         'placeholder="pm on the laptop"></label>%s'
@@ -1723,7 +1723,7 @@ class Public(Handler):
         if path == "/machiya/api/prefs":
             return self.proxied_prefs(origin)
         if path == "/machiya/signed-out":
-            return self.page(200, message_page(self.headers, "Signed Out", "You're signed out of Hister and every "
+            return self.page(200, message_page(self.headers, "Signed Out", "You're signed out of Nogon and every "
                                                "Machiya room on this device.",
                                                [("/machiya/start?return=%2F", "Sign In Again")]))
         self.page(404, message_page(self.headers, "Not Found", "There's nothing here.", [("/", "Go Back")]))
@@ -1768,7 +1768,7 @@ class Public(Handler):
             return self.send(302, [("Location", ret), ("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer")]
                              + [("Set-Cookie", c) for c in cookies])
         if status == 503:
-            return self.page(503, message_page(self.headers, "Sign-In Is Unavailable", "Hister can't be reached right "
+            return self.page(503, message_page(self.headers, "Sign-In Is Unavailable", "Nogon can't be reached right "
                                                "now. Try again in a minute.", [("/", "Try Again")]),
                              [("Set-Cookie", c) for c in done])
         self.page(401, message_page(self.headers, "Sign In", "That sign-in didn't finish. Sign in to continue.",
@@ -1871,10 +1871,10 @@ class Public(Handler):
         if path == "/machiya/api/prefs":
             return self.public_prefs()
         if path == "/machiya/signed-out":
-            return self.page(200, message_page(self.headers, "Signed Out", "You're signed out of Hister and every "
+            return self.page(200, message_page(self.headers, "Signed Out", "You're signed out of Nogon and every "
                                                "Machiya room on this device.", [("/machiya/signin", "Sign In Again")]))
         self.page(404, message_page(self.headers, "Not Found", "There's nothing here.",
-                                    [(s.public_url + "/", "Go to Hister")]))
+                                    [(s.public_url + "/", "Go to Nogon")]))
 
     def static(self, name):
         entry = STATIC.get(name)
@@ -1937,8 +1937,8 @@ class Public(Handler):
         self.page(200, signin_page(lg.s, self.headers, ret, app, state=state), [("Set-Cookie", c) for c in cookies])
 
     def unavailable(self, state):
-        text = ("Hister's user accounts are switched off, so nobody can sign in." if state == "user-handling-off"
-                else "Hister can't be reached right now. Try again in a minute.")
+        text = ("Nogon's user accounts are switched off, so nobody can sign in." if state == "user-handling-off"
+                else "Nogon can't be reached right now. Try again in a minute.")
         self.page(503, message_page(self.headers, "Sign-In Is Unavailable", text, [(self.again(), "Try Again")]))
 
     def again(self):
@@ -2372,7 +2372,7 @@ class OAuth(Handler):
             return self.refuse(refused)
         outcome, row = lg.oauth_signed_in(self.headers)
         if outcome in ("down", "off"):
-            return self.page(503, oauth_message(self.headers, "Sign-In Is Unavailable", "Hister can't be reached right "
+            return self.page(503, oauth_message(self.headers, "Sign-In Is Unavailable", "Nogon can't be reached right "
                                                 "now. Try again in a minute."))
         if outcome != "ok":
             return self.trip(req)
@@ -2410,7 +2410,7 @@ class OAuth(Handler):
             return self.send(302, [("Location", ret), ("Cache-Control", "no-store"),
                                    ("Referrer-Policy", "no-referrer")] + [("Set-Cookie", c) for c in cookies])
         if status == 503:
-            return self.page(503, oauth_message(self.headers, "Sign-In Is Unavailable", "Hister can't be reached "
+            return self.page(503, oauth_message(self.headers, "Sign-In Is Unavailable", "Nogon can't be reached "
                                                 "right now. Try again in a minute."), [("Set-Cookie", c) for c in done])
         self.page(401, oauth_message(self.headers, "Sign In", "That sign-in didn't finish. Add the connector again."),
                   [("Set-Cookie", c) for c in done])

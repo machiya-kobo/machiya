@@ -11,7 +11,7 @@
 //   assets-v1         attachments (stale-while-revalidate), the `assets` most recent.
 // The -v1 caches survive deploys; only old static-*/pages-<hash> caches are deleted.
 //
-// Rules: a new worker waits for the page's "New Version · Reload" toast (SKIP_WAITING); only ok, same-origin, not
+// Rules: a new worker waits for the page's "New Version · Reload" toast, or a refresh of the page (SKIP_WAITING); only ok, same-origin, not
 // redirected, not `Cache-Control: no-store` responses are stored (a no-store answer also drops any stored copy);
 // a navigation waits at most `timeout` ms for the network, then shows the stored copy (marked data-offline for the
 // offline banner) or /offline.

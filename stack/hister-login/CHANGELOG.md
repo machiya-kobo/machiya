@@ -1,5 +1,10 @@
 # Changelog: hister-login
 
+## 0.7.2
+
+- The sign-in, sessions and signed-out pages say Nogon, upstream Hister's new name (owner, 2026-11-19). The image name, the settings and the cookie names stay the same.
+- vaultkit 0.30.1 → 0.36.0: the Rooms menu calls the `hister` room Nogon, and the pages pick up the shared UI from 0.31–0.35 (the tab bar, the app icons) that the rooms already have.
+
 ## 0.7.1
 
 - The image's Python base is re-pinned to today's digest. 0.7.0 was tagged but never built: its pin had gone stale.

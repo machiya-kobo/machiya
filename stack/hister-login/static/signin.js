@@ -36,7 +36,7 @@ if (box) {
         : res.status === 403 ? "Password sign-in is off here; use another way below."
         : "Sign-in failed (" + res.status + "). Try again.");
     } catch {
-      show("Hister can't be reached. Try again in a minute.");
+      show("Nogon can't be reached. Try again in a minute.");
     }
     busy = false;
     button.disabled = false;
