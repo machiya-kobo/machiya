@@ -98,7 +98,7 @@ p { margin: 0; text-wrap: pretty; }
 
 /* hero */
 .hero { padding: 32px 0 56px; }
-.hero-text { text-align: center; max-width: 780px; margin: 0 auto; }
+.hero-text { text-align: center; max-width: 860px; margin: 0 auto; }
 .hero h1 { font-size: clamp(34px, 8vw, 60px); font-weight: 800; }
 /* The heading's word flips like a split-flap sign: the page, the note, the phlog, the capsule, the code, 1.5 s each,
    then "everything" for 8 s, and round again: one loop is 15.5 s (CSS only). "everything" wears the five pill colours in
@@ -149,7 +149,7 @@ p { margin: 0; text-wrap: pretty; }
   .spin .all { opacity: 1; }
 }
 .lede a { color: inherit; text-decoration-color: var(--blue); }
-.lede { text-wrap: balance; max-width: 34em; margin-inline: auto; margin-top: 18px; font-size: clamp(18px, 2.4vw, 21px); color: var(--fg2); }
+.lede { text-wrap: balance; max-width: none; margin-inline: auto; margin-top: 18px; font-size: clamp(18px, 2.4vw, 21px); color: var(--fg2); }
 .actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px 14px; margin-top: 28px; }
 .button {
   display: inline-block; padding: 12px 32px; border-radius: var(--r-pill); border: 2px solid var(--blue);
