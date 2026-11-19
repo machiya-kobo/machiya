@@ -150,6 +150,8 @@ p { margin: 0; text-wrap: pretty; }
 }
 .lede a { color: inherit; text-decoration-color: var(--blue); }
 .lede { text-wrap: balance; max-width: none; margin-inline: auto; margin-top: 18px; font-size: clamp(18px, 2.4vw, 21px); color: var(--fg2); }
+/* phones: only "Powered by Nogon, SearXNG and Obsidian." shows (owner, 2026-11-19: two lines at most); screen readers still get the whole sentence */
+@media (max-width: 640px) { .lede-more { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } }
 .actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px 14px; margin-top: 28px; }
 .button {
   display: inline-block; padding: 12px 32px; border-radius: var(--r-pill); border: 2px solid var(--blue);
