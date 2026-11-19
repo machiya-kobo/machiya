@@ -1,5 +1,9 @@
 # Changelog: hister-login
 
+## 0.7.3
+
+- 0.7.2 on today's Python base. 0.7.2 was tagged but never built: its base pin was stale.
+
 ## 0.7.2
 
 - The sign-in, sessions and signed-out pages say Nogon, upstream Hister's new name (owner, 2026-11-19). The image name, the settings and the cookie names stay the same.
