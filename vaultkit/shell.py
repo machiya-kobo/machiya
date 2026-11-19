@@ -22,7 +22,7 @@ ROOMS = [   # (key, name, seal, what it is) front to back through the house, the
     ("niwa", "Niwa", "庭", "garden"),
     ("kura", "Kura", "蔵", "notes"),
 ]
-NEIGHBOURS = [("hister", "Hister", "pages"), ("searxng", "SearXNG", "the web")]
+NEIGHBOURS = [("hister", "Nogon", "pages"), ("searxng", "SearXNG", "the web")]
 # The house itself: the stack's front door and status page (stack/landing). Not a room in the order above: with
 # MACHIYA_ROOMS naming `machiya=<url>`, every Rooms menu ends with a "Machiya · home" row (v0.19.1) and the footer's
 # "Part of Machiya" links there; without it, nothing changes.

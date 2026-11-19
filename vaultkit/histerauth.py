@@ -94,7 +94,7 @@ MAX_RETURN = 2048
 OK, SIGNED_OUT, NOT_ALLOWED, UNAVAILABLE, FALLBACK = "ok", "signed-out", "not-allowed", "unavailable", "fallback"
 CALLBACK = "callback"                   # the way back from the helper: always a redirect (respond)
 BANNER_TEXT = "Signed in through the tailnet: sign-in is unavailable"
-REFUSED_TEXT = {"legacy-off": "this room no longer takes Hister's token or the shared sign-in cookie: use a room "
+REFUSED_TEXT = {"legacy-off": "this room no longer takes Nogon's token or the shared sign-in cookie: use a room "
                               "token (hister-login's sessions page) or sign in",
                 "wrong-room": "that sign-in belongs to another room",
                 "token-expired": "this room token has expired (they last 90 days): make a new one on the sessions "

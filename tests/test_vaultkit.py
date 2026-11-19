@@ -926,7 +926,7 @@ class ShellTest(unittest.TestCase):
         for room in ("shiori", "konbini", "niwa", "kura", "hister", "searxng", "machiya"):   # every icon is drawn
             self.assertIn('.seal.icon[data-room="%s"] { background-image: url("data:image/' % room, css)
         self.assertLess(menu.index("Shiori"), menu.index("Konbini"))                          # front to back
-        self.assertLess(menu.index("Niwa"), menu.index("Hister"))                             # neighbours last
+        self.assertLess(menu.index("Niwa"), menu.index("Nogon"))                             # neighbours last
         self.assertIn('href="https://searxng.t/" data-room="searxng"', menu)
         self.assertEqual(shell.switcher("kura", {}), "")                                       # standalone: none
         self.assertEqual(shell.rooms({}), {})
