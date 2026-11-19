@@ -2,7 +2,7 @@
 
 <img src="icons/png/machiya-128.png" alt="Machiya: a townhouse front with a three-panel noren" width="96" height="96" align="right">
 
-Machiya (町家, townhouse) is a set of small self-hosted apps for finding what you've read: your pages ([Hister](https://github.com/asciimoo/hister)), the web ([SearXNG](https://github.com/searxng/searxng)), your notes ([Obsidian](https://obsidian.md)) and your code ([Forgejo](https://forgejo.org) or [GitHub](https://github.com)).
+Machiya (町家, townhouse) is a set of small self-hosted apps for finding what you've read: your pages ([Nogon](https://nogon.eu/), formerly Hister), the web ([SearXNG](https://github.com/searxng/searxng)), your notes ([Obsidian](https://obsidian.md)) and your code ([Forgejo](https://forgejo.org) or [GitHub](https://github.com)).
 
 A Kyoto machiya has a shop at the front, a small garden inside and a storehouse at the back, all under one roof.
 
@@ -35,7 +35,7 @@ Every screenshot uses the same invented vault: a paper-lantern workshop and a tr
 | **Niwa** | 庭<br>garden | Grow your digital garden on the Web, Gemini and Gopher. | [machiya-kobo/niwa](https://github.com/machiya-kobo/niwa) |
 | **Konbini** | コンビニ<br>convenience store | Manage your projects on a board made from your notes. | [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini) |
 
-Powered by [Hister](https://github.com/asciimoo/hister) (every page you've read, plus your notes) and [SearXNG](https://github.com/searxng/searxng) (the web). Their reference config is in [config/](config/).
+Powered by [Nogon](https://github.com/asciimoo/nogon) (formerly Hister: every page you've read, plus your notes) and [SearXNG](https://github.com/searxng/searxng) (the web). Their reference config is in [config/](config/).
 
 ## Architecture
 
@@ -48,7 +48,7 @@ flowchart LR
     niwa["Niwa<br/>published garden"]
     konbini["Konbini<br/>project board"]
     shiori["Shiori<br/>search app"]
-    hister[("Hister<br/>pages + notes index")]
+    hister[("Nogon<br/>pages + notes index")]
     searx[("SearXNG<br/>web")]
 
     vault -- "https, read-only" --> kura
@@ -74,9 +74,9 @@ docker run -d --name shiori -p 8080:8080 -p 8081:8081 \
   ghcr.io/machiya-kobo/shiori-web
 ```
 
-Open <http://localhost:8080> to search, or <http://localhost:8081> for the web app. If your Hister has users, sign in with your Hister account.
+Open <http://localhost:8080> to search, or <http://localhost:8081> for the web app. If your Nogon has users, sign in with your Nogon account.
 
-### Starting from scratch? Run Hister, SearXNG and Shiori together
+### Starting from scratch? Run Nogon, SearXNG and Shiori together
 
 `compose/shiori.yml` brings up all three on this machine:
 
@@ -88,7 +88,7 @@ mkdir -p data/hister
 docker compose -f shiori.yml up -d
 ```
 
-Then open <http://localhost:8080>. Save pages to Hister with its [browser extension](https://hister.org/docs/browser-extension), and they show up in Shiori.
+Then open <http://localhost:8080>. Save pages to Nogon with its [browser extension](https://nogon.eu/docs/browser-extension), and they show up in Shiori.
 
 ### Add more to Shiori
 
@@ -98,7 +98,7 @@ Each extra is its own app with a public image on `ghcr.io/machiya-kobo`. Run it,
 |---|---|---|
 | Your Obsidian notes | [Kura](https://github.com/machiya-kobo/kura), on your vault | `SHIORI_KURA_URL` (and Shiori's name for Kura in Kura's `KURA_ALLOWED_HOSTS`) |
 | Your projects | [Konbini](https://github.com/machiya-kobo/konbini), on the same vault | `SHIORI_KONBINI_URL` |
-| Your code on Forgejo or GitHub | [code-import](stack/code-import/README.md), which copies your repos into Hister | nothing: the Code tab appears |
+| Your code on Forgejo or GitHub | [code-import](stack/code-import/README.md), which copies your repos into Nogon | nothing: the Code tab appears |
 | The small web (Gemini, Gopher) | [smallweb](stack/smallweb/README.md) | `SHIORI_SMALLWEB_URL` |
 
 | To get | Run | Then set on Shiori |
@@ -156,7 +156,7 @@ docker compose up -d --build --wait
 | Kura | http://localhost:8083/ |
 | Niwa | http://localhost:8082/ |
 | Konbini | http://localhost:8081/ |
-| Hister | http://localhost:4433/ |
+| Nogon (Hister) | http://localhost:4433/ |
 | SearXNG | http://localhost:8888/ |
 
 The **Rooms** menu in each app's header moves between them.

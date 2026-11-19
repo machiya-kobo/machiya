@@ -1,6 +1,6 @@
 # Hister server config (reference). No secrets here: set the access token with the
 # HISTER__APP__ACCESS_TOKEN environment variable. Env vars HISTER__<SECTION>__<KEY>
-# override any key below. Reference: https://hister.org/docs/configuration
+# override any key below. Reference: https://nogon.eu/docs/configuration
 app:
   title: Hister
   # Web search for anything Hister doesn't know: SearXNG. One direction only:

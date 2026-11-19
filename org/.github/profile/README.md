@@ -2,7 +2,7 @@
 
 ### Find everything you read yesterday, last month, last year.
 
-Small self-hosted apps for finding what you've read: your pages ([Hister](https://github.com/asciimoo/hister)), the web ([SearXNG](https://github.com/searxng/searxng)), your notes ([Obsidian](https://obsidian.md)) and your code (Forgejo or GitHub).
+Small self-hosted apps for finding what you've read: your pages ([Nogon](https://nogon.eu/), formerly Hister), the web ([SearXNG](https://github.com/searxng/searxng)), your notes ([Obsidian](https://obsidian.md)) and your code (Forgejo or GitHub).
 
 Agentically coded with [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 
