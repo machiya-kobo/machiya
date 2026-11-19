@@ -498,6 +498,8 @@ header.top {
 .rooms .menu hr, .tabsheet .menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 4px; }
 .rooms .menu .seal, .tabsheet .menu .seal { width: 22px; height: 22px; font-size: 13px; }
 .rooms .menu .neighbour, .tabsheet .menu .neighbour { display: inline-grid; place-items: center; width: 22px; height: 22px; color: var(--muted); }
+/* an extra room's seal (MACHIYA_EXTRA_ROOMS): outlined in the menu's own text color, not filled with a room's */
+.seal.extra { background: transparent; color: var(--menu-fg, var(--fg)); box-shadow: inset 0 0 0 1.5px var(--line2); }
 /* A room's own icon (its home-screen icon) instead of the kanji square: the header mark and the Rooms menu. */
 .seal.icon { background: center / cover no-repeat transparent; border-radius: 0; color: transparent; overflow: hidden; }
 .brand .seal.icon { width: 28px; height: 28px; }

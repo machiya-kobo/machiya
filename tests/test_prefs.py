@@ -489,6 +489,17 @@ class MachiyaJsTest(unittest.TestCase):
         self.assertIsNone(a.get("phoneTheme"))                                    # "sepia": never applied
         self.assertIn("palette-gruvbox", a["phoneClasses"])
 
+    def test_extra_rooms_hide_on_this_device_only(self):
+        """MACHIYA_EXTRA_ROOMS rows (data-extra-room): their switch is a shared cookie, so every room in this browser
+        hides the row, but nothing is sent to the account (apps_hidden names only APPS) and another device shows it."""
+        x = self.out["extra"]
+        self.assertEqual(x["putsAfterExtra"], 0)
+        self.assertEqual(x["puts"], [{"apps_hidden": "searxng"}])
+        self.assertEqual((x["here"], x["niwa"], x["afterAccount"]), ({"example": True},) * 3)
+        self.assertEqual(x["cookie"], "false")
+        self.assertEqual((x["phone"], x["phoneCookie"]), ({"example": False}, None))
+        self.assertEqual(x["account"], {"apps_hidden": "kura"})
+
     def test_account_down_nothing_breaks(self):
         d = self.out["down"]
         self.assertEqual(d["cookie"], "day")

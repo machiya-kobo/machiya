@@ -9,6 +9,7 @@ This is how the web rooms (Kura, Niwa, Konbini) put the [design language](design
    `MACHIYA_ROOMS=shiori=https://shiori.example.ts.net,konbini=https://konbini.example.ts.net,niwa=https://niwa.example.ts.net,kura=https://kura.example.ts.net,hister=https://hister.example.ts.net,searxng=https://searxng.example.ts.net`
    `shell.rooms()` reads it. Unset, there's no switcher (standalone). Your own `*_NIWA_URL` / `*_KONBINI_URL` settings can stay for in-page links.
    Add `machiya=https://machiya.example.ts.net` when the stack runs the [landing page](services/landing.md) (v0.18): every Rooms menu then ends with a **Machiya · home** row before Settings (v0.19.1; "status" in v0.18–0.19.0), the footer's "Part of Machiya" links there, and Apps gets a Machiya switch. Without the key nothing changes.
+   A deployment's own rooms, outside Machiya, go in `MACHIYA_EXTRA_ROOMS` ([Extra rooms](#extra-rooms-machiya_extra_rooms)).
 3. **Pages**: build every page with `shell.page(ctx, room, title, body, tabs, current, stylesheets=["/static/<app>.css?v=…"], scripts=["/static/<app>.js?v=…"], icons={…})`, with `shell.header(room, nav, current, links, subtitle, tools)` at the top of `body` and `shell.footer(room, status, links)` at the end. The footer sits at the bottom of the window when the page is shorter than it, and right after the content otherwise (`ui/machiya.js` adds the free height above it; v0.31.3).
    - `ctx = shell.prefs(self.headers.get("Cookie"))` gives `.theme` (the appearance: system/night/day; `auto` is read as system), `.palette` (the theme, v0.15: a `vaultkit.palettes` key, `tokyo-night` when unset or unknown) and `.text` (text size).
    - `room` is `kura`, `niwa` or `konbini`: it sets the seal, the wordmark and `--room`.
@@ -200,6 +201,29 @@ All rooms get Appearance (Theme: the ten palettes; Mode: System / Light / Dark; 
 ## The source link (AGPL section 13)
 
 The rooms are AGPL software, and people who use one over a network must be offered its source. vaultkit's shell does it: set **`MACHIYA_SOURCE_URL`** to the address of the room's source repository (a plain `http://` or `https://` URL), and the page footer gets a **Source code** link and Settings, About gets **Source code** and **License** rows. Unset (the default), nothing is shown and every page is byte-identical to one built without the setting. Anything that isn't a plain http(s) address is ignored. Each room sets its own repository's URL in its compose or env file; a fork must point it at its own source.
+
+## Extra rooms (`MACHIYA_EXTRA_ROOMS`)
+
+A deployment can add rooms of its own to every Rooms menu: a page on another host, a tool of yours. Set **`MACHIYA_EXTRA_ROOMS`** in the stack's compose, next to `MACHIYA_ROOMS`. Entries are separated by `;`, fields by `|`:
+
+```
+MACHIYA_EXTRA_ROOMS=example|Example Room|例|https://example.example.ts.net;tools|Tools||https://tools.example.ts.net|https://tools.example.ts.net/icon.png
+```
+
+| Field | |
+|---|---|
+| key | 1 to 32 of `a-z`, `0-9` and `-`, starting and ending with a letter or digit. Not a key Machiya uses (a room, a neighbour, `machiya`, an app namespace). |
+| name | 1 to 40 characters, as shown. Spaces and any script are fine; `\|` and `;` are not. |
+| seal | one character, or empty |
+| url | `https://…`, or a path on the room's own origin (`/…`). Used as given: no `/` is added. |
+| icon | optional: an image, `https://…` or `/…` |
+
+- **Where they show.** In every Rooms menu and the phone's Rooms sheet, after the rooms and before the neighbours, in the order given. Settings, Rooms gets a switch for each (`show_<key>`).
+- **Their mark.** The icon when there is one; else the seal in an outlined square (`.seal.extra`); else a plain door glyph. vaultkit never draws a room of yours: bring its icon.
+- **Their switches stay on the device.** machiya.js hides a switched-off extra room like any other row and writes the `machiya_show_<key>` cookie, so every room in the browser follows. The account's `apps_hidden` names only Machiya's own apps, so another device still shows it.
+- **Strict.** An invalid entry is skipped with one line on stderr, once; the rest still show. There are at most 8. Every field is HTML-escaped.
+- **Unset changes nothing.** Every page is byte-identical to one built without the setting (a test checks).
+- `shell.extra_rooms()` returns them; `shell.room_info(key)` knows them, so a page of yours built with vaultkit's shell can be one.
 
 ## The changelog endpoint (`vaultkit.changelog`, v0.18)
 

@@ -1191,6 +1191,175 @@ class SourceLinkTest(unittest.TestCase):
 
 
 
+class ExtraRoomsTest(unittest.TestCase):
+    """MACHIYA_EXTRA_ROOMS: a deployment's own rooms in every Rooms menu and in Settings, Rooms. Unset changes nothing."""
+
+    EXAMPLE = "example|Example Room|例|https://example.example.ts.net"
+    LINKS = {"MACHIYA_ROOMS": "shiori=https://shiori.t,konbini=https://konbini.t,niwa=https://niwa.t,kura=https://kura.t,"
+                              "hister=https://hister.t,searxng=https://searxng.t,machiya=https://machiya.t"}
+    # sha256 of render_all() on vaultkit before MACHIYA_EXTRA_ROOMS existed (v0.36.0), with the UI files' ?v= hashes
+    # normalised. If the shell's output changes on purpose, recompute it with the setting unset and say so in the commit.
+    UNSET_SHA256 = "ce05658208a7598ac0a603b17280b7daa81004dcd75f8c6c08c771c973a43a2d"
+
+    def env(self, value):
+        from unittest import mock
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("MACHIYA_EXTRA_ROOMS", "MACHIYA_SOURCE_URL", "MACHIYA_ROOMS")}
+        if value is not None:
+            env["MACHIYA_EXTRA_ROOMS"] = value
+        return mock.patch.dict(os.environ, env, clear=True)
+
+    def quiet(self):
+        import contextlib
+        import io
+        self.err = io.StringIO()
+        return contextlib.redirect_stderr(self.err)
+
+    def render_all(self):
+        """Every switcher, header, tab bar, page and Settings page for each room, with a full, empty and partial
+        MACHIYA_ROOMS."""
+        import re
+        from unittest import mock
+        from vaultkit import shell
+        full = shell.rooms(self.LINKS)
+        out = []
+        with mock.patch.object(shell, "COOKIE_DOMAIN", ""):
+            ctx = shell.prefs("theme=day; machiya_show_kura=false")
+            for links in (full, {}, {"kura": "https://kura.t"}):
+                for room in ("shiori", "konbini", "niwa", "kura", "machiya", "other"):
+                    out.append(shell.switcher(room, links))
+                    out.append(shell.switcher(room, links, settings=True, who="Example"))
+                    out.append(shell.header(room, [("/", "home", "Home")], "home", links, who="Example"))
+                    out.append(shell.tabbar([("/", "home", "Home"), ("/search", "search", "Search")], "home", room, links,
+                                            who="Example"))
+                    out.append(shell.page(ctx, room, "T", "<main></main>", tabs=[("/", "home", "Home")], current="home",
+                                          links=links))
+                    out.append(shell.settings_page([shell.shared_section(ctx, room, links),
+                                                    shell.rooms_section(ctx, room, links),
+                                                    shell.apps_section(room, links, {"niwa": False}),
+                                                    shell.about_section(room, "1.0")], room))
+                    out.append(repr(shell.room_info(room)) + shell.mark(room) + shell.footer(room, house=links))
+        return re.sub(r"\?v=[0-9a-f]{10}\b", "?v=X", "\n".join(o or "" for o in out))
+
+    def test_unset_is_byte_identical(self):
+        import hashlib
+        from vaultkit import shell
+        with self.env(None):
+            self.assertEqual(shell.extra_rooms(), [])
+            unset = self.render_all()
+        self.assertEqual(hashlib.sha256(unset.encode("utf-8")).hexdigest(), self.UNSET_SHA256)
+        for value in ("", "  ", " ; ;", "Bad|x|y|https://x.example", "kura|Kura Again||https://x.example"):
+            with self.env(value), self.quiet():
+                self.assertEqual(self.render_all(), unset, repr(value))
+        self.assertNotIn("data-extra-room", unset)
+        self.assertNotIn("seal extra", unset)
+
+    def test_parsing(self):
+        from vaultkit import shell
+        value = (" example|Example Room|例|https://example.example.ts.net ;"
+                 "second-2 | Salle d'Été ||/rooms/second/ | https://icons.example.com/i.png;")
+        with self.env(value), self.quiet():
+            got = shell.extra_rooms()
+        self.assertEqual(got, [shell.ExtraRoom("example", "Example Room", "例", "https://example.example.ts.net", ""),
+                               shell.ExtraRoom("second-2", "Salle d'Été", "", "/rooms/second/",
+                                               "https://icons.example.com/i.png")])
+        self.assertEqual(self.err.getvalue(), "")
+        self.assertEqual(shell.extra_rooms({"MACHIYA_EXTRA_ROOMS": self.EXAMPLE})[0].key, "example")
+        self.assertEqual(shell.extra_rooms({}), [])
+
+    def test_invalid_entries_are_skipped_with_one_line_each_once(self):
+        from vaultkit import shell
+        builtin = [shell.ROOMS[0][0], shell.NEIGHBOURS[0][0], shell.HOUSE[0]]    # whatever the ids are called today
+        bad = ["Example|Upper Case||https://x.example", "ex_ample|Underscore||https://x.example", "-x|Dash||https://x.example",
+               "x" * 33 + "|Too Long||https://x.example", "example|Two Fields", "example|A|b|https://x.example|/i.png|more",
+               "plain|Plain HTTP||http://x.example", "js|Script||javascript:alert(1)", "proto|Protocol Relative||//evil.example",
+               "creds|Credentials||https://user:pw@x.example", "quote|Quote||https://x.example/\"onmouseover=\"",
+               "space|Space||https://x.example/a b", "port|Bad Port||https://x.example:99999/", "nohost|No Host||https:///p",
+               "seal2|Two Seals|例例|https://x.example", "mark|Combining|́|https://x.example",
+               "noname|||https://x.example", "longname|" + "n" * 41 + "||https://x.example",
+               "icon|Bad Icon||https://x.example|http://x.example/i.png", "nourl|No URL||"]
+        bad += ["%s|Clash||https://x.example" % k for k in builtin]
+        value = ";".join([self.EXAMPLE] + bad + ["example|Again||https://y.example"])
+        with self.env(value), self.quiet():
+            got = shell.extra_rooms()
+            first = self.err.getvalue()
+            shell.extra_rooms()
+            shell.switcher("kura", {})
+        self.assertEqual([x.key for x in got], ["example"])
+        lines = first.splitlines()
+        self.assertEqual(len(lines), len(bad) + 1)                                    # one line per bad entry
+        self.assertTrue(all(line.startswith("MACHIYA_EXTRA_ROOMS: skipped entry ") for line in lines))
+        self.assertIn("already an extra room", lines[-1])
+        self.assertEqual(self.err.getvalue(), first)                                 # said once, not on every page
+        many = ";".join("r%d|Room %d||https://r%d.example" % (i, i, i) for i in range(shell.EXTRA_MAX + 2))
+        with self.env(many), self.quiet():
+            self.assertEqual(len(shell.extra_rooms()), shell.EXTRA_MAX)
+        self.assertEqual(len(self.err.getvalue().splitlines()), 2)
+
+    def test_extra_url(self):
+        from vaultkit import shell
+        for good in ("https://example.ts.net", "https://example.ts.net/a?b=1&c=2#d", "/rooms/x", "/"):
+            self.assertEqual(shell.extra_url(good), good)
+        for bad in ("", "http://x.example", "HTTPS://x.example", "ftp://x", "//x.example", "/\\x", "x.example",
+                    "https://", "https://a@b.example", "https://x.example/\n", "https://x.example/<s>", "https://x/'y",
+                    "https://x/`y", "https://[::1", "data:text/html,x"):
+            self.assertEqual(shell.extra_url(bad), "", repr(bad))
+
+    def test_switcher_rows_and_glyphs(self):
+        from vaultkit import shell
+        links = shell.rooms(self.LINKS)
+        value = self.EXAMPLE + ";plain|Plain Room||/plain;pic|Picture <Room>|例|https://pic.example|https://pic.example/i.png"
+        with self.env(value):
+            menu = shell.switcher("kura", links, settings=True)
+            row = ('<a href="https://example.example.ts.net" data-room="example" data-extra-room="example">'
+                   '<span class="seal extra" data-room="example" aria-hidden="true">例</span>Example Room</a>')
+            self.assertIn(row, menu)
+            self.assertIn('<a href="/plain" data-room="plain" data-extra-room="plain"><span class="neighbour" '
+                          'aria-hidden="true">%s</span>Plain Room</a>' % shell.GLYPH["door"], menu)
+            self.assertIn('<img class="seal icon" data-room="pic" src="https://pic.example/i.png" alt="" aria-hidden="true">'
+                          'Picture &lt;Room&gt;</a>', menu)
+            last_room, first_neighbour = shell.ROOMS[-1][1], shell.NEIGHBOURS[0][1]
+            self.assertLess(menu.index(last_room + "<small>"), menu.index(row))      # after the rooms
+            self.assertLess(menu.index("Picture"), menu.index(first_neighbour))      # before the neighbours
+            self.assertLess(menu.index(row), menu.index("Plain Room"))               # in the setting's order
+            # standalone (no MACHIYA_ROOMS): the extra rooms alone still make a menu
+            self.assertIn(row, shell.switcher("kura", {}))
+            # the phone's Rooms sheet
+            tabs = shell.tabbar([("/", "home", "Home")], "home", "kura", links)
+            self.assertIn(row, tabs)
+            self.assertIn("<span>Rooms</span>", tabs)
+            # an extra room's own pages (one that uses the shell itself): it is "here", and its mark is the generic one
+            here = shell.switcher("example", links)
+            self.assertIn('<b data-room="example" data-extra-room="example"><span class="seal extra" data-room="example" '
+                          'aria-hidden="true">例</span>Example Room<small>here</small></b>', here)
+            self.assertEqual(shell.room_info("example"), ("example", "Example Room", "例", ""))
+            self.assertEqual(shell.room_info("plain"), ("plain", "Plain Room", "", ""))
+            self.assertIn('<span class="seal extra" data-room="example"', shell.header("example", [], "", links))
+        self.assertEqual(shell.room_info("example"), ("example", "Example", "", ""))  # unset: the old guess
+        with open(os.path.join(ROOT, "ui", "machiya.css"), encoding="utf-8") as f:
+            self.assertIn(".seal.extra {", f.read())
+
+    def test_rooms_settings_toggles(self):
+        from vaultkit import shell
+        links = shell.rooms(self.LINKS)
+        with self.env(self.EXAMPLE + ";plain|Plain Room||/plain"):
+            ctx = shell.prefs("machiya_show_plain=false")
+            rows = "".join(shell.rooms_section(ctx, "kura", links)[1])
+            self.assertIn('<span>Example Room</span><input type="checkbox" role="switch" class="switch" '
+                          'data-set="show_example" checked>', rows)
+            self.assertIn('data-set="show_plain">', rows)                            # switched off on this device
+            last_room = [r[1] for r in shell.ROOMS if r[0] != "kura"][-1]
+            self.assertLess(rows.index(last_room), rows.index("Example Room"))
+            self.assertLess(rows.index("Plain Room"), rows.index(shell.NEIGHBOURS[0][1]))
+            self.assertIn("show_example", "".join(shell.apps_section("kura", {}, {})[1]))
+            self.assertNotIn("show_example", "".join(shell.rooms_section(ctx, "example", links)[1]))   # not itself
+            # the account's apps_hidden never names them (vaultkit.prefs.APPS is fixed)
+            from vaultkit import prefs
+            self.assertNotIn("example", prefs.APPS)
+            ctx = shell.prefs("", account={"apps_hidden": "searxng"})
+            self.assertEqual(shell.shown_of(ctx), {"searxng": False})
+
+
 class ChangelogTest(unittest.TestCase):
     """v0.18: GET /api/changelog, an app's own CHANGELOG.md for the landing page."""
 

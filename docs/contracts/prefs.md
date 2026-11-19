@@ -27,7 +27,7 @@ The schema lives in [`vaultkit/prefs.py`](../../vaultkit/prefs.py) and is export
 | `theme` | `system`, `day`, `night` (`auto` is stored as `system`) | Mode |
 | `palette` | the ten keys of `vaultkit/palettes.py` (`tokyo-night` … `ayu`) | Theme |
 | `text_size` | `xsmall`, `small`, `standard`, `large`, `xlarge` (the house's five steps; Shiori maps its own through `HOUSE_STEPS`) | Text Size |
-| `apps_hidden` | a comma list from `shiori, konbini, niwa, kura, hister, searxng, machiya`, stored in that order without repeats; empty = all shown | Apps |
+| `apps_hidden` | a comma list from `shiori, konbini, niwa, kura, hister, searxng, machiya`, stored in that order without repeats; empty = all shown. A deployment's extra rooms ([ui.md](../ui.md#extra-rooms-machiya_extra_rooms)) are never listed: their switches stay on the device | Apps |
 | `pills` | JSON `{"order": [pill id, …], "hidden": [pill id, …]}`, ids `[a-z0-9_-]{1,32}`, at most 32 each; stored compact. The store checks the shape, Shiori the ids | Pills (Shiori only) |
 | `language`, `time_zone` | reserved: refused until an app uses them | |
 | `<app>.<key>` | `<app>` one of `kura, niwa, konbini, shiori, machiya` (landing); `<key>` is `[a-z0-9_]{1,48}`; the value a string of at most 1024 bytes with no control characters | the app's |

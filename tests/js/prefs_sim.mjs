@@ -71,7 +71,8 @@ function el(props = {}) {
 }
 
 // one page load of `room` on `device`; settings: build the /settings page's controls too
-async function visit(device, room, store, { settings = false, appPrefs = null, deviceRow = false } = {}) {
+// extra: a deployment's extra rooms (MACHIYA_EXTRA_ROOMS), drawn as switcher rows marked data-extra-room
+async function visit(device, room, store, { settings = false, appPrefs = null, deviceRow = false, extra = [] } = {}) {
   // the first render, as shell.prefs()/shell.page() draw it from the cookies (the shared one first)
   const jar = { ...(device.host[room] || {}), ...Object.fromEntries(Object.entries(device.shared)
     .filter(([k]) => k.startsWith("machiya_")).map(([k, v]) => [k.slice(8), v])) };
@@ -90,11 +91,16 @@ async function visit(device, room, store, { settings = false, appPrefs = null, d
       const c = el({ type: "checkbox", checked: true, dataset: { set: "show_" + a } });
       controls["show_" + a] = c; all.push(c);
     }
+    for (const a of extra) {
+      const c = el({ type: "checkbox", checked: true, dataset: { set: "show_" + a } });
+      controls["show_" + a] = c; all.push(c);
+    }
     for (const local of Object.keys(appPrefs || {})) {
       const c = el({ type: appPrefs[local].type === "bool" ? "checkbox" : "select-one", dataset: { set: local } });
       controls[local] = c; all.push(c);
     }
   }
+  const rows = Object.fromEntries(extra.map((a) => [a, el({ dataset: { room: a, extraRoom: a } })]));
   const deviceRowEl = el({ hidden: true });
   const deviceToggle = deviceRow ? el({ type: "checkbox" }) : null;
   const deviceSelect = deviceRow ? el({ value: "standard", closest: () => deviceRowEl }) : null;
@@ -119,6 +125,9 @@ async function visit(device, room, store, { settings = false, appPrefs = null, d
     },
     querySelectorAll(sel) {
       if (sel === "[data-set]") return all;
+      if (sel === "[data-extra-room]") return Object.values(rows);
+      const r = sel.match(/^\.rooms \.menu \[data-room="(.+)"\]$/);
+      if (r) return rows[r[1]] ? [rows[r[1]]] : [];
       const m = sel.match(/^\[data-set="(.+)"\]$/);
       if (m) return controls[m[1]] ? [controls[m[1]]] : [];
       return [];
@@ -144,6 +153,7 @@ async function visit(device, room, store, { settings = false, appPrefs = null, d
   await settle();
   const page = {
     classes: () => [...classes], text: () => body.dataset.text, log, controls, deviceToggle, deviceSelect,
+    hidden: () => Object.fromEntries(Object.entries(rows).map(([a, r]) => [a, r.hidden])),
     async change(key, value) {
       const c = controls[key];
       if (c.type === "checkbox") c.checked = value; else c.value = value;
@@ -275,6 +285,25 @@ const out = {};
   const k = await visit(laptop, "kura", account, { settings: true });
   await k.change("theme", "day");
   out.down = { cookie: theme(laptop), classes: k.classes(), pending: laptop.storage.kura.machiyaPrefsPending };
+}
+
+// 8. a deployment's extra room: its switch hides it in every room of this browser (the shared cookie), but never
+//    reaches the account (apps_hidden names only the built-in apps), so another device still shows it
+{
+  const account = new Store("account");
+  const laptop = new Device("laptop"), phone = new Device("phone");
+  const k = await visit(laptop, "kura", account, { settings: true, extra: ["example"] });
+  await k.change("show_example", false);
+  const putsAfterExtra = account.puts.length;
+  await k.change("show_searxng", false);
+  const here = k.hidden();
+  const n = await visit(laptop, "niwa", account, { extra: ["example"] });
+  account.set({ apps_hidden: "kura" });                       // another device changes the built-in Apps
+  const n2 = await visit(laptop, "niwa", account, { extra: ["example"] });
+  const p = await visit(phone, "konbini", account, { extra: ["example"] });
+  out.extra = { putsAfterExtra, puts: account.puts, here, niwa: n.hidden(), afterAccount: n2.hidden(),
+                cookie: laptop.cookies().machiya_show_example, phone: p.hidden(),
+                phoneCookie: phone.cookies().machiya_show_example ?? null, account: account.prefs };
 }
 
 console.log(JSON.stringify(out));
