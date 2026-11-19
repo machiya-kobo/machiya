@@ -91,6 +91,7 @@ def rooms(env=None):
 # -- extra rooms (MACHIYA_EXTRA_ROOMS, docs/ui.md "Extra rooms") ---------------------------------------------------
 ExtraRoom = namedtuple("ExtraRoom", "key name seal url icon")
 EXTRA_MAX = 8                                       # entries; any more are skipped
+RESERVED_KEYS = {"nogon"}                           # the hister neighbour's id after the Nogon rename (owner, 2026-11-19)
 EXTRA_KEY_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\Z")
 _extra_seen = {}                                    # the setting's value -> its rooms (each value is parsed and warned once)
 
@@ -99,7 +100,7 @@ def _builtin_keys():
     """Keys an extra room may not take: the rooms, the neighbours, the house, the Apps and the per-app namespaces."""
     from . import prefs
     return ({r[0] for r in ROOMS} | {n[0] for n in NEIGHBOURS} | {HOUSE[0]} | set(prefs.APPS) | set(prefs.APP_NAMES)
-            | set(GLYPH))
+            | set(GLYPH) | RESERVED_KEYS)
 
 
 def extra_url(url):

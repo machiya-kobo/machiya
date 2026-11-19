@@ -1248,7 +1248,8 @@ class ExtraRoomsTest(unittest.TestCase):
             self.assertEqual(shell.extra_rooms(), [])
             unset = self.render_all()
         self.assertEqual(hashlib.sha256(unset.encode("utf-8")).hexdigest(), self.UNSET_SHA256)
-        for value in ("", "  ", " ; ;", "Bad|x|y|https://x.example", "kura|Kura Again||https://x.example"):
+        for value in ("", "  ", " ; ;", "Bad|x|y|https://x.example", "kura|Kura Again||https://x.example",
+                      "nogon|Nogon Again||https://x.example", "hister|Hister Again||https://x.example"):
             with self.env(value), self.quiet():
                 self.assertEqual(self.render_all(), unset, repr(value))
         self.assertNotIn("data-extra-room", unset)
