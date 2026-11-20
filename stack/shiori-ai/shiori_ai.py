@@ -3,7 +3,7 @@
 
 Shiori's hosted pages call it on their own origin (docs/ai.md in Shiori's repository has the client's side):
   GET  /shiori/ai/status     -> 200 {"enabled", "answer", "summarize", "engine", "model", "remaining"} (no gate)
-  POST /shiori/ai/summarize  {"url": <a URL Hister has>, "refresh": bool}
+  POST /shiori/ai/summarize  {"url": <a URL Nogon has>, "refresh": bool}
        -> 200 {"summary", "engine", "model", "partial", "cached", "updated"}
   POST /shiori/ai/answer     {"q": <a web search, 1-300 characters>, "refresh": bool}
        -> 200 {"answer" (with [n] citations), "sources": [{"n", "title", "url"}], "engine", "model", "cached"}
@@ -19,21 +19,21 @@ code / local, 404 not_indexed / not_found, 405, 422 empty / no_results, 429 cap 
 declined, 503 unavailable, 504 searx.
 
 Rules:
-  - Notes, code and local files never reach the engine. Summarize: anything but an http(s) URL (Hister's local files
-    are file://) and a note host (SHIORI_AI_NOTE_HOSTS) are refused BEFORE Hister is asked; label/source `vault`,
-    source `code` and type `local` after. Answer: only SearXNG's http(s) web results, never a note host's; Hister is
+  - Notes, code and local files never reach the engine. Summarize: anything but an http(s) URL (Nogon's local files
+    are file://) and a note host (SHIORI_AI_NOTE_HOSTS) are refused BEFORE Nogon is asked; label/source `vault`,
+    source `code` and type `local` after. Answer: only SearXNG's http(s) web results, never a note host's; Nogon is
     never asked. Runs only on request. Daily request and input-token caps (UTC day).
   - The gate (SHIORI_AI_AUTH: tailscale | proxy | open), as shiori-feed's; POSTs also need Shiori's own page
     (Sec-Fetch-Site same-origin, or Origin = https://<Host>). Room tokens (0.2.0), as shiori-feed's: with
-    SHIORI_AI_AUTH_URL, SHIORI_AI_PUBLIC_URL and SHIORI_AI_HISTER_USERS a caller may send `Authorization: Bearer
+    SHIORI_AI_AUTH_URL, SHIORI_AI_PUBLIC_URL and SHIORI_AI_NOGON_USERS a caller may send `Authorization: Bearer
     mht_…`; a token decides alone, and a request it lets in skips the same-origin check (a bearer token is no cookie
     another site's page can ride on).
-  - Secrets come from files: the Anthropic key (SHIORI_AI_KEY_FILE, read per request) and the Hister token
-    (SHIORI_AI_HISTER_TOKEN_FILE). No redirect is ever followed, and no proxy from the environment is used, so neither
+  - Secrets come from files: the Anthropic key (SHIORI_AI_KEY_FILE, read per request) and the Nogon token
+    (SHIORI_AI_NOGON_TOKEN_FILE). No redirect is ever followed, and no proxy from the environment is used, so neither
     goes anywhere but where it is meant to.
   - The log carries counts, never URLs, queries, titles, text or secrets.
 Cache: SQLite in SHIORI_AI_DATA, keys prefixed with PROMPT_VERSION (bump it with a prompt). Summaries: key (url,
-Hister's `updated`), the newest CACHE_MAX kept; a re-captured page gets a fresh summary. Answers: key = the query
+Nogon's `updated`), the newest CACHE_MAX kept; a re-captured page gets a fresh summary. Answers: key = the query
 lowercased, whitespace collapsed, kept 24 h. Cached replies don't count against the caps. Stdlib only.
 """
 import collections
@@ -57,33 +57,38 @@ from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 _old_names = set()
 
 
-def nogon_first(env, key):
-    """0.3.0, the rename (Hister is now Nogon): for a SHIORI_AI_HISTER_<X> setting, SHIORI_AI_NOGON_<X> when it is set
-    (even empty), else the old name (logged once) until the rename's stage 3. Other names are read as they are."""
-    new = key.replace("HISTER", "NOGON")
-    if new != key:
-        if new in env:
-            return env[new]
-        if key in env and key not in _old_names:
-            _old_names.add(key)
-            print("shiori-ai: %s is an old name, read as %s" % (key, new), file=sys.stderr, flush=True)
+def setting(env, key):
+    """A setting, as vaultkit's names.setting() reads one (Hister is now Nogon): a SHIORI_AI_NOGON_<X> that is set wins,
+    even empty. 0.4.0, the rename's stage 3: its old SHIORI_AI_HISTER_<X> twin is no longer read. Set on its own it
+    stops the start, naming the new one, so nothing is quietly ignored; set beside it, it is ignored and said once.
+    Other names are read as they are."""
+    old = key.replace("NOGON", "HISTER")
+    if old != key:
+        if key in env:
+            if old in env and old not in _old_names:
+                _old_names.add(old)
+                print("shiori-ai: %s: an old name, ignored (%s is set; Hister is now Nogon): remove it" % (old, key),
+                      file=sys.stderr, flush=True)
+        elif old in env:
+            raise SystemExit("shiori-ai: %s is an old name and is no longer read: rename it %s (Hister is now Nogon)"
+                             % (old, key))
     return env.get(key)
 
 TEXT_MAX, BODY_MAX, URL_MAX, MAX_TOKENS, ENGINE_TIMEOUT = 60000, 8192, 4096, 300, 90
-HISTER_TIMEOUT, HISTER_MAX = 20, 16 << 20          # one stored page, with its HTML
+NOGON_TIMEOUT, NOGON_MAX = 20, 16 << 20            # one stored page, with its HTML
 SEARX_TIMEOUT, SEARX_MAX = 6, 4 << 20
 ENGINE_MAX = 1 << 20
 CLIENT_TIMEOUT = 30
 PROMPT_VERSION = "v3|"                    # prefixes both cache keys: bump when a prompt changes
 Q_MAX, ANSWER_RESULTS, ANSWER_TOKENS, ANSWER_TTL = 300, 8, 300, 86400
-HISTER_SYNTAX = re.compile(r"label:|url:|metadata\.", re.I)                # never sent to the web
+NOGON_SYNTAX = re.compile(r"label:|url:|metadata\.", re.I)                 # never sent to the web
 CTRL = re.compile("[\x00-\x1f\x7f]")
 TOKEN_RE = re.compile(r"[\x21-\x7e]{1,4096}")
-RTOKEN_RE = re.compile(r"mht_[A-Za-z0-9_-]{43}\Z")     # a room token, as hister-login mints them
+RTOKEN_RE = re.compile(r"mht_[A-Za-z0-9_-]{43}\Z")     # a room token, as nogon-login mints them
 CHANGELOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CHANGELOG.md")
 CHANGELOG_LIMIT = 64 * 1024
 UPSTREAM_FAILS = 3                  # requests in a row failing at the engine or SearXNG before /api/status errs
@@ -226,7 +231,7 @@ def base_url(value, name):
 
 
 def own_origin(url):
-    """scheme://host[:port], as hister-login writes a room's origin (lowercase, no default port)."""
+    """scheme://host[:port], as nogon-login writes a room's origin (lowercase, no default port)."""
     try:
         u = urllib.parse.urlsplit(url)
         port = None if u.port in (None, {"https": 443, "http": 80}.get(u.scheme)) else u.port
@@ -236,7 +241,7 @@ def own_origin(url):
 
 
 class RoomTokens:
-    """Room tokens checked with hister-login (GET <auth_url>/v1/check), as smallweb does: a good answer is kept 30 s,
+    """Room tokens checked with nogon-login (GET <auth_url>/v1/check), as smallweb does: a good answer is kept 30 s,
     a refusal 5 s, keyed by the token's SHA-256 (the token itself is never kept, logged or passed on)."""
 
     def __init__(self, auth_url, public_url, users, timeout=2):
@@ -244,7 +249,7 @@ class RoomTokens:
         self.cache, self.lock = {}, threading.Lock()
 
     def check(self, value):
-        """-> the Hister username the token acts as, or None."""
+        """-> the Nogon username the token acts as, or None."""
         key = hashlib.sha256(value.encode("ascii")).hexdigest()
         with self.lock:
             hit = self.cache.get(key)
@@ -274,7 +279,7 @@ class RoomTokens:
 
 
 def room_token_user(tokens, headers):
-    """-> (presented, Hister username or None). A request without a room token isn't one (presented False: the other
+    """-> (presented, Nogon username or None). A request without a room token isn't one (presented False: the other
     checks decide); a malformed token, two of them, or one sent when room tokens are off is refused."""
     values = headers.get_all("Authorization") or []
     extra = [v.strip() for v in headers.get_all("X-Machiya-Token") or [] if v.strip()]   # a client with fixed headers
@@ -316,10 +321,10 @@ class Config:
 
     def __init__(self, env=None):
         env = os.environ if env is None else env
-        g = lambda name, default="": (nogon_first(env, "SHIORI_AI_" + name) or default).strip()
-        self.hister = base_url(g("HISTER_URL"), "SHIORI_AI_HISTER_URL")
+        g = lambda name, default="": (setting(env, "SHIORI_AI_" + name) or default).strip()
+        self.nogon = base_url(g("NOGON_URL"), "SHIORI_AI_NOGON_URL")
         self.searxng = base_url(g("SEARXNG_URL"), "SHIORI_AI_SEARXNG_URL")
-        token = g("HISTER_TOKEN_FILE")
+        token = g("NOGON_TOKEN_FILE")
         self.token = None
         if token:
             self.token = SecretFile(token)
@@ -353,15 +358,15 @@ class Config:
         self.bind = g("BIND", "127.0.0.1")
         self.auth_url = g("AUTH_URL").rstrip("/")
         self.public_url = g("PUBLIC_URL").rstrip("/")
-        self.hister_users = frozenset(u.strip() for u in g("HISTER_USERS").split(",") if u.strip())
+        self.nogon_users = frozenset(u.strip() for u in g("NOGON_USERS").split(",") if u.strip())
         if self.auth_url:
             if not self.auth_url.startswith(("http://", "https://")):
-                raise SystemExit("shiori-ai: SHIORI_AI_AUTH_URL must be hister-login's http(s) address")
-            if not self.public_url.startswith(("http://", "https://")) or not self.hister_users \
-                    or "*" in self.hister_users:
+                raise SystemExit("shiori-ai: SHIORI_AI_AUTH_URL must be nogon-login's http(s) address")
+            if not self.public_url.startswith(("http://", "https://")) or not self.nogon_users \
+                    or "*" in self.nogon_users:
                 raise SystemExit("shiori-ai: SHIORI_AI_AUTH_URL (room tokens) needs SHIORI_AI_PUBLIC_URL (the address "
                                  "the tokens are issued for) and SHIORI_AI_NOGON_USERS (never *)")
-        self.room_tokens = RoomTokens(self.auth_url, self.public_url, self.hister_users) if self.auth_url else None
+        self.room_tokens = RoomTokens(self.auth_url, self.public_url, self.nogon_users) if self.auth_url else None
         self.check_bind()
 
     def check_bind(self):
@@ -591,7 +596,7 @@ class Text(HTMLParser):
 
 
 def page_text(markup):
-    """(text, partial): the readable text of Hister's stored HTML, cut to TEXT_MAX at a paragraph, sentence or word."""
+    """(text, partial): the readable text of Nogon's stored HTML, cut to TEXT_MAX at a paragraph, sentence or word."""
     p = Text()
     p.feed(markup or "")
     p.close()
@@ -638,22 +643,22 @@ class AI:
         host = (urllib.parse.urlsplit(url).hostname or "").lower().rstrip(".")
         return host in self.cfg.note_hosts or host.split(".", 1)[0] in self.cfg.note_hosts
 
-    def hister_page(self, url):
-        headers = {"Origin": "hister://", "Accept": "application/json", "User-Agent": "machiya-shiori-ai/" + VERSION}
+    def nogon_page(self, url):
+        headers = {"Origin": "nogon://", "Accept": "application/json", "User-Agent": "machiya-shiori-ai/" + VERSION}
         token = self.cfg.token.get() if self.cfg.token else ""
         if token:
             headers["X-Access-Token"] = token
-        req = urllib.request.Request(self.cfg.hister + "/api/preview?url=" + urllib.parse.quote(url, safe=""),
+        req = urllib.request.Request(self.cfg.nogon + "/api/preview?url=" + urllib.parse.quote(url, safe=""),
                                      headers=headers)
         try:
-            page = fetch_json(req, HISTER_TIMEOUT, HISTER_MAX)
+            page = fetch_json(req, NOGON_TIMEOUT, NOGON_MAX)
         except urllib.error.HTTPError as e:
-            log("summarize: hister HTTP %d" % e.code)
+            log("summarize: nogon HTTP %d" % e.code)
             if e.code in (400, 404):
                 raise Fail(404, "not_indexed", "Nogon has no copy of this page.")
             raise Fail(503, "unavailable", "Nogon didn't answer.")
         except (OSError, ValueError) as e:                                  # timeouts, refused, too big, bad JSON
-            log("summarize: hister failed: %s" % type(e).__name__)
+            log("summarize: nogon failed: %s" % type(e).__name__)
             raise Fail(503, "unavailable", "Nogon didn't answer.")
         if not isinstance(page, dict) or not page.get("content") or not isinstance(page.get("content"), str):
             raise Fail(404, "not_indexed", "Nogon has no copy of this page.")
@@ -732,19 +737,19 @@ class AI:
 
     def status(self):
         on = bool(self.cfg.read_key())
-        return {"enabled": on, "answer": on and bool(self.cfg.searxng), "summarize": on and bool(self.cfg.hister),
+        return {"enabled": on, "answer": on and bool(self.cfg.searxng), "summarize": on and bool(self.cfg.nogon),
                 "engine": "anthropic", "model": self.cfg.model, "remaining": self.store.remaining() if on else 0}
 
     def summarize(self, url, refresh):
         if len(url) > URL_MAX or CTRL.search(url):
             raise Fail(400, "bad_request", "That isn't a page address.")
-        if urllib.parse.urlsplit(url).scheme.lower() not in ("http", "https"):   # file:// (Hister's local files) and the rest
+        if urllib.parse.urlsplit(url).scheme.lower() not in ("http", "https"):   # file:// (Nogon's local files) and the rest
             raise Fail(403, "local", "Your files aren't sent to a cloud engine.")
-        if self.is_note_host(url):                                          # notes never reach Hister's text or the engine
+        if self.is_note_host(url):                                          # notes never reach Nogon's text or the engine
             raise Fail(403, "note", "Notes aren't sent to a cloud engine.")
-        if not self.cfg.hister:
+        if not self.cfg.nogon:
             raise Fail(503, "unavailable", "Summaries aren't set up here.")
-        page = self.hister_page(url)
+        page = self.nogon_page(url)
         details = page.get("details") if isinstance(page.get("details"), dict) else {}
         meta = details.get("metadata") if isinstance(details.get("metadata"), dict) else {}
         if details.get("label") == "vault" or meta.get("source") == "vault":
@@ -783,7 +788,7 @@ class AI:
             raise Fail(400, "bad_request", "The search is too long (300 characters at most).")
         if CTRL.search(q):
             raise Fail(400, "bad_request", "The search has a control character.")
-        if HISTER_SYNTAX.search(q):                                         # Hister-only syntax never goes to the web
+        if NOGON_SYNTAX.search(q):                                          # Nogon-only syntax never goes to the web
             raise Fail(400, "bad_request", "Nogon search syntax can't be answered from the web.")
         if not self.cfg.searxng:
             raise Fail(503, "unavailable", "Answers aren't set up here.")
@@ -983,7 +988,7 @@ def main():
     log("%s: listening on %s:%d, auth %s%s; Nogon %s; SearXNG %s; key %s; caps %d requests, %d input tokens a day" % (
         VERSION, cfg.bind, cfg.port, cfg.auth,
         "" if cfg.auth != "tailscale" else " (%s)" % (",".join(sorted(cfg.users)) or "NOBODY: set SHIORI_AI_USERS"),
-        cfg.hister or "off (no summaries)", cfg.searxng or "off (no answers)",
+        cfg.nogon or "off (no summaries)", cfg.searxng or "off (no answers)",
         "set" if cfg.read_key() else "MISSING (AI off)", cfg.daily_requests, cfg.daily_tokens))
     if cfg.auth == "open":
         log("WARNING: SHIORI_AI_AUTH=open: no identity check; anyone who reaches %s:%d can spend your AI caps"

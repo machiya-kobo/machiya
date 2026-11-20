@@ -2,20 +2,20 @@
 
 Summarize a saved page, or answer a web search, from Shiori on the web. **shiori-ai** is the server side of Shiori's **Summarize** and **AI Answer** on its hosted pages. It asks Claude through the Anthropic API, only when you ask, and within daily caps you set.
 
-- **Summarize** reads the copy of a page that [Hister](../../docs/services/hister.md) already stored. It never fetches the page.
+- **Summarize** reads the copy of a page that [Nogon](../../docs/services/nogon.md) already stored. It never fetches the page.
 - **AI Answer** answers from [SearXNG](../../docs/services/searxng.md)'s result snippets: the first 8 web results. It never fetches a page either, and the client sends only the search, so it is no general chatbot proxy.
-- **Your notes, code and files never leave.** A note's address, or anything but an http(s) page (Hister's local files are `file://`), is refused before Hister is asked. A page labeled `vault`, from code-import (`metadata.source:code`) or of type `local` is refused after. AI Answer never reads Hister, and drops any result that isn't an http(s) web page or that sits on a note host.
+- **Your notes, code and files never leave.** A note's address, or anything but an http(s) page (Nogon's local files are `file://`), is refused before Nogon is asked. A page labeled `vault`, from code-import (`metadata.source:code`) or of type `local` is refused after. AI Answer never reads Nogon, and drops any result that isn't an http(s) web page or that sits on a note host.
 
 It is one stdlib Python file with one SQLite file for its caches and counters. Shiori's apps run their AI on the device and don't use it.
 
 ## Endpoints
 
-Shiori's pages call these on their own origin (`/shiori/ai/` on the Hister host's address). The client's side is `docs/ai.md` in Shiori's repository.
+Shiori's pages call these on their own origin (`/shiori/ai/` on the Nogon host's address). The client's side is `docs/ai.md` in Shiori's repository.
 
 | | |
 |---|---|
 | `GET /shiori/ai/status` | `{enabled, answer, summarize, engine, model, remaining}`: `remaining` is today's engine calls left. No gate (a status page can read it) |
-| `POST /shiori/ai/summarize` | `{"url": <a URL Hister has>, "refresh": false}` → `{summary, engine, model, partial, cached, updated}`. `partial`: the page was cut to 60,000 characters first |
+| `POST /shiori/ai/summarize` | `{"url": <a URL Nogon has>, "refresh": false}` → `{summary, engine, model, partial, cached, updated}`. `partial`: the page was cut to 60,000 characters first |
 | `POST /shiori/ai/answer` | `{"q": <1-300 characters>, "refresh": false}` → `{answer, sources: [{n, title, url}], engine, model, cached}`. The answer cites sources as `[1]`, `[2]` |
 | `GET /healthz`, `/shiori/ai/healthz` | `{"ok": true}`. No gate |
 | `GET /api/status`, `/shiori/ai/api/status` | `{ok, ready, error, version, auth, room_tokens, last_ok, last_error, enabled, answer, summarize, model, remaining}`, no gate. `ok` turns false when `SHIORI_AI_KEY_FILE` holds no key, or once three requests in a row failed at the engine or SearXNG. Never a URL, a query or text |
@@ -25,17 +25,17 @@ Errors are JSON `{error, message}`:
 
 | Status | `error` | When |
 |---|---|---|
-| 400 | `bad_request` | not JSON, over 8 KB, no `url`/`q`, a search over 300 characters or with Hister syntax (`label:`, `url:`, `metadata.`) |
+| 400 | `bad_request` | not JSON, over 8 KB, no `url`/`q`, a search over 300 characters or with Nogon syntax (`label:`, `url:`, `metadata.`) |
 | 403 | `forbidden` | the gate, or not Shiori's own page (below) |
 | 403 | `note`, `code`, `local` | a note, a code document, or a local file (Shiori's Files) |
-| 404 | `not_indexed`, `not_found` | Hister has no copy; no such endpoint |
+| 404 | `not_indexed`, `not_found` | Nogon has no copy; no such endpoint |
 | 422 | `empty`, `no_results` | no readable text; the web found nothing |
 | 429 | `cap`, `busy` | today's cap is used up (`Retry-After`: midnight UTC); over `SHIORI_AI_PER_MINUTE` |
 | 502 | `engine`, `declined` | the engine refused the request, or declined to answer |
-| 503 | `unavailable` | no key, Hister or the engine down, or the job not set up |
+| 503 | `unavailable` | no key, Nogon or the engine down, or the job not set up |
 | 504 | `searx` | SearXNG took over 6 s |
 
-**Caches.** A summary is kept per page and Hister capture (the newest `SHIORI_AI_CACHE_MAX`), so a page captured again gets a fresh one. An answer is kept 24 hours per search, lowercased with spaces collapsed. `refresh: true` skips the cache. Cached replies don't count against the caps.
+**Caches.** A summary is kept per page and Nogon capture (the newest `SHIORI_AI_CACHE_MAX`), so a page captured again gets a fresh one. An answer is kept 24 hours per search, lowercased with spaces collapsed. `refresh: true` skips the cache. Cached replies don't count against the caps.
 
 ## Who may use it
 
@@ -62,8 +62,8 @@ A headless caller sends a room token from [nogon-login](../../docs/services/nogo
 | `SHIORI_AI_DAILY_REQUESTS` | `100` | engine calls per UTC day |
 | `SHIORI_AI_DAILY_INPUT_TOKENS` | `2000000` | input tokens per UTC day |
 | `SHIORI_AI_PER_MINUTE` | `20` | summarize and answer requests per minute, for every caller together; `0` = no limit |
-| `SHIORI_AI_NOGON_URL` | — | Hister's address, `http://hister:4433`. Unset: no summaries |
-| `SHIORI_AI_NOGON_TOKEN_FILE` | — | a file holding your Hister token, sent as `X-Access-Token` ([contracts/hister.md](../../docs/contracts/hister.md)); re-read when it changes. Set but missing or empty stops the start |
+| `SHIORI_AI_NOGON_URL` | — | Nogon's address, `http://nogon:4433`. Unset: no summaries. Formerly `SHIORI_AI_HISTER_URL`, `_TOKEN_FILE` and `_USERS` (Hister is now Nogon): since 0.4.0 an old name set on its own stops the start, naming the new one |
+| `SHIORI_AI_NOGON_TOKEN_FILE` | — | a file holding your Nogon token, sent as `X-Access-Token` ([contracts/nogon.md](../../docs/contracts/nogon.md)); re-read when it changes. Set but missing or empty stops the start |
 | `SHIORI_AI_SEARXNG_URL` | — | SearXNG's address, `http://searxng:8080`, with the `json` format on in its `search.formats`. Unset: no answers |
 | `SHIORI_AI_NOTE_HOSTS` | `kura,konbini,niwa` | hosts whose pages are notes: a full host name, or a first label (`kura` matches `kura.example.ts.net`) |
 | `SHIORI_AI_AUTH` | `tailscale` | `tailscale`, `proxy` or `open` (above) |
@@ -71,7 +71,7 @@ A headless caller sends a room token from [nogon-login](../../docs/services/nogo
 | `SHIORI_AI_TRUSTED_PROXIES` | — | addresses or CIDRs of the proxy |
 | `SHIORI_AI_AUTH_URL` | — | [nogon-login](../../docs/services/nogon-login.md)'s address: turns on room tokens (with the next two) |
 | `SHIORI_AI_PUBLIC_URL` | — | the address the room tokens are issued for (its origin is what nogon-login checks) |
-| `SHIORI_AI_NOGON_USERS` | — | the Hister users a room token may act as, comma-separated (never `*`) |
+| `SHIORI_AI_NOGON_USERS` | — | the Nogon users a room token may act as, comma-separated (never `*`) |
 | `SHIORI_AI_BIND_BEHIND_PROXY` | — | `1`: only the proxy (or the host's own `127.0.0.1` port) reaches the listener's network. Prefer `SHIORI_AI_TRUSTED_PROXIES` |
 | `SHIORI_AI_BIND`, `SHIORI_AI_PORT` | `127.0.0.1`, `8080` | the listener. The image sets `0.0.0.0` |
 | `SHIORI_AI_DATA` | `/data` | `shiori-ai.db`: the caches and the daily counts. It can be deleted (the day's counts go with it) |
@@ -79,9 +79,9 @@ A headless caller sends a room token from [nogon-login](../../docs/services/nogo
 
 ## Safety
 
-- **Secrets come from files**, never from argv, the environment or a log. The key goes only to `SHIORI_AI_API_URL`, the token only to Hister: no redirect is ever followed, and no proxy from the environment is used.
+- **Secrets come from files**, never from argv, the environment or a log. The key goes only to `SHIORI_AI_API_URL`, the token only to Nogon: no redirect is ever followed, and no proxy from the environment is used.
 - **Prompt injection.** The page or the results sit between `<page>` or `<results>` tags, and the system prompt says they are data. Any such tag inside them loses its angle brackets, so they can't close the block. SearXNG's titles and snippets lose all tags.
-- **Limits:** a request body of 8 KB and 30 s to send it; Hister's answer 16 MB and 20 s; SearXNG's 4 MB and 6 s; the engine's 1 MB and 90 s, with 300 output tokens. One request per connection.
+- **Limits:** a request body of 8 KB and 30 s to send it; Nogon's answer 16 MB and 20 s; SearXNG's 4 MB and 6 s; the engine's 1 MB and 90 s, with 300 output tokens. One request per connection.
 - **The caps are counted before the engine call**, since a failed call may still be billed.
 - **The log** carries the method, the path, the status and counts (characters, results, tokens). Never a URL, a search, a title, page text or a secret.
 
@@ -99,4 +99,4 @@ podman build -t shiori-ai:dev stack/shiori-ai
 cd stack/shiori-ai && python3 -m unittest discover -s tests
 ```
 
-No network: fakes of Hister, SearXNG and the Messages API on `127.0.0.1` record what they are sent.
+No network: fakes of Nogon, SearXNG and the Messages API on `127.0.0.1` record what they are sent.

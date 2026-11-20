@@ -1,5 +1,12 @@
 # Changelog: shiori-ai
 
+## 0.4.0
+
+- The rename's stage 3 (Hister is now Nogon):
+  - **The old settings stop the start.** `SHIORI_AI_HISTER_URL`, `_TOKEN_FILE` and `_USERS` are no longer read; one set without its `SHIORI_AI_NOGON_*` twin stops shiori-ai with a message naming the new one. Beside its twin it is ignored, and said once.
+  - **Calls to Nogon send `Origin: nogon://`** (Nogon v0.22 and later), not `hister://`.
+  - The code's own names say Nogon (`nogon_page`, `cfg.nogon`, …), as does the log line (`summarize: nogon …`).
+
 ## 0.3.0
 
 - Says Nogon, upstream Hister's new name (owner, 2026-11-19): "Nogon has no copy of this page.", "Nogon didn't answer.", "Nogon search syntax can't be answered from the web.", and the log line.
