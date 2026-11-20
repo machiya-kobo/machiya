@@ -572,8 +572,11 @@ def browser_checks(data, password, shots, base, sso_cookie="machiya_sso", denv=N
                     p.wait_for_load_state("networkidle")
                     visits[name] = p.url.startswith(U[name])
                 names = {c["name"]: c["value"] for c in ctx.cookies()}
+                # the page sign-in: the helper's page once (and its reload); the automatic one: each room passes
+                # through the helper once on its first visit, for its own cookie (Kura, Niwa, Konbini, landing)
                 record("[%s] with a production machiya_sso cookie too: one sign-in, no loop, the production cookie "
-                       "untouched" % engine, ok and all(visits.values()) and len(signins) <= 2
+                       "untouched" % engine, ok and all(visits.values())
+                       and len(signins) <= (1 + len(visits) if auto else 2)
                        and names.get("machiya_sso") == prod
                        and names.get(("__Host-" if base.startswith("https://") else "") + sso_cookie + "_kura",
                                      "").startswith("mhr_"),
@@ -752,6 +755,12 @@ def prefs_checks(pw, U, signin, shots, denv, tok):
     # fallback, as Serve's header would let them; Kura, with no fallback, says sign-in is unavailable)
     if engine_cmd == "native":
         print("SKIP  [prefs] the helper down (a native stack: stop nogon-login by hand)")
+        browser.close()
+        return
+    if denv.get("DEV_FRONT_SCHEME") == "http" and (denv.get("DEV_URL") or "").startswith("https://"):
+        # behind a real Tailscale Serve, Serve sets Tailscale-User-Login itself (this machine's own identity, not the
+        # owner's), so the header the check would send never reaches the rooms and the fallback can't be shown
+        print("SKIP  [prefs] the helper down (behind a real Tailscale Serve: the fallback's login header is Serve's)")
         browser.close()
         return
     login = (denv.get("DEV_TAILNET_USERS") or "owner@dev").split(",")[0].strip()
