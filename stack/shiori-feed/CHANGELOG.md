@@ -1,5 +1,13 @@
 # Changelog: shiori-feed
 
+## 0.4.0
+
+- The rename's stage 3 (Hister is now Nogon):
+  - **The old settings stop the start.** `SHIORI_FEED_HISTER_URL`, `_PUBLIC_URL`, `_TOKEN_FILE` and `_USERS` are no longer read; one set without its `SHIORI_FEED_NOGON_*` twin stops shiori-feed with a message naming the new one. Beside its twin it is ignored, and said once.
+  - **Searches send `Origin: nogon://`** (Nogon v0.22 and later), not `hister://`.
+  - **`/shiori/api/status` has `nogon`** (`token`, `last_ok`, `last_error`). `hister`, the same object, stays until the Shiori app on every device reads `nogon` (the rename's stage 3c).
+  - The code's own names say Nogon (`nogon_search`, `cfg.nogon`, …), as does the log line (`nogon: HTTP …`).
+
 ## 0.3.1
 
 - 0.3.0 on today's Python base. 0.3.0 was tagged but never built: its base pin was stale (its note above wrongly says it was re-pinned).

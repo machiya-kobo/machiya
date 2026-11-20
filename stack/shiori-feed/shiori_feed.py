@@ -1,34 +1,35 @@
 #!/usr/bin/env python3
-"""shiori-feed: an RSS 2.0 feed of any Hister search, for Shiori's Subscribe (Machiya, stack/shiori-feed).
+"""shiori-feed: an RSS 2.0 feed of any Nogon search, for Shiori's Subscribe (Machiya, stack/shiori-feed).
 
-    GET /shiori/feed?q=<Hister query>[&title=<channel title>][&exclude_label=<label>]...
-        -> 200 application/rss+xml: the 50 most recently visited matches (Hister's sort "date" orders by `updated`;
-           each item's pubDate is `added`, when Hister first saw the page). Cache-Control max-age=300.
+    GET /shiori/feed?q=<Nogon query>[&title=<channel title>][&exclude_label=<label>]...
+        -> 200 application/rss+xml: the 50 most recently visited matches (Nogon's sort "date" orders by `updated`;
+           each item's pubDate is `added`, when Nogon first saw the page). Cache-Control max-age=300.
            400: q missing or over 500 characters, a title over 200, more than 20 exclude_label or one over 100.
-           403: the gate refused the caller. 429: over SHIORI_FEED_PER_MINUTE (+ Retry-After). 502: Hister failed.
-    GET /shiori/healthz -> 200 "ok" (no gate; doesn't touch Hister)
-    GET /shiori/api/status -> 200 JSON {"ok", "ready", "error", "version", "auth", "room_tokens", "hister": {"token",
-        "last_ok", "last_error"}} (no gate, like every Machiya service's): `error` is set once three feeds in a row
-        failed to reach Hister.
+           403: the gate refused the caller. 429: over SHIORI_FEED_PER_MINUTE (+ Retry-After). 502: Nogon failed.
+    GET /shiori/healthz -> 200 "ok" (no gate; doesn't touch Nogon)
+    GET /shiori/api/status -> 200 JSON {"ok", "ready", "error", "version", "auth", "room_tokens", "nogon": {"token",
+        "last_ok", "last_error"}, "hister": the same} (no gate, like every Machiya service's): `error` is set once three
+        feeds in a row failed to reach Nogon. "hister" (the name before the rename) goes once the Shiori app on every
+        device reads "nogon" (the rename's stage 3c).
     GET /shiori/api/changelog -> this service's CHANGELOG.md, text/markdown (no gate; at most 64 KiB, an ETag)
 
 The paths also answer without the /shiori prefix (/feed, /healthz, /api/status, /api/changelog), for a proxy that
 strips its mount point.
-`q` is anything Hister's search box takes: label:books, an alias, words, * for everything. Each exclude_label (exact,
-case-sensitive) is sent to Hister as ` -label:"x"`. Code documents (metadata.source:code) are never feed items.
+`q` is anything Nogon's search box takes: label:books, an alias, words, * for everything. Each exclude_label (exact,
+case-sensitive) is sent to Nogon as ` -label:"x"`. Code documents (metadata.source:code) are never feed items.
 
 The gate (SHIORI_FEED_AUTH; the README has the details):
     tailscale  (default) a Tailscale-User-Login in SHIORI_FEED_USERS, believed only from SHIORI_FEED_TRUSTED_PROXIES
                when set; a non-loopback bind needs that or SHIORI_FEED_BIND_BEHIND_PROXY=1, or it refuses to start
     proxy      a proxy in front signs people in (nginx auth_request, say); only SHIORI_FEED_TRUSTED_PROXIES may connect
     open       no check; only on a loopback bind, or with SHIORI_FEED_BIND_BEHIND_PROXY=1 (a published 127.0.0.1 port)
-Room tokens (0.2.0), in tailscale and proxy mode: with SHIORI_FEED_AUTH_URL (hister-login's internal address) a caller
-may also send `Authorization: Bearer mht_…` (or `X-Machiya-Token`), a room token hister-login issued for
-SHIORI_FEED_PUBLIC_URL's origin, acting as one of SHIORI_FEED_HISTER_USERS. A request that carries one is decided by
+Room tokens (0.2.0), in tailscale and proxy mode: with SHIORI_FEED_AUTH_URL (nogon-login's internal address) a caller
+may also send `Authorization: Bearer mht_…` (or `X-Machiya-Token`), a room token nogon-login issued for
+SHIORI_FEED_PUBLIC_URL's origin, acting as one of SHIORI_FEED_NOGON_USERS. A request that carries one is decided by
 the token alone: a bad, revoked or other room's token is refused, never passed to the other checks.
 
-Hister gets `Origin: hister://` and the owner's token from SHIORI_FEED_HISTER_TOKEN_FILE (X-Access-Token), never a
-redirect. The log carries method, path and status only: never a query, a title or a token. Stdlib only.
+Nogon gets `Origin: nogon://` (0.4.0; Nogon v0.22 and later) and the owner's token from SHIORI_FEED_NOGON_TOKEN_FILE
+(X-Access-Token), never a redirect. The log carries method, path and status only: never a query, a title or a token. Stdlib only.
 """
 import collections
 import hashlib
@@ -48,21 +49,26 @@ from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from xml.sax.saxutils import escape
 
-VERSION = "0.3.1"
+VERSION = "0.4.0"
 
 _old_names = set()
 
 
-def nogon_first(env, key):
-    """0.3.0, the rename (Hister is now Nogon): for a <P>_HISTER_<X> setting, <P>_NOGON_<X> when it is set (even empty),
-    else the old name (logged once) until the rename's stage 3. Other names are read as they are."""
-    new = key.replace("HISTER", "NOGON")
-    if new != key:
-        if new in env:
-            return env[new]
-        if key in env and key not in _old_names:
-            _old_names.add(key)
-            print("shiori-feed: %s is an old name, read as %s" % (key, new), file=sys.stderr, flush=True)
+def setting(env, key):
+    """A setting, as vaultkit's names.setting() reads one (Hister is now Nogon): a <P>_NOGON_<X> that is set wins, even
+    empty. 0.4.0, the rename's stage 3: its old <P>_HISTER_<X> twin is no longer read. Set on its own it stops the
+    start, naming the new one, so nothing is quietly ignored; set beside it, it is ignored and said once. Other names
+    are read as they are."""
+    old = key.replace("NOGON", "HISTER")
+    if old != key:
+        if key in env:
+            if old in env and old not in _old_names:
+                _old_names.add(old)
+                print("shiori-feed: %s: an old name, ignored (%s is set; Hister is now Nogon): remove it" % (old, key),
+                      file=sys.stderr, flush=True)
+        elif old in env:
+            raise SystemExit("shiori-feed: %s is an old name and is no longer read: rename it %s (Hister is now Nogon)"
+                             % (old, key))
     return env.get(key)
 
 
@@ -73,14 +79,14 @@ CHANGELOG_PATHS = {"/shiori/api/changelog", "/api/changelog"}
 OPEN_PATHS = HEALTH_PATHS | STATUS_PATHS | CHANGELOG_PATHS     # no gate, and not logged
 CHANGELOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "CHANGELOG.md")
 CHANGELOG_LIMIT = 64 * 1024
-HISTER_FAILS = 3                    # feeds in a row that failed to reach Hister before /api/status reports an error
+NOGON_FAILS = 3                     # feeds in a row that failed to reach Nogon before /api/status reports an error
 FEED_LIMIT, Q_MAX, TITLE_MAX, LABEL_MAX, LABELS_MAX, DESC_MAX = 50, 500, 200, 100, 20, 500
-HISTER_TIMEOUT = 20                 # seconds for one Hister search
-HISTER_MAX = 16 << 20               # the most of Hister's answer read (50 documents with their text)
+NOGON_TIMEOUT = 20                  # seconds for one Nogon search
+NOGON_MAX = 16 << 20                # the most of Nogon's answer read (50 documents with their text)
 CLIENT_TIMEOUT = 30                 # seconds a client may take to send its request
 CTRL = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f￾￿]")     # not allowed in XML 1.0 (and DEL)
 TOKEN_RE = re.compile(r"[\x21-\x7e]{1,4096}")
-RTOKEN_RE = re.compile(r"mht_[A-Za-z0-9_-]{43}\Z")     # a room token, as hister-login mints them
+RTOKEN_RE = re.compile(r"mht_[A-Za-z0-9_-]{43}\Z")     # a room token, as nogon-login mints them
 MODES = ("tailscale", "proxy", "open")
 
 
@@ -156,7 +162,7 @@ def flag(value):
 
 
 def own_origin(url):
-    """scheme://host[:port], as hister-login writes a room's origin (lowercase, no default port)."""
+    """scheme://host[:port], as nogon-login writes a room's origin (lowercase, no default port)."""
     try:
         u = urllib.parse.urlsplit(url)
         port = None if u.port in (None, {"https": 443, "http": 80}.get(u.scheme)) else u.port
@@ -166,7 +172,7 @@ def own_origin(url):
 
 
 class RoomTokens:
-    """Room tokens checked with hister-login (GET <auth_url>/v1/check), as smallweb does: a good answer is kept 30 s,
+    """Room tokens checked with nogon-login (GET <auth_url>/v1/check), as smallweb does: a good answer is kept 30 s,
     a refusal 5 s, keyed by the token's SHA-256 (the token itself is never kept, logged or passed on)."""
 
     def __init__(self, auth_url, public_url, users, timeout=2):
@@ -174,7 +180,7 @@ class RoomTokens:
         self.cache, self.lock = {}, threading.Lock()
 
     def check(self, value):
-        """-> the Hister username the token acts as, or None."""
+        """-> the Nogon username the token acts as, or None."""
         key = hashlib.sha256(value.encode("ascii")).hexdigest()
         with self.lock:
             hit = self.cache.get(key)
@@ -204,7 +210,7 @@ class RoomTokens:
 
 
 def room_token_user(tokens, headers):
-    """-> (presented, Hister username or None). A request without a room token isn't one (presented False: the other
+    """-> (presented, Nogon username or None). A request without a room token isn't one (presented False: the other
     checks decide); a malformed token, two of them, or one sent when room tokens are off is refused."""
     values = headers.get_all("Authorization") or []
     extra = [v.strip() for v in headers.get_all("X-Machiya-Token") or [] if v.strip()]   # a client with fixed headers
@@ -246,17 +252,17 @@ class Config:
 
     def __init__(self, env=None):
         env = os.environ if env is None else env
-        g = lambda name, default="": (nogon_first(env, "SHIORI_FEED_" + name) or default).strip()
-        self.hister = g("HISTER_URL").rstrip("/")
-        if not self.hister.startswith(("http://", "https://")):
-            raise SystemExit("shiori-feed: SHIORI_FEED_NOGON_URL must be Nogon's http(s) address (http://hister:4433)")
-        self.public = (g("HISTER_PUBLIC_URL") or self.hister).rstrip("/")
-        token = g("HISTER_TOKEN_FILE")
+        g = lambda name, default="": (setting(env, "SHIORI_FEED_" + name) or default).strip()
+        self.nogon = g("NOGON_URL").rstrip("/")
+        if not self.nogon.startswith(("http://", "https://")):
+            raise SystemExit("shiori-feed: SHIORI_FEED_NOGON_URL must be Nogon's http(s) address (http://nogon:4433)")
+        self.public = (g("NOGON_PUBLIC_URL") or self.nogon).rstrip("/")
+        token = g("NOGON_TOKEN_FILE")
         self.token = None
         if token:
             self.token = SecretFile(token)
             if not self.token.value:
-                raise SystemExit("shiori-feed: SHIORI_FEED_HISTER_TOKEN_FILE: no token on the first line of %s" % token)
+                raise SystemExit("shiori-feed: SHIORI_FEED_NOGON_TOKEN_FILE: no token on the first line of %s" % token)
         self.auth = g("AUTH", "tailscale").lower()
         if self.auth not in MODES:
             raise SystemExit("shiori-feed: SHIORI_FEED_AUTH must be tailscale, proxy or open, not %r" % self.auth)
@@ -271,15 +277,15 @@ class Config:
             raise SystemExit("shiori-feed: SHIORI_FEED_PORT and SHIORI_FEED_PER_MINUTE are numbers")
         self.auth_url = g("AUTH_URL").rstrip("/")
         self.public_url = g("PUBLIC_URL").rstrip("/")
-        self.hister_users = frozenset(u.strip() for u in g("HISTER_USERS").split(",") if u.strip())
+        self.nogon_users = frozenset(u.strip() for u in g("NOGON_USERS").split(",") if u.strip())
         if self.auth_url:
             if not self.auth_url.startswith(("http://", "https://")):
-                raise SystemExit("shiori-feed: SHIORI_FEED_AUTH_URL must be hister-login's http(s) address")
-            if not self.public_url.startswith(("http://", "https://")) or not self.hister_users \
-                    or "*" in self.hister_users:
+                raise SystemExit("shiori-feed: SHIORI_FEED_AUTH_URL must be nogon-login's http(s) address")
+            if not self.public_url.startswith(("http://", "https://")) or not self.nogon_users \
+                    or "*" in self.nogon_users:
                 raise SystemExit("shiori-feed: SHIORI_FEED_AUTH_URL (room tokens) needs SHIORI_FEED_PUBLIC_URL (the "
-                                 "address the tokens are issued for) and SHIORI_FEED_HISTER_USERS (never *)")
-        self.room_tokens = RoomTokens(self.auth_url, self.public_url, self.hister_users) if self.auth_url else None
+                                 "address the tokens are issued for) and SHIORI_FEED_NOGON_USERS (never *)")
+        self.room_tokens = RoomTokens(self.auth_url, self.public_url, self.nogon_users) if self.auth_url else None
         self.check_bind()
 
     def check_bind(self):
@@ -343,10 +349,10 @@ class Limiter:
             return 0
 
 
-# -- Hister ----------------------------------------------------------------------------------------------------------
+# -- Nogon ----------------------------------------------------------------------------------------------------------
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
-    """A redirect from Hister is an error: urllib would carry X-Access-Token to wherever it points."""
+    """A redirect from Nogon is an error: urllib would carry X-Access-Token to wherever it points."""
 
     def redirect_request(self, *args, **kwargs):
         return None
@@ -359,21 +365,21 @@ def x(text):
     return escape(CTRL.sub("", str(text or "")))
 
 
-def hister_search(cfg, q, exclude=()):
-    """The newest FEED_LIMIT matches for q, minus the excluded labels and code documents, as Hister's documents[]."""
+def nogon_search(cfg, q, exclude=()):
+    """The newest FEED_LIMIT matches for q, minus the excluded labels and code documents, as Nogon's documents[]."""
     text = q + "".join(' -label:"%s"' % e.replace('"', "") for e in sorted(exclude)) + " -metadata.source:code"
     body = {"text": text, "sort": "date", "limit": FEED_LIMIT, "include_text": True}
-    headers = {"Origin": "hister://", "Accept": "application/json", "User-Agent": "machiya-shiori-feed/" + VERSION}
+    headers = {"Origin": "nogon://", "Accept": "application/json", "User-Agent": "machiya-shiori-feed/" + VERSION}
     token = cfg.token.get() if cfg.token else ""
     if token:
         headers["X-Access-Token"] = token
-    req = urllib.request.Request(cfg.hister + "/search?query=" + urllib.parse.quote(json.dumps(body)), headers=headers)
-    with OPENER.open(req, timeout=HISTER_TIMEOUT) as r:
+    req = urllib.request.Request(cfg.nogon + "/search?query=" + urllib.parse.quote(json.dumps(body)), headers=headers)
+    with OPENER.open(req, timeout=NOGON_TIMEOUT) as r:
         if r.status != 200:
-            raise ValueError("Hister answered %d" % r.status)
-        raw = r.read(HISTER_MAX + 1)
-    if len(raw) > HISTER_MAX:
-        raise ValueError("Hister's answer is over %d bytes" % HISTER_MAX)
+            raise ValueError("Nogon answered %d" % r.status)
+        raw = r.read(NOGON_MAX + 1)
+    if len(raw) > NOGON_MAX:
+        raise ValueError("Nogon's answer is over %d bytes" % NOGON_MAX)
     res = json.loads(raw)
     docs = res.get("documents") if isinstance(res, dict) else None
     return [d for d in docs or [] if isinstance(d, dict) and d.get("label") not in exclude][:FEED_LIMIT]
@@ -442,16 +448,16 @@ class Handler(BaseHTTPRequestHandler):
                 or any(len(e) > LABEL_MAX for e in exclude):
             return self.reply(400, b"bad request\n")
         try:
-            docs = hister_search(self.cfg, q, exclude)
+            docs = nogon_search(self.cfg, q, exclude)
         except urllib.error.HTTPError as e:
-            log("hister: HTTP %d" % e.code)
-            self.server.hister_failed("HTTP %d" % e.code)
+            log("nogon: HTTP %d" % e.code)
+            self.server.nogon_failed("HTTP %d" % e.code)
             return self.reply(502, b"Nogon failed\n")
         except (OSError, ValueError) as e:                  # refused, timeouts, too big, bad JSON
-            log("hister: %s" % type(e).__name__)
-            self.server.hister_failed(type(e).__name__)
+            log("nogon: %s" % type(e).__name__)
+            self.server.nogon_failed(type(e).__name__)
             return self.reply(502, b"Nogon failed\n")
-        self.server.hister_ok()
+        self.server.nogon_ok()
         self.reply(200, rss(self.cfg, q, title, docs), "application/rss+xml; charset=utf-8", "private, max-age=300")
 
     def do_GET(self):
@@ -502,27 +508,28 @@ class Server(ThreadingHTTPServer):
 
     def setup(self, cfg):
         self.cfg, self.limiter = cfg, Limiter(cfg.per_minute)
-        self.hister = {"last_ok": None, "last_error": None, "fails": 0}
+        self.nogon_state = {"last_ok": None, "last_error": None, "fails": 0}
         self.state_lock = threading.Lock()
 
-    def hister_ok(self):
+    def nogon_ok(self):
         with self.state_lock:
-            self.hister.update(last_ok=int(time.time()), fails=0)
+            self.nogon_state.update(last_ok=int(time.time()), fails=0)
 
-    def hister_failed(self, why):
+    def nogon_failed(self, why):
         with self.state_lock:
-            self.hister["fails"] += 1
-            self.hister["last_error"] = "%s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), why)
+            self.nogon_state["fails"] += 1
+            self.nogon_state["last_error"] = "%s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), why)
 
     def status(self):
         """GET /api/status: never a query, a title or a token."""
         with self.state_lock:
-            h = dict(self.hister)
+            h = dict(self.nogon_state)
         error = "Nogon failed %d feeds in a row (%s)" % (h["fails"], h["last_error"]) \
-            if h["fails"] >= HISTER_FAILS else None
+            if h["fails"] >= NOGON_FAILS else None
+        nogon = {"token": self.cfg.token is not None, "last_ok": h["last_ok"], "last_error": h["last_error"]}
         return {"ok": error is None, "ready": True, "error": error, "version": VERSION, "auth": self.cfg.auth,
                 "room_tokens": self.cfg.room_tokens is not None,
-                "hister": {"token": self.cfg.token is not None, "last_ok": h["last_ok"], "last_error": h["last_error"]}}
+                "nogon": nogon, "hister": nogon}     # 0.4.0: "nogon"; "hister" until the Shiori apps read "nogon" (3c)
 
 
 def make_server(cfg, bind=None, port=None):
@@ -538,9 +545,9 @@ def main():
         VERSION, cfg.bind, cfg.port, cfg.auth,
         "" if cfg.auth != "tailscale" else " (%s)" % (",".join(sorted(cfg.users)) or "NOBODY: set SHIORI_FEED_USERS"),
         " + room tokens" if cfg.room_tokens and cfg.auth != "open" else "",
-        cfg.hister, " with a token" if cfg.token else ""))
+        cfg.nogon, " with a token" if cfg.token else ""))
     if cfg.auth == "open":
-        log("WARNING: SHIORI_FEED_AUTH=open: no identity check; anyone who reaches %s:%d can read your Hister through "
+        log("WARNING: SHIORI_FEED_AUTH=open: no identity check; anyone who reaches %s:%d can read your Nogon through "
             "it" % (cfg.bind, cfg.port))
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))     # docker stop: exit at once, not after 10 s
     try:

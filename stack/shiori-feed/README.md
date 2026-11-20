@@ -1,24 +1,24 @@
 # shiori-feed
 
-Subscribe to any Hister search in your feed reader. **shiori-feed** answers `/shiori/feed?q=…` with an RSS 2.0 feed of the newest matching pages in [Hister](../../docs/services/hister.md), and Shiori's **Subscribe** builds those addresses for you (one search, label or collection at a time, or every collection as OPML).
+Subscribe to any Nogon search in your feed reader. **shiori-feed** answers `/shiori/feed?q=…` with an RSS 2.0 feed of the newest matching pages in [Nogon](../../docs/services/nogon.md), and Shiori's **Subscribe** builds those addresses for you (one search, label or collection at a time, or every collection as OPML).
 
-It is one stdlib Python file. It keeps no state and only ever calls Hister.
+It is one stdlib Python file. It keeps no state and only ever calls Nogon.
 
 ## Endpoints
 
 | | |
 |---|---|
-| `GET /shiori/feed?q=<query>` | 200 `application/rss+xml`: the 50 most recently visited matches, newest first. Hister's sort `date` orders by `updated`; each item's `pubDate` is `added`, when Hister first saw the page. `Cache-Control: private, max-age=300` |
+| `GET /shiori/feed?q=<query>` | 200 `application/rss+xml`: the 50 most recently visited matches, newest first. Nogon's sort `date` orders by `updated`; each item's `pubDate` is `added`, when Nogon first saw the page. `Cache-Control: private, max-age=300` |
 | `&title=<text>` | the channel's title, after "Shiori – " (at most 200 characters; default: the query) |
-| `&exclude_label=<label>` | repeatable, at most 20: leaves out pages with exactly that label (case-sensitive), sent to Hister as ` -label:"…"`. Shiori adds `exclude_label=vault`, so your notes stay out |
-| `GET /shiori/healthz` | 200 `ok`, with no gate and no Hister call: for probes |
-| `GET /shiori/api/status` | JSON `{ok, ready, error, version, auth, room_tokens, hister: {token, last_ok, last_error}}`, with no gate. `ok` turns false once three feeds in a row failed to reach Hister. Never a query, a title or a token |
+| `&exclude_label=<label>` | repeatable, at most 20: leaves out pages with exactly that label (case-sensitive), sent to Nogon as ` -label:"…"`. Shiori adds `exclude_label=vault`, so your notes stay out |
+| `GET /shiori/healthz` | 200 `ok`, with no gate and no Nogon call: for probes |
+| `GET /shiori/api/status` | JSON `{ok, ready, error, version, auth, room_tokens, nogon: {token, last_ok, last_error}, hister}`, with no gate. `hister` is the same object under the name before the rename, for a Shiori app that doesn't read `nogon` yet; it goes once every device's app does (0.4.0). `ok` turns false once three feeds in a row failed to reach Nogon. Never a query, a title or a token |
 | `GET /shiori/api/changelog` | this service's `CHANGELOG.md` as `text/markdown` (at most 64 KiB, an `ETag`), with no gate: the landing page's Recent Deploys |
 
-- `q` is anything Hister's search box takes: `label:books`, an alias, words, `*` for everything.
+- `q` is anything Nogon's search box takes: `label:books`, an alias, words, `*` for everything.
 - Code documents (`metadata.source:code`, from [code-import](../../docs/services/code-import.md)) are never feed items.
 - Each path also answers without `/shiori` (`/feed`, `/healthz`, `/api/status`, `/api/changelog`), for a proxy that strips its mount point.
-- Errors: 400 (no `q`, or over a limit above; `q` is at most 500 characters), 403 (the gate), 429 (over `SHIORI_FEED_PER_MINUTE`, with `Retry-After`), 502 (Hister failed or sent more than 16 MB), 404 and 405 for anything else.
+- Errors: 400 (no `q`, or over a limit above; `q` is at most 500 characters), 403 (the gate), 429 (over `SHIORI_FEED_PER_MINUTE`, with `Retry-After`), 502 (Nogon failed or sent more than 16 MB), 404 and 405 for anything else.
 
 Each item carries the page's title, its URL as link and guid, its label as a category, and the first 500 characters of its text as the description.
 
@@ -42,7 +42,7 @@ A headless caller, like a feed reader on a tagged machine, sends no Tailscale lo
 
 - `SHIORI_FEED_AUTH_URL`: nogon-login's address (`http://nogon-login:8081`);
 - `SHIORI_FEED_PUBLIC_URL`: the address the tokens are issued for (the hosted pages' own, say);
-- `SHIORI_FEED_NOGON_USERS`: the Hister users a token may act as (never `*`).
+- `SHIORI_FEED_NOGON_USERS`: the Nogon users a token may act as (never `*`).
 
 In `tailscale` or `proxy` mode the caller then sends `Authorization: Bearer mht_…` (or `X-Machiya-Token: mht_…`). nogon-login confirms each token; a good answer is kept 30 s and a refusal 5 s. A request that carries a token is decided by the token alone, and a bad or another room's token is refused. Tokens are never logged.
 
@@ -50,23 +50,23 @@ In `tailscale` or `proxy` mode the caller then sends `Authorization: Bearer mht_
 
 | Env | Default | |
 |---|---|---|
-| `SHIORI_FEED_NOGON_URL` | — | Hister's address, `http://hister:4433` (required) |
-| `SHIORI_FEED_NOGON_TOKEN_FILE` | — | a file holding your Hister token (its first line), sent as `X-Access-Token` ([contracts/hister.md](../../docs/contracts/hister.md)); re-read when the file changes. Set but missing or empty stops the start. Unset: no token (a Hister without users ignores it) |
-| `SHIORI_FEED_NOGON_PUBLIC_URL` | `SHIORI_FEED_NOGON_URL` | Hister's address for browsers: the channel's link is its search page |
+| `SHIORI_FEED_NOGON_URL` | — | Nogon's address, `http://nogon:4433` (required). Formerly `SHIORI_FEED_HISTER_URL`, likewise `_TOKEN_FILE`, `_PUBLIC_URL` and `_USERS` (Hister is now Nogon): since 0.4.0 an old name set on its own stops the start, naming the new one |
+| `SHIORI_FEED_NOGON_TOKEN_FILE` | — | a file holding your Nogon token (its first line), sent as `X-Access-Token` ([contracts/nogon.md](../../docs/contracts/nogon.md)); re-read when the file changes. Set but missing or empty stops the start. Unset: no token (a Nogon without users ignores it) |
+| `SHIORI_FEED_NOGON_PUBLIC_URL` | `SHIORI_FEED_NOGON_URL` | Nogon's address for browsers: the channel's link is its search page |
 | `SHIORI_FEED_AUTH` | `tailscale` | `tailscale`, `proxy` or `open` (above) |
 | `SHIORI_FEED_USERS` | — | the Tailscale logins allowed in `tailscale` mode; `*` = anyone; unset = nobody |
 | `SHIORI_FEED_TRUSTED_PROXIES` | — | addresses or CIDRs of the proxy: `172.31.250.2/32` |
 | `SHIORI_FEED_AUTH_URL` | — | [nogon-login](../../docs/services/nogon-login.md)'s address: turns on room tokens (with the next two) |
 | `SHIORI_FEED_PUBLIC_URL` | — | the address the room tokens are issued for (its origin is what nogon-login checks) |
-| `SHIORI_FEED_NOGON_USERS` | — | the Hister users a room token may act as, comma-separated (never `*`) |
+| `SHIORI_FEED_NOGON_USERS` | — | the Nogon users a room token may act as, comma-separated (never `*`) |
 | `SHIORI_FEED_BIND_BEHIND_PROXY` | — | `1`: only the proxy (or the host's own `127.0.0.1` port) reaches the listener's network, so in `tailscale` mode the header may come from any address there. Prefer `SHIORI_FEED_TRUSTED_PROXIES` |
 | `SHIORI_FEED_BIND`, `SHIORI_FEED_PORT` | `127.0.0.1`, `8080` | the listener. The image sets `0.0.0.0` |
 | `SHIORI_FEED_PER_MINUTE` | `60` | feeds served per minute, for every caller together; `0` = no limit |
 
 ## Safety
 
-- **Hister calls** send `Origin: hister://` and the token from the file, never in argv, the environment or a log. A redirect from Hister is never followed, so the token can't go anywhere else. No proxy from the environment is used.
-- **Limits:** 20 s and 16 MB for Hister's answer; 30 s for a client to send its request; one request per connection.
+- **Nogon calls** send `Origin: nogon://` and the token from the file, never in argv, the environment or a log. A redirect from Nogon is never followed, so the token can't go anywhere else. No proxy from the environment is used.
+- **Limits:** 20 s and 16 MB for Nogon's answer; 30 s for a client to send its request; one request per connection.
 - **The log** has the method, the path and the status: never a query, a title or a token. Errors log their code, not the request line.
 
 ## Running
@@ -83,4 +83,4 @@ podman build -t shiori-feed:dev stack/shiori-feed
 cd stack/shiori-feed && python3 -m unittest discover -s tests
 ```
 
-No network: a fake Hister on `127.0.0.1` records what it is sent.
+No network: a fake Nogon on `127.0.0.1` records what it is sent.

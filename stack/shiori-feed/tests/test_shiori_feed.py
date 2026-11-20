@@ -1,4 +1,4 @@
-"""shiori-feed's tests: no network. A fake Hister on 127.0.0.1 records what it is sent; shiori-feed runs on 127.0.0.1
+"""shiori-feed's tests: no network. A fake Nogon on 127.0.0.1 records what it is sent; shiori-feed runs on 127.0.0.1
 too. Covers the feed itself, the gate in each mode, the start checks, the limits, redirects and the log.
 
 Run, from stack/shiori-feed: python3 -m unittest discover -s tests
@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 import shiori_feed as sf                                        # noqa: E402
 
-TOKEN = "hister-test-token"
+TOKEN = "nogon-test-token"
 DOCS = [
     {"url": "https://a.example/one", "title": "One & Only", "text": "First   page\ttext " * 60, "added": 1759000000,
      "label": "books"},
@@ -38,7 +38,7 @@ def serve(handler):
     return srv, "http://127.0.0.1:%d" % srv.server_address[1]
 
 
-class Hister(BaseHTTPRequestHandler):
+class Nogon(BaseHTTPRequestHandler):
     seen = []
     mode = "ok"
 
@@ -46,26 +46,26 @@ class Hister(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        Hister.seen.append((self.path, self.headers))
-        if Hister.mode == "redirect":
+        Nogon.seen.append((self.path, self.headers))
+        if Nogon.mode == "redirect":
             self.send_response(302)
             self.send_header("Location", "http://127.0.0.1:9/elsewhere")
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        if Hister.mode == "down":
+        if Nogon.mode == "down":
             self.send_response(500)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        if self.headers.get("Origin") != "hister://":
+        if self.headers.get("Origin") != "nogon://":
             self.send_response(403)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
         body = json.dumps({"documents": DOCS}).encode()
-        if Hister.mode == "huge":
-            body = b" " * (sf.HISTER_MAX + 10) + body
+        if Nogon.mode == "huge":
+            body = b" " * (sf.NOGON_MAX + 10) + body
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -74,7 +74,7 @@ class Hister(BaseHTTPRequestHandler):
 
 
 def env(**kw):
-    out = {"SHIORI_FEED_HISTER_URL": HISTER_URL, "SHIORI_FEED_AUTH": "open"}
+    out = {"SHIORI_FEED_NOGON_URL": NOGON_URL, "SHIORI_FEED_AUTH": "open"}
     out.update({"SHIORI_FEED_" + k: v for k, v in kw.items()})
     return out
 
@@ -88,14 +88,14 @@ def get(base, path, headers=None, method="GET"):
         return e.code, dict(e.headers), e.read()
 
 
-HISTER_SRV, HISTER_URL = serve(Hister)
+NOGON_SRV, NOGON_URL = serve(Nogon)
 
 
 class Base(unittest.TestCase):
     cfg_env = {}
 
     def setUp(self):
-        Hister.seen, Hister.mode = [], "ok"
+        Nogon.seen, Nogon.mode = [], "ok"
         self.err = io.StringIO()
         self._redir = redirect_stderr(self.err)
         self._redir.__enter__()
@@ -125,18 +125,18 @@ class TestFeed(Base):
         root = ET.fromstring(body)                                  # well-formed XML, control characters dropped
         ch = root.find("channel")
         self.assertEqual(ch.findtext("title"), "Shiori – Books")
-        self.assertEqual(ch.findtext("link"), HISTER_URL + "/?q=label%3Abooks")
+        self.assertEqual(ch.findtext("link"), NOGON_URL + "/?q=label%3Abooks")
         items = ch.findall("item")
         self.assertEqual(len(items), 1)                             # the vault one is dropped, the one with no url too
         self.assertEqual(items[0].findtext("title"), "One & Only")
         self.assertEqual(items[0].findtext("category"), "books")
         self.assertTrue(items[0].findtext("description").endswith("…"))
         self.assertIn("GMT", items[0].findtext("pubDate"))
-        path, sent = Hister.seen[0]
+        path, sent = Nogon.seen[0]
         query = json.loads(parse_qs(urlsplit(path).query)["query"][0])
         self.assertEqual(query["text"], 'label:books -label:"vault" -metadata.source:code')
         self.assertEqual((query["sort"], query["limit"], query["include_text"]), ("date", 50, True))
-        self.assertEqual(sent["Origin"], "hister://")
+        self.assertEqual(sent["Origin"], "nogon://")
         self.assertIsNone(sent.get("X-Access-Token"))
 
     def test_short_paths_and_health(self):
@@ -151,11 +151,11 @@ class TestFeed(Base):
                      "/shiori/feed?q=x&title=" + "t" * 201, "/shiori/feed?q=x&exclude_label=" + "l" * 101,
                      "/shiori/feed?q=x" + "".join("&exclude_label=l%d" % i for i in range(21))):
             self.assertEqual(get(self.base, path)[0], 400, path)
-        self.assertEqual(Hister.seen, [])
+        self.assertEqual(Nogon.seen, [])
 
-    def test_hister_fails(self):
+    def test_nogon_fails(self):
         for mode in ("down", "huge"):
-            Hister.mode = mode
+            Nogon.mode = mode
             self.assertEqual(get(self.base, "/shiori/feed?q=x")[0], 502, mode)
 
     def test_log_has_no_query(self):
@@ -173,7 +173,7 @@ class TestToken(Base):
         self.token = os.path.join(self.dir.name, "token")
         with open(self.token, "w") as f:
             f.write(TOKEN + "\n")
-        self.cfg_env = {"HISTER_TOKEN_FILE": self.token}
+        self.cfg_env = {"NOGON_TOKEN_FILE": self.token}
         super().setUp()
 
     def tearDown(self):
@@ -182,7 +182,7 @@ class TestToken(Base):
 
     def test_token_sent_and_never_logged(self):
         self.assertEqual(get(self.base, "/shiori/feed?q=x")[0], 200)
-        self.assertEqual(Hister.seen[0][1]["X-Access-Token"], TOKEN)
+        self.assertEqual(Nogon.seen[0][1]["X-Access-Token"], TOKEN)
         self.assertNotIn(TOKEN, self.err.getvalue())
         self.assertNotIn(TOKEN, repr(self.cfg.token))
 
@@ -191,19 +191,19 @@ class TestToken(Base):
             f.write("rotated-token-value\n")
         os.utime(self.token, ns=(1, 1))
         get(self.base, "/shiori/feed?q=x")
-        self.assertEqual(Hister.seen[-1][1]["X-Access-Token"], "rotated-token-value")
+        self.assertEqual(Nogon.seen[-1][1]["X-Access-Token"], "rotated-token-value")
 
     def test_redirect_never_followed(self):
-        Hister.mode = "redirect"
+        Nogon.mode = "redirect"
         self.assertEqual(get(self.base, "/shiori/feed?q=x")[0], 502)
-        self.assertEqual(len(Hister.seen), 1)                     # one request, and nothing went to the Location
+        self.assertEqual(len(Nogon.seen), 1)                     # one request, and nothing went to the Location
 
     def test_bad_token_file_stops_the_start(self):
         empty = os.path.join(self.dir.name, "empty")
         open(empty, "w").close()
         for path in (empty, os.path.join(self.dir.name, "missing")):
             with self.assertRaises(SystemExit):
-                sf.Config(env(HISTER_TOKEN_FILE=path))
+                sf.Config(env(NOGON_TOKEN_FILE=path))
 
 
 class TestGate(Base):
@@ -214,7 +214,7 @@ class TestGate(Base):
         self.assertEqual(get(self.base, "/shiori/feed?q=x", {"Tailscale-User-Login": "other@example.com"})[0], 403)
         self.assertEqual(get(self.base, "/shiori/feed?q=x", {"Tailscale-User-Login": "you@example.com"})[0], 200)
         self.assertEqual(get(self.base, "/shiori/healthz")[0], 200)     # the probe needs no login
-        self.assertEqual(len(Hister.seen), 1)
+        self.assertEqual(len(Nogon.seen), 1)
 
     def test_duplicate_header_refused(self):
         conn = http.client.HTTPConnection("127.0.0.1", self.srv.server_address[1], timeout=5)
@@ -242,7 +242,7 @@ class TestGate(Base):
                     dict(AUTH="tailscale", BIND="0.0.0.0"),                 # a header anyone could send
                     dict(AUTH="proxy"),                                     # whose sign-in?
                     dict(AUTH="nobody"),
-                    dict(AUTH="open", HISTER_URL="hister:4433"),
+                    dict(AUTH="open", NOGON_URL="nogon:4433"),
                     dict(AUTH="proxy", TRUSTED_PROXIES="not-an-address")):
             with self.assertRaises(SystemExit, msg=bad):
                 sf.Config(env(**bad))
@@ -250,7 +250,7 @@ class TestGate(Base):
                      dict(AUTH="tailscale", BIND="0.0.0.0", BIND_BEHIND_PROXY="1"),
                      dict(AUTH="tailscale", BIND="0.0.0.0", TRUSTED_PROXIES="172.31.250.2/32")):
             sf.Config(env(**good))
-        self.assertEqual(sf.Config({"SHIORI_FEED_HISTER_URL": HISTER_URL}).auth, "tailscale")    # the default
+        self.assertEqual(sf.Config({"SHIORI_FEED_NOGON_URL": NOGON_URL}).auth, "tailscale")    # the default
 
 
 class TestRate(Base):
@@ -262,7 +262,7 @@ class TestRate(Base):
         code, headers, _ = get(self.base, "/shiori/feed?q=c")
         self.assertEqual(code, 429)
         self.assertGreater(int(headers["Retry-After"]), 0)
-        self.assertEqual(len(Hister.seen), 2)
+        self.assertEqual(len(Nogon.seen), 2)
 
     def test_limiter_window(self):
         now = [0.0]
@@ -284,7 +284,7 @@ OTHER = "mht_" + "B" * 43           # another room's token: refused
 
 
 class Login(BaseHTTPRequestHandler):
-    """A fake hister-login: GET /v1/check confirms GOOD for the feed's own origin only."""
+    """A fake nogon-login: GET /v1/check confirms GOOD for the feed's own origin only."""
     seen = []
 
     def log_message(self, *a):
@@ -302,7 +302,7 @@ class Login(BaseHTTPRequestHandler):
 
 
 LOGIN_SRV, LOGIN_URL = serve(Login)
-TOKENS = dict(AUTH_URL=LOGIN_URL, PUBLIC_URL="https://feed.example.ts.net/", HISTER_USERS="you")
+TOKENS = dict(AUTH_URL=LOGIN_URL, PUBLIC_URL="https://feed.example.ts.net/", NOGON_USERS="you")
 
 
 class TestRoomTokens(Base):
@@ -342,10 +342,10 @@ class TestRoomTokens(Base):
         self.assertEqual(get(self.base, "/shiori/feed?q=x", {"Authorization": "Bearer " + GOOD})[0], 403)
 
     def test_start_checks(self):
-        for bad in (dict(AUTH_URL=LOGIN_URL, HISTER_USERS="you"),                       # no public URL
+        for bad in (dict(AUTH_URL=LOGIN_URL, NOGON_USERS="you"),                       # no public URL
                     dict(AUTH_URL=LOGIN_URL, PUBLIC_URL="https://f.example"),           # nobody to act as
-                    dict(AUTH_URL=LOGIN_URL, PUBLIC_URL="https://f.example", HISTER_USERS="*"),
-                    dict(AUTH_URL="hister-login:8081", PUBLIC_URL="https://f.example", HISTER_USERS="you")):
+                    dict(AUTH_URL=LOGIN_URL, PUBLIC_URL="https://f.example", NOGON_USERS="*"),
+                    dict(AUTH_URL="nogon-login:8081", PUBLIC_URL="https://f.example", NOGON_USERS="you")):
             with self.assertRaises(SystemExit, msg=bad):
                 sf.Config(env(**bad))
         self.assertIsNone(sf.Config(env()).room_tokens)
@@ -362,18 +362,19 @@ class TestStatusAndChangelog(Base):
             st = json.loads(body)
             self.assertEqual((st["ok"], st["ready"], st["error"], st["version"], st["auth"], st["room_tokens"]),
                              (True, True, None, sf.VERSION, "tailscale", False))
-        Hister.mode = "down"
-        for i in range(sf.HISTER_FAILS):
+        Nogon.mode = "down"
+        for i in range(sf.NOGON_FAILS):
             self.assertEqual(get(self.base, "/shiori/feed?q=secret", {"Tailscale-User-Login": "you@example.com"})[0], 502)
         st = json.loads(get(self.base, "/api/status")[2])
         self.assertFalse(st["ok"])
         self.assertIn("HTTPError", st["error"].replace("HTTP 500", "HTTPError"))
         self.assertNotIn("secret", json.dumps(st))
-        Hister.mode = "ok"
+        Nogon.mode = "ok"
         self.assertEqual(get(self.base, "/shiori/feed?q=x", {"Tailscale-User-Login": "you@example.com"})[0], 200)
         st = json.loads(get(self.base, "/api/status")[2])
         self.assertTrue(st["ok"])
-        self.assertIsNotNone(st["hister"]["last_ok"])
+        self.assertIsNotNone(st["nogon"]["last_ok"])
+        self.assertEqual(st["hister"], st["nogon"])             # 0.4.0: both, until the Shiori apps read "nogon" (3c)
         self.assertNotIn("/api/status", self.err.getvalue())    # the probe isn't logged
 
     def test_changelog(self):
@@ -383,3 +384,31 @@ class TestStatusAndChangelog(Base):
         self.assertIn(b"## " + sf.VERSION.encode(), body)
         self.assertEqual(get(self.base, "/api/changelog", {"If-None-Match": headers["ETag"]})[0], 304)
         self.assertEqual(get(self.base, "/api/changelog", method="POST")[0], 405)
+
+
+class NogonNames(unittest.TestCase):
+    """0.4.0, the rename's stage 3: SHIORI_FEED_NOGON_<X> only; an old SHIORI_FEED_HISTER_<X> on its own stops the start."""
+
+    def test_setting(self):
+        import contextlib
+        import io
+        with self.assertRaises(SystemExit) as cm:
+            sf.setting({"SHIORI_FEED_HISTER_URL": "h"}, "SHIORI_FEED_NOGON_URL")
+        self.assertIn("SHIORI_FEED_HISTER_URL is an old name", str(cm.exception))
+        self.assertIn("rename it SHIORI_FEED_NOGON_URL", str(cm.exception))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            both = {"SHIORI_FEED_HISTER_PUBLIC_URL": "h", "SHIORI_FEED_NOGON_PUBLIC_URL": ""}
+            self.assertEqual(sf.setting(both, "SHIORI_FEED_NOGON_PUBLIC_URL"), "")    # set, even empty: it wins
+            self.assertEqual(sf.setting(both, "SHIORI_FEED_NOGON_PUBLIC_URL"), "")
+        self.assertEqual(err.getvalue().count("SHIORI_FEED_HISTER_PUBLIC_URL: an old name, ignored"), 1)   # said once
+        self.assertIsNone(sf.setting({}, "SHIORI_FEED_USERS"))
+        for old in ("SHIORI_FEED_HISTER_URL", "SHIORI_FEED_HISTER_TOKEN_FILE", "SHIORI_FEED_HISTER_USERS",
+                    "SHIORI_FEED_HISTER_PUBLIC_URL"):
+            e = env()
+            e[old] = "x"
+            if old == "SHIORI_FEED_HISTER_URL":
+                del e["SHIORI_FEED_NOGON_URL"]
+            with self.assertRaises(SystemExit) as cm:
+                sf.Config(e)
+            self.assertIn(old + " is an old name", str(cm.exception))
