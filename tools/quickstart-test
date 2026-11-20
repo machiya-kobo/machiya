@@ -80,8 +80,8 @@ def shiori_checks(timeout=240):
             st2, body = get("/searx/search?q=lantern&format=json")
             results = len(json.loads(body).get("results", []))
             on = json.dumps(cfg).lower()
-            # Nogon is "hister" in shiori-web's config.json until Shiori's own stage 3 of the rename; either counts
-            if st == 200 and st2 == 200 and results and ("nogon" in on or "hister" in on) and "searx" in on:
+            # shiori-web 1.30.0 (the reference pin) names the engine "nogon" in its config.json
+            if st == 200 and st2 == 200 and results and "nogon" in on and "searx" in on:
                 print("   shiori answers on :8080, Nogon and SearXNG on, a web search found %d results" % results)
                 return []
             last = "page %s, search %s with %d results" % (st, st2, results)
