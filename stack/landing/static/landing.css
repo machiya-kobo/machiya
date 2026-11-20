@@ -136,6 +136,7 @@ form.search.launch input:placeholder-shown ~ .clear { display: none; }
 .mini[data-app="niwa"] { --tile: var(--green); } .mini[data-app="kura"] { --tile: var(--orange); }
 .mini:hover { text-decoration: none; border-color: color-mix(in srgb, var(--tile) 60%, var(--line)); }
 .mini .seal.icon, .mini .seal.extra, .mini .neighbour { grid-row: 1 / 3; width: 32px; height: 32px; }
+.mini .seal.icon.neighbour-icon { background-size: 24px 24px; background-position: center; background-repeat: no-repeat; }
 @media (min-width: 761px) { .minis[data-n="5"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .minis[data-n="6"] { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .mini .mname { font-weight: 600; color: var(--tile); }

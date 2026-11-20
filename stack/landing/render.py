@@ -355,8 +355,11 @@ def due_word(days):
     return ("in %d days" % days, "soon" if days <= 3 else "")
 
 
-def home_html(snap, links, targets, search, now, tz=None):
+def home_html(snap, links, targets, search, now, tz=None, shown=None):
+    """The launcher. Its tiles follow Settings, Rooms (0.7.3): the rooms, the extra rooms, then Nogon and SearXNG, in
+    the Rooms menu's order; one switched off there (`shown`, shell.shown_of) isn't on Home either."""
     apps, t = snap["apps"], snap.get("today") or {}
+    shown = shown or {}
 
     def link(key):
         return (links.get(key) or (targets.get(key) if str(targets.get(key, "")).startswith("http") else "") or "").rstrip("/")
@@ -371,14 +374,18 @@ def home_html(snap, links, targets, search, now, tz=None):
         "konbini": ("%s in WIP" % probes.count(t["wip"])) if t.get("wip") is not None else (fact(apps["konbini"], "WIP") or fact(apps["konbini"], "cards")),
         "niwa": fact(apps["niwa"], "published"),
         "kura": plural_or(((apps["kura"].get("data") or {}).get("total_notes")), "note", fact(apps["kura"], "notes")),
+        "hister": fact(apps["hister"], "repos") or what_of("hister"),
+        "searxng": what_of("searxng"),
     }
-    tiles = [mini(k, n, apps[k], counts[k], link(k)) for k, n, g, _ in probes.APPS
-             if g == "rooms" and apps[k]["state"] != "absent" and link(k)]
-    extras = [extra_mini(x) for x in house.extra_rooms()]
-    tiles += extras
+
+    def room_tiles(group):
+        return [mini(k, n, apps[k], counts[k], link(k)) for k, n, g, _ in probes.APPS
+                if g == group and shown.get(k) is not False and apps[k]["state"] != "absent" and link(k)]
+
+    tiles = (room_tiles("rooms") + [extra_mini(x) for x in house.extra_rooms() if shown.get(x.key) is not False]
+             + room_tiles("engines"))
     if tiles:
-        out.append('<nav class="minis"%s aria-label="Rooms">%s</nav>'
-                   % ((' data-n="%d"' % len(tiles)) if extras else "", "".join(tiles)))
+        out.append('<nav class="minis" data-n="%d" aria-label="Rooms">%s</nav>' % (len(tiles), "".join(tiles)))
     secs = []
     kb, ku, ni, sh = link("konbini"), link("kura"), link("niwa"), link("shiori")
     if t.get("working") is not None:
@@ -415,9 +422,14 @@ def home_html(snap, links, targets, search, now, tz=None):
     return "".join(out)
 
 
+def what_of(key):
+    return next((w for k, _, _, w in probes.APPS if k == key), "")
+
+
 def plural_or(n, word, fallback):
     return probes.plural(int(n), word) if isinstance(n, (int, float)) and not isinstance(n, bool) else fallback
 
 
 def home(ctx, snap, links, targets, search, now, tz=None):
-    return shell_page(ctx, "Machiya", "home", links, home_html(snap, links, targets, search, now, tz) + footer(snap, now))
+    return shell_page(ctx, "Machiya", "home", links,
+                      home_html(snap, links, targets, search, now, tz, house.shown_of(ctx)) + footer(snap, now))

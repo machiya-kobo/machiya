@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.7.3
+
+- Home's tiles follow Settings, Rooms: the rooms, the extra rooms, then Nogon and SearXNG, in the Rooms menu's order. A room switched off there is not on Home either.
+
 ## 0.7.2
 
 - Home: each extra room (MACHIYA_EXTRA_ROOMS) gets a tile after the built-in rooms, with its icon, name and what it is. The landing doesn't check extra rooms, so their tiles have no state; five tiles share one row on wide screens.

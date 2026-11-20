@@ -1078,18 +1078,30 @@ class Launcher(Stack):
         """0.7.2: an extra room (MACHIYA_EXTRA_ROOMS) gets a launcher tile after the built-in rooms: mark, name, what."""
         l, snap, _ = self.today()
         plain = render.home_html(snap, l.config.links, l.config.targets, "", NOW)
-        self.assertIn('<nav class="minis" aria-label="Rooms">', plain)        # unset: unchanged
+        self.assertIn('<nav class="minis" data-n="6" aria-label="Rooms">', plain)   # 4 rooms, Nogon, SearXNG
+        self.assertLess(plain.index('data-app="kura"'), plain.index('data-app="hister"'))
+        self.assertLess(plain.index('data-app="hister"'), plain.index('data-app="searxng"'))
         rooms = ("techo|Tech\u014d|\u5e33|https://techo.example.ts.net|https://techo.example.ts.net/i.svg|agents;"
                  "bare|Bare Room||https://bare.example.ts.net")
         with mock.patch.dict(os.environ, {"MACHIYA_EXTRA_ROOMS": rooms}):
             html = render.home_html(snap, l.config.links, l.config.targets, "", NOW)
-        self.assertIn('<nav class="minis" data-n="6" aria-label="Rooms">', html)
+        self.assertIn('<nav class="minis" data-n="8" aria-label="Rooms">', html)
         self.assertIn('<a class="mini" data-app="techo" data-extra-room="techo" href="https://techo.example.ts.net">'
                       '<img class="seal icon" data-room="techo" src="https://techo.example.ts.net/i.svg" alt="" aria-hidden="true">'
                       '<span class="mname">Tech\u014d</span><span class="mcount">agents</span></a>', html)
         self.assertIn('data-app="bare"', html)
         self.assertLess(html.index('data-app="kura"'), html.index('data-app="techo"'))
-        self.assertNotIn('class="dot"', html[html.index('data-app="techo"'):html.index("</nav>")])   # not checked
+        self.assertNotIn('class="dot"', html[html.index('data-app="techo"'):html.index('data-app="hister"')])   # not checked
+        self.assertLess(html.index('data-app="bare"'), html.index('data-app="hister"'))     # extra rooms, then engines
+        with mock.patch.dict(os.environ, {"MACHIYA_EXTRA_ROOMS": rooms}):                    # 0.7.3: Settings, Rooms
+            off = render.home_html(snap, l.config.links, l.config.targets, "", NOW,
+                                   shown={"kura": False, "techo": False, "searxng": False})
+        nav = off[off.index('<nav class="minis"'):off.index("</nav>")]
+        self.assertIn('data-n="5"', nav)
+        for key in ("kura", "techo", "searxng"):
+            self.assertNotIn('data-app="%s"' % key, nav)
+        for key in ("shiori", "niwa", "bare", "hister"):
+            self.assertIn('data-app="%s"' % key, nav)
 
     def test_pill_counts(self):
         self.assertIn(">1 needs a look<", render.pill({"state": "error", "count": 1, "text": "x"}))
