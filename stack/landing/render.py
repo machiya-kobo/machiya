@@ -370,11 +370,11 @@ def home_html(snap, links, targets, search, now, tz=None, shown=None):
     out.append(search_pill(search))
     hd = (apps.get("hister") or {}).get("data") or {}
     counts = {
-        "shiori": plural_or(hd.get("docs"), "page", "search"),
+        "shiori": searches(apps["shiori"].get("searches_today")),                  # 0.7.4: what you did with it
         "konbini": ("%s in WIP" % probes.count(t["wip"])) if t.get("wip") is not None else (fact(apps["konbini"], "WIP") or fact(apps["konbini"], "cards")),
         "niwa": fact(apps["niwa"], "published"),
         "kura": plural_or(((apps["kura"].get("data") or {}).get("total_notes")), "note", fact(apps["kura"], "notes")),
-        "hister": fact(apps["hister"], "repos") or what_of("hister"),
+        "hister": plural_or(hd.get("docs"), "page", what_of("hister")),           # 0.7.4: what it holds
         "searxng": what_of("searxng"),
     }
 
@@ -420,6 +420,12 @@ def home_html(snap, links, targets, search, now, tz=None, shown=None):
         out.append('<div class="empty"><h2>Nothing Here Yet</h2><p>Rooms show up here when MACHIYA_ROOMS names them.</p></div>')
     out.append('</main>')
     return "".join(out)
+
+
+def searches(n):
+    if not isinstance(n, (int, float)) or isinstance(n, bool):
+        return "search"
+    return "1 search today" if n == 1 else "%s searches today" % probes.count(int(n))
 
 
 def what_of(key):

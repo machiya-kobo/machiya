@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.7.4
+
+- Home: Nogon's tile counts its pages and Shiori's counts today's web searches (owner, 2026-11-20), so the two tiles no longer repeat one number. Shiori says "search" when the deployment has no search counts.
+
 ## 0.7.3
 
 - Home's tiles follow Settings, Rooms: the rooms, the extra rooms, then Nogon and SearXNG, in the Rooms menu's order. A room switched off there is not on Home either.

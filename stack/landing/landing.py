@@ -189,6 +189,7 @@ class Landing:
             self.board_behind_since = None
         if c.search_counts and found["shiori"].get("state") not in ("absent", "down"):
             found["shiori"]["more"] = probes.search_counts(c.search_counts)
+            found["shiori"]["searches_today"] = probes.searches_today(c.search_counts)
         code = found["code-import"].get("data") or {}
         if code.get("added_total") is not None:              # documents added in the last day, the page's own samples
             code["added_day"], code["added_since"] = self.history.sample("code-import.added", code["added_total"], now)

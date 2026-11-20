@@ -901,6 +901,13 @@ class ZeroTwoOne(Stack):
         html = render.main_html(snap, l.history, l.logs, l.config.links, l.config.targets, NOW)
         self.assertIn("Searches 312 today", html)
         self.assertNotIn("0.19.9", html)                        # Shiori's built-against Hister isn't shown
+        home = render.home_html(snap, l.config.links, l.config.targets, "", NOW)       # 0.7.4: Shiori searches, Nogon pages
+        self.assertIn('data-app="shiori"', home)
+        shiori = home[home.index('data-app="shiori"'):home.index('data-app="konbini"')]
+        self.assertIn("312 searches today", shiori)
+        nogon = home[home.index('data-app="hister"'):home.index('data-app="searxng"')]
+        self.assertIn("1.9k pages", nogon)
+        self.assertEqual((render.searches(1), render.searches(None)), ("1 search today", "search"))
         self.assertEqual(probes.compact(1250000), "1.2M")          # cut, not rounded (0.3.0)
         with open(path, "w") as f:
             f.write("{broken")
@@ -1064,7 +1071,7 @@ class Launcher(Stack):
         self.assertIn(">All up</a>", html)
         self.assertIn('<form class="search launch" role="search" action="https://search.example.ts.net/" method="get">', html)
         self.assertIn('name="q"', html)
-        for count in ("1.9k pages", "3 in WIP", "1 published", "314 notes"):
+        for count in ("1.9k pages", "3 in WIP", "1 published", "314 notes", ">search<"):
             self.assertIn(count, html)
         for head in ("Working On", "Due Soon", "Notes Changed", "Saved &amp; Read", "Garden"):
             self.assertIn(head, html)

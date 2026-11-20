@@ -563,6 +563,16 @@ def code_import(path, now):
 compact = count             # 0.2.1's name for the same thing
 
 
+def searches_today(path):
+    """LANDING_SEARCH_COUNTS' "today" as a number (Home's Shiori tile, 0.7.4), else None."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return num(d.get("today")) if isinstance(d, dict) else None
+
+
 def search_counts(path):
     """LANDING_SEARCH_COUNTS: web searches (every SearXNG /search, what would hit a paid engine) as counted by the
     deployment: {"updated", "today", "yesterday", "month", "year", "by_day"}, UTC days, counts only. "" when the file
