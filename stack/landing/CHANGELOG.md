@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.7.5
+
+- Home: today's web searches (LANDING_SEARCH_COUNTS, every SearXNG search) are on SearXNG's tile, not Shiori's (owner, 2026-11-20). Shiori's tile says what it is ("search").
+
 ## 0.7.4
 
 - Home: Nogon's tile counts its pages and Shiori's counts today's web searches (owner, 2026-11-20), so the two tiles no longer repeat one number. Shiori says "search" when the deployment has no search counts.

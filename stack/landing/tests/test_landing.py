@@ -901,12 +901,13 @@ class ZeroTwoOne(Stack):
         html = render.main_html(snap, l.history, l.logs, l.config.links, l.config.targets, NOW)
         self.assertIn("Searches 312 today", html)
         self.assertNotIn("0.19.9", html)                        # Shiori's built-against Hister isn't shown
-        home = render.home_html(snap, l.config.links, l.config.targets, "", NOW)       # 0.7.4: Shiori searches, Nogon pages
-        self.assertIn('data-app="shiori"', home)
+        home = render.home_html(snap, l.config.links, l.config.targets, "", NOW)       # 0.7.5: SearXNG searches, Nogon pages
         shiori = home[home.index('data-app="shiori"'):home.index('data-app="konbini"')]
-        self.assertIn("312 searches today", shiori)
+        self.assertNotIn("searches", shiori)
         nogon = home[home.index('data-app="hister"'):home.index('data-app="searxng"')]
         self.assertIn("1.9k pages", nogon)
+        searx = home[home.index('data-app="searxng"'):home.index("</nav>")]
+        self.assertIn("312 searches today", searx)
         self.assertEqual((render.searches(1), render.searches(None)), ("1 search today", "search"))
         self.assertEqual(probes.compact(1250000), "1.2M")          # cut, not rounded (0.3.0)
         with open(path, "w") as f:

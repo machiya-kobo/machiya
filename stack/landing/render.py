@@ -370,12 +370,12 @@ def home_html(snap, links, targets, search, now, tz=None, shown=None):
     out.append(search_pill(search))
     hd = (apps.get("hister") or {}).get("data") or {}
     counts = {
-        "shiori": searches(apps["shiori"].get("searches_today")),                  # 0.7.4: what you did with it
+        "shiori": what_of("shiori"),
         "konbini": ("%s in WIP" % probes.count(t["wip"])) if t.get("wip") is not None else (fact(apps["konbini"], "WIP") or fact(apps["konbini"], "cards")),
         "niwa": fact(apps["niwa"], "published"),
         "kura": plural_or(((apps["kura"].get("data") or {}).get("total_notes")), "note", fact(apps["kura"], "notes")),
         "hister": plural_or(hd.get("docs"), "page", what_of("hister")),           # 0.7.4: what it holds
-        "searxng": what_of("searxng"),
+        "searxng": searches(apps["shiori"].get("searches_today"), what_of("searxng")),   # 0.7.5: web searches
     }
 
     def room_tiles(group):
@@ -422,9 +422,10 @@ def home_html(snap, links, targets, search, now, tz=None, shown=None):
     return "".join(out)
 
 
-def searches(n):
+def searches(n, fallback="search"):
+    """LANDING_SEARCH_COUNTS' today (every SearXNG /search) for SearXNG's tile."""
     if not isinstance(n, (int, float)) or isinstance(n, bool):
-        return "search"
+        return fallback
     return "1 search today" if n == 1 else "%s searches today" % probes.count(int(n))
 
 
