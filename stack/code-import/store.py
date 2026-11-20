@@ -1,16 +1,16 @@
 """code-import's state: one sqlite file under CODE_IMPORT_DATA. Losing it is safe, only slower: the next run is a full
-one, and Hister is asked about every URL before anything is added or deleted (a document whose metadata.source is
+one, and Nogon is asked about every URL before anything is added or deleted (a document whose metadata.source is
 `code` is recognised as ours again).
 
 repos:  every repo seen, per host and the host's repo id (stable across renames): its name, URL, branch and content
         stamp when last imported, and whether it is included (else why not: fork, archived, excluded, twin).
 docs:   every document URL, per repo and key (repo, doc:<path>, issue:<n>, release:<id>), what it was built from
         (`src`, a fingerprint: an unchanged one is skipped without asking anyone) and what became of it:
-        - added     sent to Hister: ours (deleted when its source goes away)
-        - known     Hister already had the URL as somebody else's page (the owner browsed it): left alone, never
+        - added     sent to Nogon: ours (deleted when its source goes away)
+        - known     Nogon already had the URL as somebody else's page (the owner browsed it): left alone, never
                     overwritten or deleted
         - refused   our secret scan refused it (CODE_IMPORT_SECRETS=refuse), or a file named like a secret
-        - rejected  Hister refused it (422 sensitive content, another 4xx); tried again when its source changes
+        - rejected  Nogon refused it (422 sensitive content, another 4xx); tried again when its source changes
 meta:   cursors (issues per scope, the last full run), and per source the last complete reconcile
         (`reconcile:<source>`: {checked, missing, at}).
 http:   ETag and body per URL for conditional GETs (GitHub's 304s are free); pruned after a week unused.
@@ -76,7 +76,7 @@ class Store:
         self.db.execute("UPDATE docs SET %s WHERE url=?" % ", ".join("%s=?" % k for k in kw), list(kw.values()) + [url])
 
     def forget(self, url):
-        """Forget what a document was built from (the reconcile found it gone from Hister): the next put() of it
+        """Forget what a document was built from (the reconcile found it gone from Nogon): the next put() of it
         rebuilds and sends it again."""
         self.db.execute("UPDATE docs SET src=NULL WHERE url=?", (url,))
 

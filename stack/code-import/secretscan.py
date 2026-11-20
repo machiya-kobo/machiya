@@ -1,6 +1,6 @@
-"""code-import's own secret scan, run on every document's text before anything reaches Hister.
+"""code-import's own secret scan, run on every document's text before anything reaches Nogon.
 
-Hister's check (422) is narrow: six default patterns, and only on `html` for a web document. A repo's README, docs,
+Nogon's check (422) is narrow: six default patterns, and only on `html` for a web document. A repo's README, docs,
 issues and release notes can hold a pasted key, so this scan is wider. What it finds is either redacted (the default:
 the match becomes `[redacted]`, and the document says `code_redacted: "true"`) or the whole document is refused
 (CODE_IMPORT_SECRETS=refuse). It never logs what it found, only the kinds.

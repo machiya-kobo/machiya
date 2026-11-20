@@ -1,5 +1,5 @@
 """code-import's tokens: every credential lives in a file (its first line), never in the environment, argv, a URL or a
-log. The Hister token and the forge tokens are handled the same way:
+log. The Nogon token and the forge tokens are handled the same way:
 
 - set but missing, empty or not a token: refuse to start (token_file raises SystemExit, never echoing the contents);
 - the file is re-read when it changes (inode, mtime, size), so a rotated token needs no restart; a file that vanishes

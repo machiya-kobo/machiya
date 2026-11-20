@@ -1,6 +1,6 @@
 # code-import
 
-Puts the owner's repos on **Forgejo** and **GitHub** into [Hister](../../docs/services/hister.md), so Shiori can search them as a **Code** area: the repos themselves (name, description, topics), their READMEs and markdown docs, their issues and pull requests (title, body, state), and their releases. Each one is a Hister document at its **real forge URL**, so a result opens the forge's page.
+Puts the owner's repos on **Forgejo** and **GitHub** into [Nogon](../../docs/services/nogon.md), so Shiori can search them as a **Code** area: the repos themselves (name, description, topics), their READMEs and markdown docs, their issues and pull requests (title, body, state), and their releases. Each one is a Nogon document at its **real forge URL**, so a result opens the forge's page.
 
 It is stdlib Python with one sqlite file, it listens on nothing, and it only ever reads from the forges (GET). The service page is [docs/services/code-import.md](../../docs/services/code-import.md).
 
@@ -26,24 +26,24 @@ Runs happen every `CODE_IMPORT_INTERVAL` seconds (15 minutes by default).
    - By default it **redacts**: the match becomes `[redacted]`, and the document says `code_redacted: "true"`.
    - With `CODE_IMPORT_SECRETS=refuse`, the whole document is refused instead.
    - It never logs what it found, only the kinds.
-5. **Hister is asked first** (`GET /api/document`):
-   - **A URL Hister already holds as somebody else's page** (the owner browsed that GitHub issue, say) **is left alone**: nothing is sent, and it is never replaced or deleted. It is counted as "already a page".
+5. **Nogon is asked first** (`GET /api/document`):
+   - **A URL Nogon already holds as somebody else's page** (the owner browsed that GitHub issue, say) **is left alone**: nothing is sent, and it is never replaced or deleted. It is counted as "already a page".
    - A document whose `metadata.source` is `code` is ours and is replaced when its source changed.
-6. **The document is sent** (`POST /api/add`), **always with `html`**: Hister's own sensitive-content check (422) reads only `html` for a web document. `skip_sensitive_check` is never set (the client refuses to send it).
-7. **What disappeared is withdrawn** (`POST /api/delete` by exact `url:"…"`, and only when Hister says the document is ours):
+6. **The document is sent** (`POST /api/add`), **always with `html`**: Nogon's own sensitive-content check (422) reads only `html` for a web document. `skip_sensitive_check` is never set (the client refuses to send it).
+7. **What disappeared is withdrawn** (`POST /api/delete` by exact `url:"…"`, and only when Nogon says the document is ours):
    - a repo that is deleted, renamed, transferred, archived, newly excluded or became a twin: all its documents;
    - a doc or release that is gone, when the repo is read again;
    - an issue that is gone, on a full run.
 
 **A full run** happens first, then every `CODE_IMPORT_FULL_INTERVAL` (6 hours). It reads every repo and every issue list completely. Only a source that changed is rebuilt: a fingerprint of what each document was built from is kept, so an unchanged one costs no call and no write.
 
-**The reconcile** (0.1.5). Because of the fingerprints, a document that Hister lost would never be sent again. Hister can lose one through its Rules page's "delete matching documents" when a pattern matches the forge's URLs (a skip rule for the tailnet's hosts does), or through a reset.
-- So every full run of a source first asks Hister for every document the state says it added: `HEAD /api/document?url=…` with the token, sequentially. 200 means it is there and 404 means it is gone. If HEAD answers 405 or 501, it uses GET from then on.
+**The reconcile** (0.1.5). Because of the fingerprints, a document that Nogon lost would never be sent again. Nogon can lose one through its Rules page's "delete matching documents" when a pattern matches the forge's URLs (a skip rule for the tailnet's hosts does), or through a reset.
+- So every full run of a source first asks Nogon for every document the state says it added: `HEAD /api/document?url=…` with the token, sequentially. 200 means it is there and 404 means it is gone. If HEAD answers 405 or 501, it uses GET from then on.
 - The gone ones are forgotten and **sent again in the same run**.
 - After a start, a source's first run also checks when its last complete check is over a day old. If anything is missing, that run becomes a full one, so the missing documents are read again.
-- Any other answer (401, 403, 429, 5xx, unreachable) **stops the check and forgets nothing**. The run fails as it does when Hister is down, and the next run is a full one again.
+- Any other answer (401, 403, 429, 5xx, unreachable) **stops the check and forgets nothing**. The run fails as it does when Nogon is down, and the next run is a full one again.
 - A check that takes over 300 s stops. What it found by then is sent again, and the next full run checks again.
-- About 1,000 documents cost about 1,000 HEADs to a local Hister every 6 hours. No forge is called for it.
+- About 1,000 documents cost about 1,000 HEADs to a local Nogon every 6 hours. No forge is called for it.
 
 **Retries.** Every forge call that fails transiently is tried again after 2, 8 and 30 s (`CODE_IMPORT_RETRY_DELAYS`). That covers a TLS, connect or read timeout, a reset connection, a 5xx, a 429 and a secondary rate limit. A `Retry-After` longer than the delay is honoured, up to 120 s; a longer one fails the call. 401, 403 and 404 are never tried again.
 
@@ -53,9 +53,9 @@ Runs happen every `CODE_IMPORT_INTERVAL` seconds (15 minutes by default).
 - A source that fails withdraws nothing. Its withdrawals, repo stamps and full-run mark wait until the whole source has completed; a source that fails part way drops them, and the next good run finds the same work again.
 - A source that suddenly lists **no** repos, after listing some before, fails: a token that lost its access must not wipe the index.
 - Twins: a source whose twins' source failed uses that source's last listing from the state. A twins' source that has never been listed makes it wait.
-- Hister down (5xx, unreachable, 403) stops the whole run. The state is written per document, so the next run resumes.
+- Nogon down (5xx, unreachable, 403) stops the whole run. The state is written per document, so the next run resumes.
 
-### What Hister gets
+### What Nogon gets
 
 ```json
 {"url": "https://github.com/machiya-kobo/kura/pull/3",
@@ -69,7 +69,7 @@ Runs happen every `CODE_IMPORT_INTERVAL` seconds (15 minutes by default).
 
 | Key | Values | Query |
 |---|---|---|
-| `source` | `code` | `metadata.source:code` (the Code area); every other Hister query adds ` -metadata.source:code` |
+| `source` | `code` | `metadata.source:code` (the Code area); every other Nogon query adds ` -metadata.source:code` |
 | `code_host` | `forgejo`, `github` | `metadata.code_host:github` |
 | `code_repo` | `owner__repo`, lowercase, with every other character `_`: `machiya-kobo/kura` → `machiya_kobo__kura` | `metadata.code_repo:machiya_kobo__kura` |
 | `code_repo_name` | `machiya-kobo/kura` | for display only (not matchable, see below) |
@@ -80,11 +80,11 @@ Runs happen every `CODE_IMPORT_INTERVAL` seconds (15 minutes by default).
 | `code_number`, `code_path`, `code_tag`, `code_prerelease`, `code_topics`, `code_language`, `code_twin_url`, `code_redacted` | | display |
 
 - No label: Code is its own area, not a topic.
-- `ignore_skip_rules: true`, as Kura's notes have: skip rules that refuse your own `*.<tailnet>.ts.net` URLs (as the [reference rules](../../config/hister/skip-rules.txt) do) would refuse every document of a Forgejo on the tailnet.
+- `ignore_skip_rules: true`, as Kura's notes have: skip rules that refuse your own `*.<tailnet>.ts.net` URLs (as the [reference rules](../../config/nogon/skip-rules.txt) do) would refuse every document of a Forgejo on the tailnet.
 
 ### The repo filter: why `owner__repo` (tested 2026-10-04)
 
-This was tested on a throwaway Hister v0.20.0 (rootless podman, dummy data). Hister **tokenizes metadata values** when it indexes them (bleve's default analyzer: a Unicode word split, then lowercase). But it turns a metadata query into **one term query that isn't analyzed** (`querybuilder`: `bleve.NewTermQuery(v)` on `metadata.<key>`). So a value matches only if it is a single lowercase token.
+This was tested on a throwaway Nogon v0.20.0 (rootless podman, dummy data). Nogon **tokenizes metadata values** when it indexes them (bleve's default analyzer: a Unicode word split, then lowercase). But it turns a metadata query into **one term query that isn't analyzed** (`querybuilder`: `bleve.NewTermQuery(v)` on `metadata.<key>`). So a value matches only if it is a single lowercase token.
 
 | `code_repo` value | `metadata.code_repo:<same value>` | why |
 |---|---|---|
@@ -96,12 +96,12 @@ This was tested on a throwaway Hister v0.20.0 (rootless podman, dummy data). His
 | `code_private: true` (JSON boolean) | `metadata.code_private:true` doesn't match | a boolean is indexed as a bool field, so it is sent as the string `"true"` |
 | `code_kind:issue`, `code_state:merged`, `code_host:forgejo` | match | single words; nothing is stemmed |
 
-Also verified on that Hister:
+Also verified on that Nogon:
 - `@code` = `metadata.source:code` works as an alias.
 - `@pages` = `* -label:vault -metadata.source:vault -metadata.source:code` keeps code out.
 - `<words> -metadata.source:code` leaves only the browsed pages.
 - `metadata.code_kind:(issue|pr)` alternation works.
-- Hister's 422 fires on `html` holding a `ghp_…` token, but not on the same token sent in `text` only.
+- Nogon's 422 fires on `html` holding a `ghp_…` token, but not on the same token sent in `text` only.
 - `/api/add` on a URL replaces the document, and the replaced document loses our `source`, which is how a later browse is recognised.
 - A page "browsed" over a code document was left alone by a fresh run ("already a page").
 
@@ -115,13 +115,13 @@ Also verified on that Hister:
 | `CODE_IMPORT_GITHUB_TOKEN_FILES` | — | `owner=/path/to/token,…`: one **fine-grained, read-only** token per resource owner (Metadata, Contents, Issues, Pull requests: read), e.g. `you=/secrets/github-you-token,your-org=/secrets/github-your-org-token`; unset: no GitHub. Never a classic token: its `repo` scope can write |
 | `CODE_IMPORT_GITHUB_API` | `https://api.github.com` | |
 | `CODE_IMPORT_TWINS` | — | `github:your-org=forgejo:your-org,forgejo:you=github:you`: a right-hand repo whose name matches a left-hand one is the same repo, indexed once, on the left |
-| `CODE_IMPORT_EXCLUDE` | — | comma list of repo names (`name` or `owner/name`, any case) never imported, e.g. `notes,password-store,backup`: a repo whose text must never reach Hister (a vault, a password store). Empty by default (0.1.4; it named three repos before). Adding a name withdraws that repo's documents on its source's next completed run |
-| `CODE_IMPORT_NOGON_URL` | — | `http://hister:4433` (required, except for `--dry-run`) |
-| `CODE_IMPORT_NOGON_TOKEN_FILE` | — | the owner's Hister token, sent as `X-Access-Token` on every Hister call ([contracts/hister.md](../../docs/contracts/hister.md)) |
+| `CODE_IMPORT_EXCLUDE` | — | comma list of repo names (`name` or `owner/name`, any case) never imported, e.g. `notes,password-store,backup`: a repo whose text must never reach Nogon (a vault, a password store). Empty by default (0.1.4; it named three repos before). Adding a name withdraws that repo's documents on its source's next completed run |
+| `CODE_IMPORT_NOGON_URL` | — | `http://nogon:4433` (required, except for `--dry-run`). Formerly `CODE_IMPORT_HISTER_URL`, likewise `_TOKEN_FILE` (Hister is now Nogon): since 0.3.0 an old name set on its own stops the start, naming the new one |
+| `CODE_IMPORT_NOGON_TOKEN_FILE` | — | the owner's Nogon token, sent as `X-Access-Token` on every Nogon call ([contracts/nogon.md](../../docs/contracts/nogon.md)) |
 | `CODE_IMPORT_SECRETS` | `redact` | `refuse`: a document with a likely secret isn't sent at all |
 | `CODE_IMPORT_INTERVAL` | `900` | seconds between runs (at least 60) |
 | `CODE_IMPORT_FULL_INTERVAL` | `21600` | seconds between full runs (at least 3600) |
-| `CODE_IMPORT_PAUSE` | — | `Sun 02:20-02:50`: no runs in that weekly slot (Hister's backup), in `CODE_IMPORT_TZ` (default `UTC`) |
+| `CODE_IMPORT_PAUSE` | — | `Sun 02:20-02:50`: no runs in that weekly slot (Nogon's backup), in `CODE_IMPORT_TZ` (default `UTC`) |
 | `CODE_IMPORT_MAX_DOCS` | `200` | markdown docs per repo |
 | `CODE_IMPORT_MAX_DOC_BYTES` | `262144` | a bigger doc is skipped |
 | `CODE_IMPORT_README_ONLY` | — | `host:owner/repo`, comma-separated (`github:you/big-fork`: a large repo whose other docs you don't want): only the repo card and the README; no other docs, issues, PRs or releases, never in `caps`. Listing a repo withdraws the rest on its source's next completed run |
@@ -143,13 +143,13 @@ Also verified on that Hister:
 - `last_run`: the run's counts, and its calls and retries per forge;
 - `counts`: documents per host, kind and status.
 
-`ok` turns false after a failed run (Hister down, or any source failed) once no run has had every source succeed for three intervals. So one source that keeps failing turns it false, while the others go on importing. The image's healthcheck reads it. Alert on `ok` only: the counts are information.
+`ok` turns false after a failed run (Nogon down, or any source failed) once no run has had every source succeed for three intervals. So one source that keeps failing turns it false, while the others go on importing. The image's healthcheck reads it. Alert on `ok` only: the counts are information.
 
 ## Running
 
 ```sh
 python3 codeimport.py --dry-run --limit 3                   # print what would be added: at most 3 documents per repo;
-                                                             # no state, no Hister writes
+                                                             # no state, no Nogon writes
 python3 codeimport.py --dry-run --repo machiya-kobo/kura --limit 100
 python3 codeimport.py --once                                 # one run (exit 1 if it failed)
 python3 codeimport.py --once --full                          # one full run now
@@ -157,7 +157,7 @@ python3 codeimport.py                                        # the service
 podman build -f stack/code-import/Dockerfile -t code-import:dev .        # from the repo root
 ```
 
-- A dry run asks Hister only which URLs it has, and only if `CODE_IMPORT_NOGON_URL` is set.
+- A dry run asks Nogon only which URLs it has, and only if `CODE_IMPORT_NOGON_URL` is set.
 - A dry run reads the forges as a first (full) run would, so with `--limit` it reads fewer blobs, not fewer lists.
 
 ## Tests
@@ -166,7 +166,7 @@ podman build -f stack/code-import/Dockerfile -t code-import:dev .        # from 
 cd stack/code-import && python3 -m unittest discover -s tests
 ```
 
-The tests need no network. They run against the fake Forgejo and fake GitHub below, and a fake Hister. The fake Hister can lose documents, refuse HEAD (405, 501) and answer 401, 429 or 503. The fakes record every request, and a test fails if the importer sends a forge anything but GET.
+The tests need no network. They run against the fake Forgejo and fake GitHub below, and a fake Nogon. The fake Nogon can lose documents, refuse HEAD (405, 501) and answer 401, 429 or 503. The fakes record every request, and a test fails if the importer sends a forge anything but GET.
 
 The synthetic forges hold:
 - a fork, an archived repo, a mirror on each host, an excluded name, a private repo, an empty repo, and twins on both hosts;
@@ -177,7 +177,7 @@ The command-line tests run `codeimport.py` as the image does and check its exit 
 
 ## The fake forges (`dev/`)
 
-[`dev/fake_forgejo.py`](dev/fake_forgejo.py) and [`dev/fake_github.py`](dev/fake_github.py) are stdlib servers answering the calls code-import makes, shaped like Forgejo 16's and GitHub's answers. They serve the invented seeds in [`dev/seed/`](dev/seed/): a user `lantern`, a Forgejo org `workshop` and a GitHub org `workshop-kobo`. The tests use them in-process, and the dev stack runs them ([compose/dev](../../compose/dev/compose.yml): `fake-forgejo` on 19213, `fake-github` on 19214, and `code-import` reading them with the dummy tokens `dev init` generates). `./dev check` asks Hister for the Code area's query and its filters, and checks that `@pages` leaves code out ([docs/dev-stack.md](../../docs/dev-stack.md)).
+[`dev/fake_forgejo.py`](dev/fake_forgejo.py) and [`dev/fake_github.py`](dev/fake_github.py) are stdlib servers answering the calls code-import makes, shaped like Forgejo 16's and GitHub's answers. They serve the invented seeds in [`dev/seed/`](dev/seed/): a user `lantern`, a Forgejo org `workshop` and a GitHub org `workshop-kobo`. The tests use them in-process, and the dev stack runs them ([compose/dev](../../compose/dev/compose.yml): `fake-forgejo` on 19213, `fake-github` on 19214, and `code-import` reading them with the dummy tokens `dev init` generates). `./dev check` asks Nogon for the Code area's query and its filters, and checks that `@pages` leaves code out ([docs/dev-stack.md](../../docs/dev-stack.md)).
 
 ## Layout
 
@@ -188,7 +188,7 @@ The command-line tests run `codeimport.py` as the image does and check its exit 
 | `forgejo.py`, `github.py` | the two forges |
 | `secretscan.py` | the secret scan and the secret-name rule |
 | `render.py` | a document's HTML (escaped; headings, code blocks, paragraphs) |
-| `hister.py` | the Hister calls (look up, the reconcile's HEAD, add, delete) and Hister's URL normalisation |
+| `nogon.py` | the Nogon calls (look up, the reconcile's HEAD, add, delete) and Nogon's URL normalisation |
 | `tokens.py` | token files |
 | `store.py` | the state |
 | `dev/` | the fake forges and their seeds (tests and the dev stack; not in the image) |

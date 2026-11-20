@@ -3,8 +3,8 @@
   a fork, an archived repo, a mirror on each host, an excluded name, a private repo, an empty repo, twins on both hosts, a README with an
   invented token, a file named like a secret, hidden, vendored, test, example and sample-vault markdown, issues, PRs (one merged), releases (one a
   draft, one a prerelease). They record every request: the importer may only GET.
-- Hister (/api/document by GET and HEAD, /api/add, /api/delete), which refuses calls without `Origin: hister://`,
-  answers 422 when the html matches Hister's default sensitive patterns, can lose documents (a "delete matching
+- Nogon (/api/document by GET and HEAD, /api/add, /api/delete), which refuses calls without `Origin: nogon://`,
+  answers 422 when the html matches Nogon's default sensitive patterns, can lose documents (a "delete matching
   documents" on its Rules page), answer HEAD with 405/501 or /api/document with 401/429/503, and records everything.
 
 Run, from stack/code-import: python3 -m unittest discover -s tests
@@ -27,7 +27,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "dev"))
 
 import codeimport                                               # noqa: E402
-import hister as histermod                                      # noqa: E402
+import nogon as nogonmod                                        # noqa: E402
 import render                                                   # noqa: E402
 import secretscan                                               # noqa: E402
 import tokens                                                   # noqa: E402
@@ -38,7 +38,7 @@ from forges import Client, ForgeError, Repo                     # noqa: E402
 from github import GitHub                                       # noqa: E402
 from store import Store                                         # noqa: E402
 
-FJ_TOKEN, GH_LANTERN, GH_WORKSHOP, HISTER_TOKEN = "fj-test-token", "gh-lantern-token", "gh-workshop-token", "hister-owner"
+FJ_TOKEN, GH_LANTERN, GH_WORKSHOP, NOGON_TOKEN = "fj-test-token", "gh-lantern-token", "gh-workshop-token", "nogon-owner"
 FJ_ROOT = "https://forgejo.example.ts.net"
 GH_WEB = "https://github.example"
 TWINS = "github:workshop-kobo=forgejo:workshop,forgejo:lantern=github:lantern"
@@ -52,8 +52,8 @@ def load(path):
 
 FJ_SEED = load(os.path.join(ROOT, "dev", "seed", "forgejo.json"))
 GH_SEED = load(os.path.join(ROOT, "dev", "seed", "github.json"))
-# Hister v0.20.0's default sensitive patterns (the ones that matter here), checked on html only, as Hister does.
-HISTER_SENSITIVE = re.compile(r"AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|-----BEGIN [A-Z ]*PRIVATE KEY-----")
+# Nogon v0.20.0's default sensitive patterns (the ones that matter here), checked on html only, as Nogon does.
+NOGON_SENSITIVE = re.compile(r"AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|-----BEGIN [A-Z ]*PRIVATE KEY-----")
 
 
 def fj_url(path):
@@ -64,7 +64,7 @@ def gh_url(path):
     return GH_WEB + path
 
 
-# -- Hister ---------------------------------------------------------------------------------------------------------
+# -- Nogon ---------------------------------------------------------------------------------------------------------
 
 class H:
     docs = {}            # url -> document
@@ -72,10 +72,10 @@ class H:
     down = False
     reject = ()          # URL substrings answered 400 (a final refusal)
     head = None          # a status every HEAD gets (405, 501: HEAD not allowed)
-    doc_status = None    # a status every /api/document call gets (401, 429, 503: Hister can't say)
+    doc_status = None    # a status every /api/document call gets (401, 429, 503: Nogon can't say)
 
 
-class HisterFake(BaseHTTPRequestHandler):
+class NogonFake(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
@@ -96,9 +96,9 @@ class HisterFake(BaseHTTPRequestHandler):
         H.calls.append((method, u.path, body, dict(self.headers)))
         if H.down:
             return self.send(503)
-        if self.headers.get("Origin") != "hister://":
+        if self.headers.get("Origin") != "nogon://":
             return self.send(403)
-        if self.headers.get("X-Access-Token") != HISTER_TOKEN:
+        if self.headers.get("X-Access-Token") != NOGON_TOKEN:
             return self.send(403)
         if method == "HEAD" and H.head:
             return self.send(H.head)
@@ -108,7 +108,7 @@ class HisterFake(BaseHTTPRequestHandler):
             doc = H.docs.get(parse_qs(u.query)["url"][0])
             return self.send(200, doc) if doc else self.send(404)
         if u.path == "/api/add":
-            if not body.get("skip_sensitive_check") and HISTER_SENSITIVE.search(body.get("html") or ""):
+            if not body.get("skip_sensitive_check") and NOGON_SENSITIVE.search(body.get("html") or ""):
                 return self.send(422)
             if any(x in body["url"] for x in H.reject):
                 return self.send(400)
@@ -136,7 +136,7 @@ def serve(handler):
     return srv, "http://127.0.0.1:%d" % srv.server_address[1]
 
 
-H_SRV, H_URL = serve(HisterFake)
+H_SRV, H_URL = serve(NogonFake)
 
 
 def adds():
@@ -165,13 +165,13 @@ class Base(unittest.TestCase):
         self.lines = []
         self.now = 1791200000
 
-    def importer(self, dry_run=False, hister=True, store=None, timeout=5, **kw):
+    def importer(self, dry_run=False, nogon=True, store=None, timeout=5, **kw):
         store = store or self.store
         client = {"retry_delays": (0.01, 0.01, 0.01), "timeout": timeout}
         forges = [Forgejo(self.fj_api, FJ_TOKEN, ["lantern", "workshop"], gap=0, cache=store, **client),
                   GitHub(self.gh_api, [("lantern", GH_LANTERN), ("workshop-kobo", GH_WORKSHOP)], gap=0, cache=store,
                          **client)]
-        h = histermod.Hister(H_URL, HISTER_TOKEN) if hister else None
+        h = nogonmod.Nogon(H_URL, NOGON_TOKEN) if nogon else None
         return codeimport.Importer(forges, store, h, rules=codeimport.Rules(EXCLUDE, twins=codeimport.parse_twins(TWINS)),
                                    dry_run=dry_run, out=self.lines.append, clock=lambda: self.now, **kw)
 
@@ -245,7 +245,7 @@ class Units(unittest.TestCase):
         self.assertEqual(kinds, ["url-password"])
         for harmless in ("password: changeme", "API_KEY=<your-api-key-goes-here>", "TOKEN_FILE=/run/secrets/token-file",
                          "token = ${GITHUB_TOKEN_FROM_THE_ENVIRONMENT}", "the secret garden is lovely",
-                         "HISTER_TOKEN_FILE=/data/secrets/owner-token"):
+                         "NOGON_TOKEN_FILE=/data/secrets/owner-token"):
             self.assertEqual(secretscan.redact(harmless), (harmless, []), harmless)
 
     def test_secret_scan_more_formats(self):
@@ -299,9 +299,9 @@ class Units(unittest.TestCase):
         self.assertIn("<h2>Head</h2>", page)
         self.assertIn("<pre><code>&lt;x&gt;</code></pre>", page)
 
-    def test_norm_matches_hister(self):
-        self.assertEqual(histermod.norm("https://a.example/p?b=2&utm_source=x&a=1#frag"), "https://a.example/p?a=1&b=2")
-        self.assertEqual(histermod.norm("https://a.example/p#x"), "https://a.example/p")
+    def test_norm_matches_nogon(self):
+        self.assertEqual(nogonmod.norm("https://a.example/p?b=2&utm_source=x&a=1#frag"), "https://a.example/p?a=1&b=2")
+        self.assertEqual(nogonmod.norm("https://a.example/p#x"), "https://a.example/p")
 
     def test_pause_window(self):
         w = codeimport.pause_window("Sun 02:20-02:50")
@@ -367,8 +367,8 @@ class Tokens(unittest.TestCase):
             with self.assertRaises(ForgeError) as e:
                 Client(mover, "secret-forge-token", "token", gap=0).get("/user")
             self.assertIn("redirect", str(e.exception))
-            with self.assertRaises(histermod.HisterDown):
-                histermod.Hister(mover, "secret-hister-token").document("https://x.example/")
+            with self.assertRaises(nogonmod.NogonDown):
+                nogonmod.Nogon(mover, "secret-nogon-token").document("https://x.example/")
             self.assertEqual(hits, [])
         finally:
             for srv in (other_srv, mover_srv):
@@ -402,8 +402,8 @@ class Pipeline(Base):
             self.assertRegex(m["code_repo"], r"^[a-z0-9_]+$")
             self.assertEqual(d.get("label", ""), "")
         for method, path, body, headers in H.calls:
-            self.assertEqual(headers.get("Origin"), "hister://")
-            self.assertEqual(headers.get("X-Access-Token"), HISTER_TOKEN)
+            self.assertEqual(headers.get("Origin"), "nogon://")
+            self.assertEqual(headers.get("X-Access-Token"), NOGON_TOKEN)
 
         pr = sent[fj_url("/lantern/garden-notes/pulls/2")]["metadata"]
         self.assertEqual((pr["code_kind"], pr["code_state"], pr["code_private"], pr["code_repo"], pr["code_number"]),
@@ -573,7 +573,7 @@ class Refusals(Base):
         self.assertEqual(self.store.doc(url)["status"], "refused")
         self.assertIn("github-token", self.store.doc(url)["error"])
 
-    def test_hister_refusal_is_final_until_the_source_changes(self):
+    def test_nogon_refusal_is_final_until_the_source_changes(self):
         H.reject = ("pixel-font/issues",)
         self.importer().run()
         url = gh_url("/lantern/pixel-font/issues/4")
@@ -587,8 +587,8 @@ class Refusals(Base):
         self.importer().run()
         self.assertEqual([d["url"] for d in adds()], [url])
 
-    def test_hister_sensitive_check_still_fires(self):
-        """Our scan misses a pattern Hister knows? Hister's 422 still stops it, because html is always sent."""
+    def test_nogon_sensitive_check_still_fires(self):
+        """Our scan misses a pattern Nogon knows? Nogon's 422 still stops it, because html is always sent."""
         self.gh_repo("pixel-font")["files"]["README.md"] = "# x\n\nkey ghp_" + "Ab12" * 9 + "\n"
         orig = secretscan.redact
         secretscan.redact = lambda text: (text, [])
@@ -603,9 +603,9 @@ class Refusals(Base):
 
 
 class Failures(Base):
-    def test_hister_down_stops_the_run_and_resumes(self):
+    def test_nogon_down_stops_the_run_and_resumes(self):
         H.down = True
-        with self.assertRaises(histermod.HisterDown):
+        with self.assertRaises(nogonmod.NogonDown):
             self.importer().run()
         self.assertEqual(self.store.counts(), {})
         H.down = False
@@ -642,7 +642,7 @@ class Failures(Base):
 
 
 class Reconcile(Base):
-    """Hister lost documents code-import added (the Rules page's "delete matching documents" with a pattern that
+    """Nogon lost documents code-import added (the Rules page's "delete matching documents" with a pattern that
     matches the forge's URLs, as Kura lost 237 notes on 2026-10-02): unchanged, they'd never be sent again."""
     LOST = {fj_url("/lantern/garden-notes/src/branch/main/README.md"), fj_url("/lantern/garden-notes/pulls/2"),
             fj_url("/lantern/dotfiles"), gh_url("/workshop-kobo/lamp/releases/tag/v0.1.0")}
@@ -655,7 +655,7 @@ class Reconcile(Base):
     def heads(self):
         return [c for c in H.calls if c[0] == "HEAD"]
 
-    def test_a_full_run_re_adds_what_hister_lost(self):
+    def test_a_full_run_re_adds_what_nogon_lost(self):
         self.importer().run()
         self.lose()
         self.now += 900                                                           # incremental: no check, no re-add
@@ -718,7 +718,7 @@ class Reconcile(Base):
                 self.assertEqual(len(self.heads()), 1)                            # asked once, then GET
                 self.store.db.execute("DELETE FROM http")
 
-    def test_hister_failing_stops_the_check_and_forgets_nothing(self):
+    def test_nogon_failing_stops_the_check_and_forgets_nothing(self):
         self.importer().run()
         self.lose()
         before = {r["url"]: r["src"] for r in self.store.db.execute("SELECT url, src FROM docs")}
@@ -727,7 +727,7 @@ class Reconcile(Base):
             with self.subTest(status=status):
                 H.calls, H.doc_status = [], status
                 self.now += 21600
-                with self.assertRaises(histermod.HisterDown) as e:
+                with self.assertRaises(nogonmod.NogonDown) as e:
                     self.importer().run()
                 self.assertIn("HTTP %d" % status, str(e.exception))
                 self.assertEqual({r["url"]: r["src"] for r in self.store.db.execute("SELECT url, src FROM docs")},
@@ -736,15 +736,15 @@ class Reconcile(Base):
                 self.assertEqual(adds(), [])
                 self.assertEqual(len([c for c in H.calls if c[1] == "/api/document"]), 1)    # stopped at the first
         H.calls, H.doc_status = [], None
-        self.importer().run()                                                     # Hister answers again: re-added
+        self.importer().run()                                                     # Nogon answers again: re-added
         self.assertEqual({d["url"] for d in adds()}, self.LOST)
 
-    def test_hister_unreachable_raises(self):
-        srv, url = serve(HisterFake)
+    def test_nogon_unreachable_raises(self):
+        srv, url = serve(NogonFake)
         srv.shutdown()
         srv.server_close()
-        with self.assertRaises(histermod.HisterDown):
-            histermod.Hister(url, HISTER_TOKEN).exists(fj_url("/lantern/dotfiles"))
+        with self.assertRaises(nogonmod.NogonDown):
+            nogonmod.Nogon(url, NOGON_TOKEN).exists(fj_url("/lantern/dotfiles"))
 
     def test_the_time_cap_stops_the_check(self):
         self.importer().run()
@@ -936,7 +936,7 @@ class DryRun(Base):
         would = [json.loads(x)["would_add"]["url"] for x in out if x.startswith('{"would_add"')]
         self.assertEqual(set(would), EXPECTED)
         self.assertEqual(stats["forgejo"]["would add"] + stats["github"]["would add"], len(EXPECTED))
-        self.assertEqual([c for c in H.calls if c[0] == "POST"], [])              # Hister only asked
+        self.assertEqual([c for c in H.calls if c[0] == "POST"], [])              # Nogon only asked
         self.assertEqual(self.store.counts(), {})
 
 
@@ -945,7 +945,7 @@ class DryRun(Base):
 class CommandLine(Base):
     def env(self, **kw):
         files = {}
-        for name, value in (("fj", FJ_TOKEN), ("ghl", GH_LANTERN), ("ghw", GH_WORKSHOP), ("hister", HISTER_TOKEN)):
+        for name, value in (("fj", FJ_TOKEN), ("ghl", GH_LANTERN), ("ghw", GH_WORKSHOP), ("nogon", NOGON_TOKEN)):
             files[name] = os.path.join(self.tmp, name)
             with open(files[name], "w") as f:
                 f.write(value + "\n")
@@ -953,9 +953,9 @@ class CommandLine(Base):
                "CODE_IMPORT_FORGEJO_URL": self.fj_api, "CODE_IMPORT_FORGEJO_TOKEN_FILE": files["fj"],
                "CODE_IMPORT_FORGEJO_OWNERS": "lantern,workshop", "CODE_IMPORT_GITHUB_API": self.gh_api,
                "CODE_IMPORT_GITHUB_TOKEN_FILES": "lantern=%s,workshop-kobo=%s" % (files["ghl"], files["ghw"]),
-               "CODE_IMPORT_TWINS": TWINS, "CODE_IMPORT_EXCLUDE": EXCLUDE, "CODE_IMPORT_GAP": "0", "CODE_IMPORT_HISTER_URL": H_URL,
+               "CODE_IMPORT_TWINS": TWINS, "CODE_IMPORT_EXCLUDE": EXCLUDE, "CODE_IMPORT_GAP": "0", "CODE_IMPORT_NOGON_URL": H_URL,
                "CODE_IMPORT_RETRY_DELAYS": "0.01,0.01,0.01",
-               "CODE_IMPORT_HISTER_TOKEN_FILE": files["hister"]}
+               "CODE_IMPORT_NOGON_TOKEN_FILE": files["nogon"]}
         env.update(kw)
         return {k: v for k, v in env.items() if v is not None}
 
@@ -989,7 +989,7 @@ class CommandLine(Base):
         self.assertEqual(status["sources"]["github:lantern"]["reconcile"]["missing"], 0)
         self.assertIn("source forgejo:lantern: reconcile: %d missing, re-added (%d checked)" % (len(lost), rec["checked"]),
                       p.stdout)
-        for token in (FJ_TOKEN, GH_LANTERN, GH_WORKSHOP, HISTER_TOKEN):
+        for token in (FJ_TOKEN, GH_LANTERN, GH_WORKSHOP, NOGON_TOKEN):
             self.assertNotIn(token, p.stdout + p.stderr)
         self.assertNotIn("Moss", p.stdout + p.stderr)                             # logs carry counts, not text
 
@@ -1018,7 +1018,7 @@ class CommandLine(Base):
         self.assertEqual(p.returncode, 0, p.stderr + p.stdout)
         self.assertEqual(set(deletes()), LAMP_ALL - LAMP_KEPT)
 
-    def test_once_fails_when_hister_is_down(self):
+    def test_once_fails_when_nogon_is_down(self):
         H.down = True
         p = self.run_cli(["--once"], self.env())
         self.assertEqual(p.returncode, 1)
@@ -1033,8 +1033,8 @@ class CommandLine(Base):
         self.assertIn("nothing was written", p.stdout)
         self.assertEqual([c for c in H.calls if c[0] == "POST"], [])
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "data")))
-        p = self.run_cli(["--dry-run", "--repo", "workshop-kobo/lamp", "--limit", "50"], self.env(CODE_IMPORT_HISTER_URL=None,
-                                                                                                    CODE_IMPORT_HISTER_TOKEN_FILE=None))
+        p = self.run_cli(["--dry-run", "--repo", "workshop-kobo/lamp", "--limit", "50"], self.env(CODE_IMPORT_NOGON_URL=None,
+                                                                                                    CODE_IMPORT_NOGON_TOKEN_FILE=None))
         self.assertEqual(p.returncode, 0, p.stderr)
         urls = {json.loads(x)["would_add"]["url"] for x in p.stdout.splitlines() if x.startswith('{"would_add"')}
         self.assertEqual(urls, {u for u in EXPECTED if "/workshop-kobo/lamp" in u})
@@ -1062,9 +1062,12 @@ class CommandLine(Base):
             ({"CODE_IMPORT_FORGEJO_URL": None, "CODE_IMPORT_GITHUB_TOKEN_FILES": None}, "no forge"),
             ({"CODE_IMPORT_FORGEJO_TOKEN_FILE": None}, "CODE_IMPORT_FORGEJO_TOKEN_FILE is required"),
             ({"CODE_IMPORT_FORGEJO_TOKEN_FILE": empty}, "doesn't hold a token"),
-            ({"CODE_IMPORT_HISTER_TOKEN_FILE": empty}, "doesn't hold a token"),
+            ({"CODE_IMPORT_NOGON_TOKEN_FILE": empty}, "doesn't hold a token"),
             ({"CODE_IMPORT_GITHUB_TOKEN_FILES": "lantern"}, "owner=/path/to/token"),
-            ({"CODE_IMPORT_HISTER_URL": None}, "CODE_IMPORT_NOGON_URL is required"),
+            ({"CODE_IMPORT_NOGON_URL": None}, "CODE_IMPORT_NOGON_URL is required"),
+            ({"CODE_IMPORT_NOGON_URL": None, "CODE_IMPORT_HISTER_URL": H_URL}, "CODE_IMPORT_HISTER_URL is an old name"),
+            ({"CODE_IMPORT_NOGON_TOKEN_FILE": None, "CODE_IMPORT_HISTER_TOKEN_FILE": empty},
+             "rename it CODE_IMPORT_NOGON_TOKEN_FILE"),
             ({"CODE_IMPORT_SECRETS": "ignore"}, "redact or refuse"),
             ({"CODE_IMPORT_TWINS": "github:a"}, "host:owner=host:owner"),
             ({"CODE_IMPORT_FORGEJO_OWNERS": None}, "names no owner"),
@@ -1076,6 +1079,25 @@ class CommandLine(Base):
             self.assertEqual(p.returncode, 1, overrides)
             self.assertIn(message, p.stderr, overrides)
         self.assertEqual(adds(), [])
+
+
+class NogonNames(unittest.TestCase):
+    """0.3.0, the rename's stage 3: CODE_IMPORT_NOGON_<X> only; an old CODE_IMPORT_HISTER_<X> on its own stops the start."""
+
+    def test_setting(self):
+        with self.assertRaises(SystemExit) as cm:
+            codeimport.setting({"CODE_IMPORT_HISTER_URL": "h"}, "CODE_IMPORT_NOGON_URL")
+        self.assertIn("CODE_IMPORT_HISTER_URL is an old name", str(cm.exception))
+        self.assertIn("rename it CODE_IMPORT_NOGON_URL", str(cm.exception))
+        import contextlib
+        import io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            both = {"CODE_IMPORT_HISTER_TOKEN_FILE": "h", "CODE_IMPORT_NOGON_TOKEN_FILE": ""}
+            self.assertEqual(codeimport.setting(both, "CODE_IMPORT_NOGON_TOKEN_FILE"), "")   # set, even empty: it wins
+            self.assertEqual(codeimport.setting(both, "CODE_IMPORT_NOGON_TOKEN_FILE"), "")
+        self.assertEqual(err.getvalue().count("CODE_IMPORT_HISTER_TOKEN_FILE: an old name, ignored"), 1)   # said once
+        self.assertIsNone(codeimport.setting({}, "CODE_IMPORT_DATA"))
 
 
 if __name__ == "__main__":

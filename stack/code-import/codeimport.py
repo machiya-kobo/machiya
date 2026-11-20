@@ -1,4 +1,4 @@
-"""code-import: the owner's repos on Forgejo and GitHub, searchable in Hister (Machiya, stack/code-import).
+"""code-import: the owner's repos on Forgejo and GitHub, searchable in Nogon (Machiya, stack/code-import).
 
 Every CODE_IMPORT_INTERVAL seconds:
   1. every forge lists every repo of its owners; forks, archived repos, mirrors, the names in CODE_IMPORT_EXCLUDE (none
@@ -8,13 +8,13 @@ Every CODE_IMPORT_INTERVAL seconds:
      full run, the README and the markdown docs of the default branch and the releases;
   3. issues and PRs (title, body, state; no comments) changed since the cursor (one search per owner on Forgejo,
      one conditional list per repo on GitHub);
-  4. each becomes one Hister document at its real forge URL, `metadata.source: code` with code_host, code_repo,
+  4. each becomes one Nogon document at its real forge URL, `metadata.source: code` with code_host, code_repo,
      code_kind, code_state, code_private, always with `html`, after our own secret scan (redact or refuse). A URL
-     Hister already holds as somebody else's page (the owner browsed it) is left alone; only documents whose
+     Nogon already holds as somebody else's page (the owner browsed it) is left alone; only documents whose
      metadata.source is `code` are ever replaced or deleted.
 A full run (the first, then every CODE_IMPORT_FULL_INTERVAL) re-reads everything and withdraws what disappeared.
 Each full run of a source (and its first run after a start, when its last check is over a day old) first reconciles:
-every document the state says Hister holds is asked for (HEAD /api/document), and the ones Hister lost (a "delete
+every document the state says Nogon holds is asked for (HEAD /api/document), and the ones Nogon lost (a "delete
 matching documents" on its Rules page, a reset) are forgotten and sent again in the same run.
 No code bodies (phase 2). Nothing is written to a forge: GET only.
 
@@ -23,8 +23,8 @@ No code bodies (phase 2). Nothing is written to a forge: GET only.
                                       one run (a full one with --full), then exit (non-zero if it failed)
   python3 codeimport.py --dry-run [--limit N] [--repo owner/name]
                                       print what would be added (at most N documents per repo, default 5); writes
-                                      nothing anywhere (no state, no Hister writes; Hister is only asked which URLs it
-                                      has, and only if CODE_IMPORT_HISTER_URL is set)
+                                      nothing anywhere (no state, no Nogon writes; Nogon is only asked which URLs it
+                                      has, and only if CODE_IMPORT_NOGON_URL is set)
 """
 import argparse
 import fnmatch
@@ -40,7 +40,7 @@ from datetime import datetime
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-import hister as histermod                                     # noqa: E402
+import nogon as nogonmod                                       # noqa: E402
 import render                                                  # noqa: E402
 import secretscan                                              # noqa: E402
 import tokens                                                  # noqa: E402
@@ -49,22 +49,28 @@ from forges import RETRY_DELAYS, ForgeError, Repo, iso          # noqa: E402
 from github import GitHub                                      # noqa: E402
 from store import Store                                        # noqa: E402
 
-VERSION = "0.2.1"
+VERSION = "0.3.0"
 
 _old_names = set()
 
 
-def nogon_first(env, key):
-    """0.2.0, the rename (Hister is now Nogon): for a <P>_HISTER_<X> setting, <P>_NOGON_<X> when it is set (even empty),
-    else the old name (logged once) until the rename's stage 3. Other names are read as they are."""
-    new = key.replace("HISTER", "NOGON")
-    if new != key:
-        if new in env:
-            return env[new]
-        if key in env and key not in _old_names:
-            _old_names.add(key)
-            print("code-import: %s is an old name, read as %s" % (key, new), file=sys.stderr, flush=True)
+def setting(env, key):
+    """A setting, as vaultkit's names.setting() reads one (Hister is now Nogon): a <P>_NOGON_<X> that is set wins, even
+    empty. 0.3.0, the rename's stage 3: its old <P>_HISTER_<X> twin is no longer read. Set on its own it stops the
+    start, naming the new one, so nothing is quietly ignored; set beside it, it is ignored and said once. Other names
+    are read as they are."""
+    old = key.replace("NOGON", "HISTER")
+    if old != key:
+        if key in env:
+            if old in env and old not in _old_names:
+                _old_names.add(old)
+                print("code-import: %s: an old name, ignored (%s is set; Hister is now Nogon): remove it" % (old, key),
+                      file=sys.stderr, flush=True)
+        elif old in env:
+            raise SystemExit("code-import: %s is an old name and is no longer read: rename it %s (Hister is now Nogon)"
+                             % (old, key))
     return env.get(key)
+
 
 DOC_V = 1               # the documents' shape: part of every fingerprint, so a bump re-sends everything once
 FINAL = ("added", "known", "refused", "rejected", "skipped")
@@ -82,9 +88,9 @@ WINDOW_RE = re.compile(r"^(%s)[a-z]*\s+([01]?\d|2[0-3]):([0-5]\d)\s*-\s*([01]?\d
 
 
 def repo_key(owner, name):
-    """metadata.code_repo: a value Hister v0.20.0 can match. Metadata values are tokenized when indexed and a
+    """metadata.code_repo: a value Nogon v0.20.0 can match. Metadata values are tokenized when indexed and a
     metadata query is one unanalyzed term, so the value must be a single lowercase token: `/`, `-`, `.` and `:` split
-    it (tested on a throwaway Hister 2026-10-04), `_` doesn't. `machiya-kobo/kura` -> `machiya_kobo__kura`."""
+    it (tested on a throwaway Nogon 2026-10-04), `_` doesn't. `machiya-kobo/kura` -> `machiya_kobo__kura`."""
     def part(s):
         return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_") or "_"
     return "%s__%s" % (part(owner), part(name))
@@ -198,10 +204,10 @@ class Ctx:
 # -- the importer -------------------------------------------------------------------------------------------------------
 
 class Importer:
-    def __init__(self, forges, store, hister=None, *, rules=None, dry_run=False, secrets="redact",
+    def __init__(self, forges, store, nogon=None, *, rules=None, dry_run=False, secrets="redact",
                  full_interval=21600, max_docs=200, max_doc_bytes=262144, max_text=100000, doc_skip=(), limit=None,
                  only_repo=None, readme_only=(), reconcile_limit=RECONCILE_LIMIT, out=print, clock=time.time):
-        self.forges, self.store, self.hister, self.rules = forges, store, hister, rules or Rules()
+        self.forges, self.store, self.nogon, self.rules = forges, store, nogon, rules or Rules()
         self.dry_run, self.secrets, self.full_interval = dry_run, secrets, full_interval
         self.max_docs, self.max_doc_bytes, self.max_text = max_docs, max_doc_bytes, max_text
         self.doc_skip = tuple(DEFAULT_DOC_SKIP) + tuple(doc_skip)
@@ -222,7 +228,7 @@ class Importer:
         self.stats[host][key] += n
 
     def lookup(self, url):
-        return self.hister.document(url) if self.hister else None
+        return self.nogon.document(url) if self.nogon else None
 
     # -- withdrawing -----------------------------------------------------------------------------------------------------
 
@@ -235,7 +241,7 @@ class Importer:
             self.later.append(fn)
 
     def withdraw(self, row):
-        """A document whose source is gone: deleted from Hister only if it is ours there; the row is forgotten.
+        """A document whose source is gone: deleted from Nogon only if it is ours there; the row is forgotten.
         Deferred to the end of the source's pass; a URL that was written again meanwhile (touched) is left alone."""
         row = dict(row)
         self.defer(lambda: None if row["url"] in self.touched else self.withdraw_now(row))
@@ -248,10 +254,10 @@ class Importer:
                 self.note(row["host"], "would delete")
                 return
             doc = self.lookup(url)
-            if histermod.is_ours(doc):
-                status = self.hister.delete(url)
+            if nogonmod.is_ours(doc):
+                status = self.nogon.delete(url)
                 if status >= 300:
-                    raise histermod.HisterDown("Hister POST /api/delete: HTTP %d" % status)
+                    raise nogonmod.NogonDown("Nogon POST /api/delete: HTTP %d" % status)
                 self.note(row["host"], "deleted")
             elif doc is not None:
                 self.note(row["host"], "left alone (a page now)")
@@ -268,7 +274,7 @@ class Importer:
     def put(self, ctx, kind, key, url, src, build, updated=0):
         """build() -> (title, line, body markdown, extra metadata); called only when the source changed."""
         host, repo = ctx.forge.name, ctx.repo
-        url = histermod.norm(url)
+        url = nogonmod.norm(url)
         self.touched.add(url)
         row = self.store.doc(url)
         if row and row["src"] == src and row["status"] in FINAL:
@@ -309,11 +315,11 @@ class Importer:
                "html": render.page(title, url, line, body), "added": int(updated or self.clock()), "metadata": meta}
 
         existing = self.lookup(url)
-        if existing is not None and not histermod.is_ours(existing):
+        if existing is not None and not nogonmod.is_ours(existing):
             self.store.put_doc(url, host=host, repo_id=repo.id, kind=kind, key=key, src=src, status="known", error=None)
             self.note(host, "already a page")
             if self.dry_run:
-                self.out(json.dumps({"already_in_hister": url}))
+                self.out(json.dumps({"already_in_nogon": url}))
             return url
         if self.dry_run:
             self.out(json.dumps({"would_add": {k: v for k, v in doc.items() if k not in ("html", "text")},
@@ -322,14 +328,14 @@ class Importer:
             self.note(host, "would add")
             ctx.shown += 1
             return url
-        status, reply = self.hister.add(doc)
+        status, reply = self.nogon.add(doc)
         if status in (200, 201):
             self.store.put_doc(url, host=host, repo_id=repo.id, kind=kind, key=key, src=src, status="added", error=None)
             self.note(host, "added " + kind + (" (redacted)" if found else ""))
         else:
             self.store.put_doc(url, host=host, repo_id=repo.id, kind=kind, key=key, src=src, status="rejected",
                                error=("HTTP %d %s" % (status, reply))[:300])
-            self.log("  rejected by Hister (%d): %s" % (status, url))
+            self.log("  rejected by Nogon (%d): %s" % (status, url))
             self.note(host, "rejected")
         return url
 
@@ -386,7 +392,7 @@ class Importer:
         elif not self.dry_run:
             self.store.drop_meta(cap)
         for kind, path, sha, size in cands:
-            url = histermod.norm(f.doc_url(r, path))
+            url = nogonmod.norm(f.doc_url(r, path))
             seen.add(url)
             src = fingerprint(ctx.fp, kind, path, sha)
             if secretscan.secret_name(path) or size > self.max_doc_bytes:
@@ -501,7 +507,7 @@ class Importer:
 
     def run(self, full=False):
         """One pass over every source (an owner on a forge), each on its own: a source that fails (after each call's
-        retries) is recorded in self.sources and withdraws nothing, and the others go on. Raises HisterDown (Hister
+        retries) is recorded in self.sources and withdraws nothing, and the others go on. Raises NogonDown (Nogon
         is every source's: the run stops; the state is written per document, so the next run resumes)."""
         self.stats, self.fresh, self.ctx, self.sources, self.reconciled = {}, set(), {}, {}, {}
         now = self.clock()
@@ -559,7 +565,7 @@ class Importer:
     def source_pass(self, f, owner, key, repos, decisions, full, now):
         last_full = self.store.meta("last_full:" + key)
         full = full or last_full is None or now - float(last_full) >= self.full_interval
-        if not self.dry_run and self.hister is not None:
+        if not self.dry_run and self.nogon is not None:
             last = self.last_reconcile(key)
             stale = last is None or now - last.get("at", 0) >= RECONCILE_EVERY
             if full or (key not in self.checked and stale):
@@ -601,10 +607,10 @@ class Importer:
     # -- the reconcile ---------------------------------------------------------------------------------------------------
 
     def reconcile(self, f, owner, key, now):
-        """Does Hister still hold every document the state says this source added? A document it lost is skipped by
+        """Does Nogon still hold every document the state says this source added? A document it lost is skipped by
         its fingerprint forever (unchanged), so a lost one is forgotten here and the same run sends it again.
-        Sequential HEADs (~1,000 documents is cheap). Hister failing (401, 403, 429, 5xx, unreachable) raises
-        HisterDown before anything is forgotten: the run stops and the next one (a full one again) checks again. Past
+        Sequential HEADs (~1,000 documents is cheap). Nogon failing (401, 403, 429, 5xx, unreachable) raises
+        NogonDown before anything is forgotten: the run stops and the next one (a full one again) checks again. Past
         reconcile_limit seconds it stops: what it found missing so far is forgotten, but the check isn't recorded as
         done. -> (checked, missing, complete)"""
         rows = sorted((d for r in self.stored(f.name, owner) for d in self.store.docs(f.name, r["id"])
@@ -614,7 +620,7 @@ class Importer:
             if time.monotonic() - started > self.reconcile_limit:
                 complete = False
                 break
-            if not self.hister.exists(row["url"]):
+            if not self.nogon.exists(row["url"]):
                 missing.append(row["url"])
             checked += 1
         for url in missing:
@@ -696,16 +702,16 @@ def build(env, dry_run=False, limit=None, only_repo=None):
                              gap=float(gap) if gap else 0.25, cache=store, **client))
     if not forges:
         raise SystemExit("code-import: no forge: set CODE_IMPORT_FORGEJO_URL and/or CODE_IMPORT_GITHUB_TOKEN_FILES")
-    hister_url = nogon_first(env, "CODE_IMPORT_HISTER_URL") or ""
-    if not hister_url and not dry_run:
+    nogon_url = setting(env, "CODE_IMPORT_NOGON_URL") or ""
+    if not nogon_url and not dry_run:
         raise SystemExit("code-import: CODE_IMPORT_NOGON_URL is required (unset is allowed only with --dry-run)")
-    htoken = tokens.token_file(nogon_first(env, "CODE_IMPORT_HISTER_TOKEN_FILE"), "CODE_IMPORT_NOGON_TOKEN_FILE")
-    hister = histermod.Hister(hister_url, htoken) if hister_url else None
+    ntoken = tokens.token_file(setting(env, "CODE_IMPORT_NOGON_TOKEN_FILE"), "CODE_IMPORT_NOGON_TOKEN_FILE")
+    nogon = nogonmod.Nogon(nogon_url, ntoken) if nogon_url else None
     secrets = env.get("CODE_IMPORT_SECRETS", "redact").strip().lower()
     if secrets not in ("redact", "refuse"):
         raise SystemExit("code-import: CODE_IMPORT_SECRETS is redact or refuse, not %r" % secrets)
     rules = Rules(env.get("CODE_IMPORT_EXCLUDE", DEFAULT_EXCLUDE), parse_twins(env.get("CODE_IMPORT_TWINS")))
-    imp = Importer(forges, store, hister, rules=rules, dry_run=dry_run, secrets=secrets,
+    imp = Importer(forges, store, nogon, rules=rules, dry_run=dry_run, secrets=secrets,
                    full_interval=max(3600, int(env.get("CODE_IMPORT_FULL_INTERVAL", "21600"))),
                    max_docs=int(env.get("CODE_IMPORT_MAX_DOCS", "200")),
                    max_doc_bytes=int(env.get("CODE_IMPORT_MAX_DOC_BYTES", "262144")),
@@ -726,13 +732,13 @@ def serve(env, once=False, full=False):
     imp, data = build(env)
     interval = max(60, int(env.get("CODE_IMPORT_INTERVAL", "900")))
     window, tz = pause_window(env.get("CODE_IMPORT_PAUSE")), env.get("CODE_IMPORT_TZ", "UTC")
-    imp.log("code-import %s: forges %s, Hister %s, every %d s, a full run every %d s%s" % (
-        VERSION, ",".join(f.name for f in imp.forges), nogon_first(env, "CODE_IMPORT_HISTER_URL"), interval, imp.full_interval,
+    imp.log("code-import %s: forges %s, Nogon %s, every %d s, a full run every %d s%s" % (
+        VERSION, ",".join(f.name for f in imp.forges), setting(env, "CODE_IMPORT_NOGON_URL"), interval, imp.full_interval,
         (", paused " + env.get("CODE_IMPORT_PAUSE")) if window else ""))
     last_ok, fails, stats = None, 0, {}
 
     def healthy():
-        """ok=false only when broken: after a failed run (Hister down, or any source failed) once no fully good run
+        """ok=false only when broken: after a failed run (Nogon down, or any source failed) once no fully good run
         has happened for three intervals. A source that keeps failing turns it false; the others still import."""
         if last_ok is None:
             return fails == 0
@@ -763,7 +769,7 @@ def serve(env, once=False, full=False):
                     imp.log("run partly failed (%d in a row): %d source(s) of %d" % (fails, len(bad), len(imp.sources)))
                 else:
                     last_ok, fails = int(time.time()), 0
-            except histermod.HisterDown as e:
+            except nogonmod.NogonDown as e:
                 fails += 1
                 error = str(e)
                 imp.log("run failed (%d in a row): %s" % (fails, e))
@@ -788,7 +794,7 @@ def main(argv=None):
         imp, _ = build(env, dry_run=True, limit=args.limit if args.limit is not None else 5, only_repo=args.repo)
         try:
             stats = imp.run(full=True)
-        except histermod.HisterDown as e:
+        except nogonmod.NogonDown as e:
             print("dry run failed: %s" % e, file=sys.stderr)
             return 1
         print("dry run: %s (nothing was written)" % json.dumps(stats, sort_keys=True))

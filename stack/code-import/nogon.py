@@ -1,9 +1,9 @@
-"""code-import's Hister calls (docs/contracts/hister.md): `Origin: hister://` on every call, and the owner's token as
-`X-Access-Token` from CODE_IMPORT_HISTER_TOKEN_FILE (tokens.py: checked at start, re-read when it changes; while it is
-set a redirect from Hister is never followed).
+"""code-import's Nogon calls (docs/contracts/nogon.md): `Origin: nogon://` on every call (0.3.0; Nogon v0.22 and later),
+and the owner's token as `X-Access-Token` from CODE_IMPORT_NOGON_TOKEN_FILE (tokens.py: checked at start, re-read
+when it changes; while it is set a redirect from Nogon is never followed).
 
 Four calls: GET /api/document (is this URL known, and whose is it?), HEAD /api/document (the reconcile: is it still
-there? GET from then on if HEAD answers 405 or 501), POST /api/add (a code document, always with `html`: Hister's
+there? GET from then on if HEAD answers 405 or 501), POST /api/add (a code document, always with `html`: Nogon's
 sensitive-content check reads only `html` for a web document), POST /api/delete (one exact `url:"…"`, only for a
 document whose metadata.source is `code`).
 """
@@ -15,12 +15,12 @@ import urllib.request
 import tokens
 
 
-class HisterDown(Exception):
-    """Hister is unreachable or answered 5xx: the run stops and nothing is recorded against a document."""
+class NogonDown(Exception):
+    """Nogon is unreachable or answered 5xx: the run stops and nothing is recorded against a document."""
 
 
 def norm(url):
-    """The URL as Hister stores it (document.normalizeWebURL in v0.20.0): no fragment, and no utm / utm_* query
+    """The URL as Nogon stores it (document.normalizeWebURL in v0.20.0): no fragment, and no utm / utm_* query
     parameters; when one is dropped the query is re-encoded the way Go's url.Values.Encode does (sorted by key)."""
     u = urllib.parse.urlsplit(url)
     if u.scheme.lower() not in ("http", "https"):
@@ -36,12 +36,12 @@ def norm(url):
 
 
 def is_ours(doc):
-    """A Hister document code-import owns: metadata.source is `code`. Anything else (a page the owner browsed, a
+    """A Nogon document code-import owns: metadata.source is `code`. Anything else (a page the owner browsed, a
     note, a feed-import page) is never overwritten or deleted."""
     return isinstance(doc, dict) and (doc.get("metadata") or {}).get("source") == "code"
 
 
-class Hister:
+class Nogon:
     def __init__(self, base, token=None, timeout=60):
         """token: a tokens.SecretFile, a plain string (tests), or None for none."""
         self.base, self.timeout = base.rstrip("/"), timeout
@@ -50,12 +50,12 @@ class Hister:
         self.head_ok = True             # HEAD /api/document works (else GET, for good)
 
     def __repr__(self):                 # never the token
-        return "Hister(%s%s)" % (self.base, ", token" if self.token else "")
+        return "Nogon(%s%s)" % (self.base, ", token" if self.token else "")
 
     def call(self, method, path, body=None, passthrough=()):
-        """(status, parsed JSON or text). 4xx come back; 5xx and network errors raise HisterDown, except the statuses
+        """(status, parsed JSON or text). 4xx come back; 5xx and network errors raise NogonDown, except the statuses
         in `passthrough`, which come back too."""
-        headers = {"Origin": "hister://", "Accept": "application/json"}
+        headers = {"Origin": "nogon://", "Accept": "application/json"}
         data = None
         if body is not None:
             data = json.dumps(body).encode()
@@ -64,20 +64,20 @@ class Hister:
         if token:
             headers["X-Access-Token"] = token
         req = urllib.request.Request(self.base + path, data=data, method=method, headers=headers)
-        what = "Hister %s %s" % (method, path.split("?")[0])
+        what = "Nogon %s %s" % (method, path.split("?")[0])
         try:
             with self.opener.open(req, timeout=self.timeout) as r:
                 status, raw = r.status, r.read()
         except urllib.error.HTTPError as e:
             if self.token is not None and 300 <= e.code < 400:
-                raise HisterDown("%s: a redirect (%d), not followed with the token" % (what, e.code))
+                raise NogonDown("%s: a redirect (%d), not followed with the token" % (what, e.code))
             if e.code >= 500 and e.code not in passthrough:
-                raise HisterDown("%s: HTTP %d" % (what, e.code))
+                raise NogonDown("%s: HTTP %d" % (what, e.code))
             if e.code == 403:
-                raise HisterDown("%s: 403, no or an invalid token (CODE_IMPORT_HISTER_TOKEN_FILE)" % what)
+                raise NogonDown("%s: 403, no or an invalid token (CODE_IMPORT_NOGON_TOKEN_FILE)" % what)
             status, raw = e.code, e.read()[:500]
         except (urllib.error.URLError, OSError) as e:
-            raise HisterDown("%s: %s" % (what, e))
+            raise NogonDown("%s: %s" % (what, e))
         try:
             return status, json.loads(raw) if raw else None
         except ValueError:
@@ -89,13 +89,13 @@ class Hister:
         if status == 404:
             return None
         if status != 200 or not isinstance(doc, dict):
-            raise HisterDown("Hister GET /api/document: HTTP %d" % status)
+            raise NogonDown("Nogon GET /api/document: HTTP %d" % status)
         return doc
 
     def exists(self, url):
-        """The reconcile's question: does Hister still hold this exact URL? True (200) or False (404), by HEAD, or by
+        """The reconcile's question: does Nogon still hold this exact URL? True (200) or False (404), by HEAD, or by
         GET for good once HEAD answers 405 or 501. Anything else (401, 403, 429, 5xx, unreachable, a redirect) raises
-        HisterDown: Hister can't say, so nothing may be taken as missing."""
+        NogonDown: Nogon can't say, so nothing may be taken as missing."""
         path = "/api/document?url=" + urllib.parse.quote(url, safe="")
         if self.head_ok:
             status, _ = self.call("HEAD", path, passthrough=(501,))
@@ -111,12 +111,12 @@ class Hister:
             return True
         if status == 404:
             return False
-        raise HisterDown("Hister %s /api/document: HTTP %d" % (method, status))
+        raise NogonDown("Nogon %s /api/document: HTTP %d" % (method, status))
 
     def add(self, doc):
         """201 added, 406 refused by a skip rule, 422 sensitive content; any other 4xx is a final refusal."""
         if not doc.get("html"):
-            raise ValueError("a code document is always sent with html (Hister checks only html for secrets)")
+            raise ValueError("a code document is always sent with html (Nogon checks only html for secrets)")
         if "skip_sensitive_check" in doc:
             raise ValueError("code-import never sets skip_sensitive_check")
         return self.call("POST", "/api/add", doc)

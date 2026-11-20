@@ -1,7 +1,7 @@
-"""A code document as HTML (stdlib only). Hister extracts the text from the HTML, as it does for a visited page, and
+"""A code document as HTML (stdlib only). Nogon extracts the text from the HTML, as it does for a visited page, and
 its sensitive-content check reads only the HTML, so every document is sent with it.
 
-The markdown is rendered just enough to read well in Hister's preview: headings, fenced code, paragraphs, lists as
+The markdown is rendered just enough to read well in Nogon's preview: headings, fenced code, paragraphs, lists as
 lines. Everything is escaped; no link, image or raw HTML from a repo is ever passed through.
 """
 import html
