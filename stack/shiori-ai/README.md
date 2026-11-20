@@ -51,7 +51,7 @@ On top of the gate, `summarize` and `answer` take only requests from Shiori's ow
 
 ## Room tokens
 
-A headless caller sends a room token from [nogon-login](../../docs/services/nogon-login.md), as for [shiori-feed](../shiori-feed/README.md#room-tokens): `SHIORI_AI_AUTH_URL`, `SHIORI_AI_PUBLIC_URL` and `SHIORI_AI_HISTER_USERS` (never `*`), then `Authorization: Bearer mht_…` in `tailscale` or `proxy` mode. A request a token lets in skips the same-origin check: a bearer token isn't a cookie another site's page can ride on. Notes, code and local files are refused all the same.
+A headless caller sends a room token from [nogon-login](../../docs/services/nogon-login.md), as for [shiori-feed](../shiori-feed/README.md#room-tokens): `SHIORI_AI_AUTH_URL`, `SHIORI_AI_PUBLIC_URL` and `SHIORI_AI_NOGON_USERS` (never `*`), then `Authorization: Bearer mht_…` in `tailscale` or `proxy` mode. A request a token lets in skips the same-origin check: a bearer token isn't a cookie another site's page can ride on. Notes, code and local files are refused all the same.
 
 ## Settings
 
@@ -62,8 +62,8 @@ A headless caller sends a room token from [nogon-login](../../docs/services/nogo
 | `SHIORI_AI_DAILY_REQUESTS` | `100` | engine calls per UTC day |
 | `SHIORI_AI_DAILY_INPUT_TOKENS` | `2000000` | input tokens per UTC day |
 | `SHIORI_AI_PER_MINUTE` | `20` | summarize and answer requests per minute, for every caller together; `0` = no limit |
-| `SHIORI_AI_HISTER_URL` | — | Hister's address, `http://hister:4433`. Unset: no summaries |
-| `SHIORI_AI_HISTER_TOKEN_FILE` | — | a file holding your Hister token, sent as `X-Access-Token` ([contracts/hister.md](../../docs/contracts/hister.md)); re-read when it changes. Set but missing or empty stops the start |
+| `SHIORI_AI_NOGON_URL` | — | Hister's address, `http://hister:4433`. Unset: no summaries |
+| `SHIORI_AI_NOGON_TOKEN_FILE` | — | a file holding your Hister token, sent as `X-Access-Token` ([contracts/hister.md](../../docs/contracts/hister.md)); re-read when it changes. Set but missing or empty stops the start |
 | `SHIORI_AI_SEARXNG_URL` | — | SearXNG's address, `http://searxng:8080`, with the `json` format on in its `search.formats`. Unset: no answers |
 | `SHIORI_AI_NOTE_HOSTS` | `kura,konbini,niwa` | hosts whose pages are notes: a full host name, or a first label (`kura` matches `kura.example.ts.net`) |
 | `SHIORI_AI_AUTH` | `tailscale` | `tailscale`, `proxy` or `open` (above) |
@@ -71,7 +71,7 @@ A headless caller sends a room token from [nogon-login](../../docs/services/nogo
 | `SHIORI_AI_TRUSTED_PROXIES` | — | addresses or CIDRs of the proxy |
 | `SHIORI_AI_AUTH_URL` | — | [nogon-login](../../docs/services/nogon-login.md)'s address: turns on room tokens (with the next two) |
 | `SHIORI_AI_PUBLIC_URL` | — | the address the room tokens are issued for (its origin is what nogon-login checks) |
-| `SHIORI_AI_HISTER_USERS` | — | the Hister users a room token may act as, comma-separated (never `*`) |
+| `SHIORI_AI_NOGON_USERS` | — | the Hister users a room token may act as, comma-separated (never `*`) |
 | `SHIORI_AI_BIND_BEHIND_PROXY` | — | `1`: only the proxy (or the host's own `127.0.0.1` port) reaches the listener's network. Prefer `SHIORI_AI_TRUSTED_PROXIES` |
 | `SHIORI_AI_BIND`, `SHIORI_AI_PORT` | `127.0.0.1`, `8080` | the listener. The image sets `0.0.0.0` |
 | `SHIORI_AI_DATA` | `/data` | `shiori-ai.db`: the caches and the daily counts. It can be deleted (the day's counts go with it) |
@@ -89,7 +89,7 @@ A headless caller sends a room token from [nogon-login](../../docs/services/nogo
 
 ```sh
 SHIORI_AI_AUTH=open SHIORI_AI_DATA=/tmp/shiori-ai SHIORI_AI_KEY_FILE=$HOME/.config/anthropic-key \
-  SHIORI_AI_HISTER_URL=http://127.0.0.1:4433 SHIORI_AI_SEARXNG_URL=http://127.0.0.1:8888 python3 shiori_ai.py
+  SHIORI_AI_NOGON_URL=http://127.0.0.1:4433 SHIORI_AI_SEARXNG_URL=http://127.0.0.1:8888 python3 shiori_ai.py
 podman build -t shiori-ai:dev stack/shiori-ai
 ```
 

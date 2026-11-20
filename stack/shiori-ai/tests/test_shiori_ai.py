@@ -530,3 +530,17 @@ class TestStatusAndChangelog(Base):
         self.assertEqual(conn.getresponse().status, 304)
         conn.close()
         self.assertNotIn("/api/changelog", self.err.getvalue())
+
+
+class NogonNames(unittest.TestCase):
+    """0.3.0, the rename's stage 1: SHIORI_AI_NOGON_<X> first, SHIORI_AI_HISTER_<X> still read."""
+
+    def test_nogon_first(self):
+        import contextlib
+        import io
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(sa.nogon_first({"SHIORI_AI_HISTER_URL": "h"}, "SHIORI_AI_HISTER_URL"), "h")
+        self.assertEqual(sa.nogon_first({"SHIORI_AI_HISTER_URL": "h", "SHIORI_AI_NOGON_URL": ""},
+                                               "SHIORI_AI_HISTER_URL"), "")
+        self.assertEqual(sa.nogon_first({"SHIORI_AI_NOGON_URL": "n"}, "SHIORI_AI_HISTER_URL"), "n")
+        self.assertIsNone(sa.nogon_first({}, "SHIORI_AI_SEARXNG_URL"))

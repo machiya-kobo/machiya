@@ -1,5 +1,11 @@
 # Changelog: shiori-ai
 
+## 0.3.0
+
+- Says Nogon, upstream Hister's new name (owner, 2026-11-19): "Nogon has no copy of this page.", "Nogon didn't answer.", "Nogon search syntax can't be answered from the web.", and the log line.
+- The rename's stage 1: `SHIORI_AI_NOGON_URL`, `SHIORI_AI_NOGON_TOKEN_FILE` and `SHIORI_AI_NOGON_USERS` are read first. The `SHIORI_AI_HISTER_*` names still work until stage 3, each logged once. A NOGON name that is set wins, even when empty.
+- The Python base re-pinned to today's digest.
+
 ## 0.2.2
 
 (There is no 0.2.1 release: a tag of that name was pushed by mistake on an unrelated commit and never built.)

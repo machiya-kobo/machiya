@@ -57,7 +57,21 @@ from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.2.2"
+VERSION = "0.3.0"
+_old_names = set()
+
+
+def nogon_first(env, key):
+    """0.3.0, the rename (Hister is now Nogon): for a SHIORI_AI_HISTER_<X> setting, SHIORI_AI_NOGON_<X> when it is set
+    (even empty), else the old name (logged once) until the rename's stage 3. Other names are read as they are."""
+    new = key.replace("HISTER", "NOGON")
+    if new != key:
+        if new in env:
+            return env[new]
+        if key in env and key not in _old_names:
+            _old_names.add(key)
+            print("shiori-ai: %s is an old name, read as %s" % (key, new), file=sys.stderr, flush=True)
+    return env.get(key)
 
 TEXT_MAX, BODY_MAX, URL_MAX, MAX_TOKENS, ENGINE_TIMEOUT = 60000, 8192, 4096, 300, 90
 HISTER_TIMEOUT, HISTER_MAX = 20, 16 << 20          # one stored page, with its HTML
@@ -302,7 +316,7 @@ class Config:
 
     def __init__(self, env=None):
         env = os.environ if env is None else env
-        g = lambda name, default="": (env.get("SHIORI_AI_" + name) or default).strip()
+        g = lambda name, default="": (nogon_first(env, "SHIORI_AI_" + name) or default).strip()
         self.hister = base_url(g("HISTER_URL"), "SHIORI_AI_HISTER_URL")
         self.searxng = base_url(g("SEARXNG_URL"), "SHIORI_AI_SEARXNG_URL")
         token = g("HISTER_TOKEN_FILE")
@@ -310,7 +324,7 @@ class Config:
         if token:
             self.token = SecretFile(token)
             if not self.token.value:
-                raise SystemExit("shiori-ai: SHIORI_AI_HISTER_TOKEN_FILE: no token on the first line of %s" % token)
+                raise SystemExit("shiori-ai: SHIORI_AI_NOGON_TOKEN_FILE: no token on the first line of %s" % token)
         self.key_file = g("KEY_FILE")
         self.api = g("API_URL", DEFAULT_API)
         u = urllib.parse.urlsplit(self.api)
@@ -346,7 +360,7 @@ class Config:
             if not self.public_url.startswith(("http://", "https://")) or not self.hister_users \
                     or "*" in self.hister_users:
                 raise SystemExit("shiori-ai: SHIORI_AI_AUTH_URL (room tokens) needs SHIORI_AI_PUBLIC_URL (the address "
-                                 "the tokens are issued for) and SHIORI_AI_HISTER_USERS (never *)")
+                                 "the tokens are issued for) and SHIORI_AI_NOGON_USERS (never *)")
         self.room_tokens = RoomTokens(self.auth_url, self.public_url, self.hister_users) if self.auth_url else None
         self.check_bind()
 
@@ -636,13 +650,13 @@ class AI:
         except urllib.error.HTTPError as e:
             log("summarize: hister HTTP %d" % e.code)
             if e.code in (400, 404):
-                raise Fail(404, "not_indexed", "Hister has no copy of this page.")
-            raise Fail(503, "unavailable", "Hister didn't answer.")
+                raise Fail(404, "not_indexed", "Nogon has no copy of this page.")
+            raise Fail(503, "unavailable", "Nogon didn't answer.")
         except (OSError, ValueError) as e:                                  # timeouts, refused, too big, bad JSON
             log("summarize: hister failed: %s" % type(e).__name__)
-            raise Fail(503, "unavailable", "Hister didn't answer.")
+            raise Fail(503, "unavailable", "Nogon didn't answer.")
         if not isinstance(page, dict) or not page.get("content") or not isinstance(page.get("content"), str):
-            raise Fail(404, "not_indexed", "Hister has no copy of this page.")
+            raise Fail(404, "not_indexed", "Nogon has no copy of this page.")
         return page
 
     def searx_results(self, q):
@@ -770,7 +784,7 @@ class AI:
         if CTRL.search(q):
             raise Fail(400, "bad_request", "The search has a control character.")
         if HISTER_SYNTAX.search(q):                                         # Hister-only syntax never goes to the web
-            raise Fail(400, "bad_request", "Hister search syntax can't be answered from the web.")
+            raise Fail(400, "bad_request", "Nogon search syntax can't be answered from the web.")
         if not self.cfg.searxng:
             raise Fail(503, "unavailable", "Answers aren't set up here.")
         if not refresh:
@@ -966,7 +980,7 @@ def make_server(cfg, bind=None, port=None, ai=None):
 def main():
     cfg = Config()
     server = make_server(cfg)
-    log("%s: listening on %s:%d, auth %s%s; Hister %s; SearXNG %s; key %s; caps %d requests, %d input tokens a day" % (
+    log("%s: listening on %s:%d, auth %s%s; Nogon %s; SearXNG %s; key %s; caps %d requests, %d input tokens a day" % (
         VERSION, cfg.bind, cfg.port, cfg.auth,
         "" if cfg.auth != "tailscale" else " (%s)" % (",".join(sorted(cfg.users)) or "NOBODY: set SHIORI_AI_USERS"),
         cfg.hister or "off (no summaries)", cfg.searxng or "off (no answers)",
