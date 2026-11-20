@@ -1,10 +1,10 @@
-# Hister server config (reference). No secrets here: set the access token with the
-# HISTER__APP__ACCESS_TOKEN environment variable. Env vars HISTER__<SECTION>__<KEY>
+# Nogon (formerly Hister) server config (reference). No secrets here: set the access token with the
+# NOGON__APP__ACCESS_TOKEN environment variable. Env vars NOGON__<SECTION>__<KEY> (HISTER__ before v0.22)
 # override any key below. Reference: https://nogon.eu/docs/configuration
 app:
-  title: Hister
-  # Web search for anything Hister doesn't know: SearXNG. One direction only:
-  # SearXNG must NOT query Hister (other people may use SearXNG; this index is private).
+  title: Nogon
+  # Web search for anything Nogon doesn't know: SearXNG. One direction only:
+  # SearXNG must NOT query Nogon (other people may use SearXNG; this index is private).
   search_url: http://localhost:8888/search?q={query}
   redirect_on_no_results: false
   user_handling: false          # single user; restrict access at the network or proxy level

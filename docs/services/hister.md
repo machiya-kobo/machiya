@@ -5,7 +5,7 @@
 - importers, for saves from other tools;
 - [Kura](https://github.com/machiya-kobo/kura), which pushes every note in as `label:vault`.
 
-Machiya runs Hister unchanged. This repo holds its [reference config](../../config/hister/), and [contracts/hister.md](../contracts/hister.md) says how the other services use it.
+Machiya runs Hister unchanged. This repo holds its [reference config](../../config/nogon/), and [contracts/hister.md](../contracts/hister.md) says how the other services use it.
 
 - **URL:** `https://hister.example.ts.net`, for example a Tailscale Service on its own sidecar. Only you can reach it.
 - **Image:** `ghcr.io/asciimoo/nogon` (`ghcr.io/asciimoo/hister` up to v0.21), pinned. The reference compose still pins `hister:v0.20.0`; Nogon v0.22 opens its data and config as they are (same `HISTER_*` variables, `/hister/hister` kept as a link to the binary), and Machiya keeps the `hister` names. It's pre-1.0 and releases break things. When you bump it, bump [Konbini](https://github.com/machiya-kobo/konbini)'s `HISTER_VERSION` too: Konbini ships the `hister` CLI for link rot.

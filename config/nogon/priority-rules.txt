@@ -1,4 +1,4 @@
-# Hister PRIORITY rules: URLs matching a pattern get a score boost in every search.
+# Nogon PRIORITY rules: URLs matching a pattern get a score boost in every search.
 #
 # FORMAT DIFFERS FROM skip-rules.txt - priority rules are search-index regexps (Bleve):
 #  - they match the WHOLE URL, no ^ or $ (a pattern with $ made EVERY search return 0 results);

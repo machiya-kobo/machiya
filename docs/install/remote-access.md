@@ -21,7 +21,7 @@ KONBINI_PUBLIC_URL=https://<machine>.<tailnet>.ts.net:8081
 MACHIYA_ROOMS=konbini=https://<machine>.<tailnet>.ts.net:8081,niwa=https://<machine>.<tailnet>.ts.net:8082,kura=https://<machine>.<tailnet>.ts.net:8083
 ```
 
-Hister and SearXNG have no sign-in of their own. Serve them (4433, 8888) and add them to `MACHIYA_ROOMS` only if everyone on your tailnet may use them, and set `HISTER_PUBLIC_URL` and `SEARXNG_PUBLIC_URL` to match.
+Nogon (formerly Hister) and SearXNG have no sign-in of their own. Serve them (4433, 8888) and add them to `MACHIYA_ROOMS` only if everyone on your tailnet may use them, and set `NOGON_PUBLIC_URL` and `SEARXNG_PUBLIC_URL` to match.
 
 **3. Turn the login check on:** `KURA_AUTH`, `NIWA_AUTH` and `KONBINI_AUTH` to `tailscale`, and your Tailscale login in `KURA_USERS`, `NIWA_USERS` and `KONBINI_USERS`.
 

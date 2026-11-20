@@ -1,6 +1,6 @@
-# Hister SKIP rules: URLs matching any pattern are never indexed (Go regexp, full URL, one per line,
+# Nogon SKIP rules: URLs matching any pattern are never indexed (Go regexp, full URL, one per line,
 # no spaces inside a pattern; '#' lines are comments). Loading a list replaces the server's skip list.
-# Rules only stop NEW captures: `hister reindex` removes already-indexed pages that now match. Hister
+# Rules only stop NEW captures: `nogon reindex` removes already-indexed pages that now match. Nogon
 # never indexes its own URLs.
 
 # Tailnet + LAN: internal UIs (password manager, Konbini, Niwa, SearXNG results) never go in from browsing.
@@ -53,7 +53,7 @@
 ^https?://(www\.|smile\.)?(amazon|target|walmart|bestbuy|ebay|costco|etsy|homedepot|lowes|ikea|newegg|aliexpress|temu|wayfair|kohls|macys)\.com/?(\?[^/]*)?$
 
 # ---- Doom-scrolling / high-volume, low-value pages ----
-# Social timelines: never keep. Scrolling a timeline saves EVERY post seen (Hister's per-post extractors do this too).
+# Social timelines: never keep. Scrolling a timeline saves EVERY post seen (Nogon's per-post extractors do this too).
 ^https?://([^/]*\.)?bsky\.app([:/]|$)
 ^https?://([^/]*\.)?(x|twitter)\.com([:/]|$)
 ^https?://(social\.example\.com|mastodon\.social|mastodon\.online|mstdn\.social)([:/]|$)

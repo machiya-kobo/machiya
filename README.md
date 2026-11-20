@@ -63,13 +63,13 @@ flowchart LR
 
 ## Quickstart
 
-### Already have Hister and SearXNG? Search them together with Shiori
+### Already have Nogon (or Hister) and SearXNG? Search them together with Shiori
 
 [Shiori](https://github.com/machiya-kobo/shiori) needs only those two. Turn on SearXNG's JSON results (`formats: [html, json]` under `search:` in its `settings.yml`), then run:
 
 ```bash
 docker run -d --name shiori -p 8080:8080 -p 8081:8081 \
-  -e SHIORI_HISTER_URL=http://hister.example:4433 \
+  -e SHIORI_NOGON_URL=http://nogon.example:4433 \
   -e SHIORI_SEARXNG_URL=http://searxng.example:8080 \
   ghcr.io/machiya-kobo/shiori-web
 ```

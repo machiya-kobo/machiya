@@ -10,7 +10,7 @@ Shipped in this repository
 
 icons/hister.svg, searxng.svg  Neutral glyphs drawn for Machiya (this repository's license), standing in for the
                                 Hister and SearXNG logos in the Rooms menu.
-config/hister/, config/searxng/ Reference configuration for Hister and SearXNG, written for Machiya (this repository's
+config/nogon/, config/searxng/  Reference configuration for Nogon and SearXNG, written for Machiya (this repository's
                                 license). They configure those programs; they contain none of their code.
 ui/, vaultkit/shell.py          The "Tokyo Night" and "Tokyo Night Day" colour palettes (by enkia, MIT license;
                                 github.com/enkia/tokyo-night-vscode-theme) are the basis of the apps' themes.

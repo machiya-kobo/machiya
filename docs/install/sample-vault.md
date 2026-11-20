@@ -39,7 +39,7 @@ cd machiya/compose
 ./demo-init
 ```
 
-**3. Start it.** The first start builds three images and pulls Hister, SearXNG and Valkey:
+**3. Start it.** The first start builds three images and pulls Nogon, SearXNG and Valkey:
 
 <!-- quickstart: up -->
 ```bash
@@ -61,7 +61,7 @@ done
 curl -s http://127.0.0.1:8083/api/status | grep -m1 -o '"notes": [0-9]*'
 curl -s http://127.0.0.1:8082/api/status | grep -m1 -o '"published": [0-9]*'
 curl -s http://127.0.0.1:8081/api/status | grep -m1 -o '"cards": [0-9]*'
-curl -s -o /dev/null -w 'hister %{http_code}\n' http://127.0.0.1:4433/
+curl -s -o /dev/null -w 'nogon %{http_code}\n' http://127.0.0.1:4433/
 curl -s http://127.0.0.1:8888/healthz; echo
 for port in 8083 8082 8081; do curl -s http://127.0.0.1:$port/ | grep -o '<title>[^<]*'; done
 ```
@@ -73,7 +73,7 @@ You should see:
 "notes": 27
 "published": 9
 "cards": 10
-hister 200
+nogon 200
 OK
 <title>Kura
 <title>Niwa

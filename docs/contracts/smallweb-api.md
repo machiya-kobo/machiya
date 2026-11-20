@@ -85,7 +85,7 @@ A page read through `/page` is saved (in the background) with `POST http://histe
 - **Saved:** Gemini `20` with `text/gemini` or `text/plain`; gopher type `0`; gopher type `1` menus with at least 300 characters of text.
 - **Never saved:** the engines' own search pages, anything answered after a prompt or type-7 search (including a direct link to a prompt's answer), `6x`, binaries, pages behind a changed certificate (TOFU mismatch), and a body unchanged since its last save.
 - Find them in Hister with `metadata.source:smallweb`. `gemini://` and `gopher://` URLs are accepted by Hister (`201`), and `%23` in a selector is kept.
-- The skip rule for your own `*.ts.net` pages (`^https?://([^/]*\.)?example\.ts\.net…`, see `config/hister/skip-rules.txt`) keeps the extension from saving the proxy URLs.
+- The skip rule for your own `*.ts.net` pages (`^https?://([^/]*\.)?example\.ts\.net…`, see `config/nogon/skip-rules.txt`) keeps the extension from saving the proxy URLs.
 
 ## `POST /api/save {"url": "…", "title": "…", "only_new": true, "via": "…", "query": "…"}`
 

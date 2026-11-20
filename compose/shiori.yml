@@ -1,28 +1,28 @@
-# Just Shiori: Hister, SearXNG and Shiori's search page and web app, nothing else. The quickest way to try Shiori.
+# Just Shiori: Nogon (formerly Hister), SearXNG and Shiori's search page and web app, nothing else. The quickest way to try Shiori.
 #
 #   cd compose
 #   echo "SEARXNG_SECRET=$(openssl rand -hex 32)" >> .env
-#   mkdir -p data/hister             # yours, not root's: Docker would create it as root and Hister couldn't write it
+#   mkdir -p data/hister             # yours, not root's: Docker would create it as root and Nogon couldn't write it
 #   docker compose -f shiori.yml up -d
 #
-# Then open http://localhost:8080 to search, or http://localhost:8081 for the web app. Hister is at http://localhost:4433:
+# Then open http://localhost:8080 to search, or http://localhost:8081 for the web app. Nogon is at http://localhost:4433:
 # save pages to it with its browser extension (docs/install/README.md), or import your bookmarks there.
 # Every port binds 127.0.0.1, so there's nothing to sign in to. Add Kura, Konbini and the rest from compose.yml, then set
 # their SHIORI_*_URL here (Shiori's README, "Add more"). `docker compose` works the same as `podman compose`.
 name: shiori
 
 services:
-  hister:
-    image: ghcr.io/asciimoo/hister:v0.20.0          # pinned: pre-1.0, breaking releases
-    user: "${MACHIYA_UID:-1000}:${MACHIYA_GID:-1000}"   # so ./data/hister stays yours (the image's own user is 65532)
+  nogon:                                            # Nogon, formerly Hister (renamed at v0.22)
+    image: ghcr.io/asciimoo/nogon:v0.22.0@sha256:d1b427c7f876e64e6212e000df60d33c2e418b60372582b56cfee719eafd4107   # pinned: pre-1.0, breaking releases
+    user: "${MACHIYA_UID:-1000}:${MACHIYA_GID:-1000}"   # so its data folder stays yours (the image's own user is 65532)
     userns_mode: ${MACHIYA_USERNS:-}
-    environment:
-      - HISTER__SERVER__BASE_URL=${HISTER_PUBLIC_URL:-http://localhost:4433}
-      - HISTER__APP__SEARCH_URL=${SEARXNG_PUBLIC_URL:-http://localhost:8888}/search?q={query}
+    environment:                                    # the image keeps its /hister/... paths
+      - NOGON__SERVER__BASE_URL=${NOGON_PUBLIC_URL:-http://localhost:4433}
+      - NOGON__APP__SEARCH_URL=${SEARXNG_PUBLIC_URL:-http://localhost:8888}/search?q={query}
     volumes:
-      - ../config/hister/config.yml:/hister/config.yml:ro
-      - ${HISTER_DATA:-./data/hister}:/hister/data
-    ports: ["127.0.0.1:${HISTER_PORT:-4433}:4433"]
+      - ../config/nogon/config.yml:/hister/config.yml:ro
+      - ${NOGON_DATA:-./data/hister}:/hister/data      # ./data/hister: the folder an older install already has
+    ports: ["127.0.0.1:${NOGON_PORT:-4433}:4433"]
     restart: unless-stopped
 
   searxng:
@@ -44,13 +44,13 @@ services:
     restart: unless-stopped
 
   shiori:
-    image: ghcr.io/machiya-kobo/shiori-web:${SHIORI_VERSION:-1.1.1}
+    image: ghcr.io/machiya-kobo/shiori-web:${SHIORI_VERSION:-1.29.1}
     read_only: true
     tmpfs: [/tmp]
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     environment:
-      - SHIORI_HISTER_URL=http://hister:4433
+      - SHIORI_NOGON_URL=http://nogon:4433
       - SHIORI_SEARXNG_URL=http://searxng:8080
       - SHIORI_SEARCH_PAGE_URL=${SHIORI_SEARCH_PAGE_URL:-http://localhost:8080/}
       - SHIORI_APP_URL=${SHIORI_APP_URL:-http://localhost:8081/}
@@ -60,5 +60,5 @@ services:
     ports:
       - "127.0.0.1:${SHIORI_SEARCH_PORT:-8080}:8080"   # the search page
       - "127.0.0.1:${SHIORI_APP_PORT:-8081}:8081"      # the web app
-    depends_on: [hister, searxng]
+    depends_on: [nogon, searxng]
     restart: unless-stopped

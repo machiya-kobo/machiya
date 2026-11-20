@@ -45,8 +45,8 @@ VAULT_GIT=$data/vault.git
 VAULT_SUBDIR=personal
 KONBINI_REPO=$data/konbini-repo
 SEARXNG_SECRET=$secret
-KURA_HISTER_URL=http://hister:4433
-MACHIYA_ROOMS=konbini=http://localhost:8081,niwa=http://localhost:8082,kura=http://localhost:8083,hister=http://localhost:4433,searxng=http://localhost:8888
+KURA_NOGON_URL=http://nogon:4433
+MACHIYA_ROOMS=konbini=http://localhost:8081,niwa=http://localhost:8082,kura=http://localhost:8083,nogon=http://localhost:4433,searxng=http://localhost:8888
 ENV
 if [ "$mirror" = yes ]; then
     printf 'COMPOSE_FILE=compose.yml:mirror.yml\nMIRROR_DATA=%s\n' "$data/mirror" >> .env
