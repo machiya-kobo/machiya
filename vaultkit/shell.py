@@ -18,7 +18,7 @@ import unicodedata
 from collections import namedtuple
 from urllib.parse import unquote, urlsplit
 
-from . import palettes
+from . import names, palettes
 
 ROOMS = [   # (key, name, seal, what it is) front to back through the house, then the neighbours
     ("shiori", "Shiori", "栞", "search"),
@@ -84,7 +84,7 @@ def rooms(env=None):
         if "=" in part:
             k, v = part.split("=", 1)
             if k.strip() and v.strip():
-                out[k.strip().lower()] = v.strip().rstrip("/")
+                out[names.room_key(k.strip().lower())] = v.strip().rstrip("/")   # nogon= is read as hister (0.38)
     return out
 
 

@@ -2,6 +2,20 @@
 
 How Machiya's services use [Hister](../services/hister.md). Hister is upstream code, so these are rules for the callers.
 
+## Names (Hister is now Nogon)
+
+Upstream Hister is now Nogon (v0.22.0). The owner chose on 2026-11-19 to rename everything Machiya itself calls Hister, in three stages:
+
+1. **Readers (vaultkit 0.38.0 on):** every name below is read in both spellings, and nothing that is written changes.
+   - A setting spelled with `NOGON` wins over its `HISTER` twin, even when it is empty, as upstream does with its own. The old name is logged once. Examples: `KURA_NOGON_URL` over `KURA_HISTER_URL`, `<P>_NOGON_USERS` over `<P>_HISTER_USERS`, `NOGON_LOGIN_*` over `HISTER_LOGIN_*`.
+   - `<P>_AUTH=nogon` is the same as `hister`.
+   - The room id `nogon` is the same as `hister` in `MACHIYA_ROOMS` and the account's `apps_hidden`.
+   - The helper is renamed `nogon-login`.
+2. **The switch:** deployments move to the new names.
+3. **The old names go:** the house's own room id becomes `nogon`, and writers send `Origin: nogon://`.
+
+**What stays:** the names upstream Nogon defines. Its session cookie is still `hister`. `X-Access-Token` and the API paths don't change. Its own `HISTER__*` settings still work, though it prefers `NOGON__*`. Nogon v0.22 accepts both `Origin: hister://` and `nogon://`, so callers keep `hister://` until every Nogon they talk to is v0.22 or later.
+
 ## Every call
 
 - **Send `Origin: hister://`** on POSTs (without it: 403). GETs to `/search` need it unless they ask for JSON (`format=json` or `Accept: application/json`, allowed since v0.20.0); sending it always is simplest.
