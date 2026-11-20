@@ -1,5 +1,9 @@
 # Changelog: nogon-login (hister-login until 0.7.3)
 
+## 0.8.1
+
+- vaultkit 0.38.0 → 0.40.0: an extra room in the Rooms menu can say what it is (MACHIYA_EXTRA_ROOMS' sixth field; Techō: "agents", owner 2026-11-20).
+
 ## 0.8.0
 
 - **Renamed nogon-login** (Hister is now Nogon; the owner, 2026-11-19: rename everything). The image is `nogon-login`, its tags are `nogon-login-v*`, the code is `stack/nogon-login/nogon_login.py`.

@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.7.1
+
+- vaultkit 0.38.0 → 0.40.0: an extra room in the Rooms menu can say what it is (MACHIYA_EXTRA_ROOMS' sixth field; Techō: "agents", owner 2026-11-20).
+
 ## 0.7.0
 
 - Says Nogon, upstream Hister's new name (owner, 2026-11-19): the status rows ("Pages indexed", "Notes indexed", "Kura → Nogon"), the engines list, and the Account notes ("Signed in with Nogon.").
