@@ -1272,13 +1272,14 @@ class ExtraRoomsTest(unittest.TestCase):
         from vaultkit import shell
         builtin = [shell.ROOMS[0][0], shell.NEIGHBOURS[0][0], shell.HOUSE[0]]    # whatever the ids are called today
         bad = ["Example|Upper Case||https://x.example", "ex_ample|Underscore||https://x.example", "-x|Dash||https://x.example",
-               "x" * 33 + "|Too Long||https://x.example", "example|Two Fields", "example|A|b|https://x.example|/i.png|more",
+               "x" * 33 + "|Too Long||https://x.example", "example|Two Fields", "example|A|b|https://x.example|/i.png|more|again",
                "plain|Plain HTTP||http://x.example", "js|Script||javascript:alert(1)", "proto|Protocol Relative||//evil.example",
                "creds|Credentials||https://user:pw@x.example", "quote|Quote||https://x.example/\"onmouseover=\"",
                "space|Space||https://x.example/a b", "port|Bad Port||https://x.example:99999/", "nohost|No Host||https:///p",
                "seal2|Two Seals|例例|https://x.example", "mark|Combining|́|https://x.example",
                "noname|||https://x.example", "longname|" + "n" * 41 + "||https://x.example",
-               "icon|Bad Icon||https://x.example|http://x.example/i.png", "nourl|No URL||"]
+               "icon|Bad Icon||https://x.example|http://x.example/i.png", "nourl|No URL||",
+               "longwhat|Long What||https://x.example||" + "w" * 21, "ctlwhat|Control||https://x.example||a\tb"]
         bad += ["%s|Clash||https://x.example" % k for k in builtin]
         value = ";".join([self.EXAMPLE] + bad + ["example|Again||https://y.example"])
         with self.env(value), self.quiet():
@@ -1296,6 +1297,26 @@ class ExtraRoomsTest(unittest.TestCase):
         with self.env(many), self.quiet():
             self.assertEqual(len(shell.extra_rooms()), shell.EXTRA_MAX)
         self.assertEqual(len(self.err.getvalue().splitlines()), 2)
+
+    def test_what_it_is(self):
+        """v0.40: an optional sixth field, what the room is, beside its name like a room's "notes"."""
+        from vaultkit import shell
+        links = shell.rooms(self.LINKS)
+        value = ("desk|Desk|帳|https://desk.example||agents;pic|Pic||https://pic.example|https://pic.example/i.png|the <web>;"
+                 "none|None||https://none.example||")
+        with self.env(value), self.quiet():
+            got = shell.extra_rooms()
+            self.assertEqual([x.what for x in got], ["agents", "the <web>", ""])
+            self.assertEqual(got[0], shell.ExtraRoom("desk", "Desk", "帳", "https://desk.example", "", "agents"))
+            menu = shell.switcher("kura", links)
+            self.assertIn('<span class="seal extra" data-room="desk" aria-hidden="true">帳</span>Desk<small>agents</small></a>',
+                          menu)
+            self.assertIn('Pic<small>the &lt;web&gt;</small></a>', menu)
+            self.assertIn('</span>None</a>', menu)                                     # empty: no <small>, as before
+            self.assertIn("Desk<small>here</small></b>", shell.switcher("desk", links))  # its own page: "here"
+            self.assertEqual(shell.room_info("desk"), ("desk", "Desk", "帳", "agents"))
+        self.assertEqual(self.err.getvalue(), "")
+        self.assertEqual(shell.ExtraRoom("a", "A", "", "/a", ""), shell.ExtraRoom("a", "A", "", "/a", "", ""))
 
     def test_extra_url(self):
         from vaultkit import shell

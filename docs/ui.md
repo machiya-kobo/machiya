@@ -218,6 +218,7 @@ MACHIYA_EXTRA_ROOMS=example|Example Room|例|https://example.example.ts.net;tool
 | seal | one character, or empty |
 | url | `https://…`, or a path on the room's own origin (`/…`). Used as given: no `/` is added. |
 | icon | optional: an image, `https://…` or `/…` |
+| what | optional (v0.40): what it is, shown beside the name in the Rooms menu like a room's "notes" or "board". At most 20 characters; may be empty. Give the icon field (empty if none) before it: `key|Name|seal|url||what`. vaultkit before 0.40 skips a six-field entry, so add it only once every room that reads the setting runs 0.40. |
 
 - **Where they show.** In every Rooms menu and the phone's Rooms sheet, after the rooms and before the neighbours, in the order given. Settings, Rooms gets a switch for each (`show_<key>`).
 - **Their mark.** The icon when there is one; else the seal in an outlined square (`.seal.extra`); else a plain door glyph. vaultkit never draws a room of yours: bring its icon.

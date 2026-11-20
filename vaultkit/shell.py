@@ -89,7 +89,7 @@ def rooms(env=None):
 
 
 # -- extra rooms (MACHIYA_EXTRA_ROOMS, docs/ui.md "Extra rooms") ---------------------------------------------------
-ExtraRoom = namedtuple("ExtraRoom", "key name seal url icon")
+ExtraRoom = namedtuple("ExtraRoom", "key name seal url icon what", defaults=("",))   # what: v0.40
 EXTRA_MAX = 8                                       # entries; any more are skipped
 RESERVED_KEYS = {"nogon"}                           # the hister neighbour's id after the Nogon rename (owner, 2026-11-19)
 EXTRA_KEY_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\Z")
@@ -137,8 +137,8 @@ def _parse_extra(raw):
         fields = [f.strip() for f in entry.split("|")]
         key = fields[0] if fields else ""
         why = ""
-        if len(fields) not in (4, 5):
-            why = "needs key|name|seal|url or key|name|seal|url|icon"
+        if len(fields) not in (4, 5, 6):
+            why = "needs key|name|seal|url, key|name|seal|url|icon or key|name|seal|url|icon|what"
         elif not EXTRA_KEY_RE.match(key):
             why = "the key is 1-32 of a-z, 0-9 and -"
         elif key in builtin:
@@ -151,25 +151,29 @@ def _parse_extra(raw):
             why = "the seal is one character, or empty"
         elif not extra_url(fields[3]):
             why = "the url is https:// or a path on this origin"
-        elif len(fields) == 5 and fields[4] and not extra_url(fields[4]):
+        elif len(fields) >= 5 and fields[4] and not extra_url(fields[4]):
             why = "the icon is https:// or a path on this origin, or empty"
+        elif len(fields) == 6 and (len(fields[5]) > 20 or not fields[5].isprintable()):
+            why = "what it is is at most 20 printable characters, or empty"
         elif len(out) >= EXTRA_MAX:
             why = "at most %d extra rooms" % EXTRA_MAX
         if why:
             print("MACHIYA_EXTRA_ROOMS: skipped entry %d (%s)" % (i, why), file=sys.stderr, flush=True)
             continue
         taken.add(key)
-        out.append(ExtraRoom(key, fields[1], fields[2], fields[3], fields[4] if len(fields) == 5 else ""))
+        out.append(ExtraRoom(key, fields[1], fields[2], fields[3], fields[4] if len(fields) >= 5 else "",
+                             fields[5] if len(fields) == 6 else ""))
     return tuple(out)
 
 
 def extra_rooms(env=None):
-    """[ExtraRoom(key, name, seal, url, icon)] from MACHIYA_EXTRA_ROOMS: a deployment's own rooms, shown in every Rooms
-    menu after the built-in rooms and before the neighbours, and in Settings, Rooms. Entries are separated by ";", fields
-    by "|": `key|Name|seal|url` or `key|Name|seal|url|icon`, e.g.
+    """[ExtraRoom(key, name, seal, url, icon, what)] from MACHIYA_EXTRA_ROOMS: a deployment's own rooms, shown in every
+    Rooms menu after the built-in rooms and before the neighbours, and in Settings, Rooms. Entries are separated by ";",
+    fields by "|": `key|Name|seal|url`, `key|Name|seal|url|icon` or (v0.40) `key|Name|seal|url|icon|what`, e.g.
     "example|Example Room|例|https://example.example.ts.net". key: 1-32 of a-z, 0-9 and "-", not a built-in one; Name:
     1-40 printable characters (spaces and any script are fine; "|" and ";" are not); seal: one character or empty;
-    url and icon: https:// or a path on the room's own origin (the icon may be empty). An invalid entry is skipped
+    url and icon: https:// or a path on the room's own origin (the icon may be empty); what: what it is, a word or two
+    shown beside the name like a room's "notes" (at most 20 printable characters, may be empty). An invalid entry is skipped
     with one line on stderr (once per value of the setting); the rest still show. Unset or empty: [] and every page
     is byte-identical to one built without the setting."""
     raw = (env if env is not None else os.environ).get("MACHIYA_EXTRA_ROOMS") or ""
@@ -417,12 +421,12 @@ def offline_row():
 
 
 def room_info(key):
-    """(key, name, seal, what it is): a room, the house, an extra room (MACHIYA_EXTRA_ROOMS; what is ""), or a guess."""
+    """(key, name, seal, what it is): a room, the house, an extra room (MACHIYA_EXTRA_ROOMS), or a guess."""
     hit = next((r for r in ROOMS + [HOUSE] if r[0] == key), None)
     if hit:
         return hit
     x = _extra(key)
-    return (x.key, x.name, x.seal, "") if x else (key, key.title(), "", "")
+    return (x.key, x.name, x.seal, x.what) if x else (key, key.title(), "", "")
 
 
 def mark(room):
@@ -446,13 +450,14 @@ def switcher(room, links, cls="rooms", settings=False, who=""):
         elif key in links:
             rows.append('<a href="%s/" data-room="%s">%s%s<small>%s</small></a>'
                         % (e(links[key]), key, mark(key), e(name), e(what)))
-    for x in extra_rooms():                         # their address as given (no "/" added), no "what it is"
+    for x in extra_rooms():                         # their address as given (no "/" added); "what it is" when given
         if x.key == room:
             rows.append('<b data-room="%s" data-extra-room="%s">%s%s<small>here</small></b>'
                         % (e(x.key), e(x.key), extra_mark(x), e(x.name)))
         else:
-            rows.append('<a href="%s" data-room="%s" data-extra-room="%s">%s%s</a>'
-                        % (e(x.url), e(x.key), e(x.key), extra_mark(x), e(x.name)))
+            rows.append('<a href="%s" data-room="%s" data-extra-room="%s">%s%s%s</a>'
+                        % (e(x.url), e(x.key), e(x.key), extra_mark(x), e(x.name),
+                           ("<small>%s</small>" % e(x.what)) if x.what else ""))
     nb = ['<a href="%s/" data-room="%s"><span class="seal icon neighbour-icon" data-room="%s" aria-hidden="true"></span>%s<small>%s</small></a>'
           % (e(links[k]), k, k, e(n), e(w)) for k, n, w in NEIGHBOURS if k in links]      # their own logos (machiya.css)
     key, name, _, what = HOUSE
