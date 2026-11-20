@@ -140,6 +140,7 @@ machiyaSW({"version": "<room build>-<core hash>", "precache": [...], "notes": {"
 **Wiring (each room):**
 - Serve `/static/machiya-sw.js` from `app/vaultkit/ui/` next to `machiya.css`/`machiya.js`.
 - Serve `/sw.js` as `shell.service_worker(BUILD, precache, **options)` with `Cache-Control: no-cache`. Delete the room's own `sw.js`. Keep registering `/sw.js` from the room's script.
+- A room with a worker script of its own (a push handler, say) passes `imports=["/static/push-sw.js"]` (vaultkit 0.39.0): same-origin paths ending in `.js`, loaded after the core and before it is configured. Without it the worker is unchanged.
   - `BUILD` is the room's build hash, the same one as its versioned static URLs.
   - `precache` is the shell: the versioned CSS/JS, the icons and `/offline`.
 - Options (all optional):

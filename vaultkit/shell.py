@@ -384,15 +384,26 @@ def ui_url(name):
 
 # -- the service worker (ui/machiya-sw.js; docs/ui.md "Service worker") -----------------------------------------------
 
-def service_worker(version, precache, **options):
+SW_IMPORT_RE = re.compile(r"/(?!/)[A-Za-z0-9._~/-]+\.js(\?[A-Za-z0-9._~=&-]*)?\Z")
+
+
+def service_worker(version, precache, imports=(), **options):
     """A room's whole /sw.js: import the shared core and configure it. version: the room's build hash (it goes into
     the static cache's name, with the UI's); precache: the shell URLs, versioned; options (all optional, JSON):
     offline ("/offline"), timeout (ms, 2500), bypass / network / assetMatch (lists of path regexps: never touched /
     navigations never stored / attachments, stale-while-revalidate), notes ({"match": "^/n/", "limit": 200}),
     pages (30), assets (100), pins (a URL answering {"urls": [...]}: notes kept on the device for good).
+    imports (0.39.0): the room's own worker scripts, same-origin paths ending in .js ("/static/push-sw.js"), loaded
+    after the core and before it is configured, e.g. a push handler; ValueError for anything else. None: byte-identical
+    to before.
     Serve it with Cache-Control: no-cache, and /static/machiya-sw.js from app/vaultkit/ui/ like machiya.css."""
+    imports = list(imports or ())
+    bad = [i for i in imports if not isinstance(i, str) or not SW_IMPORT_RE.match(i)]
+    if bad:
+        raise ValueError("service_worker imports are same-origin paths ending in .js, not %r" % (bad[0],))
     cfg = dict(options, version="%s-%s" % (version, UI_VERSION.get("machiya-sw.js", "0")), precache=list(precache))
-    return "importScripts(%s);\nmachiyaSW(%s);\n" % (json.dumps(ui_url("machiya-sw.js")), json.dumps(cfg, indent=1))
+    extra = "".join("importScripts(%s);\n" % json.dumps(i) for i in imports)
+    return "importScripts(%s);\n%smachiyaSW(%s);\n" % (json.dumps(ui_url("machiya-sw.js")), extra, json.dumps(cfg, indent=1))
 
 
 OFFLINE_PIN = '<meta name="machiya-offline" content="pin">'   # in a note page's head (page(head=…)): kept for good

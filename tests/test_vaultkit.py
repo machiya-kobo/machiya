@@ -1740,6 +1740,21 @@ class SharedUITest(unittest.TestCase):
         self.assertIn("Clear Offline Copies", row)
         self.assertEqual(self.shell.OFFLINE_PIN, '<meta name="machiya-offline" content="pin">')
 
+    def test_service_worker_imports(self):
+        """0.39.0: a room's own worker scripts load after the core and before machiyaSW(); none is byte-identical."""
+        plain = self.shell.service_worker("abc123", ["/offline"])
+        self.assertEqual(plain, self.shell.service_worker("abc123", ["/offline"], imports=()))
+        self.assertEqual(plain, self.shell.service_worker("abc123", ["/offline"], imports=None))
+        js = self.shell.service_worker("abc123", ["/offline"], imports=["/static/push-sw.js", "/static/b.js?v=1"])
+        lines = js.split("\n")
+        self.assertTrue(lines[0].startswith('importScripts("/static/machiya-sw.js'))
+        self.assertEqual(lines[1:3], ['importScripts("/static/push-sw.js");', 'importScripts("/static/b.js?v=1");'])
+        self.assertTrue(lines[3].startswith("machiyaSW("))
+        for bad in ("//evil.example/x.js", "https://evil.example/x.js", "static/x.js", "/x.css", '/x.js");alert(1);//',
+                    "/x .js", "/../x.js\n", 5):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                self.shell.service_worker("abc123", [], imports=[bad])
+
     def test_cookie_domain_on_body(self):
         old = self.shell.COOKIE_DOMAIN
         try:
