@@ -11,6 +11,7 @@
     ./dev status             the addresses, and what runs
     ./dev logs SERVICE       a service's log
     ./dev down               stop it (the data stays)
+    ./dev move DIR [--siblings DIR]   down, then the data to DIR with every path in it rewritten (another disk)
     ./dev reset [--yes]      down, delete the data, init with the same settings, up: the same seed again
 
 The public base is https://localhost by default: `front` terminates TLS with a throwaway CA made here
@@ -858,6 +859,66 @@ def cmd_down(a):
         compose(env, data, "down", "--remove-orphans")
 
 
+def git_dirs(top):
+    """Every git directory under top: a clone's .git and a bare repository (config + objects)."""
+    for root, dirs, files in os.walk(top):
+        if "config" in files and "objects" in dirs and ("HEAD" in files):
+            yield root
+            dirs[:] = []
+        elif ".git" in dirs:
+            yield os.path.join(root, ".git")
+
+
+def cmd_move(a):
+    """The stack's data to another folder (another disk), with every path that names it: dev.env, the vault's clones'
+    remotes and alternates. DEV_ROOT and MACHIYA_SRC become this driver's checkout; --siblings moves the rooms' too."""
+    data = data_dir(a.data)
+    env = load(data)
+    dest = os.path.abspath(a.dest)
+    if os.path.exists(dest):
+        die("%s exists: name a folder that doesn't, its parent will hold it" % dest)
+    if dest.startswith(data.rstrip("/") + "/"):
+        die("%s is inside %s" % (dest, data))
+    cmd_down(a)
+    sock = os.path.join(data, "podman.sock")       # a socket can't be copied; `up` starts one again when it needs it
+    if os.path.exists(sock):
+        os.unlink(sock)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    say("moving %s -> %s" % (data, dest))
+    shutil.move(data, dest)
+    old, changed = data.rstrip("/"), []
+    for gd in git_dirs(dest):
+        for name in ("config", "FETCH_HEAD", os.path.join("objects", "info", "alternates")):
+            path = os.path.join(gd, name)
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8", errors="surrogateescape") as f:
+                    text = f.read()
+                if old + "/" in text:
+                    with open(path, "w", encoding="utf-8", errors="surrogateescape") as f:
+                        f.write(text.replace(old + "/", dest + "/"))
+                    changed.append(os.path.relpath(path, dest))
+    envf = os.path.join(dest, "dev.env")
+    with open(envf) as f:
+        lines = f.read().splitlines()
+    sets = {"DEV_DATA": dest, "DEV_ROOT": HERE, "MACHIYA_SRC": MACHIYA}
+    if a.siblings:
+        sib = os.path.abspath(a.siblings)
+        sets.update(KURA_SRC=os.path.join(sib, "kura"), NIWA_SRC=os.path.join(sib, "niwa"),
+                    KONBINI_SRC=os.path.join(sib, "konbini"))
+    out = []
+    for line in lines:
+        k = line.partition("=")[0]
+        out.append("%s=%s" % (k, sets[k]) if k in sets and not line.startswith("#") else line)
+    with open(envf, "w") as f:
+        f.write("\n".join(out) + "\n")
+    pointer = os.path.join(HERE, ".data-dir")
+    if os.path.exists(pointer) and open(pointer).read().strip() == old:
+        with open(pointer, "w") as f:
+            f.write(dest + "\n")
+    say("moved; paths rewritten in dev.env and %s" % (", ".join(changed) or "no git repository"))
+    say("next: ./dev --data %s up" % dest)
+
+
 def cmd_reset(a):
     data = data_dir(a.data)
     env = load(data)
@@ -935,6 +996,10 @@ def main():
     p.add_argument("service")
     p.set_defaults(fn=cmd_logs)
     sub.add_parser("down").set_defaults(fn=cmd_down)
+    p = sub.add_parser("move")
+    p.add_argument("dest", help="the data folder's new path (it must not exist)")
+    p.add_argument("--siblings", help="where the kura, niwa and konbini checkouts are now (default: unchanged)")
+    p.set_defaults(fn=cmd_move)
     p = sub.add_parser("reset")
     p.add_argument("--yes", action="store_true")
     p.set_defaults(fn=cmd_reset)

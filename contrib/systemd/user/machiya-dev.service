@@ -1,0 +1,21 @@
+# The standing dev stack (compose/dev, docs/dev-stack.md) as a systemd user service: `dev up` at boot, `dev down` at
+# stop. Expects the checkouts in ~/data/machiya-dev/{machiya,kura,niwa,konbini} and the stack's data in
+# ~/data/machiya-dev/data (a disk that keeps files: /var/tmp ages out what isn't touched for 30 days, git objects
+# included). Starting it from here also gives podman a socket outside an agent's shell, where conmon can start
+# containers.
+[Unit]
+Description=Machiya dev stack (rootless podman, synthetic data) for the agents on this machine
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h/data/machiya-dev/machiya/compose/dev
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/data/machiya-dev/machiya/compose/dev/dev --data %h/data/machiya-dev/data up
+ExecStop=%h/data/machiya-dev/machiya/compose/dev/dev --data %h/data/machiya-dev/data down
+TimeoutStartSec=20min
+
+[Install]
+WantedBy=default.target

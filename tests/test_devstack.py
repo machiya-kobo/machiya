@@ -201,6 +201,41 @@ class NativePlan(unittest.TestCase):
         self.assertEqual(dev.interpolate("${A:-x}", {"A": "a"}), "a")
 
 
+class Move(unittest.TestCase):
+    """`dev move`: the data to another disk, and every path in it that named the old folder (dev.env, the clones'
+    remotes, and the alternates that borrow the bare vault's objects) names the new one."""
+
+    def test_move_rewrites_paths(self):
+        import argparse
+        import subprocess
+        dev = load("devmove", os.path.join(DEV, "dev"))
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        old, new = os.path.join(tmp.name, "a", "data"), os.path.join(tmp.name, "b", "data")
+        git = lambda *a: subprocess.run(["git", "-c", "init.defaultBranch=main"] + list(a), check=True,
+                                        capture_output=True)
+        os.makedirs(old)
+        git("init", "-q", "--bare", os.path.join(old, "vault.git"))
+        git("clone", "-q", "--shared", os.path.join(old, "vault.git"), os.path.join(old, "niwa", "repo"))
+        with open(os.path.join(old, "dev.env"), "w") as f:
+            f.write("# a comment\nDEV_ENGINE=native\nDEV_DATA=%s\nDEV_ROOT=/elsewhere\nKURA_SRC=/s/kura\n" % old)
+        dev.cmd_down = lambda a: None                       # nothing runs here
+        dev.cmd_move(argparse.Namespace(data=old, dest=new, siblings=None))
+        self.assertFalse(os.path.exists(old))
+        env = dev.read_env(os.path.join(new, "dev.env"))
+        self.assertEqual(env["DEV_DATA"], new)
+        self.assertEqual(env["DEV_ROOT"], os.path.abspath(DEV))
+        self.assertEqual(env["KURA_SRC"], "/s/kura")       # no --siblings: unchanged
+        repo = os.path.join(new, "niwa", "repo", ".git")
+        for name in ("config", os.path.join("objects", "info", "alternates")):
+            with open(os.path.join(repo, name)) as f:
+                text = f.read()
+            self.assertNotIn(old + "/", text, name)
+            self.assertIn(new + "/vault.git", text, name)
+        with self.assertRaises(SystemExit):                 # never onto an existing folder
+            dev.cmd_move(argparse.Namespace(data=new, dest=new, siblings=None))
+
+
 class SyntheticOnly(unittest.TestCase):
     """The seed is invented: no tailnet names, no real hosts, nothing that looks like a secret."""
 
