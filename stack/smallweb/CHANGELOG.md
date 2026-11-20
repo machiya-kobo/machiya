@@ -1,5 +1,15 @@
 # Changelog: smallweb
 
+## 0.6.0
+
+- The rename's stage 3 (Hister is now Nogon):
+  - **The old settings stop the start.** `SMALLWEB_HISTER_URL`, `_USERS` and `_TOKEN_FILE` are no longer read; one set without its `SMALLWEB_NOGON_*` twin stops smallweb with a message naming the new one. Beside its twin it is ignored, and said once.
+  - **Saves send `Origin: nogon://`** (Nogon v0.22 and later), not `hister://`.
+  - **`POST /api/save` takes `Origin: nogon://`** as well as `hister://`: Shiori's apps switch once this is live, and an app from before still sends the old one.
+  - **`/api/status` reports the saves as `nogon` only**; the `hister` copy 0.5.0 also sent is gone (the landing reads `nogon`).
+  - `selftest.py` reads `SMALLWEB_NOGON_URL` and takes `--nogon` (it read only `SMALLWEB_HISTER_URL`, and, with only the new name set, smallweb would have saved during the test). `SMALLWEB_HISTER_URL` on its own, or `--hister`, stops it, naming the new one.
+  - The code's own names say Nogon (`save_to_nogon`, `nogon_headers`, …).
+
 ## 0.5.0
 
 - Says Nogon, upstream Hister's new name (owner, 2026-11-19): the About text, save notes, the status error and the log lines.

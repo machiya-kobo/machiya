@@ -5,13 +5,13 @@
   prefetch, never following links on its own. Cached for an hour, capped per engine per hour, one connection per
   engine host at least 1.5 s apart, 44 SLOW DOWN honoured.
 - GET /page?url=gemini://…|gopher://…  the page as HTML (no script; links go back through /page). A page read here
-  is saved to Hister under its canonical gemini:// or gopher:// URL (not the proxy URL), without a label.
+  is saved to Nogon under its canonical gemini:// or gopher:// URL (not the proxy URL), without a label.
 - GET /  a plain search page over the same data. GET /api/status  for the probe (open). GET /api/changelog  this app's
   CHANGELOG.md for the landing page's recent deploys (open, like /api/status).
 - POST /api/save {"url"}  a page Shiori asks to have saved: gemini/gopher as a /page read would, or an http(s) page
   fetched once (web.py: private addresses refused unless SMALLWEB_FETCH_ALLOW names them). Never a web proxy.
-  "only_new": true (http(s)) saves it only if Hister holds neither the asked nor the final URL (Shiori's Save Web
-  Results You Open: an opened result never replaces a page Hister has); "via" and "query" go in its metadata.
+  "only_new": true (http(s)) saves it only if Nogon holds neither the asked nor the final URL (Shiori's Save Web
+  Results You Open: an opened result never replaces a page Nogon has); "via" and "query" go in its metadata.
 
 Egress goes through SMALLWEB_SOCKS (e.g. socks5h://proxy:1080) when set, so capsule hosts never see the server's own IP.
 Gemini certificates are trusted on first use (known hosts in the sqlite file under SMALLWEB_DATA). Private, in
@@ -38,7 +38,7 @@ import smolnet   # noqa: E402
 import web       # noqa: E402
 from store import Store   # noqa: E402
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -64,16 +64,20 @@ _old_names = set()
 
 
 def setting(name, default=""):
-    """0.5.0, the rename (Hister is now Nogon): SMALLWEB_NOGON_<X>, else SMALLWEB_HISTER_<X> (logged once) until the
-    rename's stage 3. A NOGON name that is set wins, even empty, as upstream Nogon does with its own."""
-    if name in os.environ:
-        return os.environ[name]
+    """SMALLWEB_NOGON_<X> (Hister is now Nogon), as vaultkit's names.setting() reads one. A NOGON name that is set wins,
+    even empty, as upstream Nogon does with its own. 0.6.0, the rename's stage 3: its old SMALLWEB_HISTER_<X> twin is no
+    longer read. Set on its own it stops the start, naming the new one, so nothing is quietly ignored; set beside it, it
+    is ignored and said once."""
     old = name.replace("NOGON", "HISTER")
-    if old in os.environ:
-        if old not in _old_names:
+    if name in os.environ:
+        if old != name and old in os.environ and old not in _old_names:
             _old_names.add(old)
-            print("smallweb: %s is an old name, read as %s" % (old, name), file=sys.stderr, flush=True)
-        return os.environ[old]
+            print("smallweb: %s: an old name, ignored (%s is set; Hister is now Nogon): remove it" % (old, name),
+                  file=sys.stderr, flush=True)
+        return os.environ[name]
+    if old != name and old in os.environ:
+        raise SystemExit("smallweb: %s is an old name and is no longer read: rename it %s (Hister is now Nogon)"
+                         % (old, name))
     return default
 
 
@@ -83,10 +87,12 @@ PORT = int(os.environ.get("SMALLWEB_PORT", "8080"))
 USERS = set(filter(None, (u.strip() for u in os.environ.get("SMALLWEB_USERS", "").split(","))))
 PUBLIC_URL = os.environ.get("SMALLWEB_PUBLIC_URL", "").rstrip("/")
 SOCKS = socks_addr(os.environ.get("SMALLWEB_SOCKS"))
-HISTER = setting("SMALLWEB_NOGON_URL").rstrip("/")
-# Origins besides smallweb's own that may POST /api/save: Shiori's native apps send Origin: hister://, and Shiori's
-# hosted pages reach smallweb through a reverse proxy, so their browser Origin is that site's (list it in SMALLWEB_ORIGINS).
-ORIGINS = {o.strip().rstrip("/") for o in ["hister://"] + os.environ.get("SMALLWEB_ORIGINS", "").split(",") if o.strip()}
+NOGON = setting("SMALLWEB_NOGON_URL").rstrip("/")
+# Origins besides smallweb's own that may POST /api/save: Shiori's native apps send Origin: nogon:// (0.6.0; an app
+# from before the rename still sends hister://, so both are taken), and Shiori's hosted pages reach smallweb through a
+# reverse proxy, so their browser Origin is that site's (list it in SMALLWEB_ORIGINS).
+APP_ORIGINS = ["nogon://", "hister://"]
+ORIGINS = {o.strip().rstrip("/") for o in APP_ORIGINS + os.environ.get("SMALLWEB_ORIGINS", "").split(",") if o.strip()}
 DATA = os.environ.get("SMALLWEB_DATA", "/data")
 # http(s) saves never reach a private address (loopback, RFC 1918, CGNAT/Tailscale, link-local, …) unless it is listed
 # here: host names (exact) and CIDRs. Unset = nothing private.
@@ -105,18 +111,18 @@ BAD_PORTS = {1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69
              2376, 3306, 3659, 4045, 4190, 5060, 5061, 5432, 5984, 6000, 6379, 6566, 6665, 6666, 6667, 6668, 6669,
              6697, 9200, 9300, 10080, 11211, 27017}
 USER_AGENT = "smallweb/%s (Machiya; saves a page its owner asked for)" % VERSION
-# Room tokens (0.3.0): with SMALLWEB_AUTH_URL (hister-login's internal address) a caller may also send
-# `Authorization: Bearer mht_…`, a room token hister-login issued for SMALLWEB_PUBLIC_URL's origin, acting as one of
-# SMALLWEB_HISTER_USERS: an agent on a tagged machine has no Tailscale login, and never gets Hister's raw token.
+# Room tokens (0.3.0): with SMALLWEB_AUTH_URL (nogon-login's internal address) a caller may also send
+# `Authorization: Bearer mht_…`, a room token nogon-login issued for SMALLWEB_PUBLIC_URL's origin, acting as one of
+# SMALLWEB_NOGON_USERS: an agent on a tagged machine has no Tailscale login, and never gets Nogon's raw token.
 AUTH_URL = (os.environ.get("SMALLWEB_AUTH_URL") or "").strip().rstrip("/")
-HISTER_USERS = set(filter(None, (u.strip() for u in setting("SMALLWEB_NOGON_USERS").split(","))))
+NOGON_USERS = set(filter(None, (u.strip() for u in setting("SMALLWEB_NOGON_USERS").split(","))))
 RTOKEN_RE = re.compile(r"mht_[A-Za-z0-9_-]{43}\Z")
 _ROOM_TOKENS = {}                       # sha256(token) -> (expires, username or None); 30 s good, 5 s refused
 _ROOM_TOKENS_LOCK = threading.Lock()
 
 
 def own_origin(url):
-    """scheme://host[:port] of SMALLWEB_PUBLIC_URL, as hister-login writes origins (lowercase, no default port)."""
+    """scheme://host[:port] of SMALLWEB_PUBLIC_URL, as nogon-login writes origins (lowercase, no default port)."""
     try:
         u = urlsplit(url)
         port = None if u.port in (None, {"https": 443, "http": 80}.get(u.scheme)) else u.port
@@ -138,13 +144,13 @@ def same_origin(headers, public_url=None):
     return bool(host) and urlsplit(claimed).netloc == host
 
 
-if AUTH_URL and (not PUBLIC_URL.startswith(("https://", "http://")) or not HISTER_USERS or "*" in HISTER_USERS):
+if AUTH_URL and (not PUBLIC_URL.startswith(("https://", "http://")) or not NOGON_USERS or "*" in NOGON_USERS):
     raise SystemExit("smallweb: SMALLWEB_AUTH_URL (room tokens) needs SMALLWEB_PUBLIC_URL and SMALLWEB_NOGON_USERS "
                      "(never *)")
 
 
 def room_token_user(headers):
-    """-> (presented, Hister username or None). A request without a room token isn't one (presented False: the
+    """-> (presented, Nogon username or None). A request without a room token isn't one (presented False: the
     Tailscale header decides); a bad, revoked or other service's token is refused and never passed over."""
     import http.client
     values = headers.get_all("Authorization") or []
@@ -177,7 +183,7 @@ def room_token_user(headers):
         r = conn.getresponse()
         data = json.loads(r.read(1 << 16) or b"null")
         if r.status == 200 and isinstance(data, dict) and data.get("kind") == "token" \
-                and data.get("username") in HISTER_USERS:
+                and data.get("username") in NOGON_USERS:
             user, ttl = data["username"], 30
     except (OSError, http.client.HTTPException, ValueError):
         pass
@@ -199,8 +205,8 @@ store = Store(os.path.join(DATA, "smallweb.sqlite3"))
 polite = smolnet.Polite({e["host"]: ENGINE_GAP for e in engines.ENGINES.values()})
 web_polite = smolnet.Polite(default=web.GAP)          # http(s) saves: one connection per host, 1.5 s apart
 health = {k: {"last_ok": None, "last_error": None} for k in engines.ORDER}
-hister_state = {"last_error": None, "fails": 0, "held": 0}   # fails: consecutive saves that didn't reach Hister;
-#                                                              held: only_new saves left alone, Hister had the page
+nogon_state = {"last_error": None, "fails": 0, "held": 0}   # fails: consecutive saves that didn't reach Nogon;
+#                                                             held: only_new saves left alone, Nogon had the page
 pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
 save_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)      # POST /api/save: fetched in the background
 save_state = {"pending": 0, "lock": threading.Lock()}
@@ -527,13 +533,13 @@ def open_gopher(url, q):
     return Page(200, render.page(title, html, url), save=save)
 
 
-# -- Hister ----------------------------------------------------------------------------------------------------------
+# -- Nogon -----------------------------------------------------------------------------------------------------------
 
 TOKEN_RE = re.compile(r"[\x21-\x7e]{1,4096}")
 
 
 class SecretFile:
-    """SMALLWEB_HISTER_TOKEN_FILE: the owner's Hister token (docs/contracts/hister.md), the file's first line, re-read
+    """SMALLWEB_NOGON_TOKEN_FILE: the owner's Nogon token (docs/contracts/nogon.md), the file's first line, re-read
     when the file changes (inode, mtime, size), so a rotated token needs no restart; a file that vanishes or holds no
     token keeps the last good value. Never logged, never in repr()."""
 
@@ -563,8 +569,8 @@ class SecretFile:
         return "SecretFile(%s)" % self.path
 
 
-def hister_token(path):
-    """None when unset (no token, as before: a Hister without users ignores it). Set but missing, empty or not a
+def nogon_token(path):
+    """None when unset (no token, as before: a Nogon without users ignores it). Set but missing, empty or not a
     token: refuse to start."""
     path = (path or "").strip()
     if not path:
@@ -577,7 +583,7 @@ def hister_token(path):
     return secret
 
 
-HISTER_TOKEN = hister_token(setting("SMALLWEB_NOGON_TOKEN_FILE") or None)
+NOGON_TOKEN = nogon_token(setting("SMALLWEB_NOGON_TOKEN_FILE") or None)
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -585,21 +591,22 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-HISTER_OPENER = urllib.request.build_opener(NoRedirect)     # a redirect would carry the token elsewhere: never followed
+NOGON_OPENER = urllib.request.build_opener(NoRedirect)     # a redirect would carry the token elsewhere: never followed
 
 
-def hister_headers():
-    """Every Hister call's headers: Origin: hister:// and, with SMALLWEB_HISTER_TOKEN_FILE, X-Access-Token."""
-    h = {"Content-Type": "application/json", "Origin": "hister://"}
-    token = HISTER_TOKEN.get() if HISTER_TOKEN is not None else ""
+def nogon_headers():
+    """Every Nogon call's headers: Origin: nogon:// (0.6.0; Nogon v0.22 and later) and, with SMALLWEB_NOGON_TOKEN_FILE,
+    X-Access-Token."""
+    h = {"Content-Type": "application/json", "Origin": "nogon://"}
+    token = NOGON_TOKEN.get() if NOGON_TOKEN is not None else ""
     if token:
         h["X-Access-Token"] = token
     return h
 
 
-def save_to_hister(s):
-    """POST the page to Hister (in the background): the canonical URL, no label (a visited page), html + text."""
-    if not HISTER or store.saved_hash(s["url"]) == s["sha"]:
+def save_to_nogon(s):
+    """POST the page to Nogon (in the background): the canonical URL, no label (a visited page), html + text."""
+    if not NOGON or store.saved_hash(s["url"]) == s["sha"]:
         return
     meta = {"source": "smallweb", "smallweb_scheme": s["scheme"], "smallweb_mime": s["mime"],
             "smallweb_fetched": int(time.time())}
@@ -610,32 +617,32 @@ def save_to_hister(s):
            "html": s.get("html") or "<!DOCTYPE html><html><head><title>%s</title></head><body><article>%s</article>"
                                     "</body></html>" % (render.e(s["title"]), s["body"]),
            "metadata": meta}
-    req = urllib.request.Request(HISTER + "/api/add", data=json.dumps(doc).encode(), method="POST",
-                                 headers=hister_headers())
+    req = urllib.request.Request(NOGON + "/api/add", data=json.dumps(doc).encode(), method="POST",
+                                 headers=nogon_headers())
     try:
-        with HISTER_OPENER.open(req, timeout=15) as r:
+        with NOGON_OPENER.open(req, timeout=15) as r:
             status = r.status
     except urllib.error.HTTPError as ex:
         status = ex.code                               # 406 skipped by a rule, 422 sensitive
     except (urllib.error.URLError, OSError) as ex:
-        hister_state["last_error"] = "%s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), ex)
-        hister_state["fails"] += 1
+        nogon_state["last_error"] = "%s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), ex)
+        nogon_state["fails"] += 1
         return
     store.record_save(s["url"], s["sha"], status)
-    # 406 (a skip rule) and 422 (sensitive content) are Hister's answers, not failures
-    hister_state["fails"] = 0 if status in (200, 201, 406, 422) else hister_state["fails"] + 1
+    # 406 (a skip rule) and 422 (sensitive content) are Nogon's answers, not failures
+    nogon_state["fails"] = 0 if status in (200, 201, 406, 422) else nogon_state["fails"] + 1
     if status not in (200, 201):
-        hister_state["last_error"] = "%s: %s -> %d" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), s["url"], status)
+        nogon_state["last_error"] = "%s: %s -> %d" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), s["url"], status)
 
 
 def note_save(url, what):
-    """A save that didn't happen, in /api/status's hister.last_error and the log. Never counted as a Hister failure."""
-    hister_state["last_error"] = "%s: save %s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), url, what)
+    """A save that didn't happen, in /api/status's nogon.last_error and the log. Never counted as a Nogon failure."""
+    nogon_state["last_error"] = "%s: save %s: %s" % (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), url, what)
     sys.stderr.write("smallweb save %s: %s\n" % (url, what))
 
 
-def hister_norm(url):
-    """The URL as Hister stores it (document.normalizeWebURL in v0.20.0; feed-import's hister.norm): no fragment, and
+def nogon_norm(url):
+    """The URL as Nogon stores it (document.normalizeWebURL in v0.20.0; feed-import's nogon.norm): no fragment, and
     no utm / utm_* query parameters; when one is dropped the query is re-encoded as Go's url.Values.Encode does."""
     u = urlsplit(url)
     query = u.query
@@ -649,11 +656,11 @@ def hister_norm(url):
 
 
 def held(url):
-    """only_new: True when Hister already holds this page, or can't say (a failed lookup never risks a replace)."""
-    req = urllib.request.Request(HISTER + "/api/document?url=" + quote(hister_norm(url), safe=""),
-                                 headers=dict(hister_headers(), Accept="application/json"))
+    """only_new: True when Nogon already holds this page, or can't say (a failed lookup never risks a replace)."""
+    req = urllib.request.Request(NOGON + "/api/document?url=" + quote(nogon_norm(url), safe=""),
+                                 headers=dict(nogon_headers(), Accept="application/json"))
     try:
-        with HISTER_OPENER.open(req, timeout=15):
+        with NOGON_OPENER.open(req, timeout=15):
             pass
     except urllib.error.HTTPError as ex:
         if ex.code == 404:
@@ -663,15 +670,15 @@ def held(url):
     except (urllib.error.URLError, OSError) as ex:
         note_save(url, "not saved: Nogon's lookup failed: %s" % ex)
         return True
-    hister_state["held"] += 1
+    nogon_state["held"] += 1
     return True
 
 
 def save_web(url, title="", only_new=False, meta=None):
-    """An http(s) page Shiori asked to have saved: fetched once (checked, web.fetch), read, and sent to Hister under
-    its final URL. A private address is `blocked: private address`, not a failure. only_new: never a page Hister
+    """An http(s) page Shiori asked to have saved: fetched once (checked, web.fetch), read, and sent to Nogon under
+    its final URL. A private address is `blocked: private address`, not a failure. only_new: never a page Nogon
     holds, under the asked URL (checked before fetching) or the final one."""
-    if not HISTER or (only_new and held(url)):
+    if not NOGON or (only_new and held(url)):
         return
     try:
         r = web.fetch(url, FETCH_ALLOW, SOCKS, web_polite, USER_AGENT)
@@ -679,11 +686,11 @@ def save_web(url, title="", only_new=False, meta=None):
         return note_save(url, "blocked: %s" % ex)
     except web.WebError as ex:
         return note_save(url, str(ex))
-    if only_new and hister_norm(r.url) != hister_norm(url) and held(r.url):
+    if only_new and nogon_norm(r.url) != nogon_norm(url) and held(r.url):
         return
     page_title, text, html = web.read_page(r.body, r.mime, r.charset, r.url, title)
-    save_to_hister({"url": r.url, "title": page_title, "text": text, "html": html, "scheme": urlsplit(r.url).scheme,
-                    "mime": r.mime, "cert": None, "sha": hashlib.sha256(r.body).hexdigest(), "meta": meta})
+    save_to_nogon({"url": r.url, "title": page_title, "text": text, "html": html, "scheme": urlsplit(r.url).scheme,
+                   "mime": r.mime, "cert": None, "sha": hashlib.sha256(r.body).hexdigest(), "meta": meta})
 
 
 VIA = re.compile(r"[a-z0-9-]{1,32}")
@@ -719,7 +726,7 @@ def queue_save(url, title="", only_new=False, via="", query=""):
         def work():
             p = open_page(url)
             if p.save:
-                save_to_hister(dict(p.save, meta=meta))
+                save_to_nogon(dict(p.save, meta=meta))
     with save_state["lock"]:
         if save_state["pending"] >= MAX_PENDING:
             return 429, {"error": "too many saves waiting; try again later"}
@@ -745,7 +752,7 @@ CSP = ("default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'
 
 def problems():
     """What is actually broken in smallweb itself (an engine or a capsule being down isn't): the data dir, the SOCKS
-    proxy, Hister saves. A monitoring probe should fail on a non-null "error"."""
+    proxy, Nogon saves. A monitoring probe should fail on a non-null "error"."""
     out = []
     try:
         store.q("INSERT OR REPLACE INTO cache VALUES ('health', 'probe', ?, '')", (int(time.time()),))
@@ -753,20 +760,20 @@ def problems():
         out.append("data dir not writable (%s): %s" % (DATA, ex))
     if SOCKS and smolnet.PROXY["fails"] >= 2:
         out.append(smolnet.PROXY["error"])
-    if HISTER and hister_state["fails"] >= 3:
-        out.append("Nogon saves failing (%d in a row): %s" % (hister_state["fails"], hister_state["last_error"]))
+    if NOGON and nogon_state["fails"] >= 3:
+        out.append("Nogon saves failing (%d in a row): %s" % (nogon_state["fails"], nogon_state["last_error"]))
     return out
 
 
 def status():
     errors = problems()
-    saves = {"enabled": bool(HISTER), "token": HISTER_TOKEN is not None, "saved": store.save_count(),
-             "queued": save_state["pending"], "only_new": True, "held": hister_state["held"],
-             "last_error": hister_state["last_error"]}
+    saves = {"enabled": bool(NOGON), "token": NOGON_TOKEN is not None, "saved": store.save_count(),
+             "queued": save_state["pending"], "only_new": True, "held": nogon_state["held"],
+             "last_error": nogon_state["last_error"]}
     return {"ok": not errors, "ready": True, "error": "; ".join(errors) or None,
             "version": VERSION, "auth": AUTH, "socks": bool(SOCKS),
             "sources": {k: dict(v) for k, v in health.items()},
-            "nogon": saves, "hister": saves,      # 0.5.0: "nogon"; "hister" until the rename's stage 3
+            "nogon": saves,                       # 0.6.0: "nogon" only (0.5.0 also sent it as "hister")
             "known_hosts": store.tofu_count()}
 
 
@@ -946,7 +953,7 @@ class Handler(BaseHTTPRequestHandler):
                                                   native=False))
             p = open_page(qs.get("url", ""), qs.get("q"))
             if p.save and self.command == "GET":            # 0.3.1, MACH-F-2: never on HEAD, never cross-site
-                threading.Thread(target=save_to_hister, args=(p.save,), daemon=True).start()
+                threading.Thread(target=save_to_nogon, args=(p.save,), daemon=True).start()
             if p.html:
                 return self.send(p.status, p.html)
             headers = [("Content-Disposition", 'attachment; filename="%s"' % re.sub(r'[^\w.-]', "_", p.attachment))] \
@@ -1040,7 +1047,7 @@ def check_bind(bind=None):
 def main():
     print("smallweb %s: auth %s%s, listening on %s:%d; egress %s; Nogon %s" % (
         VERSION, AUTH, "" if AUTH == "open" else " (%s)" % (",".join(sorted(USERS)) or "NOBODY: set SMALLWEB_USERS"),
-        BIND, PORT, ("SOCKS " + SOCKS) if SOCKS else "DIRECT (set SMALLWEB_SOCKS)", HISTER or "off"), flush=True)
+        BIND, PORT, ("SOCKS " + SOCKS) if SOCKS else "DIRECT (set SMALLWEB_SOCKS)", NOGON or "off"), flush=True)
     print("smallweb: http(s) saves never fetch a private address%s" % (
         "" if not (FETCH_ALLOW[0] or FETCH_ALLOW[1]) else " except %s" % ", ".join(
             sorted(FETCH_ALLOW[0]) + [str(n) for n in FETCH_ALLOW[1]])), flush=True)

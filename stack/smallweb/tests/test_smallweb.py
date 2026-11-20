@@ -1,6 +1,6 @@
 """smallweb's tests: the parsers on the engines' response formats (with invented content), the renderers, and the
 whole gateway against local fakes: two Gemini engines and a capsule (TLS), a Gopher engine and hole, a web server (http
-and https) for http(s) saves, a SOCKS5 proxy (which records the names or addresses it is asked for) and Hister (which
+and https) for http(s) saves, a SOCKS5 proxy (which records the names or addresses it is asked for) and Nogon (which
 records /api/add). The web server is on 127.0.0.1, which smallweb never fetches unless SMALLWEB_FETCH_ALLOW says so:
 the tests allow 127.0.0.1/32 and map invented names to addresses with a patched resolver.
 
@@ -217,7 +217,7 @@ WEB_PAGES = {
     "/to-file": (302, {"Location": "file:///etc/passwd"}, b""),
     "/loop": (302, {"Location": "/loop"}, b""),
     "/v/work/n/x": (200, {"Content-Type": "text/html"}, b"<title>private</title>"),
-    "/skipme": (200, {"Content-Type": "text/html"}, b"<title>Skip me</title><p>Hister refuses this one.</p>"),
+    "/skipme": (200, {"Content-Type": "text/html"}, b"<title>Skip me</title><p>Nogon refuses this one.</p>"),
 }
 
 
@@ -270,28 +270,28 @@ def fake_resolve(host, port, type=0, **kw):
     raise socket.gaierror("no such name: %s" % host)
 
 
-HISTER_DOCS = []
-HISTER_TOKENS = []                               # the X-Access-Token each save carried (None: none)
-HISTER_HELD = set()                              # URLs GET /api/document finds (only_new)
-HISTER_LOOKUPS = []                              # (url asked, X-Access-Token) per GET /api/document
+NOGON_DOCS = []
+NOGON_TOKENS = []                               # the X-Access-Token each save carried (None: none)
+NOGON_HELD = set()                              # URLs GET /api/document finds (only_new)
+NOGON_LOOKUPS = []                              # (url asked, X-Access-Token) per GET /api/document
 
 
-class HisterFake(BaseHTTPRequestHandler):
+class NogonFake(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
     def do_POST(self):
         doc = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        HISTER_DOCS.append((self.headers.get("Origin"), doc))
-        HISTER_TOKENS.append(self.headers.get("X-Access-Token"))
-        self.send_response(406 if "/skipme" in doc["url"] else 201)          # 406: one of Hister's skip rules
+        NOGON_DOCS.append((self.headers.get("Origin"), doc))
+        NOGON_TOKENS.append(self.headers.get("X-Access-Token"))
+        self.send_response(406 if "/skipme" in doc["url"] else 201)          # 406: one of Nogon's skip rules
         self.send_header("Content-Length", "0")
         self.end_headers()
 
     def do_GET(self):
         url = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("url", [""])[0]
-        HISTER_LOOKUPS.append((url, self.headers.get("X-Access-Token")))
-        body = json.dumps({"url": url}).encode() if url in HISTER_HELD else b""
+        NOGON_LOOKUPS.append((url, self.headers.get("X-Access-Token")))
+        body = json.dumps({"url": url}).encode() if url in NOGON_HELD else b""
         self.send_response(500 if "lookup-fails" in url else 200 if body else 404)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -302,15 +302,15 @@ GEM_PAGES, GOPHER_PAGES = {}, {}                  # filled below, once the ports
 GEM_PORT = Fakes.gemini_server(GEM_PAGES)
 GOPHER_PORT = Fakes.gopher_server(GOPHER_PAGES)
 SOCKS_PORT = Fakes.socks_server()
-hister = ThreadingHTTPServer(("127.0.0.1", 0), HisterFake)
-threading.Thread(target=hister.serve_forever, daemon=True).start()
+nogon = ThreadingHTTPServer(("127.0.0.1", 0), NogonFake)
+threading.Thread(target=nogon.serve_forever, daemon=True).start()
 
 DATA = tempfile.mkdtemp()
-TOKEN = "SmallwebHisterToken0123456789"
-with open(os.path.join(DATA, "hister.token"), "w") as _f:
+TOKEN = "SmallwebNogonToken0123456789"
+with open(os.path.join(DATA, "nogon.token"), "w") as _f:
     _f.write(TOKEN + "\n")
-os.environ.update(SMALLWEB_HISTER_TOKEN_FILE=os.path.join(DATA, "hister.token"), SMALLWEB_DATA=DATA, SMALLWEB_USERS="user@test", SMALLWEB_SOCKS="socks5h://127.0.0.1:%d" % SOCKS_PORT,
-                  SMALLWEB_HISTER_URL="http://127.0.0.1:%d" % hister.server_address[1], SMALLWEB_PER_HOUR="100",
+os.environ.update(SMALLWEB_NOGON_TOKEN_FILE=os.path.join(DATA, "nogon.token"), SMALLWEB_DATA=DATA, SMALLWEB_USERS="user@test", SMALLWEB_SOCKS="socks5h://127.0.0.1:%d" % SOCKS_PORT,
+                  SMALLWEB_NOGON_URL="http://127.0.0.1:%d" % nogon.server_address[1], SMALLWEB_PER_HOUR="100",
                   SMALLWEB_PUBLIC_URL="https://smallweb.test", SMALLWEB_ORIGINS="https://shiori.test/",
                   SMALLWEB_FETCH_ALLOW="127.0.0.1/32")
 os.environ.pop("SMALLWEB_AUTH", None)
@@ -624,15 +624,24 @@ class Gateway(unittest.TestCase):
         finally:
             smallweb.CHANGELOG_FILE = saved
 
+    def test_selftest_refuses_old_names(self):
+        env = dict(os.environ, SMALLWEB_HISTER_URL="http://h:1")
+        env.pop("SMALLWEB_NOGON_URL", None)
+        for argv, want in (([], "rename it SMALLWEB_NOGON_URL"), (["--hister"], "use --nogon")):
+            r = subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "selftest.py")] + argv, env=env,
+                               capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn(want, r.stderr)
+
     def test_status_reports_real_breakage_only(self):
-        smallweb.hister_state["fails"] = 3
+        smallweb.nogon_state["fails"] = 3
         try:
             d = json.loads(get("/api/status", user=None)[2])
             self.assertTrue(d["error"].startswith("Nogon saves failing"))
-            self.assertEqual(d["nogon"], d["hister"])                        # 0.5.0: both, until stage 3
+            self.assertNotIn("hister", d)                                    # 0.6.0: "nogon" only
             self.assertFalse(d["ok"])
         finally:
-            smallweb.hister_state["fails"] = 0
+            smallweb.nogon_state["fails"] = 0
         old = smallweb.SOCKS
         smallweb.SOCKS = "127.0.0.1:1"                       # nothing listens there: the proxy itself is down
         try:
@@ -688,16 +697,16 @@ class Gateway(unittest.TestCase):
         for q in ("", "q=", "q=x&source=quarry", "q=x&page=0", "q=" + "x" * 301):
             self.assertEqual(get("/api/search?" + q)[0], 400, q)
 
-    def test_page_renders_and_saves_to_hister(self):
-        HISTER_DOCS.clear()
+    def test_page_renders_and_saves_to_nogon(self):
+        NOGON_DOCS.clear()
         code, headers, body = page(CAP + "/")
         self.assertEqual(code, 200)
         self.assertTrue(headers["Content-Security-Policy"].startswith("default-src 'none'"))
         self.assertIn("<h1>Hello &lt;capsule&gt;</h1>", body)
         self.assertNotIn("<script", body)
-        self.assertTrue(wait_for(lambda: HISTER_DOCS))
-        origin, doc = HISTER_DOCS[0]
-        self.assertEqual(origin, "hister://")
+        self.assertTrue(wait_for(lambda: NOGON_DOCS))
+        origin, doc = NOGON_DOCS[0]
+        self.assertEqual(origin, "nogon://")
         self.assertEqual(doc["url"], "gemini://capsule.test:%d/" % GEM_PORT)          # canonical, not the proxy URL
         self.assertNotIn("label", doc)
         self.assertEqual(doc["metadata"]["source"], "smallweb")
@@ -709,10 +718,10 @@ class Gateway(unittest.TestCase):
         smallweb.store.q("DELETE FROM cache WHERE kind='page'")
         page(CAP + "/")
         time.sleep(0.5)
-        self.assertEqual(len(HISTER_DOCS), 1)
+        self.assertEqual(len(NOGON_DOCS), 1)
 
     def test_prompts_redirects_and_errors(self):
-        HISTER_DOCS.clear()
+        NOGON_DOCS.clear()
         self.assertIn('name="q"', page(CAP + "/ask")[2])
         code, _, body = get("/page?url=%s&q=%s" % (urllib.parse.quote(CAP + "/ask", safe=""), "Ann%20B"))
         self.assertIn("Hi Ann B", body)
@@ -727,36 +736,40 @@ class Gateway(unittest.TestCase):
         self.assertEqual(len(Fakes.gemini_requests), n)
         smallweb.polite.until.clear()
         time.sleep(0.5)
-        self.assertNotIn("gemini://capsule.test:%d/ask?Ann%%20B" % GEM_PORT, [d["url"] for _, d in HISTER_DOCS])
+        self.assertNotIn("gemini://capsule.test:%d/ask?Ann%%20B" % GEM_PORT, [d["url"] for _, d in NOGON_DOCS])
 
     def test_query_urls_saved_unless_they_answer_a_prompt(self):
-        HISTER_DOCS.clear()
+        NOGON_DOCS.clear()
         self.assertIn("Hi Ann B", page(CAP + "/ask?Ann%20B")[2])               # a link straight to a prompt's answer
         self.assertIn("Some Article", page(CAP + "/view?Some+Article")[2])
-        self.assertTrue(wait_for(lambda: any("/view?" in d["url"] for _, d in HISTER_DOCS)))
+        self.assertTrue(wait_for(lambda: any("/view?" in d["url"] for _, d in NOGON_DOCS)))
         time.sleep(0.3)
-        self.assertFalse(any("/ask?" in d["url"] for _, d in HISTER_DOCS))
+        self.assertFalse(any("/ask?" in d["url"] for _, d in NOGON_DOCS))
 
     def test_api_save(self):
-        HISTER_DOCS.clear()
+        NOGON_DOCS.clear()
         body = json.dumps({"url": CAP + "/saveme"}).encode()
         js = {"Content-Type": "application/json"}
         self.assertEqual(get("/api/save", data=body, headers=dict(js, Origin="https://evil.test"))[0], 403)
         self.assertEqual(get("/api/save", data=body, headers=js)[0], 403)                 # no Origin at all
         self.assertEqual(get("/api/save", data=body, headers=dict(js, Origin="https://shiori.test"))[0], 202)
-        self.assertTrue(wait_for(lambda: any(d["url"].endswith("/saveme") for _, d in HISTER_DOCS)))
-        code, _, out = get("/api/save", data=json.dumps({"url": CAP + "/two"}).encode(), headers=dict(js, Origin="hister://"))
+        self.assertTrue(wait_for(lambda: any(d["url"].endswith("/saveme") for _, d in NOGON_DOCS)))
+        code, _, out = get("/api/save", data=json.dumps({"url": CAP + "/two"}).encode(), headers=dict(js, Origin="nogon://"))
         self.assertEqual((code, json.loads(out)["url"]), (202, "gemini://capsule.test:%d/two" % GEM_PORT))
-        self.assertEqual(get("/api/save", data=b'{"url": "ftp://example.com/"}', headers=dict(js, Origin="hister://"))[0], 400)
-        self.assertEqual(get("/api/save", data=body, user="other@test", headers=dict(js, Origin="hister://"))[0], 403)
-        n = len(HISTER_DOCS)
-        get("/api/save", data=json.dumps({"url": CAP + "/ask?Ann%20B"}).encode(), headers=dict(js, Origin="hister://"))
+        # 0.6.0: an app from before the rename still sends Origin: hister://, and is still taken
+        code, _, out = get("/api/save", data=json.dumps({"url": CAP + "/three"}).encode(), headers=dict(js, Origin="hister://"))
+        self.assertEqual((code, json.loads(out)["url"]), (202, "gemini://capsule.test:%d/three" % GEM_PORT))
+        self.assertEqual(get("/api/save", data=body, headers=dict(js, Origin="nogon://evil"))[0], 403)
+        self.assertEqual(get("/api/save", data=b'{"url": "ftp://example.com/"}', headers=dict(js, Origin="nogon://"))[0], 400)
+        self.assertEqual(get("/api/save", data=body, user="other@test", headers=dict(js, Origin="nogon://"))[0], 403)
+        n = len(NOGON_DOCS)
+        get("/api/save", data=json.dumps({"url": CAP + "/ask?Ann%20B"}).encode(), headers=dict(js, Origin="nogon://"))
         time.sleep(0.5)
-        self.assertEqual(len([d for _, d in HISTER_DOCS if "/ask?" in d["url"]]), 0)   # the never-save rules hold
+        self.assertEqual(len([d for _, d in NOGON_DOCS if "/ask?" in d["url"]]), 0)   # the never-save rules hold
 
     # -- http(s) saves ---------------------------------------------------------------------------------------------
 
-    def save(self, url, origin="hister://", wait=True, **extra):
+    def save(self, url, origin="nogon://", wait=True, **extra):
         code, _, out = get("/api/save", data=json.dumps(dict(extra, url=url)).encode(),
                            headers={"Content-Type": "application/json", "Origin": origin})
         if wait:
@@ -764,26 +777,26 @@ class Gateway(unittest.TestCase):
         return code, json.loads(out)
 
     def docs_for(self, fragment):
-        return [d for _, d in HISTER_DOCS if fragment in d["url"]]
+        return [d for _, d in NOGON_DOCS if fragment in d["url"]]
 
     def assert_not_saved(self, url, why, **extra):
-        smallweb.hister_state["last_error"] = None
-        n, saved = len(HISTER_DOCS), smallweb.store.save_count()
+        smallweb.nogon_state["last_error"] = None
+        n, saved = len(NOGON_DOCS), smallweb.store.save_count()
         code, out = self.save(url, **extra)
         self.assertEqual(code, 202, url)
-        self.assertIn(why, smallweb.hister_state["last_error"] or "", url)
-        self.assertEqual((len(HISTER_DOCS), smallweb.store.save_count()), (n, saved), url)
+        self.assertIn(why, smallweb.nogon_state["last_error"] or "", url)
+        self.assertEqual((len(NOGON_DOCS), smallweb.store.save_count()), (n, saved), url)
         status = json.loads(get("/api/status", user=None)[2])
-        self.assertEqual((status["error"], status["hister"]["queued"]), (None, 0))   # not a failure
+        self.assertEqual((status["error"], status["nogon"]["queued"]), (None, 0))   # not a failure
 
     def test_api_save_http_page(self):
-        HISTER_DOCS.clear()
+        NOGON_DOCS.clear()
         WEB_REQUESTS.clear()
         saved = smallweb.store.save_count()
         code, out = self.save("HTTP://Web.Test:%d/ok?t=1#top" % WEB_PORT, origin="https://shiori.test")
         self.assertEqual((code, out), (202, {"queued": True, "url": WEB + "/ok?t=1"}))
-        origin, doc = HISTER_DOCS[0]
-        self.assertEqual(origin, "hister://")
+        origin, doc = NOGON_DOCS[0]
+        self.assertEqual(origin, "nogon://")
         self.assertEqual((doc["url"], doc["title"]), (WEB + "/ok?t=1", "A Web Page"))
         self.assertNotIn("label", doc)
         self.assertEqual(doc["text"], "Heading\nHello web & friends.\nlink")
@@ -804,7 +817,7 @@ class Gateway(unittest.TestCase):
         # https, a form body, and the asked title used only when the page has none; saved under the final URL
         code, _, out = get("/api/save", data=urllib.parse.urlencode({"url": "https://web.test:%d/untitled" % WEBS_PORT,
                                                                       "title": "Asked  Title"}).encode(),
-                           headers={"Origin": "hister://"})
+                           headers={"Origin": "hister://"})          # an app from before the rename
         self.assertEqual(code, 202)
         self.assertTrue(wait_for(lambda: self.docs_for("/untitled")))
         doc = self.docs_for("/untitled")[0]
@@ -852,33 +865,33 @@ class Gateway(unittest.TestCase):
         self.assert_not_saved(WEB + "/image", "not saved: image/png")
         self.assert_not_saved(WEB + "/missing", "HTTP 404")
 
-    def test_api_save_http_skipped_by_hister(self):
-        smallweb.hister_state["fails"] = 0
+    def test_api_save_http_skipped_by_nogon(self):
+        smallweb.nogon_state["fails"] = 0
         saved = smallweb.store.save_count()
         self.assertEqual(self.save(WEB + "/skipme")[0], 202)
-        self.assertEqual(len(self.docs_for("/skipme")), 1)                              # sent, and Hister said 406
+        self.assertEqual(len(self.docs_for("/skipme")), 1)                              # sent, and Nogon said 406
         status = json.loads(get("/api/status", user=None)[2])
-        self.assertEqual((status["hister"]["saved"], status["error"], smallweb.hister_state["fails"]), (saved, None, 0))
+        self.assertEqual((status["nogon"]["saved"], status["error"], smallweb.nogon_state["fails"]), (saved, None, 0))
 
     def test_api_save_only_new(self):
-        HISTER_DOCS.clear()
-        HISTER_HELD.clear()
-        HISTER_HELD.update({WEB + "/ok?t=held", WEB + "/ok", WEB + "/ok?t=utm"})
+        NOGON_DOCS.clear()
+        NOGON_HELD.clear()
+        NOGON_HELD.update({WEB + "/ok?t=held", WEB + "/ok", WEB + "/ok?t=utm"})
         WEB_REQUESTS.clear()
-        held = smallweb.hister_state["held"]
+        held = smallweb.nogon_state["held"]
         # held under the asked URL: not fetched, not saved, not an error
         self.assertEqual(self.save(WEB + "/ok?t=held", only_new=True)[0], 202)
         self.assertEqual((WEB_REQUESTS, self.docs_for("/ok")), ([], []))
-        # asked in Hister's form: no fragment (smallweb's canonical URL), no utm parameters
+        # asked in Nogon's form: no fragment (smallweb's canonical URL), no utm parameters
         self.assertEqual(self.save(WEB + "/ok?t=utm&utm_source=feed#x", only_new=True)[0], 202)
-        self.assertEqual(HISTER_LOOKUPS[-1], (WEB + "/ok?t=utm", TOKEN))
-        # the asked URL is new, but it redirects to one Hister holds: fetched, not saved
+        self.assertEqual(NOGON_LOOKUPS[-1], (WEB + "/ok?t=utm", TOKEN))
+        # the asked URL is new, but it redirects to one Nogon holds: fetched, not saved
         self.assertEqual(self.save(WEB + "/to-ok", only_new=True)[0], 202)
         self.assertEqual([p for p, _, _ in WEB_REQUESTS], ["/to-ok", "/ok"])
-        self.assertEqual([u for u, _ in HISTER_LOOKUPS[-2:]], [WEB + "/to-ok", WEB + "/ok"])
+        self.assertEqual([u for u, _ in NOGON_LOOKUPS[-2:]], [WEB + "/to-ok", WEB + "/ok"])
         self.assertEqual(self.docs_for("/ok"), [])
         status = json.loads(get("/api/status", user=None)[2])
-        self.assertEqual((status["hister"]["only_new"], status["hister"]["held"], status["error"]), (True, held + 3, None))
+        self.assertEqual((status["nogon"]["only_new"], status["nogon"]["held"], status["error"]), (True, held + 3, None))
         # new: saved, with via and query in the metadata
         code, out = self.save(WEB + "/ok?t=new", origin="https://shiori.test", only_new=True, via="web-result",
                               query="  old   macs " + "x" * 300)
@@ -889,15 +902,15 @@ class Gateway(unittest.TestCase):
         # a failed lookup never risks a replace
         self.assert_not_saved(WEB + "/ok?t=lookup-fails", "Nogon's lookup answered 500", only_new=True)
         # without only_new nothing is looked up, as before (Add Page replaces on purpose)
-        n = len(HISTER_LOOKUPS)
+        n = len(NOGON_LOOKUPS)
         self.assertEqual(self.save(WEB + "/ok?t=held")[0], 202)
-        self.assertEqual((len(HISTER_LOOKUPS), len(self.docs_for("/ok?t=held"))), (n, 1))
+        self.assertEqual((len(NOGON_LOOKUPS), len(self.docs_for("/ok?t=held"))), (n, 1))
         self.assertNotIn("smallweb_via", self.docs_for("/ok?t=held")[0]["metadata"])
         # refusals
         for extra in ({"via": "Web Result"}, {"via": "x" * 33}, {"via": 5}, {"query": ["a"]}):
             self.assertEqual(self.save(WEB + "/ok?t=bad", wait=False, **extra)[0], 400, extra)
         self.assertEqual(self.save(CAP + "/saveme", wait=False, only_new=True)[0], 400)   # http(s) only
-        HISTER_HELD.clear()
+        NOGON_HELD.clear()
 
     def test_gopher(self):
         code, _, body = page(HOLE_URL)
@@ -912,7 +925,7 @@ class Gateway(unittest.TestCase):
         self.assertIn("<h1>Two</h1>", page(url)[2])
         Fakes.cert = "b"
         smallweb.store.q("DELETE FROM cache WHERE kind='page'")
-        HISTER_DOCS.clear()
+        NOGON_DOCS.clear()
         code, _, body = page(url)
         self.assertIn("Certificate Changed", body)
         self.assertNotIn("<h1>Two</h1>", body)
@@ -1004,7 +1017,7 @@ class Sweep(unittest.TestCase):
     """The 2026-10 sweep: MACH-F-1 (a relay to anything), F-2 (planted saves), F-5 (logs), F-8 (no deadline), F-9."""
 
     def fresh(self):
-        HISTER_DOCS.clear()
+        NOGON_DOCS.clear()
         Fakes.gemini_requests.clear()
         smallweb.store.q("DELETE FROM cache WHERE kind='page'")
         smallweb.store.q("DELETE FROM saves")
@@ -1047,7 +1060,7 @@ class Sweep(unittest.TestCase):
         self.assertEqual(get("/?q=never+asked&source=tlgs", headers=CROSS)[0], 200)   # the home page; nothing searched
         time.sleep(0.5)
         self.assertEqual(Fakes.gemini_requests, [])
-        self.assertEqual(HISTER_DOCS, [])
+        self.assertEqual(NOGON_DOCS, [])
 
     def test_saves_only_for_pages_viewed_through_smallweb(self):
         for headers, saved in (({"Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate"}, True),
@@ -1057,14 +1070,14 @@ class Sweep(unittest.TestCase):
                                ({}, True)):                                      # an app, not a browser
             self.fresh()
             self.assertEqual(page(CAP + "/", headers=headers)[0], 200)
-            self.assertEqual(wait_for(lambda: HISTER_DOCS, 2), saved, headers)
+            self.assertEqual(wait_for(lambda: NOGON_DOCS, 2), saved, headers)
         self.fresh()
         req = urllib.request.Request(BASE + "/page?url=" + urllib.parse.quote(CAP + "/", safe=""), method="HEAD",
                                      headers={"Tailscale-User-Login": "user@test"})
         with urllib.request.urlopen(req, timeout=10) as r:
             self.assertEqual(r.status, 200)
         time.sleep(0.5)
-        self.assertEqual(HISTER_DOCS, [])                            # HEAD never saves
+        self.assertEqual(NOGON_DOCS, [])                            # HEAD never saves
 
     def test_the_log_has_no_queries(self):
         err = io.StringIO()
@@ -1205,29 +1218,29 @@ class KeepAlive(unittest.TestCase):
             self.assertTrue(closed, value)
 
 
-class HisterToken(unittest.TestCase):
-    """SMALLWEB_HISTER_TOKEN_FILE (docs/contracts/hister.md): every save carries X-Access-Token when it is set, none
+class NogonToken(unittest.TestCase):
+    """SMALLWEB_NOGON_TOKEN_FILE (docs/contracts/nogon.md): every save carries X-Access-Token when it is set, none
     when it isn't; the token is never logged, in /api/status or on argv; a set file that is bad stops the start."""
 
     def save(self, n):
-        HISTER_DOCS.clear()
-        HISTER_TOKENS.clear()
-        smallweb.save_to_hister({"url": "gemini://tok.test/%s" % n, "title": "t", "text": "x", "body": "x",
-                                 "scheme": "gemini", "mime": "text/gemini", "cert": None, "sha": "sha-%s" % n})
-        self.assertTrue(wait_for(lambda: HISTER_TOKENS))
-        return HISTER_TOKENS[0], HISTER_DOCS[0][0]
+        NOGON_DOCS.clear()
+        NOGON_TOKENS.clear()
+        smallweb.save_to_nogon({"url": "gemini://tok.test/%s" % n, "title": "t", "text": "x", "body": "x",
+                                "scheme": "gemini", "mime": "text/gemini", "cert": None, "sha": "sha-%s" % n})
+        self.assertTrue(wait_for(lambda: NOGON_TOKENS))
+        return NOGON_TOKENS[0], NOGON_DOCS[0][0]
 
     def test_sent_when_set(self):
-        self.assertEqual(self.save(time.time()), (TOKEN, "hister://"))
+        self.assertEqual(self.save(time.time()), (TOKEN, "nogon://"))
 
     def test_absent_when_unset(self):
-        old = smallweb.HISTER_TOKEN
-        smallweb.HISTER_TOKEN = None
+        old = smallweb.NOGON_TOKEN
+        smallweb.NOGON_TOKEN = None
         try:
-            self.assertEqual(self.save(time.time()), (None, "hister://"))
-            self.assertNotIn("X-Access-Token", smallweb.hister_headers())
+            self.assertEqual(self.save(time.time()), (None, "nogon://"))
+            self.assertNotIn("X-Access-Token", smallweb.nogon_headers())
         finally:
-            smallweb.HISTER_TOKEN = old
+            smallweb.NOGON_TOKEN = old
 
     def test_never_logged_or_shown(self):
         err = io.StringIO()
@@ -1236,7 +1249,7 @@ class HisterToken(unittest.TestCase):
             code, _, body = get("/api/status")
         self.assertNotIn(TOKEN, err.getvalue())
         self.assertNotIn(TOKEN, body if isinstance(body, str) else json.dumps(body))
-        self.assertNotIn(TOKEN, repr(smallweb.HISTER_TOKEN))
+        self.assertNotIn(TOKEN, repr(smallweb.NOGON_TOKEN))
         self.assertNotIn(TOKEN, " ".join(sys.argv))
 
     def test_bad_file_refuses_to_start(self):
@@ -1246,12 +1259,12 @@ class HisterToken(unittest.TestCase):
             open(empty, "w").close()
             for path in (empty, os.path.join(folder, "missing"), folder):
                 with self.assertRaises(SystemExit, msg=path):
-                    smallweb.hister_token(path)
-            self.assertIsNone(smallweb.hister_token(""))
+                    smallweb.nogon_token(path)
+            self.assertIsNone(smallweb.nogon_token(""))
             rotating = os.path.join(folder, "t")
             with open(rotating, "w") as f:
                 f.write("first-token\n")
-            secret = smallweb.hister_token(rotating)
+            secret = smallweb.nogon_token(rotating)
             with open(rotating + ".new", "w") as f:
                 f.write("second-token-longer\n")
             os.replace(rotating + ".new", rotating)
@@ -1262,7 +1275,7 @@ class HisterToken(unittest.TestCase):
             shutil.rmtree(folder)
 
 class RoomTokenTest(unittest.TestCase):
-    """0.3.0: a room token (Bearer mht_) hister-login issued for smallweb, beside the Tailscale header."""
+    """0.3.0: a room token (Bearer mht_) nogon-login issued for smallweb, beside the Tailscale header."""
 
     def setUp(self):
         good = self.good = "mht_" + "G" * 43
@@ -1283,13 +1296,13 @@ class RoomTokenTest(unittest.TestCase):
                 self.wfile.write(body)
         self.helper = ThreadingHTTPServer(("127.0.0.1", 0), Helper)
         threading.Thread(target=self.helper.serve_forever, daemon=True).start()
-        self.saved = (smallweb.AUTH_URL, smallweb.HISTER_USERS)
+        self.saved = (smallweb.AUTH_URL, smallweb.NOGON_USERS)
         smallweb.AUTH_URL = "http://127.0.0.1:%d" % self.helper.server_address[1]
-        smallweb.HISTER_USERS = {"owner"}
+        smallweb.NOGON_USERS = {"owner"}
         smallweb._ROOM_TOKENS.clear()
 
     def tearDown(self):
-        smallweb.AUTH_URL, smallweb.HISTER_USERS = self.saved
+        smallweb.AUTH_URL, smallweb.NOGON_USERS = self.saved
         smallweb._ROOM_TOKENS.clear()
         self.helper.shutdown()
         self.helper.server_close()
@@ -1312,16 +1325,20 @@ if __name__ == "__main__":
 
 
 class NogonNames(unittest.TestCase):
-    """0.5.0, the rename's stage 1: SMALLWEB_NOGON_<X> first, SMALLWEB_HISTER_<X> still read."""
+    """0.6.0, the rename's stage 3: SMALLWEB_NOGON_<X> only; an old SMALLWEB_HISTER_<X> on its own stops the start."""
 
     def test_setting(self):
-        import contextlib
-        import io
         from unittest import mock
-        with mock.patch.dict(os.environ, {"SMALLWEB_HISTER_URL": "http://h:1"}, clear=False), \
-                contextlib.redirect_stderr(io.StringIO()):
+        with mock.patch.dict(os.environ, {"SMALLWEB_HISTER_URL": "http://h:1"}, clear=False):
             os.environ.pop("SMALLWEB_NOGON_URL", None)
-            self.assertEqual(smallweb.setting("SMALLWEB_NOGON_URL"), "http://h:1")
+            with self.assertRaises(SystemExit) as cm:
+                smallweb.setting("SMALLWEB_NOGON_URL")
+            self.assertIn("SMALLWEB_HISTER_URL is an old name", str(cm.exception))
+            self.assertIn("rename it SMALLWEB_NOGON_URL", str(cm.exception))
             os.environ["SMALLWEB_NOGON_URL"] = ""
-            self.assertEqual(smallweb.setting("SMALLWEB_NOGON_URL"), "")          # set, even empty: it wins
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                self.assertEqual(smallweb.setting("SMALLWEB_NOGON_URL"), "")      # set, even empty: it wins
+                self.assertEqual(smallweb.setting("SMALLWEB_NOGON_URL"), "")
+            self.assertEqual(err.getvalue().count("SMALLWEB_HISTER_URL: an old name, ignored"), 1)   # said once
         self.assertEqual(smallweb.setting("SMALLWEB_NOGON_NOTHING", "d"), "d")
