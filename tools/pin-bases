@@ -6,7 +6,7 @@
 
 A `FROM image:tag` line becomes `FROM image:tag@sha256:<index digest>`: the tag stays for people to read, the digest
 is what builds use, so a rebuild gets exactly the image that was tested. The digest is the image index (the
-multi-arch list), so amd64 and arm64 builds both pin. A tag that names an ARG (`hister:${HISTER_VERSION}`) is
+multi-arch list), so amd64 and arm64 builds both pin. A tag that names an ARG (`nogon:${NOGON_VERSION}`) is
 resolved with that ARG's default in the same file. Run it before a release to pick up the base images' security
 fixes; --check only reports pins that are missing or out of date, and exits 1 if there are any.
 

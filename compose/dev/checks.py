@@ -63,13 +63,13 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def L(port, path=""):
-    """The front's ports (19200-19208) in its scheme; the plain ones (Hister 19224, the MCP 19226, ...) over http."""
+    """The front's ports (19200-19208) in its scheme; the plain ones (Nogon 19224, the MCP 19226, ...) over http."""
     return "%s://%s:%d%s" % (FRONT if 19200 <= port <= 19208 else "http", ADDR, port, path)
 
 
-def hister_total(tok, q):
+def nogon_total(tok, q):
     st, body, _ = http("GET", L(19224, "/search?" + urllib.parse.urlencode({"q": q, "limit": 100})),
-                       headers={"Origin": "hister://", "Accept": "application/json", "X-Access-Token": tok})
+                       headers={"Origin": "nogon://", "Accept": "application/json", "X-Access-Token": tok})
     if st != 200 or not isinstance(body, dict):
         return -1
     return body.get("total", len(body.get("documents") or []))
@@ -90,12 +90,12 @@ def mcp(port, method, params=None, headers=None):
 def http_checks(data, tok, password, rtok="", denv=None):
     bearer = {"Authorization": "Bearer " + (rtok or tok)}        # the rooms: a room token (nogon-login 0.3.0)
     probes = [("landing", 19200, "/healthz"), ("kura", 19201, "/api/status"), ("niwa", 19202, "/api/status"),
-              ("konbini", 19203, "/api/health"), ("hister", 19204, "/health"), ("nogon-login", 19204,
+              ("konbini", 19203, "/api/health"), ("nogon", 19204, "/health"), ("nogon-login", 19204,
               "/machiya/healthz"), ("searxng", 19205, "/healthz"), ("machiya-mcp", 19206, "/healthz"),
               ("smallweb", 19207, "/api/status"), ("stub-oidc", 19208, "/.well-known/openid-configuration"),
               ("fixtures", 19209, "/healthz"), ("fake-newsblur", 19210, "/healthz"),
               ("fake-forgejo", 19213, "/healthz"), ("fake-github", 19214, "/healthz"),
-              ("hister (plain)", 19224, "/health"), ("machiya-mcp (plain)", 19226, "/healthz")]
+              ("nogon (plain)", 19224, "/health"), ("machiya-mcp (plain)", 19226, "/healthz")]
     seen = {}
     for name, port, path in probes:
         st, body, _ = http("GET", L(port, path), timeout=8)
@@ -107,7 +107,7 @@ def http_checks(data, tok, password, rtok="", denv=None):
                sorted(optional)) if optional else ""))
 
     st, body, _ = http("GET", L(19204, "/machiya/healthz"))
-    record("nogon-login: Hister has users (hister ok)", isinstance(body, dict) and body.get("hister") == "ok",
+    record("nogon-login: Nogon has users (nogon ok)", isinstance(body, dict) and body.get("nogon") == "ok",
            str(body))
 
     gates = {}
@@ -149,19 +149,19 @@ def http_checks(data, tok, password, rtok="", denv=None):
            st == 200 and (published or 0) >= 9 and st2 == 200 and "Bamboo frames" in str(page),
            "published %s; GET / %s" % (published, st2))
 
-    counts = {q: hister_total(tok, q) for q in ("@pages", "label:vault", "metadata.source:newsblur", "quillwort",
+    counts = {q: nogon_total(tok, q) for q in ("@pages", "label:vault", "metadata.source:newsblur", "quillwort",
                                                  "label:travel")}
-    record("Hister: the synthetic corpus, Kura's notes (personal + shared team, never work), feed-import's pages",
+    record("Nogon: the synthetic corpus, Kura's notes (personal + shared team, never work), feed-import's pages",
            counts["@pages"] >= 12 and counts["label:vault"] >= 29 and counts["quillwort"] == 0
            and counts["metadata.source:newsblur"] >= 4 and counts["label:travel"] >= 3, str(counts))
 
-    h = {"Origin": "hister://", "Accept": "application/json", "X-Access-Token": tok}
+    h = {"Origin": "nogon://", "Accept": "application/json", "X-Access-Token": tok}
     st, rules, _ = http("GET", L(19224, "/api/rules"), headers=h)
     aliases = sorted(((rules or {}).get("aliases") or {}).keys()) if isinstance(rules, dict) else []
     st2, hist, _ = http("GET", L(19224, "/api/history?opened=true"), headers=h)
     n_hist = len((hist or {}).get("documents") or []) if isinstance(hist, dict) else -1
-    st3, anon, _ = http("GET", L(19224, "/api/rules"), headers={"Origin": "hister://", "Accept": "application/json"})
-    record("Hister: collections (aliases) and history are the owner's; no token, no answer",
+    st3, anon, _ = http("GET", L(19224, "/api/rules"), headers={"Origin": "nogon://", "Accept": "application/json"})
+    record("Nogon: collections (aliases) and history are the owner's; no token, no answer",
            {"@notes", "@pages", "@code", "@travel", "@workshop"} <= set(aliases) and n_hist >= 3 and st3 in (401, 403),
            "aliases %s; opened history %d; without a token HTTP %s" % (aliases, n_hist, st3))
 
@@ -171,10 +171,10 @@ def http_checks(data, tok, password, rtok="", denv=None):
     except (OSError, ValueError) as e:
         fs = {"error": str(e)}
     st, nb, _ = http("GET", L(19210, "/healthz"))
-    record("feed-import: imports the fake NewsBlur's read and starred stories into Hister",
+    record("feed-import: imports the fake NewsBlur's read and starred stories into Nogon",
            fs.get("ok") is True and isinstance(nb, dict) and nb.get("calls", 0) > 0
            and counts["metadata.source:newsblur"] >= 4,
-           "status.json ok=%s; fake NewsBlur served %s call(s); Hister has %s newsblur page(s)" % (
+           "status.json ok=%s; fake NewsBlur served %s call(s); Nogon has %s newsblur page(s)" % (
                fs.get("ok"), (nb or {}).get("calls") if isinstance(nb, dict) else nb, counts["metadata.source:newsblur"]))
 
     code_checks(data, tok)
@@ -196,7 +196,7 @@ def http_checks(data, tok, password, rtok="", denv=None):
     htools = sorted(t["name"] for t in ((body or {}).get("result") or {}).get("tools", [])) if isinstance(body, dict) \
         else []
     st2, anon = mcp(19224, "tools/list")
-    record("Hister's MCP: tools with the token, refused without", {"search", "get_preview"} <= set(htools)
+    record("Nogon's MCP: tools with the token, refused without", {"search", "get_preview"} <= set(htools)
            and st2 in (401, 403), "with token HTTP %s %s; without HTTP %s" % (st, htools, st2))
 
     for _ in range(12):                               # landing polls every 20 s
@@ -223,7 +223,7 @@ def http_checks(data, tok, password, rtok="", denv=None):
              "HTTP %s, %s result(s)" % (st, len((body or {}).get("results", [])) if isinstance(body, dict) else "?"))
 
     st, body, _ = http("GET", L(19207, "/api/status"))
-    record("smallweb: up, saves into Hister", st == 200 and isinstance(body, dict) and body.get("ok"), str(body)[:300])
+    record("smallweb: up, saves into Nogon", st == 200 and isinstance(body, dict) and body.get("ok"), str(body)[:300])
 
     forge_tokens = []
     for name in ("forgejo-token", "github-lantern-token", "github-workshop-token"):
@@ -235,7 +235,7 @@ def http_checks(data, tok, password, rtok="", denv=None):
     room_session_checks(data, password, tok, rtok, denv or {})
 
     leaks = scan_logs(data, [tok, password, rtok] + forge_tokens)
-    record("no secret in any service log (the owner's password and Hister token, the room token, the fake forges' "
+    record("no secret in any service log (the owner's password and Nogon token, the room token, the fake forges' "
            "tokens)", not leaks, ", ".join(leaks))
 
 
@@ -256,7 +256,7 @@ def cookie_named(cookies, name):
 def room_session_checks(data, password, tok, rtok, denv):
     """At the HTTP level, as a browser would: a room's code works once, only at its room, only with its browser's
     nonce; the room's cookie is host-only; a room session works in its own room only; Sign Out in one room ends the
-    others; with NOGON_LOGIN_LEGACY=none Hister's raw token opens no room while the room token does."""
+    others; with NOGON_LOGIN_LEGACY=none Nogon's raw token opens no room while the room token does."""
     import base64
     import hashlib
     pub = os.environ.get("DEV_URL", "https://localhost").rstrip("/")
@@ -267,12 +267,13 @@ def room_session_checks(data, password, tok, rtok, denv):
     ports = {"kura": 19201, "niwa": 19202, "konbini": 19203, "landing": 19200}
     s256 = lambda n: base64.urlsafe_b64encode(hashlib.sha256(n.encode()).digest()).rstrip(b"=").decode()  # noqa
     nonce = lambda: base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()                         # noqa
-    # a browser's Hister session, as the helper's sign-in page gets it (its script posts to Hister's /api/login)
+    # a browser's Nogon session (upstream's cookie is still `hister`), as the helper's sign-in page gets it (its script
+    # posts to Nogon's /api/login)
     st, _, hdrs = http("POST", L(19204, "/api/login"), {"username": "owner", "password": password},
-                       headers={"Origin": "hister://", "Accept": "application/json"}, follow=False)
+                       headers={"Origin": "nogon://", "Accept": "application/json"}, follow=False)
     hister, _ = cookie_named(set_cookies(hdrs), "hister")
     if not hister:
-        record("room sessions: a Hister sign-in for the checks", False, "POST /api/login: HTTP %s" % st)
+        record("room sessions: a Nogon sign-in for the checks", False, "POST /api/login: HTTP %s" % st)
         return
     own = {}
 
@@ -336,7 +337,7 @@ def room_session_checks(data, password, tok, rtok, denv):
     record("room sessions: Kura's session opens no other room (as Niwa's cookie, or as a Bearer at Konbini)",
            st_niwa == 401 and st_bearer == 401 and isinstance(b_niwa, dict) and b_niwa.get("reason") == "wrong-room",
            "Niwa %s %s; Konbini %s" % (st_niwa, b_niwa if isinstance(b_niwa, dict) else "", st_bearer))
-    # Hister's raw token in the rooms, and the room token
+    # Nogon's raw token in the rooms, and the room token
     legacy = (denv.get("DEV_AUTH_LEGACY") or "").strip()
     raw_tok = {name: http("GET", L(port, path), headers={"Authorization": "Bearer " + tok})[0]
                for name, port, path in (("kura", 19201, "/api/search?q=x"), ("konbini", 19203, "/api/cards"),
@@ -346,14 +347,14 @@ def room_session_checks(data, password, tok, rtok, denv):
                 for name, port, path in (("kura", 19201, "/api/search?q=x"), ("konbini", 19203, "/api/cards"),
                                          ("niwa", 19202, "/api/suggestions"))} if rtok else {}
     if legacy == "none":
-        record("the switch (NOGON_LOGIN_LEGACY=none): Hister's raw owner token opens no room (Bearer or "
+        record("the switch (NOGON_LOGIN_LEGACY=none): Nogon's raw owner token opens no room (Bearer or "
                "X-Access-Token: 401 legacy-off); the room token opens every room",
                set(raw_tok.values()) == {401} and xat[0] == 401 and isinstance(xat[1], dict)
                and xat[1].get("reason") == "legacy-off" and room_tok and set(room_tok.values()) == {200},
                "raw token %s, X-Access-Token %s %s; room token %s" % (raw_tok, xat[0], xat[1] if isinstance(
                    xat[1], dict) else "", room_tok))
     else:
-        record("before the switch (NOGON_LOGIN_LEGACY=%s): Hister's raw token still opens the rooms, and so does the "
+        record("before the switch (NOGON_LOGIN_LEGACY=%s): Nogon's raw token still opens the rooms, and so does the "
                "room token" % (legacy or "default"), set(raw_tok.values()) == {200} and set(room_tok.values()) == {200},
                "raw token %s; room token %s" % (raw_tok, room_tok))
     # Sign Out in Kura ends Niwa's session of the same browser (the helper session and every room session made from it)
@@ -378,7 +379,7 @@ def room_session_checks(data, password, tok, rtok, denv):
 
 
 def code_checks(data, tok):
-    """code-import: the fake forges' synthetic repos are in Hister as metadata.source:code, found by the Code area's
+    """code-import: the fake forges' synthetic repos are in Nogon as metadata.source:code, found by the Code area's
     query and its filters, and kept out of the pages. The first run may still be going: wait up to a minute."""
     fs = {}
     for _ in range(30):
@@ -390,7 +391,7 @@ def code_checks(data, tok):
         if fs.get("last_success"):
             break
         time.sleep(2)
-    q = {name: hister_total(tok, query) for name, query in (
+    q = {name: nogon_total(tok, query) for name, query in (
         ("code", "metadata.source:code"),
         ("lamp", "metadata.source:code metadata.code_repo:workshop_kobo__lamp"),
         ("open issues and PRs", "metadata.source:code metadata.code_kind:(issue|pr) metadata.code_state:open"),
@@ -399,7 +400,7 @@ def code_checks(data, tok):
         ("@pages dusk", "@pages dusk"),
         ("left out", "metadata.source:code never imported"))}
     st, body, _ = http("GET", L(19224, "/search?" + urllib.parse.urlencode({"q": "metadata.source:code", "limit": 100})),
-                       headers={"Origin": "hister://", "Accept": "application/json", "X-Access-Token": tok})
+                       headers={"Origin": "nogon://", "Accept": "application/json", "X-Access-Token": tok})
     urls = {d.get("url") for d in (body or {}).get("documents") or []} if isinstance(body, dict) else set()
     want = {"https://github.example/workshop-kobo/lamp", "http://forgejo.example/lantern/garden-notes/pulls/2",
             "https://github.example/lantern/pixel-font/issues/4", "http://forgejo.example/lantern/dotfiles"}
@@ -444,7 +445,7 @@ def browser_checks(data, password, shots, base, sso_cookie="machiya_sso", denv=N
     auto = bool(denv.get("DEV_SIGNIN_PROVIDER"))     # MACHIYA_SIGNIN_PROVIDER: pages sign themselves in (stub OIDC)
     os.makedirs(shots, exist_ok=True)
     U = {n: "%s:%d" % (base, p) for n, p in (("landing", 19200), ("kura", 19201), ("niwa", 19202),
-                                              ("konbini", 19203), ("hister", 19204))}
+                                              ("konbini", 19203), ("nogon", 19204))}
 
     def shot(page, name, engine):
         for scheme in ("light", "dark"):
@@ -503,18 +504,18 @@ def browser_checks(data, password, shots, base, sso_cookie="machiya_sso", denv=N
                 p.wait_for_load_state("networkidle")
                 found = "Chochin folding" in p.content()
                 shot(p, label + "kura-search", engine)
-                p.goto(U["hister"] + "/")
+                p.goto(U["nogon"] + "/")
                 p.wait_for_load_state("networkidle")
-                hister_in = "/machiya/signin" not in p.url and "login" not in p.url
-                shot(p, label + "hister", engine)
+                nogon_in = "/machiya/signin" not in p.url and "login" not in p.url
+                shot(p, label + "nogon", engine)
                 if label == "":
                     first = ("signed in automatically through the stub OIDC provider (no page, no click)" if auto
                              else "sign in once at the helper")
-                    record("[%s] %s, then Kura, Niwa, Konbini, landing and Hister with no prompt" % (engine, first),
+                    record("[%s] %s, then Kura, Niwa, Konbini, landing and Nogon with no prompt" % (engine, first),
                            (not shown if auto else at_signin) and back.startswith(U["kura"]) and ok_kura
-                           and all(a and b for a, b in rooms.values()) and hister_in,
-                           "kura -> sign-in page shown %s, back at %s; rooms (no prompt, content) %s; Hister UI signed "
-                           "in %s" % (bool(shown) or at_signin, back, rooms, hister_in))
+                           and all(a and b for a, b in rooms.values()) and nogon_in,
+                           "kura -> sign-in page shown %s, back at %s; rooms (no prompt, content) %s; Nogon UI signed "
+                           "in %s" % (bool(shown) or at_signin, back, rooms, nogon_in))
                     record("[%s] Kura's search page finds 'chochin'" % engine, found, "")
                     jar = {c["name"]: c for c in ctx.cookies()}
                     pre = "__Host-" if base.startswith("https://") else ""
@@ -537,7 +538,7 @@ def browser_checks(data, password, shots, base, sso_cookie="machiya_sso", denv=N
                            "cookies %s; %s" % (sorted(jar), host_only))
                     # sign out everywhere from the helper's sessions page; the rooms send you back to sign in, and
                     # (the automatic sign-in) the helper shows its page instead of signing you straight back in
-                    p.goto(U["hister"] + "/machiya/sessions")
+                    p.goto(U["nogon"] + "/machiya/sessions")
                     p.click("button[value=all]")
                     p.wait_for_load_state("networkidle")
                     deadline, out = time.time() + 45, False
@@ -779,7 +780,7 @@ def prefs_checks(pw, U, signin, shots, denv, tok):
     deadline = time.time() + 90
     while time.time() < deadline:
         st, body, _ = http("GET", L(19204, "/machiya/healthz"), timeout=5)
-        if st == 200 and isinstance(body, dict) and body.get("hister") == "ok":
+        if st == 200 and isinstance(body, dict) and body.get("nogon") == "ok":
             break
         time.sleep(2)
     time.sleep(12)                                     # the rooms' health flag (10 s)

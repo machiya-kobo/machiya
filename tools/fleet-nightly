@@ -22,9 +22,10 @@ One run:
 Legs (each OS lists its own in `oses.<os>.legs`):
 
   dev-docker         machiya tools/dev-test VM --packages                      (Linux: the stack in Docker)
-  dev-native         machiya tools/dev-test VM --packages --native  + --hister-bin FILE (`hister_bin`) or
-                     --hister-via <the Hister host> (a kept Docker dev stack on `hister_host`, started on first
-                     need, kept until the last OS that needs it, then stopped)
+  dev-native         machiya tools/dev-test VM --packages --native  + --nogon-bin FILE (`nogon_bin`) or
+                     --nogon-via <the Nogon host> (a kept Docker dev stack on `nogon_host`, started on first
+                     need, kept until the last OS that needs it, then stopped). Nogon is the search engine formerly
+                     called Hister: a config's old `hister_bin` and `hister_host` are read as the new names
   stack-quickstart   machiya tools/quickstart-test --with-packages, on the VM  (the README's stack Quickstart)
   shiori-quickstart  machiya tools/quickstart-test --only shiori --with-packages, on the VM  (Shiori from scratch)
   kura-native        kura tools/quickstart-test --only native --ssh VM
@@ -116,7 +117,7 @@ DEFAULTS = {
     "publish": "",                # a shell command that reads nightly.json on stdin
     "lock_dir": "/var/tmp",
     "remote_dir": "/var/tmp/machiya-nightly",
-    "hister_host": "debian",      # the OS whose VM lends its Hister to dev-native legs without a hister_bin
+    "nogon_host": "debian",       # the OS whose VM lends its Nogon to dev-native legs without a nogon_bin
     "order": ["debian", "freebsd", "netbsd", "openbsd", "haiku", "arm64"],
     "oses": {
         "debian": {"vm": "tv-debian", "system": "debian", "legs": LINUX_LEGS},
@@ -151,7 +152,7 @@ def iso(t):
 def load_config(path=None, env=os.environ):
     cfg = copy.deepcopy(DEFAULTS)
     path = path or env.get("FLEET_NIGHTLY_CONFIG") or os.path.expanduser("~/.config/machiya/fleet-nightly.json")
-    used = None
+    used, user = None, {}
     if os.path.isfile(path):
         with open(path, encoding="utf-8") as f:
             user = json.load(f)
@@ -162,6 +163,14 @@ def load_config(path=None, env=os.environ):
             else:
                 cfg[k] = v
         used = path
+    # a config written before Hister became Nogon: its old keys are read as the new ones (a new key, if set, wins)
+    old_host = cfg.pop("hister_host", None)
+    if old_host and "nogon_host" not in user:
+        cfg["nogon_host"] = old_host
+    for o, entry in cfg["oses"].items():
+        old_bin = entry.pop("hister_bin", None)
+        if old_bin and "nogon_bin" not in (user.get("oses") or {}).get(o, {}):
+            entry["nogon_bin"] = old_bin
     for k, var in ENV.items():
         if env.get(var):
             cfg[k] = env[var]
@@ -299,7 +308,7 @@ def tail(path, size=65536):
 
 # ---------------------------------------------------------------- the plan
 
-def leg_spec(leg, entry, cfg, src, hister_vm=None):
+def leg_spec(leg, entry, cfg, src, nogon_vm=None):
     """-> (where, argv-or-script) for one leg; src is the directory of the fresh clones."""
     spec = LEGS[leg]
     vm = entry["vm"]
@@ -308,10 +317,10 @@ def leg_spec(leg, entry, cfg, src, hister_vm=None):
         argv = [py, os.path.join(src, "machiya", "tools", "dev-test"), vm, "--packages", "--siblings", src]
         if leg == "dev-native":
             argv.append("--native")
-            if entry.get("hister_bin"):
-                argv += ["--hister-bin", entry["hister_bin"]]
-            elif hister_vm:
-                argv += ["--hister-via", hister_vm]
+            if entry.get("nogon_bin"):
+                argv += ["--nogon-bin", entry["nogon_bin"]]
+            elif nogon_vm:
+                argv += ["--nogon-via", nogon_vm]
         return "local", argv
     args = spec["args"].format(vm=vm, dir=cfg["remote_dir"])
     if spec["where"] == "local":
@@ -319,14 +328,14 @@ def leg_spec(leg, entry, cfg, src, hister_vm=None):
     return "vm", "cd %s/%s && python3 tools/quickstart-test %s" % (cfg["remote_dir"], spec["repo"], args)
 
 
-def hister_plan(entry, cfg):
-    """How a dev-native leg gets its Hister: ("bin", path), ("via", host os), or ("none", why)."""
-    if entry.get("hister_bin"):
-        return "bin", entry["hister_bin"]
-    host = cfg.get("hister_host")
+def nogon_plan(entry, cfg):
+    """How a dev-native leg gets its Nogon: ("bin", path), ("via", host os), or ("none", why)."""
+    if entry.get("nogon_bin"):
+        return "bin", entry["nogon_bin"]
+    host = cfg.get("nogon_host")
     if host and host in cfg["oses"] and cfg["oses"][host]["vm"] != entry["vm"]:
         return "via", host
-    return "none", "no Hister binary for this OS (set oses.<os>.hister_bin) and it is the Hister host itself"
+    return "none", "no Nogon binary for this OS (set oses.<os>.nogon_bin) and it is the Nogon host itself"
 
 
 def plan(cfg, only_os=None, only_legs=None):
@@ -360,7 +369,7 @@ def print_plan(cfg, entries):
         for leg in e["legs"]:
             hv = None
             if leg == "dev-native":
-                kind, what = hister_plan(e, cfg)
+                kind, what = nogon_plan(e, cfg)
                 if kind == "none":
                     print("  %-18s SKIP: %s" % (leg, what))
                     continue
@@ -377,8 +386,8 @@ def print_plan(cfg, entries):
             print("      timeout %d min" % (LEGS[leg]["timeout"] * slow // 60))
         print("  then: %s stop %s; release the lock" % ("vmctl", e["vm"]))
     if needs_host:
-        h = cfg["oses"][cfg["hister_host"]]
-        print("\nHister host: %s, started on the first dev-native leg that needs it (revert, dev-test %s --packages "
+        h = cfg["oses"][cfg["nogon_host"]]
+        print("\nNogon host: %s, started on the first dev-native leg that needs it (revert, dev-test %s --packages "
               "--keep, holding its lock), stopped after the last." % (h["vm"], h["vm"]))
 
 
@@ -392,9 +401,9 @@ class Runner:
         self.t0 = time.monotonic()
         self.budget_s = budget_s
         self.say = log or (lambda *a: print(*a, flush=True))
-        self.hister = None           # {"os", "vm", "lock", "status", ...} while a Hister host is up
-        self.hister_record = None
-        self.hister_failed = None
+        self.nogon = None            # {"os", "vm", "lock", "status", ...} while a Nogon host is up
+        self.nogon_record = None
+        self.nogon_failed = None
         self.held = {}               # os -> lock file we hold
         self.records = []            # one per OS, appended as it starts, so an abort keeps what ran
 
@@ -450,51 +459,51 @@ class Runner:
                 return "the bootstrap (python3, git) failed"
         return None
 
-    # -- the Hister host: a kept Docker dev stack lending its Hister to dev-native legs (dev-test --hister-via)
+    # -- the Nogon host: a kept Docker dev stack lending its Nogon to dev-native legs (dev-test --nogon-via)
 
-    def hister_up(self, host_os):
-        if self.hister:
+    def nogon_up(self, host_os):
+        if self.nogon:
             return None
-        if self.hister_failed:
-            return self.hister_failed
+        if self.nogon_failed:
+            return self.nogon_failed
         entry = dict(self.cfg["oses"][host_os], os=host_os)
         lock = try_lock(os.path.join(self.cfg["lock_dir"], "testvm-%s.lock" % host_os))
         t = time.monotonic()
-        log = os.path.join(self.logs, "hister-host.log")
+        log = os.path.join(self.logs, "nogon-host.log")
         if lock is None:
-            self.hister_failed = "the Hister host %s is locked by another run" % entry["vm"]
+            self.nogon_failed = "the Nogon host %s is locked by another run" % entry["vm"]
         else:
-            self.say("== Hister host: %s (dev-test --packages --keep)" % entry["vm"])
+            self.say("== Nogon host: %s (dev-test --packages --keep)" % entry["vm"])
             err = self.fresh_vm(entry, log)
             if not err:
                 _, argv = leg_spec("dev-docker", entry, self.cfg, self.src)
                 rc, to = run_logged(argv + ["--keep"], log, min(1800 * entry.get("slow", 1), max(self.remaining(), 60)))
                 if rc or to:
                     err = "its dev stack failed: " + summarize("dev-docker", tail(log), rc or 1)
-            self.hister_record = {"os": host_os, "vm": entry["vm"], "status": "error" if err else "pass",
-                                  "duration_s": int(time.monotonic() - t), "summary": err or summarize("dev-docker", tail(log), 0),
-                                  "log": os.path.relpath(log, self.run_dir)}
+            self.nogon_record = {"os": host_os, "vm": entry["vm"], "status": "error" if err else "pass",
+                                 "duration_s": int(time.monotonic() - t), "summary": err or summarize("dev-docker", tail(log), 0),
+                                 "log": os.path.relpath(log, self.run_dir)}
             if err:
-                self.hister_failed = "the Hister host %s: %s" % (entry["vm"], err)
+                self.nogon_failed = "the Nogon host %s: %s" % (entry["vm"], err)
                 self.vmctl("stop", entry["vm"], log)
                 lock.close()
             else:
-                self.hister = {"os": host_os, "vm": entry["vm"], "lock": lock, "log": log}
-        if self.hister_failed and not self.hister_record:
-            self.hister_record = {"os": host_os, "vm": entry["vm"], "status": "skipped", "duration_s": 0,
-                                  "summary": self.hister_failed}
-        return self.hister_failed
+                self.nogon = {"os": host_os, "vm": entry["vm"], "lock": lock, "log": log}
+        if self.nogon_failed and not self.nogon_record:
+            self.nogon_record = {"os": host_os, "vm": entry["vm"], "status": "skipped", "duration_s": 0,
+                                 "summary": self.nogon_failed}
+        return self.nogon_failed
 
-    def hister_down(self):
-        if self.hister:
-            self.say("== Hister host: stopping %s" % self.hister["vm"])
-            self.vmctl("stop", self.hister["vm"], self.hister["log"])
-            self.hister["lock"].close()
-            self.hister = None
+    def nogon_down(self):
+        if self.nogon:
+            self.say("== Nogon host: stopping %s" % self.nogon["vm"])
+            self.vmctl("stop", self.nogon["vm"], self.nogon["log"])
+            self.nogon["lock"].close()
+            self.nogon = None
 
-    def hister_needed_after(self, index):
+    def nogon_needed_after(self, index):
         for e in self.entries[index + 1:]:
-            if "dev-native" in e["legs"] and hister_plan(e, self.cfg)[0] == "via":
+            if "dev-native" in e["legs"] and nogon_plan(e, self.cfg)[0] == "via":
                 return True
         return False
 
@@ -508,19 +517,19 @@ class Runner:
             return rec
         hv = None
         if leg == "dev-native":
-            kind, what = hister_plan(entry, self.cfg)
+            kind, what = nogon_plan(entry, self.cfg)
             if kind == "none":
                 rec["summary"] = what
                 return rec
             if kind == "bin" and not os.path.isfile(what):
-                rec.update(status="error", summary="hister_bin %s is missing here" % os.path.basename(what))
+                rec.update(status="error", summary="nogon_bin %s is missing here" % os.path.basename(what))
                 return rec
             if kind == "via":
-                err = self.hister_up(what)
+                err = self.nogon_up(what)
                 if err:
                     rec.update(status="error", summary=err)
                     return rec
-                hv = self.hister["vm"]
+                hv = self.nogon["vm"]
         log = os.path.join(self.logs, "%s-%s.log" % (entry["os"], leg))
         rec["log"] = os.path.relpath(log, self.run_dir)
         where, cmd = leg_spec(leg, entry, self.cfg, self.src, hv)
@@ -555,8 +564,8 @@ class Runner:
         rec = {"os": o, "vm": entry["vm"], "status": "skipped", "legs": [], "started": iso(now()), "duration_s": 0}
         self.records.append(rec)
         t = time.monotonic()
-        if self.hister and self.hister["vm"] == entry["vm"]:
-            self.hister_down()        # the Hister host's VM is this OS's VM: give it back first
+        if self.nogon and self.nogon["vm"] == entry["vm"]:
+            self.nogon_down()         # the Nogon host's VM is this OS's VM: give it back first
         if self.remaining() < 60:
             rec["reason"] = "the time budget is spent"
             rec["legs"] = [{"leg": l, "title": LEGS[l]["title"], "status": "skipped", "summary": rec["reason"]}
@@ -586,12 +595,12 @@ class Runner:
                 rec["cleanup"] = "the stop failed"
             lock.close()
             self.held.pop(o, None)
-            if self.hister and not self.hister_needed_after(index):
-                self.hister_down()
+            if self.nogon and not self.nogon_needed_after(index):
+                self.nogon_down()
         return rec
 
     def cleanup(self):
-        self.hister_down()
+        self.nogon_down()
         for o, lock in list(self.held.items()):
             self.vmctl("stop", self.cfg["oses"][o]["vm"], os.path.join(self.logs, "%s-vmctl.log" % o))
             lock.close()
@@ -637,9 +646,9 @@ def human(result):
                                              for r, s in result["sources"].items()))
     if result.get("error"):
         lines.append("runner error: " + result["error"])
-    h = result.get("hister_host")
+    h = result.get("nogon_host")
     if h:
-        lines.append("Hister host %s: %s, %s (%s)" % (h["vm"], h["status"], dur(h["duration_s"]), h["summary"]))
+        lines.append("Nogon host %s: %s, %s (%s)" % (h["vm"], h["status"], dur(h["duration_s"]), h["summary"]))
     for o in result["oses"]:
         lines.append("%-8s %-7s %s" % (o["os"], o["status"].upper(), o.get("reason", "")))
         for l in o["legs"]:
@@ -737,8 +746,9 @@ def main(argv=None):
         runner.cleanup()
         result["duration_s"] = int(time.monotonic() - t0)
         result["budget_exhausted"] = runner.remaining() < 60
-        if runner.hister_record:
-            result["hister_host"] = runner.hister_record
+        if runner.nogon_record:
+            result["nogon_host"] = runner.nogon_record
+            result["hister_host"] = runner.nogon_record     # its old name, which genkan reads, until it reads nogon_host
         done = {o["os"] for o in result["oses"]}
         for e in entries:              # the OSes an abort or error left out still show up, as skipped
             if e["os"] not in done:

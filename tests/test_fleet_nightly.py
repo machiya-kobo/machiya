@@ -28,13 +28,30 @@ class Config(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = os.path.join(d, "c.json")
             with open(p, "w") as f:
-                json.dump({"budget_minutes": 30, "vmctl": "from-file", "oses": {"freebsd": {"hister_bin": "/x/hister"}}}, f)
+                json.dump({"budget_minutes": 30, "vmctl": "from-file", "oses": {"freebsd": {"nogon_bin": "/x/nogon"}}}, f)
             cfg = fn.load_config(p, env={"FLEET_VMCTL": "from-env"})
         self.assertEqual(cfg["budget_minutes"], 30)
         self.assertEqual(cfg["vmctl"], "from-env")
-        self.assertEqual(cfg["oses"]["freebsd"]["hister_bin"], "/x/hister")
+        self.assertEqual(cfg["oses"]["freebsd"]["nogon_bin"], "/x/nogon")
         self.assertEqual(cfg["oses"]["freebsd"]["vm"], "tv-freebsd")          # the rest of the entry is kept
-        self.assertNotIn("hister_bin", fn.DEFAULTS["oses"]["freebsd"])        # the defaults are not touched
+        self.assertNotIn("nogon_bin", fn.DEFAULTS["oses"]["freebsd"])         # the defaults are not touched
+
+    def test_old_names_read_as_new(self):
+        """A config from before Hister became Nogon: hister_bin and hister_host count, and a new key set beside wins."""
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "c.json")
+            with open(p, "w") as f:
+                json.dump({"hister_host": "arm64", "oses": {"freebsd": {"hister_bin": "/x/hister"},
+                                                            "netbsd": {"hister_bin": "/old", "nogon_bin": "/new"}}}, f)
+            cfg = fn.load_config(p, env={})
+            self.assertEqual(cfg["nogon_host"], "arm64")
+            self.assertNotIn("hister_host", cfg)
+            self.assertEqual(cfg["oses"]["freebsd"]["nogon_bin"], "/x/hister")
+            self.assertNotIn("hister_bin", cfg["oses"]["freebsd"])
+            self.assertEqual(cfg["oses"]["netbsd"]["nogon_bin"], "/new")
+            with open(p, "w") as f:
+                json.dump({"hister_host": "arm64", "nogon_host": "debian"}, f)
+            self.assertEqual(fn.load_config(p, env={})["nogon_host"], "debian")
 
     def test_remote_dir_must_be_plain(self):
         with tempfile.TemporaryDirectory() as d:
@@ -45,16 +62,16 @@ class Config(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     fn.load_config(p, env={})
 
-    def test_plan_filters_and_hister(self):
+    def test_plan_filters_and_nogon(self):
         cfg = fn.load_config("/nonexistent", env={})
         entries = fn.plan(cfg, ["debian", "haiku"], ["dev-native", "dev-docker"])
         self.assertEqual([e["os"] for e in entries], ["debian", "haiku"])
         self.assertEqual(entries[0]["legs"], ["dev-docker", "dev-native"])
-        self.assertEqual(fn.hister_plan(entries[0], cfg)[0], "none")           # the Hister host can't borrow from itself
-        self.assertEqual(fn.hister_plan(entries[1], cfg), ("via", "debian"))
+        self.assertEqual(fn.nogon_plan(entries[0], cfg)[0], "none")            # the Nogon host can't borrow from itself
+        self.assertEqual(fn.nogon_plan(entries[1], cfg), ("via", "debian"))
         where, argv = fn.leg_spec("dev-native", entries[1], cfg, "/s", "tv-debian")
         self.assertEqual(where, "local")
-        self.assertEqual(argv[-3:], ["--native", "--hister-via", "tv-debian"])
+        self.assertEqual(argv[-3:], ["--native", "--nogon-via", "tv-debian"])
         where, script = fn.leg_spec("niwa-native", dict(cfg["oses"]["freebsd"], os="freebsd"), cfg, "/s")
         self.assertEqual((where, script), ("vm", "cd /var/tmp/machiya-nightly/niwa && python3 tools/quickstart-test "
                                                  "--only native --with-packages"))

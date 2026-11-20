@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Micheal Waltz and Machiya contributors
-"""dev - the Machiya dev stack: every service, synthetic data only, Hister's users as the sign-in (docs/dev-stack.md).
+"""dev - the Machiya dev stack: every service, synthetic data only, Nogon's users as the sign-in (docs/dev-stack.md).
 
     ./dev init [--url URL] [--behind-serve] [--bind ADDR] [--data DIR] [--native] [--siblings DIR]
                [--tailnet-users LOGINS] [--project NAME] [--signin-provider oidc|""] [--auth-legacy none]
-    ./dev up                 build and start everything (the vault mirror first), wait, then seed Hister once
-    ./dev seed               (again) the synthetic Hister corpus: pages, labels, collections, history; idempotent
+    ./dev up                 build and start everything (the vault mirror first), wait, then seed Nogon once
+    ./dev seed               (again) the synthetic Nogon corpus: pages, labels, collections, history; idempotent
     ./dev check [--browser] [--shots DIR]   the checks (HTTP; --browser adds Playwright, Chromium and WebKit)
     ./dev status             the addresses, and what runs
     ./dev logs SERVICE       a service's log
@@ -19,13 +19,15 @@ The public base is https://localhost by default: `front` terminates TLS with a t
 
 init writes $DEV_DATA (default: ./data here; `--data` or MACHIYA_DEV_DATA elsewhere, remembered in .data-dir): the
 sample vault plus seed/vault as a bare git repository with fixed commit dates (the same commit on every machine), the
-board's clone, generated secrets (0600, never printed: the dummy owner's password and Hister token, the OIDC client
-secret, SearXNG's secret, the fake NewsBlur's token), the dummy owner in Hister (`hister create-user` in a pseudo-TTY),
-bound to the stub OIDC provider's login, and dev.env (the compose's settings: no secrets in it).
+board's clone, generated secrets (0600, never printed: the dummy owner's password and Nogon token, the OIDC client
+secret, SearXNG's secret, the fake NewsBlur's token), the dummy owner in Nogon (`nogon user create --offline` in a
+pseudo-TTY), bound to the stub OIDC provider's login, and dev.env (the compose's settings: no secrets in it).
+Nogon is the search engine formerly called Hister (renamed upstream at v0.22); a stack made before the rename is
+brought over at `up` (its data folder, its env file and its dev.env names, see upgrade()).
 
 Engines: rootless podman (`podman compose`, a user API socket is started under $DEV_DATA when DOCKER_HOST is unset),
 Docker (`docker compose`), or --native: every service as a plain process from the checkouts (compose.yml's x-native
-blocks; Hister from $HISTER_BIN or `hister` on PATH, SearXNG optional), for hosts without containers.
+blocks; Nogon from $NOGON_BIN or `nogon` on PATH, SearXNG optional), for hosts without containers.
 The rooms are built from checkouts of kura, niwa and konbini next to the machiya checkout (or --siblings).
 Standard library only (--native also needs pyyaml, which the rooms need anyway).
 """
@@ -51,17 +53,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MACHIYA = os.path.dirname(os.path.dirname(HERE))
 PROJECT = "machiya-dev"                            # the default; --project at init for a second stack beside it
 ADDR = ["127.0.0.1"]                              # where this machine reaches the published ports (DEV_BIND)
-HISTER_IMAGE = "ghcr.io/asciimoo/hister:v0.20.0"
+# Nogon (formerly Hister) v0.22.0, the multi-arch index, as in compose.yml (the same pin: change both together)
+NOGON_IMAGE = "ghcr.io/asciimoo/nogon:v0.22.0@sha256:d1b427c7f876e64e6212e000df60d33c2e418b60372582b56cfee719eafd4107"
 OWNER = "owner"
 OIDC_ID = "oidc-owner@dev.idp.example"            # the stub provider's login, bound to the owner (STUB_EMAIL in compose)
 SEED_DATE = "2026-10-01T00:00:00Z"                # the vault commit's date: the same hash everywhere
 PORTS = [  # (port, name, path to show)
     (19200, "landing", "/"), (19201, "kura", "/"), (19202, "niwa", "/"), (19203, "konbini", "/"),
-    (19204, "hister", "/"), (19205, "searxng", "/"), (19206, "machiya-mcp", "/mcp"), (19207, "smallweb", "/"),
+    (19204, "nogon", "/"), (19205, "searxng", "/"), (19206, "machiya-mcp", "/mcp"), (19207, "smallweb", "/"),
     (19208, "stub-oidc", "/.well-known/openid-configuration"), (19209, "fixtures", "/"),
     (19210, "fake-newsblur", "/healthz"), (19211, "niwa-gemini", ""), (19212, "niwa-gopher", ""),
     (19213, "fake-forgejo", "/healthz"), (19214, "fake-github", "/healthz"),
-    (19224, "hister-plain", "/mcp"), (19226, "mcp-plain", "/mcp")]
+    (19224, "nogon-plain", "/mcp"), (19226, "mcp-plain", "/mcp")]
 FRONT_PORTS = range(19200, 19209)                  # behind `front` (https, or http behind a real Serve)
 UNVERIFIED = ssl._create_unverified_context()      # the throwaway dev CA, from this machine to itself only
 
@@ -105,9 +108,15 @@ def load(data):
     if not os.path.exists(envf):
         die("no dev stack at %s: run ./dev init first" % data)
     env = read_env(envf)
+    for old, new in RENAMED_ENV.items():          # a dev.env written before the rename (Hister is now Nogon)
+        if old in env:
+            env.setdefault(new, env.pop(old))
     SCHEME["front"] = env.get("DEV_FRONT_SCHEME", "https")
     ADDR[0] = local_addr(env)
     return env
+
+
+RENAMED_ENV = {"HISTER_BIN": "NOGON_BIN", "DEV_REMOTE_HISTER": "DEV_REMOTE_NOGON"}    # dev.env: old -> new
 
 
 def project(env):
@@ -197,12 +206,12 @@ RATE_RE = re.compile(r"toomanyrequests|rate exceeded|too many requests|\b429\b",
 
 
 def stack_images(env):
-    """Every image the stack needs from a registry, each once: Hister's (init's create-user), compose.yml's `image:`s,
+    """Every image the stack needs from a registry, each once: Nogon's (init's user create), compose.yml's `image:`s,
     and the FROMs of the Dockerfiles it builds (their ARG defaults filled in; stage names and unreadable files left
     out)."""
     with open(os.path.join(HERE, "compose.yml")) as f:
         text = f.read()
-    images = [HISTER_IMAGE] + re.findall(r"^\s+image:\s*(\S+)", text, re.M)
+    images = [NOGON_IMAGE] + re.findall(r"^\s+image:\s*(\S+)", text, re.M)
     for spec in re.findall(r"^\s+build:\s*(.+?)\s*$", text, re.M):
         m = re.fullmatch(r"\{\s*context:\s*([^,]+?)\s*,\s*dockerfile:\s*([^}]+?)\s*\}", spec)
         ctx, dockerfile = (m.group(1), m.group(2)) if m else (spec, "Dockerfile")
@@ -257,27 +266,36 @@ def make_secrets(data):
 
     put("owner-password", secrets.token_urlsafe(18))
     put("oidc-client-secret", secrets.token_urlsafe(24))
-    put("hister.env", "HISTER__SERVER__OAUTH__OIDC__CLIENT_SECRET=" + secret(data, "oidc-client-secret"))
+    put("nogon.env", "NOGON__SERVER__OAUTH__OIDC__CLIENT_SECRET=" + secret(data, "oidc-client-secret"))
     put("searxng.env", "SEARXNG_SECRET=" + secrets.token_hex(32))
     put("newsblur-token", "devnb_" + secrets.token_urlsafe(24))
     put("forgejo-token", "devfj_" + secrets.token_urlsafe(24))           # code-import's fake forges
     put("github-lantern-token", "devgh_" + secrets.token_urlsafe(24))
     put("github-workshop-token", "devgh_" + secrets.token_urlsafe(24))
     # a room token (nogon-login 0.3.0) for the stack's own callers of the rooms (machiya-mcp, Niwa -> Konbini,
-    # landing's owner reads) and for agents: registered with the helper at `up` (token add), never Hister's token
+    # landing's owner reads) and for agents: registered with the helper at `up` (token add), never Nogon's token
     put("room-token", "mht_" + secrets.token_urlsafe(32))
 
 
-DATA_DIRS = ("hister", "login", "kura", "niwa", "konbini", "mirror", "landing", "mcp", "smallweb", "feed-import",
+DATA_DIRS = ("nogon", "login", "kura", "niwa", "konbini", "mirror", "landing", "mcp", "smallweb", "feed-import",
              "code-import", "logs")
 
 
 def upgrade(data, env):
     """A stack made before a service joined gets that service's folder and generated secrets (only missing ones:
-    nothing existing, the owner's token included, ever changes)."""
+    nothing existing, the owner's token included, ever changes). A stack made before Hister became Nogon gets its
+    engine's folder renamed (hister/ -> nogon/: the same data, which v0.22 reads as it is) and its env file made again
+    under the new name (secrets/nogon.env, from the same OIDC client secret); the old file goes."""
+    old, new = os.path.join(data, "hister"), os.path.join(data, "nogon")
+    if os.path.isdir(old) and not os.path.exists(new):
+        os.rename(old, new)
+        say("the engine's data folder is now %s (formerly hister/)" % new)
     for d in DATA_DIRS:
         os.makedirs(os.path.join(data, d), exist_ok=True)
     make_secrets(data)
+    stale = os.path.join(data, "secrets", "hister.env")
+    if os.path.exists(stale) and os.path.exists(os.path.join(data, "secrets", "nogon.env")):
+        os.unlink(stale)
 
 
 def git(*args, cwd=None, env=None):
@@ -338,51 +356,51 @@ def make_vault(data):
     return head
 
 
-def hister_cmd(env, data, *args, tty=False):
-    """The hister CLI on the dev Hister's data (Hister itself stopped or not started yet)."""
-    conf = os.path.join(HERE, "config", "hister.yml")
+def nogon_cmd(env, data, *args, tty=False):
+    """The nogon CLI on the dev Nogon's data (Nogon itself stopped or not started yet). The image keeps upstream's
+    /hister/... paths."""
+    conf = os.path.join(HERE, "config", "nogon.yml")
     if env["DEV_ENGINE"] == "native":
-        e = dict(HISTER_CONFIG=conf, HISTER_DATA_DIR=os.path.join(data, "hister"), HISTER__APP__USER_HANDLING="true",
+        e = dict(NOGON_CONFIG=conf, NOGON_DATA_DIR=os.path.join(data, "nogon"), NOGON__APP__USER_HANDLING="true",
                  # the CLI loads the server config too, and refuses 0.0.0.0 without a base URL (found on tv-freebsd)
-                 HISTER__SERVER__BASE_URL=env.get("DEV_URL", "http://127.0.0.1") + ":19204",
-                 **read_env(os.path.join(data, "secrets", "hister.env")))
-        return [env.get("HISTER_BIN") or "hister"] + list(args), e
+                 NOGON__SERVER__BASE_URL=env.get("DEV_URL", "http://127.0.0.1") + ":19204",
+                 **read_env(os.path.join(data, "secrets", "nogon.env")))
+        return [env.get("NOGON_BIN") or "nogon"] + list(args), e
     cmd = [env["DEV_ENGINE"], "run", "--rm"] + (["-it"] if tty else []) + [
-        "--env-file", os.path.join(data, "secrets", "hister.env"),
-        "-e", "HISTER_CONFIG=/hister/config.yml", "-e", "HISTER__APP__USER_HANDLING=true",
-        "-v", "%s:/hister/data" % os.path.join(data, "hister"), "-v", "%s:/hister/config.yml:ro" % conf,
+        "--env-file", os.path.join(data, "secrets", "nogon.env"),
+        "-e", "NOGON_CONFIG=/hister/config.yml", "-e", "NOGON__APP__USER_HANDLING=true",
+        "-v", "%s:/hister/data" % os.path.join(data, "nogon"), "-v", "%s:/hister/config.yml:ro" % conf,
         "--user", "%s:%s" % (env["DEV_UID"], env["DEV_GID"])]
     if env.get("DEV_USERNS"):
         cmd += ["--userns", env["DEV_USERNS"]]
-    return cmd + [HISTER_IMAGE] + list(args), {}
+    return cmd + [NOGON_IMAGE] + list(args), {}
 
 
 def make_owner(env, data):
-    """The dummy owner: `hister create-user` (it insists on a TTY: tty_create_user.py types the password from its file),
-    its token to secrets/owner-token, and the stub OIDC login bound to it (as tsidp's is bound in production)."""
+    """The dummy owner: `nogon user create --offline` with the server stopped (it insists on a TTY:
+    tty_create_user.py types the password from its file; v0.22 dropped `create-user` and `show-user`), its token
+    from the database to secrets/owner-token, and the stub OIDC login bound to it (as tsidp's is in production)."""
     tok = os.path.join(data, "secrets", "owner-token")
     if os.path.exists(tok) and os.path.getsize(tok):
         return
-    cmd, extra = hister_cmd(env, data, "create-user", OWNER, "--admin", tty=True)
+    cmd, extra = nogon_cmd(env, data, "user", "create", OWNER, "--admin", "--offline", tty=True)
     r = subprocess.run([sys.executable, os.path.join(MACHIYA, "stack", "nogon-login", "dev", "tty_create_user.py"),
                         os.path.join(data, "secrets", "owner-password")] + cmd,
                        env=dict(os.environ, **extra), capture_output=True, text=True)
     if r.returncode != 0 or "User created" not in r.stdout:
-        die("hister create-user failed: %s %s" % (r.stdout.strip()[-500:], r.stderr.strip()[-500:]))
-    cmd, extra = hister_cmd(env, data, "show-user", OWNER, "--token")
-    r = subprocess.run(cmd, env=dict(os.environ, **extra), capture_output=True, text=True)
-    plain = re.sub(r"\x1b\[[0-9;]*m", "", r.stdout)
-    m = re.search(r"^\s*Token\s*:\s*(\S+)", plain, re.M)
-    if not m:
-        die("hister show-user gave no token (exit %d)" % r.returncode)
+        die("nogon user create failed: %s %s" % (r.stdout.strip()[-500:], r.stderr.strip()[-500:]))
+    db = sqlite3.connect(os.path.join(data, "nogon", "db.sqlite3"))
+    row = db.execute("SELECT token FROM users WHERE username = ?", (OWNER,)).fetchone()
+    if not row or not row[0]:
+        db.close()
+        die("nogon user create made no token for %s" % OWNER)
     fd = os.open(tok, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
-        f.write(m.group(1) + "\n")
-    db = sqlite3.connect(os.path.join(data, "hister", "db.sqlite3"))
+        f.write(row[0] + "\n")
     db.execute("UPDATE users SET o_auth_id = ? WHERE username = ?", (OIDC_ID, OWNER))
     db.commit()
     db.close()
-    say("Hister owner '%s' made (password and token in %s, not shown); OIDC login bound" % (OWNER, os.path.dirname(tok)))
+    say("Nogon owner '%s' made (password and token in %s, not shown); OIDC login bound" % (OWNER, os.path.dirname(tok)))
 
 
 def cmd_init(a):
@@ -408,16 +426,16 @@ def cmd_init(a):
         die("--auth-legacy is none, or a list of domain-cookie and hister-token")
     if a.signin_provider not in ("", "oidc"):
         die("--signin-provider is oidc (the stub OIDC provider, as tsidp in production) or empty (the helper's page)")
-    remote = getattr(a, "remote_hister", None)
+    remote = getattr(a, "remote_nogon", None)
     if remote and engine != "native":
-        die("--remote-hister is for --native (a host that can't run Hister, such as Haiku)")
+        die("--remote-nogon is for --native (a host that can't run Nogon, such as Haiku)")
     os.makedirs(data, exist_ok=True)
-    if remote:      # the other stack's dummy owner and OIDC secret, so its Hister (through a tunnel) knows us
+    if remote:      # the other stack's dummy owner and OIDC secret, so its Nogon (through a tunnel) knows us
         os.makedirs(os.path.join(data, "secrets"), mode=0o700, exist_ok=True)
-        for name in ("owner-password", "owner-token", "oidc-client-secret", "hister.env"):
+        for name in ("owner-password", "owner-token", "oidc-client-secret"):     # nogon.env is made from the last
             src, dst = os.path.join(remote, name), os.path.join(data, "secrets", name)
             if not os.path.isfile(src):
-                die("--remote-hister %s has no %s (copy the Hister host's $DEV_DATA/secrets)" % (remote, name))
+                die("--remote-nogon %s has no %s (copy the Nogon host's $DEV_DATA/secrets)" % (remote, name))
             shutil.copyfile(src, dst)
             os.chmod(dst, 0o600)
     for d in DATA_DIRS:
@@ -439,23 +457,23 @@ def cmd_init(a):
         "KONBINI_SRC": os.path.join(siblings, "konbini"),
         "DEV_UID": str(os.getuid()), "DEV_GID": str(os.getgid()), "DEV_USERNS": userns,
         "DEV_COOKIE_DOMAIN": a.cookie_domain or "", "DEV_TAILNET_USERS": a.tailnet_users or "owner@dev",
-        "DEV_SSO_COOKIE": a.sso_cookie or "", "DEV_REMOTE_HISTER": os.path.abspath(remote) if remote else "",
+        "DEV_SSO_COOKIE": a.sso_cookie or "", "DEV_REMOTE_NOGON": os.path.abspath(remote) if remote else "",
         "DEV_PROJECT": a.project or PROJECT, "DEV_SIGNIN_PROVIDER": a.signin_provider,
         "DEV_AUTH_LEGACY": getattr(a, "auth_legacy", "") or "",
         "DEV_FRONT_SCHEME": "https" if tls else "http",
         "DEV_TLS_CERT": "/certs/tls.crt" if tls else "", "DEV_TLS_KEY": "/certs/tls.key" if tls else "",
     }
-    if engine == "native" and os.environ.get("HISTER_BIN"):
-        env["HISTER_BIN"] = os.path.abspath(os.environ["HISTER_BIN"])
+    if engine == "native" and os.environ.get("NOGON_BIN"):
+        env["NOGON_BIN"] = os.path.abspath(os.environ["NOGON_BIN"])
     pointer = os.path.join(HERE, ".data-dir")
     if data != os.path.join(HERE, "data") and not os.path.exists(pointer):    # the first stack made here is the default
         with open(pointer, "w") as f:
             f.write(data + "\n")
     if engine != "native":
-        pull_images(engine, [HISTER_IMAGE])
-    elif not remote and not shutil.which(env.get("HISTER_BIN") or "hister"):
-        die("--native needs the hister binary: HISTER_BIN=/path/to/hister or `hister` on PATH, or --remote-hister "
-            "(docs/dev-stack.md)")
+        pull_images(engine, [NOGON_IMAGE])
+    elif not remote and not shutil.which(env.get("NOGON_BIN") or "nogon"):
+        die("--native needs the nogon binary (v0.22 or later): NOGON_BIN=/path/to/nogon or `nogon` on PATH, or "
+            "--remote-nogon (docs/dev-stack.md)")
     if not remote:
         make_owner(env, data)
     with open(os.path.join(data, "dev.env"), "w") as f:            # last: its presence means "initialised"
@@ -525,7 +543,7 @@ PROCS = {}          # native: the services this `up` started, so a wait can tell
 def native_up(env, data):
     run = os.path.join(data, "run")
     os.makedirs(run, exist_ok=True)
-    order = ["stub-idp", "hister", "nogon-login", "front", "fixtures", "fake-newsblur", "vault-mirror", "kura",
+    order = ["stub-idp", "nogon", "nogon-login", "front", "fixtures", "fake-newsblur", "vault-mirror", "kura",
              "niwa", "konbini", "landing", "smallweb", "machiya-mcp", "feed-import", "fake-forgejo", "fake-github",
              "code-import"]
     plan = {p[0]: p for p in native_plan(env)}
@@ -541,11 +559,11 @@ def native_up(env, data):
                 continue                                   # already running
             except (OSError, ValueError):
                 pass
-        if name == "hister" and env.get("DEV_REMOTE_HISTER"):
-            say("hister: remote (127.0.0.1:19224 is a tunnel to the Hister host's stack)")
+        if name == "nogon" and env.get("DEV_REMOTE_NOGON"):
+            say("nogon: remote (127.0.0.1:19224 is a tunnel to the Nogon host's stack)")
             continue
-        if name == "hister" and not shutil.which(cmd[0]):
-            say("hister: no binary (%s): skipped; the rooms answer 503 until a Hister runs on 127.0.0.1:19224" % cmd[0])
+        if name == "nogon" and not shutil.which(cmd[0]):
+            say("nogon: no binary (%s): skipped; the rooms answer 503 until a Nogon runs on 127.0.0.1:19224" % cmd[0])
             continue
         log = open(os.path.join(data, "logs", name + ".log"), "ab")
         e = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONDONTWRITEBYTECODE="1", **extra)
@@ -715,10 +733,10 @@ def cmd_up(a):
             time.sleep(10 * (attempt + 1))
             pull_images(env["DEV_ENGINE"], images)    # an image compose failed to pull: serially, with the backoff
     say("waiting for the services")
-    wait_for(lambda: ready(19224, "/health"), 120, "Hister (19224/health)",
-             None if env.get("DEV_REMOTE_HISTER") else "hister")
+    wait_for(lambda: ready(19224, "/health"), 120, "Nogon (19224/health)",
+             None if env.get("DEV_REMOTE_NOGON") else "nogon")
     wait_for(lambda: ready(19204, "/health"), 60, "the front (19204)", "front")
-    wait_for(lambda: ready(19204, "/machiya/healthz", lambda b: b.get("hister") == "ok"), 60, "the helper",
+    wait_for(lambda: ready(19204, "/machiya/healthz", lambda b: b.get("nogon") == "ok"), 60, "the helper",
              "nogon-login")
     register_room_token(env, data)
     wait_for(lambda: ready(19201, "/api/status", lambda b: b.get("ready")), 180, "Kura", "kura")
@@ -744,12 +762,12 @@ def html_text(path):
 
 
 def seed(env, data, quiet=False):
-    """The synthetic Hister corpus (seed/hister.json), through Hister's API with the dummy owner's token. Idempotent:
-    a page is re-added only when Hister doesn't have it, aliases are set, history entries added once."""
-    with open(os.path.join(HERE, "seed", "hister.json")) as f:
+    """The synthetic Nogon corpus (seed/nogon.json), through Nogon's API with the dummy owner's token. Idempotent:
+    a page is re-added only when Nogon doesn't have it, aliases are set, history entries added once."""
+    with open(os.path.join(HERE, "seed", "nogon.json")) as f:
         spec = json.load(f)
-    h = {"Origin": "hister://", "Accept": "application/json", "X-Access-Token": secret(data, "owner-token")}
-    base = local(19224)                                  # Hister itself, plain
+    h = {"Origin": "nogon://", "Accept": "application/json", "X-Access-Token": secret(data, "owner-token")}
+    base = local(19224)                                  # Nogon itself, plain
     added = 0
     for p in spec["pages"]:
         st, _ = http("GET", base + "/api/document?" + urllib.parse.urlencode({"url": p["url"]}), headers=h)
@@ -761,7 +779,7 @@ def seed(env, data, quiet=False):
                "metadata": {"source": "dev-seed"}}
         st, out = http("POST", base + "/api/add", doc, headers=h)
         if st not in (200, 201):
-            die("Hister refused %s: HTTP %d %s" % (p["url"], st, str(out)[:200]))
+            die("Nogon refused %s: HTTP %d %s" % (p["url"], st, str(out)[:200]))
         added += 1
     st, rules = http("GET", base + "/api/rules", headers=h)
     have = (rules or {}).get("aliases") or {} if isinstance(rules, dict) else {}
@@ -769,7 +787,7 @@ def seed(env, data, quiet=False):
         if have.get(k) != v:
             st, _ = http("POST", base + "/api/add_alias", {"alias-keyword": k, "alias-value": v}, headers=h, form=True)
             if st != 200:
-                die("Hister refused the alias @%s: HTTP %d" % (k, st))
+                die("Nogon refused the alias @%s: HTTP %d" % (k, st))
     st, hist = http("GET", base + "/api/history?opened=true", headers=h)
     items = (hist or {}).get("documents") or [] if isinstance(hist, dict) else []
     seen = {(i.get("url"), i.get("query")) for i in items if isinstance(i, dict)}
@@ -777,11 +795,11 @@ def seed(env, data, quiet=False):
         if (entry["url"], entry["query"]) not in seen:
             st, _ = http("POST", base + "/api/history", entry, headers=h)
             if st != 200:
-                die("Hister refused a history entry: HTTP %d" % st)
+                die("Nogon refused a history entry: HTTP %d" % st)
     with open(os.path.join(data, "seeded.json"), "w") as f:
         json.dump({"pages": len(spec["pages"]), "aliases": sorted(spec["aliases"]), "history": len(spec["history"]),
                    "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, f)
-    say("seeded Hister: %d page(s) added (%d in the seed), %d alias(es), %d history entr(ies)" % (
+    say("seeded Nogon: %d page(s) added (%d in the seed), %d alias(es), %d history entr(ies)" % (
         added, len(spec["pages"]), len(spec["aliases"]), len(spec["history"])))
 
 
@@ -806,7 +824,7 @@ def status(env, data):
         print("  TLS: the throwaway dev CA is %s (trust it in a browser, or accept the warning)"
               % os.path.join(data, "certs", "ca.crt"))
     print("  agents: MACHIYA_MCP_URL=http://%s:19226/mcp MACHIYA_TOKEN_FILE=%s (pages, notes and the board; a room "
-          "token for the rooms, machiya-mcp and smallweb, never Hister; Hister's own MCP is not for AI clients)"
+          "token for the rooms, machiya-mcp and smallweb, never Nogon; Nogon's own MCP is not for AI clients)"
           % (ADDR[0], os.path.join(data, "secrets", "room-token")))
     print("  sign-in: each room keeps its own host-only cookie (nogon-login 0.3.0); legacy: %s"
           % (env.get("DEV_AUTH_LEGACY") or "domain-cookie,hister-token (the default)"))
@@ -854,7 +872,7 @@ def cmd_reset(a):
                               engine=env["DEV_ENGINE"] if env["DEV_ENGINE"] != "native" else None,
                               siblings=os.path.dirname(env["KURA_SRC"]), tailnet_users=env.get("DEV_TAILNET_USERS"),
                               cookie_domain=env.get("DEV_COOKIE_DOMAIN"), sso_cookie=env.get("DEV_SSO_COOKIE"),
-                              remote_hister=env.get("DEV_REMOTE_HISTER") or None,
+                              remote_nogon=env.get("DEV_REMOTE_NOGON") or None,
                               project=env.get("DEV_PROJECT") or PROJECT,
                               signin_provider=env.get("DEV_SIGNIN_PROVIDER", ""),
                               auth_legacy=env.get("DEV_AUTH_LEGACY", ""))
@@ -889,8 +907,8 @@ def main():
     p.add_argument("--siblings", help="where the kura, niwa and konbini checkouts are (default: next to machiya)")
     p.add_argument("--tailnet-users", help="Niwa's and Konbini's fallback login(s) (default owner@dev)")
     p.add_argument("--cookie-domain", help="MACHIYA_COOKIE_DOMAIN (default: none, host-only cookies)")
-    p.add_argument("--remote-hister", metavar="SECRETS_DIR",
-                   help="--native without a local Hister: use the Hister on 127.0.0.1:19224 (an ssh tunnel to another "
+    p.add_argument("--remote-nogon", metavar="SECRETS_DIR",
+                   help="--native without a local Nogon: use the Nogon on 127.0.0.1:19224 (an ssh tunnel to another "
                         "dev stack) with that stack's secrets, copied to SECRETS_DIR")
     p.add_argument("--sso-cookie", help="MACHIYA_SSO_COOKIE, the sign-in cookie's name (default machiya_sso; "
                                         "machiya_dev_sso where a production stack shares the cookie domain)")
@@ -901,7 +919,7 @@ def main():
                         "signs itself in through the stub OIDC provider) or '' (the helper's page)")
     p.add_argument("--auth-legacy", default="",
                    help="NOGON_LOGIN_LEGACY: none (the switch: rooms take only their own cookie, room tokens and apps' "
-                        "ids) or empty (default: the old shared cookie and Hister's raw token still work)")
+                        "ids) or empty (default: the old shared cookie and Nogon's raw token still work)")
     p.set_defaults(fn=cmd_init)
     p = sub.add_parser("up")
     p.add_argument("--verbose", action="store_true")

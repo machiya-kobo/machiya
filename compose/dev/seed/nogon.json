@@ -1,5 +1,5 @@
 {
-  "_comment": "The dev stack's synthetic Hister corpus (dev seed). Pages come from seed/site/<host>/<path> and are added with POST /api/add under http://<host>/<path>; the times are fixed so every machine gets the same index. Everything is invented.",
+  "_comment": "The dev stack's synthetic Nogon corpus (dev seed). Pages come from seed/site/<host>/<path> and are added with POST /api/add under http://<host>/<path>; the times are fixed so every machine gets the same index. Everything is invented.",
   "pages": [
     {"url": "http://lantern-supply.example/", "file": "lantern-supply.example/index.html", "label": "crafts", "added": "2026-09-02T09:00:00Z"},
     {"url": "http://lantern-supply.example/washi-grades.html", "file": "lantern-supply.example/washi-grades.html", "label": "paper", "added": "2026-09-03T10:15:00Z"},

@@ -1,8 +1,8 @@
-# The dev stack's Hister (v0.20.0): users on, the stub OIDC provider, no secrets here. Settings that depend on the dev
-# host come from the environment (HISTER__SERVER__BASE_URL, HISTER__APP__SEARCH_URL); the OIDC client secret from the
-# env file dev init writes under $DEV_DATA/secrets (HISTER__SERVER__OAUTH__OIDC__CLIENT_SECRET). Dev only.
+# The dev stack's Nogon (v0.22.0; formerly Hister): users on, the stub OIDC provider, no secrets here. Settings that
+# depend on the dev host come from the environment (NOGON__SERVER__BASE_URL, NOGON__APP__SEARCH_URL); the OIDC client
+# secret from the env file dev init writes under $DEV_DATA/secrets (NOGON__SERVER__OAUTH__OIDC__CLIENT_SECRET). Dev only.
 app:
-  title: Hister (dev)
+  title: Nogon (dev)
   user_handling: true
   public: false
   redirect_on_no_results: false

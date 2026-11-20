@@ -39,14 +39,14 @@ class Front(unittest.TestCase):
         self.front = load("front", os.path.join(DEV, "front.py"))
 
     def test_routes_longest_prefix_and_exact(self):
-        r = self.front.parse_routes("/=http://hister:4433 /machiya/=http://nogon-login:8080 "
+        r = self.front.parse_routes("/=http://nogon:4433 /machiya/=http://nogon-login:8080 "
                                     "=/api/oauth/callback=http://nogon-login:8080")
         pick = self.front.pick
         self.assertEqual(pick(r, "/machiya/signin?return=x"), ("nogon-login", 8080))
         self.assertEqual(pick(r, "/api/oauth/callback?code=1"), ("nogon-login", 8080))
-        self.assertEqual(pick(r, "/api/oauth/callbackx"), ("hister", 4433))      # exact means exact
-        self.assertEqual(pick(r, "/api/oauth?provider=oidc"), ("hister", 4433))
-        self.assertEqual(pick(r, "/"), ("hister", 4433))
+        self.assertEqual(pick(r, "/api/oauth/callbackx"), ("nogon", 4433))       # exact means exact
+        self.assertEqual(pick(r, "/api/oauth?provider=oidc"), ("nogon", 4433))
+        self.assertEqual(pick(r, "/"), ("nogon", 4433))
 
     def test_bad_route_refused(self):
         with self.assertRaises(SystemExit):
@@ -60,9 +60,9 @@ class Front(unittest.TestCase):
             spec = yaml.safe_load(f)
         sites = json.loads(spec["services"]["front"]["environment"]["FRONT_SITES"])
         self.assertEqual(sorted(sites), [str(p) for p in range(19200, 19209)])
-        hister = self.front.parse_routes(sites["19204"])
-        self.assertEqual(self.front.pick(hister, "/machiya/healthz"), ("nogon-login", 8080))
-        self.assertEqual(self.front.pick(hister, "/mcp"), ("hister", 4433))
+        nogon = self.front.parse_routes(sites["19204"])
+        self.assertEqual(self.front.pick(nogon, "/machiya/healthz"), ("nogon-login", 8080))
+        self.assertEqual(self.front.pick(nogon, "/mcp"), ("nogon", 4433))
 
 
 def serve(handler):
@@ -161,8 +161,8 @@ class NativePlan(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         env["DEV_DATA"] = tmp.name
         os.makedirs(os.path.join(tmp.name, "secrets"))
-        with open(os.path.join(tmp.name, "secrets", "hister.env"), "w") as f:
-            f.write("HISTER__SERVER__OAUTH__OIDC__CLIENT_SECRET=x\n")
+        with open(os.path.join(tmp.name, "secrets", "nogon.env"), "w") as f:
+            f.write("NOGON__SERVER__OAUTH__OIDC__CLIENT_SECRET=x\n")
         plan = {p[0]: p for p in dev.native_plan(env)}
         self.assertEqual(plan["searxng"][4] and "optional" in plan["searxng"][4], True)
         kura = plan["kura"][3]
@@ -171,18 +171,23 @@ class NativePlan(unittest.TestCase):
         self.assertEqual(kura["KURA_VAULTS"], "personal=%s/mirror/vault#personal,team+shared:Team=%s/mirror/vault#team,"
                                               "work:Work=%s/mirror/vault#work" % ((tmp.name,) * 3))
         self.assertEqual(kura["KURA_PUBLIC_URL"], "https://localhost:19201")
-        self.assertEqual(kura["KURA_HISTER_TOKEN_FILE"], tmp.name + "/secrets/owner-token")
+        self.assertEqual(kura["KURA_NOGON_TOKEN_FILE"], tmp.name + "/secrets/owner-token")
+        self.assertEqual(kura["KURA_AUTH"], "nogon")
+        self.assertIn("nogon=https://localhost:19204", kura["MACHIYA_ROOMS"])
         self.assertEqual(plan["kura"][2], "/s/kura/app")
         front = plan["front"][3]
         self.assertIn("http://127.0.0.1:19235", front["FRONT_SITES"])
         self.assertEqual(front["FRONT_TLS_CERT"], tmp.name + "/certs/tls.crt")
-        self.assertEqual(plan["hister"][3]["HISTER__SERVER__OAUTH__OIDC__CLIENT_SECRET"], "x")
+        nogon = plan["nogon"]
+        self.assertEqual(nogon[3]["NOGON__SERVER__OAUTH__OIDC__CLIENT_SECRET"], "x")
+        self.assertEqual(nogon[3]["NOGON_DATA_DIR"], tmp.name + "/nogon")
+        self.assertEqual(nogon[1], ["nogon", "listen"])                       # NOGON_BIN unset: `nogon` on PATH
         ports = []
         for name, cmd, cwd, extra, skip in plan.values():
             if skip:
                 continue
             for k, v in extra.items():
-                self.assertNotRegex(v, r"//(hister|kura|niwa|konbini|landing|stub-idp|nogon-login|machiya-mcp|"
+                self.assertNotRegex(v, r"//(nogon|hister|kura|niwa|konbini|landing|stub-idp|nogon-login|machiya-mcp|"
                                        r"smallweb|searxng|fake-newsblur|fake-forgejo|fake-github|code-import|fixtures):", "%s %s" % (name, k))
                 self.assertFalse(re.match(r"^/(data|vault|secrets|repo|certs|seed|mirror|feed)(/|$)", v),
                                  "%s %s=%s still a container path" % (name, k, v))
@@ -239,7 +244,7 @@ class Images(unittest.TestCase):
         env = {"KURA_SRC": "/nowhere/kura", "NIWA_SRC": "/nowhere/niwa", "KONBINI_SRC": "/nowhere/konbini"}
         images = self.dev.stack_images(env)
         self.assertEqual(len(images), len(set(images)))
-        self.assertEqual(images[0], self.dev.HISTER_IMAGE)
+        self.assertEqual(images[0], self.dev.NOGON_IMAGE)
         for want in ("public.ecr.aws/docker/library/python:3.13-alpine",
                      "public.ecr.aws/docker/library/python:3.13-slim", "docker.io/searxng/searxng:"):
             self.assertTrue(any(i.startswith(want) for i in images), want)

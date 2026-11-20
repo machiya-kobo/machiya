@@ -4,7 +4,7 @@
 """dev-test - run the dev stack (compose/dev) and its checks on another machine, such as a clean test VM: the same
 stack, the same synthetic seed, the same checks as on the dev host.
 
-    tools/dev-test HOST [--native] [--packages] [--hister-bin FILE | --hister-via HOST2] [--siblings DIR] [--dir DIR]
+    tools/dev-test HOST [--native] [--packages] [--nogon-bin FILE | --nogon-via HOST2] [--siblings DIR] [--dir DIR]
                    [--keep] [--dry-run]
 
 It copies this working tree and the kura, niwa and konbini checkouts (their tracked and untracked, not ignored, files:
@@ -24,14 +24,15 @@ before them fails).
                  every BSD's package is older and OpenBSD's pip refuses the system Python (PEP 668); the run puts
                  DIR/venv/bin first on PATH whenever it exists. Haiku (--native): python3.14 + pip's markdown and
                  pyyaml (docs/dev-stack.md).
-  --native       no containers: every service as a process (the BSDs and Haiku have no Docker). Hister is a Go binary
-                 with cgo: pass one built for that OS with --hister-bin (it is copied to DIR/hister). SearXNG is left out.
-  --hister-bin   a hister binary for the remote OS (--native).
-  --hister-via   HOST2[:DATA] (--native) for an OS with no Hister (Haiku): use the Hister of a dev stack already running
+  --native       no containers: every service as a process (the BSDs and Haiku have no Docker). Nogon (formerly Hister)
+                 is a Go binary with cgo: pass one built for that OS with --nogon-bin (it is copied to DIR/nogon).
+                 SearXNG is left out.
+  --nogon-bin    a nogon binary (v0.22 or later) for the remote OS (--native).
+  --nogon-via    HOST2[:DATA] (--native) for an OS with no Nogon (Haiku): use the Nogon of a dev stack already running
                  on HOST2 (e.g. `tools/dev-test HOST2 --keep`; DATA defaults to DIR/data there). Its dummy owner's
                  secrets are copied over, and two ssh tunnels from here join them: HOST2's 127.0.0.1:19224 to this
                  machine's 127.0.0.1:19324, and that to HOST's 127.0.0.1:19224. Both stacks must use the same public
-                 base (the default https://localhost) for Hister's documents to line up.
+                 base (the default https://localhost) for Nogon's documents to line up.
 
 The checks are the HTTP ones (no browser on a test VM). Nothing secret travels: the remote init makes its own dummy
 secrets. Standard library only; needs ssh and tar here.
@@ -85,14 +86,14 @@ def files(repo):
     return [f.decode() for f in out if f and os.path.isfile(os.path.join(repo, f.decode()))]
 
 
-def bundle(repos, hister_bin):
+def bundle(repos, nogon_bin):
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         for name, path in repos.items():
             for f in files(path):
                 tar.add(os.path.join(path, f), arcname="%s/%s" % (name, f), recursive=False)
-        if hister_bin:
-            tar.add(hister_bin, arcname="hister")
+        if nogon_bin:
+            tar.add(nogon_bin, arcname="nogon")
     return buf.getvalue()
 
 
@@ -105,8 +106,8 @@ def main():
     ap.add_argument("host")
     ap.add_argument("--native", action="store_true")
     ap.add_argument("--packages", action="store_true")
-    ap.add_argument("--hister-bin")
-    ap.add_argument("--hister-via")
+    ap.add_argument("--nogon-bin")
+    ap.add_argument("--nogon-via")
     ap.add_argument("--siblings", default=os.path.dirname(ROOT))
     ap.add_argument("--dir", default="/var/tmp/machiya-dev-test")
     ap.add_argument("--keep", action="store_true")
@@ -124,11 +125,11 @@ def main():
         sys.exit("dev-test: --dir must be a plain absolute path like /var/tmp/machiya-dev-test, not %r" % a.dir)
     dev = "%s/machiya/compose/dev/dev --data %s/data" % (d, d)
     init = dev + " init" + (" --native" if a.native else "")
-    if a.hister_via:
+    if a.nogon_via:
         if not a.native:
-            sys.exit("dev-test: --hister-via is for --native")
-        init += " --remote-hister %s/hister-secrets" % d
-    env = ("HISTER_BIN=%s/hister " % d) if a.hister_bin else ""
+            sys.exit("dev-test: --nogon-via is for --native")
+        init += " --remote-nogon %s/nogon-secrets" % d
+    env = ("NOGON_BIN=%s/nogon " % d) if a.nogon_bin else ""
     steps = []
     if a.packages:
         steps.append('os=$(uname -s); [ "$os" = Linux ] && os=$(. /etc/os-release; echo "${ID_LIKE:-$ID}" | '
@@ -148,10 +149,10 @@ def main():
         print("  $ " + s.replace("\n", "\n    "))
     if a.dry_run:
         return 0
-    data = bundle(repos, a.hister_bin)
+    data = bundle(repos, a.nogon_bin)
     print("dev-test: copying %.1f MB" % (len(data) / 1e6), flush=True)
     r = ssh(a.host, "rm -rf %s/machiya %s/kura %s/niwa %s/konbini %s/data && mkdir -p %s && tar -xzf - -C %s%s" % (
-        d, d, d, d, d, d, d, " && chmod +x %s/hister" % d if a.hister_bin else ""), stdin=data)
+        d, d, d, d, d, d, d, " && chmod +x %s/nogon" % d if a.nogon_bin else ""), stdin=data)
     if r.returncode:
         print("dev-test: copy failed")
         return 1
@@ -159,15 +160,15 @@ def main():
         print("dev-test: the package step failed")
         return 1
     tunnels = []
-    if a.hister_via:
-        via, _, via_data = a.hister_via.partition(":")
+    if a.nogon_via:
+        via, _, via_data = a.nogon_via.partition(":")
         via_data = via_data or d + "/data"
-        names = "owner-password owner-token oidc-client-secret hister.env"
+        names = "owner-password owner-token oidc-client-secret"
         secrets = subprocess.run(["ssh", "-o", "BatchMode=yes", via, "tar -C %s/secrets -cf - %s" % (
             shlex.quote(via_data), names)], capture_output=True).stdout
-        if not secrets or ssh(a.host, "umask 077; rm -rf %s/hister-secrets && mkdir -p %s/hister-secrets && "
-                                      "tar -xf - -C %s/hister-secrets" % (d, d, d), stdin=secrets).returncode:
-            print("dev-test: couldn't copy the Hister host's secrets (is a dev stack running on %s?)" % via)
+        if not secrets or ssh(a.host, "umask 077; rm -rf %s/nogon-secrets && mkdir -p %s/nogon-secrets && "
+                                      "tar -xf - -C %s/nogon-secrets" % (d, d, d), stdin=secrets).returncode:
+            print("dev-test: couldn't copy the Nogon host's secrets (is a dev stack running on %s?)" % via)
             return 1
         for args in (["-L", "19324:127.0.0.1:19224", via], ["-R", "19224:127.0.0.1:19324", a.host]):
             tunnels.append(subprocess.Popen(["ssh", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes",
