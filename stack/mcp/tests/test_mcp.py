@@ -1139,3 +1139,16 @@ class Failures(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NogonNames(unittest.TestCase):
+    """0.11.0, the rename's stage 1: NOGON_* first, HISTER_* still read."""
+
+    def test_setting(self):
+        import contextlib
+        import io
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(mcp.setting({"HISTER_URL": "http://h:1"}, "NOGON_URL"), "http://h:1")
+            self.assertEqual(mcp.setting({"HISTER_URL": "http://h:1", "NOGON_URL": ""}, "NOGON_URL"), "")
+            self.assertEqual(mcp.setting({"MCP_HISTER_USERS": "owner"}, "MCP_NOGON_USERS"), "owner")
+        self.assertEqual(mcp.setting({}, "NOGON_URL", "d"), "d")

@@ -19,7 +19,7 @@ AI clients read saved pages here (`pages_search`, `pages_read`), never through H
 
 ## Standalone
 
-Each room is an optional URL: `KONBINI_URL`, `KURA_URL`, `NIWA_URL`, `HISTER_URL`. A room's tools appear only when its URL is set. The server works with any mix of rooms, and no room depends on it.
+Each room is an optional URL: `KONBINI_URL`, `KURA_URL`, `NIWA_URL`, `NOGON_URL`. A room's tools appear only when its URL is set. The server works with any mix of rooms, and no room depends on it. (Since 0.11.0 the Nogon names are read first; `HISTER_URL`, `HISTER_TOKEN_FILE` and `MCP_HISTER_*` still work until the rename's stage 3.)
 
 ## Tools
 
@@ -105,7 +105,7 @@ A note that already has an open suggestion isn't suggested again: the tool repor
 Only you. Without the identity file, `MCP_AUTH` decides:
 
 - **`tailscale`** (default): a request needs a `Tailscale-User-Login` listed in `MCP_USERS` (empty = nobody).
-  - With `MCP_AUTH_URL` set, a request may instead carry a **room token** that [nogon-login](nogon-login.md) issued for this server (`Authorization: Bearer mht_…`), acting as one of `MCP_HISTER_USERS` ([identity.md](../identity.md#room-tokens)). This is for an agent on a tagged machine, which has no Tailscale login. It never gets Hister's raw token.
+  - With `MCP_AUTH_URL` set, a request may instead carry a **room token** that [nogon-login](nogon-login.md) issued for this server (`Authorization: Bearer mht_…`), acting as one of `MCP_NOGON_USERS` ([identity.md](../identity.md#room-tokens)). This is for an agent on a tagged machine, which has no Tailscale login. It never gets Hister's raw token.
   - A bad, revoked or other service's token gets 401. It never falls back to the header.
 - **`open`** (localhost or a trusted LAN; warns at startup) ignores the header and logs the caller as `local`.
 
@@ -127,7 +127,7 @@ No proof, or a bad one, gets **401** and never falls through to a login. A princ
 - **No way out.** No tool takes a URL. Each room has one configured base URL, and tools pass paths.
 - Every call sends `X-Agent: mcp:<agent>`, from the client's `X-Agent` header. With the identity file it's `mcp:<principal>` or `mcp:<principal>/<client's X-Agent>`. It's a label for the rooms' history, never a permission.
 - With `MCP_TOKEN_FILE`, every call to Kura, Konbini and Niwa also sends `Authorization: Bearer <the mcp principal's token>`, and a redirect is an error, never followed. The token never goes to Hister and is never logged.
-- With `HISTER_TOKEN_FILE`, every Hister call sends `X-Access-Token` (your Hister token), which goes nowhere else.
+- With `NOGON_TOKEN_FILE`, every Hister call sends `X-Access-Token` (your Hister token), which goes nowhere else.
 - **No `Origin` or `Referer` ever goes to Konbini, Kura or Niwa.** A same-origin header makes them treat a caller as "web", with your full powers.
 - Hister calls always carry `Origin: hister://`.
 
@@ -180,7 +180,7 @@ No proof, or a bad one, gets **401** and never falls through to a login. A princ
 **Search your pages and notes from Claude Duet.** Duet runs in Anthropic's cloud, so it can't reach the tailnet. A second machiya-mcp with `MCP_AUTH=oauth` sits on a Tailscale Funnel host and serves four read tools: `pages_search`, `pages_read`, `notes_search` and `notes_read`. Nothing else exists there: no board, no writes, no resources, no prompts. Hister and Kura stay tailnet-only.
 
 - **Sign-in is OAuth 2.1.** [nogon-login](nogon-login.md) is the authorization server, on the same Funnel host. You add the connector from a tailnet device, sign in, and allow it. Each connector shows on nogon-login's sessions page, and you can revoke it there.
-- **Only an access token gets in:** `Authorization: Bearer mho_…`. The server asks nogon-login's internal `/v1/check` about it (naming itself `X-Machiya-Room: mcp-public`), and nogon-login answers `{"username", "kind": "oauth", "scopes", "resource", "client_id"}`. The resource must be this server's `/mcp`, and the user one of `MCP_HISTER_USERS`. A login header, a room token, an identity-file token or Hister's own token never counts, and never falls back to anything else.
+- **Only an access token gets in:** `Authorization: Bearer mho_…`. The server asks nogon-login's internal `/v1/check` about it (naming itself `X-Machiya-Room: mcp-public`), and nogon-login answers `{"username", "kind": "oauth", "scopes", "resource", "client_id"}`. The resource must be this server's `/mcp`, and the user one of `MCP_NOGON_USERS`. A login header, a room token, an identity-file token or Hister's own token never counts, and never falls back to anything else.
 - **No token, or a bad one:** 401 with `WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource"`, which tells the client where to sign in ([RFC 9728](https://www.rfc-editor.org/rfc/rfc9728)). A token without the tool's scope (`pages:read`, `notes:read`): 403 `insufficient_scope`.
 - **It refuses to start** with `MCP_NOTES_DIR`, `KONBINI_URL`, `NIWA_URL` or the identity file set, or with `MCP_TOOLS` unset or naming anything but those four.
 - **It says little about itself.** `/healthz` says `ok`. `/api/status` and `/api/changelog` are 404.
@@ -197,8 +197,8 @@ MCP_TOOLS=pages_search,pages_read,notes_search,notes_read
 MCP_PUBLIC_URL=https://mcp-public.example.ts.net
 MCP_OAUTH_ISSUER=https://mcp-public.example.ts.net
 MCP_AUTH_URL=http://nogon-login:8081
-MCP_HISTER_USERS=owner
-KURA_URL=…  HISTER_URL=…  MCP_TOKEN_FILE=…  HISTER_TOKEN_FILE=…
+MCP_NOGON_USERS=owner
+KURA_URL=…  NOGON_URL=…  MCP_TOKEN_FILE=…  NOGON_TOKEN_FILE=…
 ```
 
 Then add `https://mcp-public.example.ts.net/mcp` as a custom connector in Claude.
@@ -220,7 +220,7 @@ Then add `https://mcp-public.example.ts.net/mcp` as a custom connector in Claude
 | `MCP_TOOLS` | all | a comma list: only these tools exist (any mode; a name that isn't a tool refuses to start). Required with `oauth`, and only `pages_search`, `pages_read`, `notes_search` and `notes_read` |
 | `MCP_ALLOW_CIDRS` | none | `/mcp` only from these client addresses or CIDRs (Anthropic's: `160.79.104.0/21`). Needs `MCP_CLIENT_ADDR_HEADER` and `MCP_TRUSTED_PROXIES` |
 | `MCP_CLIENT_ADDR_HEADER` | none | the header the proxy puts the client's address in (`X-Forwarded-For`; its last entry counts), believed only from `MCP_TRUSTED_PROXIES` |
-| `MCP_HISTER_USERS` | none | the Hister usernames a room token, or with `oauth` an access token, may act as (never `*`) |
+| `MCP_NOGON_USERS` | none | the Hister usernames a room token, or with `oauth` an access token, may act as (never `*`) |
 | `MACHIYA_IDENTITY_FILE` | none | Machiya's identity file (read-only): callers by principal, the `mcp` `use` grant, limits from the file. `MCP_USERS` is then unused. A bad file or setting refuses to start |
 | `MCP_AUTH_HEADER` | none | with the identity file and `MCP_AUTH=header`: the proxy's login header, e.g. `Remote-User` |
 | `MCP_ACCEPT_APP_CAPS` | off | with the identity file: `1` reads Tailscale tagged nodes' capability (Serve with `--accept-app-caps`, Tailscale v1.92+) |
@@ -229,10 +229,10 @@ Then add `https://mcp-public.example.ts.net/mcp` as a custom connector in Claude
 
 | Variable | Default | |
 |---|---|---|
-| `KONBINI_URL`, `KURA_URL`, `NIWA_URL`, `HISTER_URL` | none | the rooms. An unset room's tools are hidden |
+| `KONBINI_URL`, `KURA_URL`, `NIWA_URL`, `NOGON_URL` | none | the rooms. An unset room's tools are hidden |
 | `<ROOM>_PUBLIC_URL` | the room's URL | the links in results |
 | `MCP_TOKEN_FILE` | none | the `mcp` principal's own token (first line of the file), sent as `Authorization: Bearer` to Kura, Konbini and Niwa, never to Hister. Redirects are then not followed. Set but missing or empty: refuses to start. Unset: no `Authorization` |
-| `HISTER_TOKEN_FILE` | none | your Hister token (first line of the file; [contracts/hister.md](../contracts/hister.md)), sent as `X-Access-Token` on every Hister call and to nothing else. Re-read when the file changes. Redirects from Hister are then not followed. Set but missing, empty or not a token: refuses to start. Unset: no token (a Hister without users ignores it). The token is admin, so the server refuses any Hister update carrying `changes.user_id` |
+| `NOGON_TOKEN_FILE` | none | your Hister token (first line of the file; [contracts/hister.md](../contracts/hister.md)), sent as `X-Access-Token` on every Hister call and to nothing else. Re-read when the file changes. Redirects from Hister are then not followed. Set but missing, empty or not a token: refuses to start. Unset: no token (a Hister without users ignores it). The token is admin, so the server refuses any Hister update carrying `changes.user_id` |
 
 `KURA_URL` must be a URL Kura's gate admits. Kura checks `Tailscale-User-Login` (`KURA_USERS`), and this server sends only `X-Agent`. So point `KURA_URL` at the Tailscale-served host, or at a Kura running `KURA_AUTH=open` on a private network. Konbini and Niwa are the same (`KANBAN_AUTH`, `NIWA_AUTH`). With the identity file in the rooms, `MCP_TOKEN_FILE` is the proof instead, and each room grants the `mcp` principal what it may do there.
 
@@ -269,8 +269,8 @@ Comma lists. Path rules are vault-relative prefixes (`Dir/` or `Dir/File.md`) or
 | Variable | Default | |
 |---|---|---|
 | `MCP_TZ` | `UTC` | the time zone for the notes' dates and the backup window |
-| `MCP_HISTER_BACKUP_WINDOW` | none | a weekly slot like `Sat 03:10-03:40` (local time, within one day) when Hister is stopped for its backup. Hister writes pause then. An invalid value makes the server exit at start; unset means no pause |
-| `MCP_HISTER_WRITES_PER_MIN` | `60` | Hister writes a minute |
+| `MCP_NOGON_BACKUP_WINDOW` | none | a weekly slot like `Sat 03:10-03:40` (local time, within one day) when Hister is stopped for its backup. Hister writes pause then. An invalid value makes the server exit at start; unset means no pause |
+| `MCP_NOGON_WRITES_PER_MIN` | `60` | Hister writes a minute |
 | `MCP_BULK_PER_HOUR` | `5` | bulk applies an hour |
 | `MCP_RELABEL_MAX` | `200` | pages per apply |
 | `MCP_ROLLBACK_DIR` | `/data/rollback` | the rollback files |
@@ -325,7 +325,7 @@ Add a `machiya-mcp` service beside your other rooms:
 Environment:
 - `MCP_USERS=<your Tailscale login>`
 - `KONBINI_URL`/`KURA_URL`/`NIWA_URL=https://<room>.<tailnet>.ts.net`
-- `HISTER_URL=http://hister:4433` (join the Hister network)
+- `NOGON_URL=http://hister:4433` (join the Hister network)
 
 In `serve.json`, point the Tailscale Service name at `http://machiya-mcp:8080`.
 

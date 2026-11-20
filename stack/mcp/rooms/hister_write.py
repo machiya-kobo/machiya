@@ -110,7 +110,7 @@ def check_label(ctx, label, allow_empty=True):
 
 def guard_write(ctx):
     if ctx.server.in_backup_window():
-        raise ToolError("Hister's backup window (%s, local time) stops it for a short while: writes are paused until it ends. "
+        raise ToolError("Nogon's backup window (%s, local time) stops it for a short while: writes are paused until it ends. "
                         "Retry after." % ctx.server.config.backup_window_text, code="backup_window")
 
 
@@ -173,7 +173,7 @@ def pages_labels(ctx, args):
                              key=lambda x: (-x["count"], x["label"])),
             "unlabelled": counts.get("", 0), "other": {l: c for l, c in counts.items() if l and reserved(ctx, l)},
             "pages": sum(counts.values()),
-            **({} if complete(ctx) else {"truncated": True, "note": "Hister's paging stopped early: these counts are a lower bound"})}
+            **({} if complete(ctx) else {"truncated": True, "note": "Nogon's paging stopped early: these counts are a lower bound"})}
 
 
 def collections_audit(ctx, args):
@@ -197,7 +197,7 @@ def collections_audit(ctx, args):
                                "note": "%s is the owner's own keyword: reported, never edited here" % r}
     if not complete(ctx):
         out["truncated"] = True
-        out["note"] = "Hister's paging stopped early: page counts are a lower bound, and a label may look dead when it isn't"
+        out["note"] = "Nogon's paging stopped early: page counts are a lower bound, and a label may look dead when it isn't"
     return out
 
 
@@ -247,7 +247,7 @@ def pages_relabel(ctx, args):
         label = check_label(ctx, args.get("label", ""))
         query = arg_str(args, "query", maxlen=300)
         if not query:
-            raise ToolError("query is required (Hister query language, e.g. label:tech domain:example.com)")
+            raise ToolError("query is required (Nogon query language, e.g. label:tech domain:example.com)")
     docs, _ = all_docs(ctx, query + EXCL, cap + 1)
     todo = [d for d in docs if (d.get("label") or "") != label and not reserved(ctx, d.get("label") or "")]
     if len(docs) > cap:
@@ -277,7 +277,7 @@ def pages_relabel(ctx, args):
             problems.append({"url": d["url"], "answer": r})
     forget(ctx)
     return {"applied": done, "problems": problems[:20], "rollback_file": rollback,
-            "rollback": "restore from this rollback file (url -> old label) with a relabel script or the Hister API"}
+            "rollback": "restore from this rollback file (url -> old label) with a relabel script or the Nogon API"}
 
 
 # -- collections -------------------------------------------------------------------------------------------------------
@@ -334,9 +334,9 @@ TOOLS = [
          "pages, and how far the owner's reserved aliases (MCP_RESERVED_COLLECTIONS) have drifted (reported, never edited).", handler=collections_audit),
     tool("pages_set_label", "Give one saved page an existing label (empty string clears it). A new label is the owner's; vault notes and "
          "import labels are never touched. Pass expected_label if you read the page's label first.",
-         {"url": s("The page's exact URL, from Hister's search"), "label": s("An existing label, or empty to clear"),
+         {"url": s("The page's exact URL, from Nogon's search"), "label": s("An existing label, or empty to clear"),
           "expected_label": s("The label you saw; the call fails if it changed")}, ["url", "label"], IDEMPOTENT, pages_set_label, WRITE_LIMITS),
-    tool("pages_relabel", "Relabel many pages at once, in two steps. Step 1 (no apply_token): a dry run that matches the query (Hister query "
+    tool("pages_relabel", "Relabel many pages at once, in two steps. Step 1 (no apply_token): a dry run that matches the query (Nogon query "
          "language; notes are always excluded), shows how many pages would change, a sample and their current labels, and returns an "
          "apply_token. Step 2: after the owner agrees, call again with the apply_token. At most 200 pages; the old labels are saved to a "
          "rollback file first. The label must already exist.",

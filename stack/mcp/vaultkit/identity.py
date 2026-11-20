@@ -115,7 +115,7 @@ def utc(value):
 # with SCRYPT_MISSING, and everything else (open, tailscale, header and hister modes, tokens) works as before.
 HAVE_SCRYPT = hasattr(hashlib, "scrypt")
 SCRYPT_MISSING = ("this Python's hashlib has no scrypt (built against LibreSSL, as on OpenBSD): password sign-in and "
-                  "pairing codes are unavailable here; use Tailscale, a proxy header, Hister's sign-in or tokens")
+                  "pairing codes are unavailable here; use Tailscale, a proxy header, Nogon's sign-in or tokens")
 
 
 def hash_password(password, salt=None):

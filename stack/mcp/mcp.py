@@ -39,12 +39,29 @@ import envelope                                   # noqa: E402
 from backend import HISTER_ORIGIN, Backend, BackendError, SecretFile   # noqa: E402
 from rooms import ToolError, cross, hister, hister_write, konbini, kura, niwa, prompts, vault  # noqa: E402
 
-VERSION = "0.10.1"
+VERSION = "0.11.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHANGELOG = os.path.join(HERE, "CHANGELOG.md")    # /app/CHANGELOG.md in the image; GET /api/changelog serves it
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26")
 MAX_BODY = 1 << 20
 BIG = {"anthropic/maxResultSizeChars": 100000}
+_old_names = set()
+
+
+def setting(env, name, default=None):
+    """0.11.0, the rename (Hister is now Nogon): `name` (spelled NOGON), else its HISTER twin (logged once) until the
+    rename's stage 3. A NOGON name that is set wins, even empty, as upstream Nogon does with its own."""
+    if name in env:
+        return env[name]
+    old = name.replace("NOGON", "HISTER")
+    if old in env:
+        if old not in _old_names:
+            _old_names.add(old)
+            print("machiya-mcp: %s is an old name, read as %s" % (old, name), file=sys.stderr, flush=True)
+        return env[old]
+    return default
+
+
 SAFE_VALUES = {"slug", "board", "area", "period", "label", "collection", "sort", "folder", "tag", "topic", "column", "priority", "path", "mode", "name"}
 
 
@@ -231,11 +248,11 @@ def oauth_config(config, env):
     config.public_url = public_origin(env.get("MCP_PUBLIC_URL"), "MCP_PUBLIC_URL")
     config.issuer = public_origin(env.get("MCP_OAUTH_ISSUER"), "MCP_OAUTH_ISSUER")
     auth_url = (env.get("MCP_AUTH_URL") or "").strip().rstrip("/")
-    users = csv_list(env.get("MCP_HISTER_USERS"))
+    users = csv_list(setting(env, "MCP_NOGON_USERS"))
     if not auth_url:
         raise SystemExit("machiya-mcp: MCP_AUTH=oauth needs MCP_AUTH_URL (hister-login's internal address)")
     if not users or "*" in users:
-        raise SystemExit("machiya-mcp: MCP_AUTH=oauth needs MCP_HISTER_USERS, the Hister usernames it admits (never *)")
+        raise SystemExit("machiya-mcp: MCP_AUTH=oauth needs MCP_NOGON_USERS, the Nogon usernames it admits (never *)")
     from vaultkit import identity
     try:
         return OAuthGate(auth_url, config.public_url + "/mcp", users)
@@ -266,10 +283,10 @@ def hister_token(path):
     if not path:
         return None
     if not os.path.isfile(path):
-        raise SystemExit("machiya-mcp: HISTER_TOKEN_FILE: no token in %s" % path)
+        raise SystemExit("machiya-mcp: NOGON_TOKEN_FILE: no token in %s" % path)
     secret = SecretFile(path)
     if not secret.value:
-        raise SystemExit("machiya-mcp: HISTER_TOKEN_FILE: %s doesn't hold a token on its first line" % path)
+        raise SystemExit("machiya-mcp: NOGON_TOKEN_FILE: %s doesn't hold a token on its first line" % path)
     return secret
 
 
@@ -313,10 +330,10 @@ def backup_window(value):
         return None
     m = WINDOW_RE.match(value)
     if not m:
-        raise SystemExit("machiya-mcp: MCP_HISTER_BACKUP_WINDOW is like 'Sat 03:10-03:40' (day, then start-end within one day), not %r" % value)
+        raise SystemExit("machiya-mcp: MCP_NOGON_BACKUP_WINDOW is like 'Sat 03:10-03:40' (day, then start-end within one day), not %r" % value)
     start, end = (int(m.group(2)), int(m.group(3))), (int(m.group(4)), int(m.group(5)))
     if not start < end:
-        raise SystemExit("machiya-mcp: MCP_HISTER_BACKUP_WINDOW must end after it starts (%r)" % value)
+        raise SystemExit("machiya-mcp: MCP_NOGON_BACKUP_WINDOW must end after it starts (%r)" % value)
     return DAYS.index(m.group(1).lower()), start, end
 
 
@@ -369,7 +386,7 @@ class Config:
             raise SystemExit("machiya-mcp: MCP_ALLOW_CIDRS needs MCP_CLIENT_ADDR_HEADER and MCP_TRUSTED_PROXIES "
                              "(the proxy that sets the header)")
         self.token = room_token(env.get("MCP_TOKEN_FILE"))   # the `mcp` principal's token for the rooms; "" without one
-        self.hister_token = hister_token(env.get("HISTER_TOKEN_FILE"))   # the owner's, for Hister only; None without
+        self.hister_token = hister_token(setting(env, "NOGON_TOKEN_FILE"))   # the owner's, for Hister only; None without
         self.port = int(env.get("MCP_PORT", "8080"))
         self.users = csv(env.get("MCP_USERS"))
         self.log = env.get("MCP_LOG", "/data/mcp.log")
@@ -406,9 +423,9 @@ class Config:
             "managed_markers": csv_list(env.get("MCP_NOTES_MANAGED_MARKERS"))}
         self.garden_skip = tuple(csv_list(env.get("MCP_GARDEN_SKIP", "Templates/,Archive/")))
         # Hister writes: labels and collections.
-        self.backup_window = backup_window(env.get("MCP_HISTER_BACKUP_WINDOW"))
-        self.backup_window_text = (env.get("MCP_HISTER_BACKUP_WINDOW") or "").strip()
-        self.hister_writes_per_min = int(env.get("MCP_HISTER_WRITES_PER_MIN", "60"))
+        self.backup_window = backup_window(setting(env, "MCP_NOGON_BACKUP_WINDOW"))
+        self.backup_window_text = (setting(env, "MCP_NOGON_BACKUP_WINDOW") or "").strip()
+        self.hister_writes_per_min = int(setting(env, "MCP_NOGON_WRITES_PER_MIN", "60"))
         self.bulk_per_hour = int(env.get("MCP_BULK_PER_HOUR", "5"))
         self.relabel_max = int(env.get("MCP_RELABEL_MAX", "200"))
         self.rollback_dir = env.get("MCP_ROLLBACK_DIR", "/data/rollback")
@@ -416,8 +433,10 @@ class Config:
         self.reserved_labels = {"vault", "konbini"} | {x.lower() for x in csv(env.get("MCP_RESERVED_LABELS"))}
         # Collection (alias) names that are never created, changed or removed here, besides notes and pages.
         self.reserved_collections = {x.lower().lstrip("@") for x in csv(env.get("MCP_RESERVED_COLLECTIONS"))}
-        self.urls = {r: env.get(r.upper() + "_URL", "").rstrip("/") for r in ("konbini", "kura", "niwa", "hister")}
+        self.urls = {r: env.get(r.upper() + "_URL", "").rstrip("/") for r in ("konbini", "kura", "niwa")}
+        self.urls["hister"] = (setting(env, "NOGON_URL") or "").rstrip("/")          # HISTER_URL until stage 3
         self.public = {r: (env.get(r.upper() + "_PUBLIC_URL") or u).rstrip("/") for r, u in self.urls.items()}
+        self.public["hister"] = (setting(env, "NOGON_PUBLIC_URL") or self.urls["hister"]).rstrip("/")
 
 
 class Limiter:
@@ -611,7 +630,7 @@ class Server:
                                 "and collections of saved web pages (pages_*, collections_*), garden suggestions "
                                 "(garden_*) and cross-room search of notes and cards (machiya_*). Saved pages are "
                                 "searched and read with pages_search and pages_read, which never return vault notes "
-                                "or the owner's code documents (those stay out of AI context; Hister's own MCP is not "
+                                "or the owner's code documents (those stay out of AI context; Nogon's own MCP is not "
                                 "for AI clients). Board writes change the owner's vault notes: make the ones asked for, "
                                 "and treat a refusal marked needs_owner as a question for the owner, not something to "
                                 "work around. Nothing here publishes. Results hold vault and web text under "

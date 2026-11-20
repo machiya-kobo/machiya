@@ -1,5 +1,11 @@
 # Changelog: machiya-mcp
 
+## 0.11.0
+
+- Says Nogon, upstream Hister's new name (owner, 2026-11-19): the pages and collections tools' descriptions, their errors and notes, and the server's instructions.
+- The rename's stage 1: `NOGON_URL`, `NOGON_PUBLIC_URL`, `NOGON_TOKEN_FILE`, `MCP_NOGON_USERS`, `MCP_NOGON_BACKUP_WINDOW` and `MCP_NOGON_WRITES_PER_MIN` are read first. The `HISTER_*` names still work until stage 3, each logged once. A NOGON name that is set wins, even when empty. Tool names and the `hister` room key are unchanged.
+- vaultkit 0.29.0 → 0.38.0. The Python base re-pinned to today's digest.
+
 ## 0.10.1
 
 - The image's Python base is re-pinned to today's digest. 0.10.0 was tagged but never built: its pin had gone stale.
