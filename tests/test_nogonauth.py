@@ -1,5 +1,5 @@
-"""vaultkit.histerauth (AUTH=hister): python3 -m unittest tests.test_histerauth (standard library only; no network:
-the helper is a fake fetch)."""
+"""vaultkit.nogonauth (AUTH=nogon; formerly histerauth): python3 -m unittest tests.test_nogonauth (standard library
+only; no network: the helper is a fake fetch). The histerauth alias module (0.41 only) is tested at the end."""
 import io
 import json
 import os
@@ -11,12 +11,12 @@ from contextlib import redirect_stderr
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from vaultkit import histerauth as ha             # noqa: E402
+from vaultkit import nogonauth as ha              # noqa: E402
 from vaultkit.identity import IdentityError, tailscale_uid   # noqa: E402
 
 SID = "mhs_" + "A" * 43
 SID2 = "mhs_" + "B" * 43
-SIGNIN = "https://hister.example.ts.net/machiya/signin"
+SIGNIN = "https://nogon.example.ts.net/machiya/signin"
 
 
 class Clock:
@@ -68,8 +68,8 @@ class Headers(dict):
 def make(fallback="tailscale", users=("owner",), fallback_users=("me@passkey",), auth_url="http://hl:8081",
          domain="example.ts.net"):
     helper, clock = FakeHelper(), Clock()
-    auth = ha.HisterAuth("niwa", SIGNIN, users, "https://niwa.example.ts.net", auth_url, fallback, fallback_users,
-                         domain, True, fetch=helper, clock=clock)
+    auth = ha.NogonAuth("niwa", SIGNIN, users, "https://niwa.example.ts.net", auth_url, fallback, fallback_users,
+                        domain, True, fetch=helper, clock=clock)
     return auth, helper, clock
 
 
@@ -129,43 +129,43 @@ class SafeReturnTest(unittest.TestCase):
         self.assertEqual(ha.signin_url(SIGNIN + "?app=1", "x"), SIGNIN + "?app=1&return=x")
 
 
-class HisterHeadersTest(unittest.TestCase):
+class NogonHeadersTest(unittest.TestCase):
     def test_token_file_reread(self):
         tmp = tempfile.mkdtemp()
         try:
             path = os.path.join(tmp, "token")
-            self.assertEqual(ha.hister_headers(""), {"Origin": "hister://"})
-            self.assertEqual(quiet(ha.hister_headers, path), {"Origin": "hister://"})        # missing: no token
+            self.assertEqual(ha.nogon_headers(""), {"Origin": "nogon://"})
+            self.assertEqual(quiet(ha.nogon_headers, path), {"Origin": "nogon://"})        # missing: no token
             with open(path, "w") as f:
                 f.write("s3cret-one\n")
-            self.assertEqual(ha.hister_headers(path), {"Origin": "hister://", "X-Access-Token": "s3cret-one"})
+            self.assertEqual(ha.nogon_headers(path), {"Origin": "nogon://", "X-Access-Token": "s3cret-one"})
             with open(path + ".new", "w") as f:
                 f.write("s3cret-two-longer")
             os.replace(path + ".new", path)                                                   # rotated: re-read
-            self.assertEqual(ha.hister_headers(path)["X-Access-Token"], "s3cret-two-longer")
+            self.assertEqual(ha.nogon_headers(path)["X-Access-Token"], "s3cret-two-longer")
             with open(path, "w") as f:
                 f.write("bad token with spaces")
             err = io.StringIO()
             with redirect_stderr(err):
-                self.assertNotIn("X-Access-Token", ha.hister_headers(path))
+                self.assertNotIn("X-Access-Token", ha.nogon_headers(path))
             self.assertNotIn("s3cret", err.getvalue())
         finally:
             shutil.rmtree(tmp)
 
 
 class LoadForTest(unittest.TestCase):
-    BASE = {"NIWA_AUTH": "hister", "NIWA_AUTH_URL": "http://hister-login:8081", "NIWA_AUTH_SIGNIN_URL": SIGNIN,
-            "NIWA_HISTER_USERS": "owner", "NIWA_USERS": "me@passkey", "NIWA_PUBLIC_URL": "https://niwa.example.ts.net",
+    BASE = {"NIWA_AUTH": "nogon", "NIWA_AUTH_URL": "http://nogon-login:8081", "NIWA_AUTH_SIGNIN_URL": SIGNIN,
+            "NIWA_NOGON_USERS": "owner", "NIWA_USERS": "me@passkey", "NIWA_PUBLIC_URL": "https://niwa.example.ts.net",
             "NIWA_BIND_BEHIND_PROXY": "1", "MACHIYA_COOKIE_DOMAIN": ".example.ts.net"}
 
-    def test_not_hister(self):
+    def test_not_nogon(self):
         self.assertIsNone(ha.load_for("niwa", {}))
         self.assertIsNone(ha.load_for("niwa", {"NIWA_AUTH": "tailscale"}))
 
     def test_loads(self):
         a = ha.load_for("niwa", dict(self.BASE))
         self.assertEqual((a.fallback, a.users, a.cookie_domain, a.auth_url), ("tailscale", {"owner"}, "example.ts.net",
-                                                                              "http://hister-login:8081"))
+                                                                              "http://nogon-login:8081"))
         self.assertEqual(a.fallback_users, {"me@passkey"})
         self.assertFalse(a.standalone)
 
@@ -188,8 +188,8 @@ class LoadForTest(unittest.TestCase):
 
     def test_refusals(self):
         cases = [
-            {"NIWA_AUTH_SIGNIN_URL": ""}, {"NIWA_AUTH_SIGNIN_URL": "javascript:x"}, {"NIWA_HISTER_USERS": ""},
-            {"NIWA_HISTER_USERS": "owner,*"}, {"NIWA_USERS": "*"}, {"NIWA_AUTH_FALLBACK": "open"},
+            {"NIWA_AUTH_SIGNIN_URL": ""}, {"NIWA_AUTH_SIGNIN_URL": "javascript:x"}, {"NIWA_NOGON_USERS": ""},
+            {"NIWA_NOGON_USERS": "owner,*"}, {"NIWA_USERS": "*"}, {"NIWA_AUTH_FALLBACK": "open"},
             {"NIWA_AUTH_FALLBACK": "none", "NIWA_AUTH_URL": ""}, {"NIWA_PUBLIC_URL": ""},
             {"MACHIYA_IDENTITY_FILE": "/etc/machiya/identity.toml"}, {"NIWA_BIND_BEHIND_PROXY": ""},
             {"MACHIYA_COOKIE_DOMAIN": "bad domain"},
@@ -198,6 +198,20 @@ class LoadForTest(unittest.TestCase):
             env = dict(self.BASE, **change)
             with self.assertRaises(IdentityError, msg=repr(change)):
                 ha.load_for("niwa", env)
+
+    def test_old_names_refused_naming_the_new_ones(self):
+        """0.41: AUTH=hister and NIWA_HISTER_USERS alone stop the room, saying what to use instead."""
+        with self.assertRaisesRegex(IdentityError, r"NIWA_AUTH=hister .*use NIWA_AUTH=nogon"):
+            ha.load_for("niwa", dict(self.BASE, NIWA_AUTH="Hister"))
+        env = dict(self.BASE, NIWA_HISTER_USERS="owner")
+        del env["NIWA_NOGON_USERS"]
+        with self.assertRaisesRegex(IdentityError, r"NIWA_HISTER_USERS .*rename it NIWA_NOGON_USERS"):
+            ha.load_for("niwa", env)
+        err = io.StringIO()
+        with redirect_stderr(err):                      # beside the new name the old one is ignored, and said
+            a = ha.load_for("niwa", dict(self.BASE, NIWA_HISTER_USERS="someone"))
+        self.assertEqual(a.users, {"owner"})
+        self.assertIn("NIWA_HISTER_USERS: an old name, ignored", err.getvalue())
 
     def test_loopback_bind_needs_no_proxy_flag(self):
         env = dict(self.BASE, NIWA_BIND_BEHIND_PROXY="")
@@ -208,7 +222,7 @@ class LoadForTest(unittest.TestCase):
         err = io.StringIO()
         with redirect_stderr(err):
             a = ha.load_for("niwa", env)
-        self.assertIn("hister mode, but no sign-in service: Tailscale identity only", err.getvalue())
+        self.assertIn("nogon mode, but no sign-in service: Tailscale identity only", err.getvalue())
         self.assertTrue(a.standalone)
         r = a.resolve(Headers(("Tailscale-User-Login", "me@passkey")))
         self.assertEqual((r.status, r.reason, r.banner), (200, "ok", False))
@@ -261,9 +275,9 @@ class CookieNameTest(unittest.TestCase):
 
     def test_own_name_only(self):
         helper, clock = FakeHelper(), Clock()
-        a = ha.HisterAuth("niwa", SIGNIN, ("owner",), "https://niwa.example.ts.net", "http://hl:8081", "tailscale",
-                          ("me@passkey",), "example.ts.net", True, fetch=helper, clock=clock,
-                          sso_cookie="machiya_dev_sso")
+        a = ha.NogonAuth("niwa", SIGNIN, ("owner",), "https://niwa.example.ts.net", "http://hl:8081", "tailscale",
+                         ("me@passkey",), "example.ts.net", True, fetch=helper, clock=clock,
+                         sso_cookie="machiya_dev_sso")
         helper.ok(SID)
         other = "mhs_" + "B" * 43
         self.assertEqual(a.credential(Headers(("Cookie", "machiya_sso=%s; machiya_dev_sso=%s" % (other, SID)))),
@@ -277,7 +291,7 @@ class CookieNameTest(unittest.TestCase):
         self.assertFalse(any(c.startswith(("machiya_sso=", "machiya_sso_try=", "__Host-machiya_sso"))
                              for c in r.cookies))
         with self.assertRaises(ha.IdentityError):
-            ha.HisterAuth("niwa", SIGNIN, ("owner",), "https://n.example", "http://hl:8081", sso_cookie="bad name")
+            ha.NogonAuth("niwa", SIGNIN, ("owner",), "https://n.example", "http://hl:8081", sso_cookie="bad name")
 
 
 class ResolveTest(unittest.TestCase):
@@ -288,7 +302,7 @@ class ResolveTest(unittest.TestCase):
         a, h, _ = make()
         h.ok(SID)
         r = a.resolve(self.cookie())
-        self.assertEqual((r.status, r.reason, r.actor, r.banner, r.cookies), (200, "ok", "hister:owner", False, []))
+        self.assertEqual((r.status, r.reason, r.actor, r.banner, r.cookies), (200, "ok", "nogon:owner", False, []))
         self.assertTrue(r.principal.owner)
         self.assertEqual(r.principal.uid, tailscale_uid("me@passkey"))   # the one fallback login keys preferences
         self.assertEqual(h.calls[0][1:], ("/v1/check", {"X-Machiya-Session": SID, "Accept": "application/json",
@@ -315,7 +329,7 @@ class ResolveTest(unittest.TestCase):
         a.resolve(self.cookie())
         self.assertEqual(len(h.calls), 2)
 
-    def test_other_hister_user_is_403_no_fallback(self):
+    def test_other_nogon_user_is_403_no_fallback(self):
         a, h, _ = make()
         h.ok(SID, username="someone-else")
         r = a.resolve(Headers(("Cookie", "machiya_sso=" + SID), ("Tailscale-User-Login", "me@passkey")))
@@ -441,7 +455,7 @@ class ResolveTest(unittest.TestCase):
         status, _, body = a.respond(r, is_page=True)
         self.assertEqual(status, 503)
         self.assertIn(b"Sign-In Is Unavailable", body)
-        # and a signed-in owner still gets in: Kura's uid is the Hister username's hash
+        # and a signed-in owner still gets in: Kura's uid is the Nogon username's hash
         h.down = False
         h.ok(SID)
         clock.t += 6                                               # the cached "down" lasts 5 s
@@ -555,11 +569,11 @@ class PiecesTest(unittest.TestCase):
 
     def test_settings_refused_in_constructor(self):
         with self.assertRaises(IdentityError):
-            ha.HisterAuth("kura", SIGNIN, ["owner"], "https://k", "", "none")
+            ha.NogonAuth("kura", SIGNIN, ["owner"], "https://k", "", "none")
         with self.assertRaises(IdentityError):
-            ha.HisterAuth("kura", SIGNIN, ["*"], "https://k", "http://h", "none")
+            ha.NogonAuth("kura", SIGNIN, ["*"], "https://k", "http://h", "none")
         with self.assertRaises(IdentityError):
-            ha.HisterAuth("kura", "", ["o"], "https://k", "http://h", "none")
+            ha.NogonAuth("kura", "", ["o"], "https://k", "http://h", "none")
 
     def test_ui_hooks_are_opt_in(self):
         root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ui")
@@ -603,8 +617,8 @@ class RoomSessionTest(unittest.TestCase):
         self.assertEqual((a.room_cookie, a.state_cookie, a.try_cookie, a.out_cookie),
                          ("__Host-machiya_sso_niwa", "__Host-machiya_sso_niwa_state", "__Host-machiya_sso_niwa_try",
                           "__Host-machiya_sso_niwa_out"))
-        plain = ha.HisterAuth("kura", SIGNIN, ("owner",), "http://localhost:8080", "http://hl:8081", "none",
-                              secure=False, fetch=FakeHelper())
+        plain = ha.NogonAuth("kura", SIGNIN, ("owner",), "http://localhost:8080", "http://hl:8081", "none",
+                             secure=False, fetch=FakeHelper())
         self.assertEqual(plain.room_cookie, "machiya_sso_kura")      # no __Host- without https
         self.assertTrue(all("Secure" not in c for c in plain.clear_cookies()))
 
@@ -630,7 +644,7 @@ class RoomSessionTest(unittest.TestCase):
         a, h, _ = make()
         self.room_ok(h)
         r = a.resolve(Headers(("Cookie", "__Host-machiya_sso_niwa=" + RSID)))
-        self.assertEqual((r.status, r.actor, r.principal.via), (200, "hister:owner", "hister"))
+        self.assertEqual((r.status, r.actor, r.principal.via), (200, "nogon:owner", "nogon"))
         self.assertEqual(h.calls[-1][2], {"X-Machiya-Session": RSID, "X-Machiya-Room": NIWA,
                                           "Accept": "application/json"})
 
@@ -821,14 +835,47 @@ class TokenGateTest(unittest.TestCase):
 
     def test_settings(self):
         self.assertIsNone(ha.token_gate_for("mcp", "MCP", {}))
-        g = ha.token_gate_for("mcp", "MCP", {"MCP_AUTH_URL": "http://hister-login:8081", "MCP_PUBLIC_URL":
-                                             "https://mcp.example.ts.net", "MCP_HISTER_USERS": "owner"})
+        g = ha.token_gate_for("mcp", "MCP", {"MCP_AUTH_URL": "http://nogon-login:8081", "MCP_PUBLIC_URL":
+                                             "https://mcp.example.ts.net", "MCP_NOGON_USERS": "owner"})
         self.assertEqual(g.origin, "https://mcp.example.ts.net")
-        for env in ({"MCP_AUTH_URL": "http://h:8081", "MCP_HISTER_USERS": "owner"},
+        for env in ({"MCP_AUTH_URL": "http://h:8081", "MCP_NOGON_USERS": "owner"},
                     {"MCP_AUTH_URL": "http://h:8081", "MCP_PUBLIC_URL": "https://m"},
-                    {"MCP_AUTH_URL": "http://h:8081", "MCP_PUBLIC_URL": "https://m", "MCP_HISTER_USERS": "*"}):
+                    {"MCP_AUTH_URL": "http://h:8081", "MCP_PUBLIC_URL": "https://m", "MCP_NOGON_USERS": "*"}):
             with self.assertRaises(IdentityError):
                 ha.token_gate_for("mcp", "MCP", env)
+        with self.assertRaisesRegex(IdentityError, "rename it MCP_NOGON_USERS"):     # 0.41: the old name alone
+            ha.token_gate_for("mcp", "MCP", {"MCP_AUTH_URL": "http://h:8081", "MCP_PUBLIC_URL": "https://m",
+                                             "MCP_HISTER_USERS": "owner"})
+
+
+class HisterAuthAliasTest(unittest.TestCase):
+    """vaultkit 0.41: histerauth is nogonauth under its old name, for one release (it goes in 0.42.0)."""
+
+    # every name the rooms, the stack's services and their tests used from histerauth (2026-11-20)
+    USED = ("HisterAuth", "hister_headers", "origin_of", "RSID_RE", "state_hash", "signin_meta", "NONCE_RE",
+            "load_for", "banner_html", "RTOKEN_PREFIX", "safe_return", "RTOKEN_RE", "ROOM_PREFIX", "TOKEN_RE",
+            "STATE_MAX_AGE", "Result", "new_nonce", "HOST_PREFIX", "CODE_RE", "token_gate_for", "SSO_COOKIE", "SID_RE",
+            "SID_PREFIX", "PROVIDER_RE", "OUT_MAX_AGE", "origins_header", "_http_fetch", "CODE_PREFIX",
+            "CALLBACK_PATH", "FALLBACK", "TokenGate")
+
+    def test_old_and_new_names_are_the_same_objects(self):
+        from vaultkit import histerauth
+        self.assertIs(histerauth.HisterAuth, ha.NogonAuth)
+        self.assertIs(histerauth.NogonAuth, ha.NogonAuth)
+        self.assertIs(histerauth.hister_headers, ha.nogon_headers)
+        self.assertIs(histerauth.nogon_headers, ha.nogon_headers)
+        for name in self.USED:
+            self.assertTrue(hasattr(histerauth, name), name)
+        for name in [n for n in vars(ha) if not n.startswith("__")]:
+            self.assertIs(getattr(histerauth, name), getattr(ha, name), name)
+        with self.assertRaises(AttributeError):
+            histerauth.no_such_name
+
+    def test_the_alias_behaves_as_nogonauth(self):
+        from vaultkit import histerauth
+        self.assertEqual(histerauth.hister_headers(""), {"Origin": "nogon://"})
+        a = histerauth.load_for("niwa", dict(LoadForTest.BASE))
+        self.assertIsInstance(a, ha.NogonAuth)
 
 
 if __name__ == "__main__":
@@ -842,8 +889,8 @@ class TrustedFallbackTest(unittest.TestCase):
     def make(self, trusted, auth_url="http://hl:8081"):
         helper, clock = FakeHelper(), Clock()
         helper.down = True                       # the helper is down, so the fallback decides
-        a = ha.HisterAuth("niwa", SIGNIN, ("owner",), "https://niwa.example.ts.net", auth_url, "tailscale",
-                          ("me@passkey",), "example.ts.net", True, fetch=helper, clock=clock, trusted=trusted)
+        a = ha.NogonAuth("niwa", SIGNIN, ("owner",), "https://niwa.example.ts.net", auth_url, "tailscale",
+                         ("me@passkey",), "example.ts.net", True, fetch=helper, clock=clock, trusted=trusted)
         return a
 
     def test_untrusted_peer_gets_no_fallback(self):
@@ -867,7 +914,7 @@ class TrustedFallbackTest(unittest.TestCase):
         self.assertEqual(quiet(self.make(()).resolve, h, client="192.0.2.1").status, 200)
 
     def test_load_for_reads_the_rooms_trusted_proxies(self):
-        env = {"NIWA_AUTH": "hister", "NIWA_AUTH_SIGNIN_URL": SIGNIN, "NIWA_HISTER_USERS": "owner",
+        env = {"NIWA_AUTH": "nogon", "NIWA_AUTH_SIGNIN_URL": SIGNIN, "NIWA_NOGON_USERS": "owner",
                "NIWA_USERS": "me@passkey", "NIWA_PUBLIC_URL": "https://niwa.example.ts.net",
                "NIWA_AUTH_URL": "http://hl:8081", "NIWA_TRUSTED_PROXIES": "10.210.4.2/32"}
         a = quiet(ha.load_for, "niwa", env, bind="127.0.0.1")
@@ -879,6 +926,7 @@ class TrustedFallbackTest(unittest.TestCase):
 
 class RefusedTextTest(unittest.TestCase):
     def test_token_expired_is_explained(self):
-        """v0.29: hister-login 0.6.0's token-expired reaches the room as its own reason, with a sentence for people."""
+        """v0.29: nogon-login (then hister-login) 0.6.0's token-expired reaches the room as its own reason, with a
+        sentence for people."""
         self.assertIn("token-expired", ha.REFUSED_TEXT)
         self.assertIn("90 days", ha.REFUSED_TEXT["token-expired"])

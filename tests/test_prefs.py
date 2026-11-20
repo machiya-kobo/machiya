@@ -1,5 +1,5 @@
 """The settings that follow a person (docs/contracts/prefs.md): vaultkit.prefs (schema, store, the migration rule),
-signin.handle_prefs (a room's own store), histerauth.forward_prefs (a room in hister mode), the shell's Shared and
+signin.handle_prefs (a room's own store), nogonauth.forward_prefs (a room in nogon mode), the shell's Shared and
 This Device sections, and ui/machiya.js's sync rules, run in Node as rooms sharing one cookie jar (tests/js/).
 
     python3 -m unittest tests.test_prefs        (the machiya.js part needs `node`; skipped without it)
@@ -18,8 +18,8 @@ import unittest
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, ROOT)
 
-from vaultkit import histerauth as ha, identity as idn, palettes, prefs, shell, signin   # noqa: E402
-from tests.test_histerauth import FakeHelper, Headers, SID, quiet                     # noqa: E402
+from vaultkit import nogonauth as ha, identity as idn, palettes, prefs, shell, signin    # noqa: E402
+from tests.test_nogonauth import FakeHelper, Headers, SID, quiet                      # noqa: E402
 
 HOST = "kura.example.test"
 
@@ -33,7 +33,7 @@ class SchemaTest(unittest.TestCase):
         self.assertEqual(list(prefs.SHARED["palette"]["values"]), list(palettes.PALETTES))
 
     def test_refused(self):
-        for bad in ({"theme": "sepia"}, {"palette": "Nord"}, {"text_size": "huge"}, {"apps_hidden": "hister,evil"},
+        for bad in ({"theme": "sepia"}, {"palette": "Nord"}, {"text_size": "huge"}, {"apps_hidden": "nogon,evil"},
                     {"language": "en"}, {"time_zone": "UTC"}, {"previewPane": "on"}, {"kura": "x"},
                     {"other.key": "x"}, {"kura.Bad": "x"}, {"kura." + "a" * 49: "x"}, {"kura.x": 1},
                     {"kura.x": "a" * 1025}, {"kura.x": "a\nb"}, {"theme": ["night"]}, ["theme"],
@@ -177,7 +177,7 @@ class RoomStoreTest(unittest.TestCase):
 
 
 class ForwardTest(unittest.TestCase):
-    """histerauth.forward_prefs: a room's /api/prefs in hister mode goes to the helper's /v1/prefs with the caller's
+    """nogonauth.forward_prefs: a room's /api/prefs in nogon mode goes to the helper's /v1/prefs with the caller's
     own credential, never a user id; the fallback has no account; a cookie-borne PUT must be same-origin."""
 
     class Helper(FakeHelper):
@@ -209,9 +209,9 @@ class ForwardTest(unittest.TestCase):
         self.helper.answers[("/v1/check", SID)] = (200, json.dumps({
             "username": "owner", "user_id": 1, "via": "session",
             "prefs": {"theme": "night", "palette": "nord", "bogus": "x", "text_size": "huge"}}).encode())
-        self.auth = ha.HisterAuth("niwa", "https://hister.example.ts.net/machiya/signin", ("owner",),
-                                  "https://niwa.example.ts.net", "http://hl:8081", "tailscale", ("me@passkey",),
-                                  "example.ts.net", True, fetch=self.helper)
+        self.auth = ha.NogonAuth("niwa", "https://nogon.example.ts.net/machiya/signin", ("owner",),
+                                 "https://niwa.example.ts.net", "http://hl:8081", "tailscale", ("me@passkey",),
+                                 "example.ts.net", True, fetch=self.helper)
 
     def cookie(self, *more):
         return Headers(("Cookie", "machiya_sso=" + SID), *more)
@@ -279,7 +279,7 @@ class ForwardTest(unittest.TestCase):
         self.assertEqual((status, "signin" in json.loads(body)), (401, True))
 
     def test_standalone_keeps_the_rooms_own_store(self):
-        auth = quiet(ha.HisterAuth, "niwa", "https://h/machiya/signin", ("owner",), "https://niwa.example.ts.net", "",
+        auth = quiet(ha.NogonAuth, "niwa", "https://h/machiya/signin", ("owner",), "https://niwa.example.ts.net", "",
                      "tailscale", ("me@passkey",))
         res = auth.resolve(Headers(("Tailscale-User-Login", "me@passkey")), True, "/")
         self.assertIsNone(auth.forward_prefs(res, "GET", Headers()))
@@ -293,14 +293,14 @@ class AutoSigninTest(unittest.TestCase):
 
     def make(self, provider="oidc"):
         helper = FakeHelper()
-        auth = ha.HisterAuth("niwa", "https://hister.example.ts.net/machiya/signin", ("owner",),
-                             "https://niwa.example.ts.net", "http://hl:8081", "tailscale", ("me@passkey",),
-                             "example.ts.net", True, fetch=helper, provider=provider)
+        auth = ha.NogonAuth("niwa", "https://nogon.example.ts.net/machiya/signin", ("owner",),
+                            "https://niwa.example.ts.net", "http://hl:8081", "tailscale", ("me@passkey",),
+                            "example.ts.net", True, fetch=helper, provider=provider)
         return auth, helper
 
     def test_signin_location_carries_the_provider(self):
         auth, _ = self.make()
-        self.assertEqual(auth.signin_location("/n/x"), "https://hister.example.ts.net/machiya/signin?return="
+        self.assertEqual(auth.signin_location("/n/x"), "https://nogon.example.ts.net/machiya/signin?return="
                          "https%3A%2F%2Fniwa.example.ts.net%2Fn%2Fx&provider=oidc&auto=1")
         self.assertNotIn("provider", auth.signin_location("/n/x", auto=False))
         plain, _ = self.make("")
@@ -332,7 +332,7 @@ class AutoSigninTest(unittest.TestCase):
         self.assertNotIn("provider", res.location)
 
     def test_load_for(self):
-        env = {"NIWA_AUTH": "hister", "NIWA_AUTH_SIGNIN_URL": "https://h/machiya/signin", "NIWA_HISTER_USERS": "owner",
+        env = {"NIWA_AUTH": "nogon", "NIWA_AUTH_SIGNIN_URL": "https://h/machiya/signin", "NIWA_NOGON_USERS": "owner",
                "NIWA_AUTH_URL": "http://hl:8081", "NIWA_USERS": "me@passkey", "NIWA_PUBLIC_URL": "https://niwa.x",
                "NIWA_BIND_BEHIND_PROXY": "1"}
         self.assertEqual(quiet(ha.load_for, "niwa", env).provider, "")
@@ -342,7 +342,7 @@ class AutoSigninTest(unittest.TestCase):
 
 
 class ShellTest(unittest.TestCase):
-    LINKS = {"kura": "https://k", "konbini": "https://b", "hister": "https://h", "machiya": "https://m"}
+    LINKS = {"kura": "https://k", "konbini": "https://b", "nogon": "https://h", "machiya": "https://m"}
 
     def test_device_size(self):
         ctx = shell.prefs("machiya_textSize=large; machiya_textSizeDevice=xsmall")
@@ -355,7 +355,7 @@ class ShellTest(unittest.TestCase):
         self.assertIn('data-text="small"', page)
 
     def test_shared_section_first_rows_and_state(self):
-        ctx = shell.prefs("machiya_show_hister=false; textSize=small; textSizeDevice=xlarge")
+        ctx = shell.prefs("machiya_show_nogon=false; textSize=small; textSizeDevice=xlarge")
         sec = shell.shared_section(ctx, "kura", self.LINKS, "account", "owner")
         title, items, note, extra = sec
         html = "".join(items)
@@ -368,7 +368,7 @@ class ShellTest(unittest.TestCase):
         self.assertNotIn("show_", html)                                         # the apps are their own section
         rooms = "".join(sec.then[1])
         self.assertEqual(sec.then[0], "Rooms")
-        self.assertIn('data-set="show_hister">', rooms)                         # off: no "checked"
+        self.assertIn('data-set="show_nogon">', rooms)                          # off: no "checked"
         self.assertNotIn("show_kura", rooms)                                    # not the room itself
         self.assertIsNone(shell.shared_section(ctx, "kura", self.LINKS, "account", apps=False).then)
         self.assertIsNone(shell.rooms_section(ctx, "kura", {}))
@@ -499,6 +499,20 @@ class MachiyaJsTest(unittest.TestCase):
         self.assertEqual(x["cookie"], "false")
         self.assertEqual((x["phone"], x["phoneCookie"]), ({"example": False}, None))
         self.assertEqual(x["account"], {"apps_hidden": "kura"})
+
+    def test_old_room_id_still_hides_nogon(self):
+        """vaultkit 0.41 (Hister is now Nogon): a machiya_show_hister cookie and an account row holding `hister`
+        still hide the Nogon row, on a new page (data-room="nogon") and an old one (genkan's "hister"); nothing is
+        written under the old id, and an old page's show_hister switch writes show_nogon."""
+        r = self.out["renamed"]
+        self.assertEqual(r["oldCookie"], {"nogon": True, "hister": True})
+        self.assertEqual((r["filled"], r["control"]), ({"apps_hidden": "nogon"}, False))
+        self.assertEqual(r["afterOn"], {"hidden": {"nogon": False, "hister": False}, "cookie": "true", "account": ""})
+        self.assertEqual(r["phone"], {"nogon": True, "hister": True, "searxng": True})   # the account's old row
+        self.assertEqual((r["phonePuts"], r["phoneCookie"], r["phoneOld"]), (2, "false", None))  # applied, not sent
+        self.assertEqual((r["genkanBefore"], r["genkan"]), ({"hister": True}, {"hister": False}))
+        self.assertEqual((r["genkanCookie"], r["genkanOld"]), ("true", None))
+        self.assertEqual(r["puts"], [{"apps_hidden": "nogon"}, {"apps_hidden": ""}, {"apps_hidden": "searxng"}])
 
     def test_account_down_nothing_breaks(self):
         d = self.out["down"]

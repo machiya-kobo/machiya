@@ -112,7 +112,7 @@ def utc(value):
 
 # hashlib.scrypt needs OpenSSL: a Python built against LibreSSL (OpenBSD's) has none. Then everything that hashes a
 # password or a pairing code (the built-in sign-in, POST /api/pair, the CLI's passwd/setup --password/pair) refuses
-# with SCRYPT_MISSING, and everything else (open, tailscale, header and hister modes, tokens) works as before.
+# with SCRYPT_MISSING, and everything else (open, tailscale, header and nogon modes, tokens) works as before.
 HAVE_SCRYPT = hasattr(hashlib, "scrypt")
 SCRYPT_MISSING = ("this Python's hashlib has no scrypt (built against LibreSSL, as on OpenBSD): password sign-in and "
                   "pairing codes are unavailable here; use Tailscale, a proxy header, Nogon's sign-in or tokens")

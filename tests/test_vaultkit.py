@@ -914,7 +914,7 @@ class GitSyncTest(unittest.TestCase):
 
 class ShellTest(unittest.TestCase):
     ENV = {"MACHIYA_ROOMS": "shiori=https://shiori.t/, konbini=https://konbini.t,niwa=https://niwa.t,kura=https://kura.t,"
-                            "hister=https://hister.t,searxng=https://searxng.t"}
+                            "nogon=https://nogon.t,searxng=https://searxng.t"}
 
     def test_rooms_and_switcher(self):
         from vaultkit import shell
@@ -923,8 +923,11 @@ class ShellTest(unittest.TestCase):
         menu = shell.switcher("kura", links)
         self.assertIn('<b data-room="kura"><span class="seal icon" data-room="kura" title="Kura (蔵)" aria-hidden="true">蔵</span>Kura', menu)   # here, not a link
         css = open(os.path.join(ROOT, "ui", "machiya.css"), encoding="utf-8").read()
-        for room in ("shiori", "konbini", "niwa", "kura", "hister", "searxng", "machiya"):   # every icon is drawn
+        for room in ("shiori", "konbini", "niwa", "kura", "nogon", "searxng", "machiya"):    # every icon is drawn
             self.assertIn('.seal.icon[data-room="%s"] { background-image: url("data:image/' % room, css)
+        # 0.41: Nogon's logo also for a page that still uses the old id (genkan, until it moves)
+        self.assertIn('.seal.icon[data-room="hister"], .seal.icon[data-room="nogon"] { background-image:', css)
+        self.assertIn('href="https://nogon.t/" data-room="nogon"', menu)
         self.assertLess(menu.index("Shiori"), menu.index("Konbini"))                          # front to back
         self.assertLess(menu.index("Niwa"), menu.index("Nogon"))                             # neighbours last
         self.assertIn('href="https://searxng.t/" data-room="searxng"', menu)
@@ -1043,12 +1046,12 @@ class ShellTest(unittest.TestCase):
         page = shell.settings_page([shell.appearance_section(ctx),
                                     ("Reading", [shell.toggle("Preview Pane", "previewPane", True, cookie=True)],
                                      "Preview Pane shows a note beside the list."),
-                                    shell.apps_section("kura", shell.rooms(self.ENV), {"hister": False}),
+                                    shell.apps_section("kura", shell.rooms(self.ENV), {"nogon": False}),
                                     shell.about_section("kura", "0.3.0", "synced abc 3 min ago")], "kura")
         self.assertIn('<option value="day" selected>Light</option>', page)
         self.assertIn('<option value="small" selected>Small</option>', page)
         self.assertIn('data-set="previewPane" data-cookie checked', page)
-        self.assertIn('data-set="show_hister">', page)                                         # off
+        self.assertIn('data-set="show_nogon">', page)                                          # off
         self.assertNotIn('show_kura', page)                                                     # not itself
         self.assertIn('<h2 id="about">About</h2>', page)
 
@@ -1197,9 +1200,12 @@ class ExtraRoomsTest(unittest.TestCase):
     EXAMPLE = "example|Example Room|例|https://example.example.ts.net"
     LINKS = {"MACHIYA_ROOMS": "shiori=https://shiori.t,konbini=https://konbini.t,niwa=https://niwa.t,kura=https://kura.t,"
                               "hister=https://hister.t,searxng=https://searxng.t,machiya=https://machiya.t"}
-    # sha256 of render_all() on vaultkit before MACHIYA_EXTRA_ROOMS existed (v0.36.0), with the UI files' ?v= hashes
-    # normalised. If the shell's output changes on purpose, recompute it with the setting unset and say so in the commit.
-    UNSET_SHA256 = "ce05658208a7598ac0a603b17280b7daa81004dcd75f8c6c08c771c973a43a2d"
+    # sha256 of render_all() with the setting unset and the UI files' ?v= hashes normalised. If the shell's output
+    # changes on purpose, recompute it and say so in the commit. v0.36.0 (before MACHIYA_EXTRA_ROOMS):
+    # ce05658208a7598ac0a603b17280b7daa81004dcd75f8c6c08c771c973a43a2d; v0.41.0: the Nogon neighbour's data-room and
+    # its Apps switch say nogon, not hister (60 data-room="…" and 18 show_… attributes; nothing else changed). LINKS
+    # keeps the old key hister=, which is read as nogon.
+    UNSET_SHA256 = "e97b356154ed91e9da33773a6fb8bae9e0a81c79b24e7d6aae580a1c4dc6a868"
 
     def env(self, value):
         from unittest import mock
@@ -1648,9 +1654,9 @@ class SharedUITest(unittest.TestCase):
         self.shell = importlib.import_module("vaultkit.shell")
 
     def test_shared_cookie_wins(self):
-        p = self.shell.prefs("theme=day; machiya_theme=night; textSize=small; machiya_show_hister=false; group=family")
+        p = self.shell.prefs("theme=day; machiya_theme=night; textSize=small; machiya_show_nogon=false; group=family")
         self.assertEqual((p.theme, p.text), ("night", "small"))
-        self.assertEqual(p.extra.get("show_hister"), "false")
+        self.assertEqual(p.extra.get("show_nogon"), "false")
         self.assertEqual(p.extra.get("group"), "family")
         self.assertTrue(self.shell.is_shared("show_niwa") and not self.shell.is_shared("group"))
 

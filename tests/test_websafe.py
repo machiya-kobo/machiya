@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, ROOT)
 
-from vaultkit import histerauth, shell, websafe   # noqa: E402
+from vaultkit import nogonauth, shell, websafe    # noqa: E402
 
 ADDRESSES = ["127.0.0.1", "127.1.2.3", "10.0.0.1", "172.17.0.2", "192.168.1.1", "169.254.169.254", "100.64.0.1",
              "100.100.100.100", "0.0.0.0", "255.255.255.255", "224.0.0.1", "::1", "fe80::1", "fd7a:115c:a1e0::1",
@@ -61,10 +61,10 @@ class Headers(unittest.TestCase):
         for bad in ("//evil.example/x", "/\\evil.example", "https://evil.example/", "javascript:x", "", None):
             self.assertEqual(websafe.location(bad), "/")
 
-    def test_histerauth_refusals_carry_the_headers(self):
-        auth = histerauth.HisterAuth("kura", "https://hister.t/machiya/signin", ["owner"], "https://kura.t", "",
-                                     "tailscale", ["o@t"], "", True, None)
-        result = histerauth.Result(status=401, signin="https://hister.t/machiya/signin")
+    def test_nogonauth_refusals_carry_the_headers(self):
+        auth = nogonauth.NogonAuth("kura", "https://nogon.t/machiya/signin", ["owner"], "https://kura.t", "",
+                                   "tailscale", ["o@t"], "", True, None)
+        result = nogonauth.Result(status=401, signin="https://nogon.t/machiya/signin")
         for is_page in (True, False):
             status, headers, _ = auth.respond(result, is_page=is_page)
             h = dict(headers)

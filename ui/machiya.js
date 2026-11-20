@@ -35,8 +35,8 @@
 //     (textSizeDevice) is this device's own text size and never leaves it.
 //  7. sign-out (v0.13): a form posting to /signout first empties the service worker's offline copies (CLEAR_OFFLINE),
 //     so whoever uses this device next can't read what was kept; the server's answer also clears the HTTP cache.
-//  8. Hister sign-in (v0.18; inert unless the room opts in with <meta name="machiya-signin" content="/signout">,
-//     histerauth's signin_meta()): a same-origin fetch answered 401 with a JSON "signin" address sends the whole page
+//  8. Nogon sign-in (v0.18; inert unless the room opts in with <meta name="machiya-signin" content="/signout">,
+//     nogonauth's signin_meta()): a same-origin fetch answered 401 with a JSON "signin" address sends the whole page
 //     there, with return= this page (API calls are never redirected by the server, so the page has to go itself); and
 //     every Rooms menu gains a "Sign Out" row, a form posting to that path (so 7. applies to it too).
 // 10. the Settings sheet (v0.32, owner 2026-10-14): the gear and every link to /settings open Settings as a sheet over the
@@ -60,7 +60,15 @@ const PALETTES = ["tokyo-night", "solarized", "nord", "dracula", "catppuccin", "
                   "everforest", "ayu"];
 const TEXT_SIZES = ["xsmall", "small", "standard", "large", "xlarge"];
 // the switcher's rows (vaultkit/prefs.py APPS; a test checks they match): apps_hidden <-> show_<app>
-const APPS = ["shiori", "konbini", "niwa", "kura", "hister", "searxng", "machiya"];
+const APPS = ["shiori", "konbini", "niwa", "kura", "nogon", "searxng", "machiya"];
+// the room ids before vaultkit 0.41 (Hister is now Nogon; vaultkit/names.py ROOM_ALIASES): a show_hister cookie or
+// stored switch, or an account's apps_hidden naming hister, is read as nogon; a page that still uses the old id
+// (genkan, until it moves) is matched too. What this page writes uses the new id.
+const OLD_IDS = { hister: "nogon" };
+const OLD_OF = Object.fromEntries(Object.entries(OLD_IDS).map(([old, now]) => [now, old]));
+const roomId = (a) => OLD_IDS[a] || a;
+const showKey = (key) => (key.startsWith("show_") ? "show_" + roomId(key.slice(5)) : key);
+const appsList = (v) => { const set = new Set(v.split(",").map(roomId)); return APPS.filter((a) => set.has(a)).join(","); };
 // the deployment's extra rooms (shell.extra_rooms): only the page knows their keys
 const EXTRA = [...new Set([...document.querySelectorAll("[data-extra-room]")].map((el) => el.dataset.extraRoom))]
   .filter((a) => /^[a-z0-9-]{1,32}$/.test(a) && !APPS.includes(a));
@@ -116,8 +124,11 @@ function apply(key, value) {
   } else if (key === "textSizeDevice") {
     b.dataset.text = value || current("textSize");
   } else if (key.startsWith("show_")) {
-    const which = key.slice(5);
-    for (const a of document.querySelectorAll(`.rooms .menu [data-room="${which}"]`)) a.hidden = value === false;
+    const which = roomId(key.slice(5));
+    const ids = OLD_OF[which] ? [which, OLD_OF[which]] : [which];
+    for (const a of document.querySelectorAll(ids.map((i) => `.rooms .menu [data-room="${i}"]`).join(", "))) {
+      a.hidden = value === false;
+    }
   }
   if (key === "theme" || key === "palette") barColour();
   document.dispatchEvent(new CustomEvent("machiya:setting", { detail: { key, value } }));
@@ -131,16 +142,28 @@ function barColour() {
   if (metas[0]) { metas[0].removeAttribute("media"); metas[0].content = colour; }
 }
 function showControl(key, value) {
-  for (const el of document.querySelectorAll(`[data-set="${key}"]`)) {
+  const old = key.startsWith("show_") && OLD_OF[key.slice(5)] ? `, [data-set="show_${OLD_OF[key.slice(5)]}"]` : "";
+  for (const el of document.querySelectorAll(`[data-set="${key}"]` + old)) {
     if (el.type === "checkbox") el.checked = !!value; else el.value = value;
   }
 }
 
 const settings = load();
+for (const [old, now] of Object.entries(OLD_IDS)) {   // a switch this room kept before 0.41
+  if (Object.hasOwn(settings, "show_" + old)) {
+    if (!Object.hasOwn(settings, "show_" + now)) settings["show_" + now] = settings["show_" + old];
+    delete settings["show_" + old];
+  }
+}
+// show_<a>'s cookie, else its old id's (a browser that chose before 0.41); the new one wins
+function showCookie(a) {
+  const v = cookieOf("show_" + a);
+  return v !== null || !OLD_OF[a] ? v : cookieOf("show_" + OLD_OF[a]);
+}
 const appliedNow = {};                                // what this page shows now, so a re-read applies only changes
 // the Apps switches: the show_* cookies (another room may have changed them) win over this room's localStorage copy
 for (const a of ROWS) {
-  const c = cookieOf("show_" + a);
+  const c = showCookie(a);
   if (c !== null) settings["show_" + a] = c !== "false";
 }
 // hide rooms switched off on this device (every page)
@@ -177,7 +200,7 @@ function appsHidden() {                               // this browser's apps_hid
   let any = false;
   const hidden = [];
   for (const a of APPS) {
-    let v = cookieOf("show_" + a);
+    let v = showCookie(a);
     if (v === null && Object.hasOwn(settings, "show_" + a)) v = String(settings["show_" + a]);
     if (v !== null) any = true;
     if (v === "false") hidden.push(a);
@@ -208,7 +231,7 @@ function localOf(key) {
 function valid(key, v) {
   if (typeof v !== "string") return false;
   if (Object.hasOwn(SHARED_KEYS, key)) return KNOWN[SHARED_KEYS[key]].includes(v === "auto" ? "system" : v);
-  if (key === "apps_hidden") return v.split(",").every((a) => a === "" || APPS.includes(a));
+  if (key === "apps_hidden") return v.split(",").every((a) => a === "" || APPS.includes(roomId(a)));
   const spec = appSpec[APP_LOCAL[key]];
   if (!spec) return false;
   if (spec.type === "bool") return v === "on" || v === "off";
@@ -228,10 +251,10 @@ function setLocal(key, v) {
     showControl(local, value);
     apply(local, value);
   } else if (key === "apps_hidden") {
-    const hidden = new Set((v || "").split(",").filter(Boolean));
+    const hidden = new Set((v || "").split(",").filter(Boolean).map(roomId));
     for (const a of APPS) {
       const on = !hidden.has(a);
-      if (!on || cookieOf("show_" + a) !== null) setCookie("show_" + a, on);
+      if (!on || showCookie(a) !== null) setCookie("show_" + a, on);
       all["show_" + a] = on;
       settings["show_" + a] = on;
       appliedNow["show_" + a] = on;
@@ -354,12 +377,15 @@ function reconcile(data) {
       else if (local !== undefined) push[key] = local;    // fill the blank from this browser
       continue;
     }
-    const value = prefs[key];
-    if (!valid(key, value) || value === local) continue;  // unknown values are never applied
+    if (!valid(key, prefs[key])) continue;               // unknown values are never applied
+    const apps = key === "apps_hidden";                   // (an old id in it is read as the new one: 0.41)
+    const value = apps ? appsList(prefs[key]) : prefs[key];
+    if (value === local) continue;
     if (key === "apps_hidden" && local === undefined && value === "") continue;       // all shown either way
     // the account still says what it said last time, and this browser now says something else: another room (or
     // this one, offline) changed it here since, so this browser's value is the newer one
-    if (local !== undefined && was[key] === value && wasAt[key] === updated[key]) push[key] = local;
+    const wasValue = apps && typeof was[key] === "string" ? appsList(was[key]) : was[key];
+    if (local !== undefined && wasValue === value && wasAt[key] === updated[key]) push[key] = local;
     else setLocal(key, value);
   }
   store(SEEN, { rev: data.rev, prefs, updated });
@@ -386,7 +412,7 @@ function refresh() {
   const d = deviceSize();
   if (appliedNow.textSizeDevice !== d) { appliedNow.textSizeDevice = d; apply("textSizeDevice", d); syncDeviceControls(); }
   for (const a of ROWS) {
-    const c = cookieOf("show_" + a);
+    const c = showCookie(a);
     if (c === null) continue;
     const on = c !== "false";
     if (appliedNow["show_" + a] !== on) {
@@ -446,6 +472,7 @@ bindDevice(document, null);
 
 // the /settings page: every [data-set] control. keep() is what a change does there, and what Save does in the sheet.
 function keep(key, value, cookie) {
+  key = showKey(key);                                 // a page's old show_hister switch keeps show_nogon (0.41)
   const all = load();
   all[key] = value;
   save(all);
@@ -462,8 +489,9 @@ function bindSettings(root, sheet) {
   for (const el of root.querySelectorAll("[data-set]")) {
     const key = el.dataset.set;
     const cookie = "cookie" in el.dataset;
-    if (key in now && !cookie) {                      // cookie-backed values come server-rendered
-      if (el.type === "checkbox") el.checked = !!now[key]; else el.value = now[key];
+    const k = showKey(key);
+    if (k in now && !cookie) {                        // cookie-backed values come server-rendered
+      if (el.type === "checkbox") el.checked = !!now[k]; else el.value = now[k];
     }
     if (sheet) sheet.shown(key, el.type === "checkbox" ? el.checked : el.value);
     el.addEventListener("change", () => {
@@ -673,7 +701,7 @@ document.addEventListener("click", (ev) => {
   mark();
 })();
 
-// Hister sign-in (8.): only with <meta name="machiya-signin">
+// Nogon sign-in (8.): only with <meta name="machiya-signin">
 const signinMeta = document.querySelector('meta[name="machiya-signin"]');
 const signoutPath = signinMeta ? signinMeta.content || "/signout" : "";
 if (signinMeta && /^\/(?![\/\\])/.test(signoutPath)) {

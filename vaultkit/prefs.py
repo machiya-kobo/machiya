@@ -1,7 +1,7 @@
 """The settings that follow a person (docs/contracts/prefs.md): the schema, its validation, and the store.
 
 Three kinds of setting (docs/ui.md "Settings"):
-  - **Shared** (SHARED): one value for every Machiya app, kept in the account (hister-login's store; a standalone
+  - **Shared** (SHARED): one value for every Machiya app, kept in the account (nogon-login's store; a standalone
     room's own store): `theme`, `palette`, `text_size`, `apps_hidden`, and Shiori's `pills`.
   - **Per-app** (`<app>.<key>`, APPS): one app's own settings, also kept in the account; the app that reads a key
     validates its value, the store only checks its shape.
@@ -25,7 +25,8 @@ from . import names as _names, palettes
 VERSION = 1
 THEMES = ("system", "day", "night")                              # Appearance; `auto` is read as `system`
 TEXT_SIZES = ("xsmall", "small", "standard", "large", "xlarge")   # the house's five steps
-APPS = ("shiori", "konbini", "niwa", "kura", "hister", "searxng", "machiya")   # the switcher's rows, in its order
+APPS = ("shiori", "konbini", "niwa", "kura", "nogon", "searxng", "machiya")    # the switcher's rows, in its order
+# (0.41: `nogon` was `hister`; a stored or sent `hister` is read as `nogon`, and `nogon` is what is written)
 SHARED = {
     "theme": {"label": "Mode", "values": list(THEMES), "default": "system"},
     "palette": {"label": "Theme", "values": list(palettes.PALETTES), "default": palettes.DEFAULT},
@@ -61,7 +62,7 @@ def known(key):
 
 def _apps(value):
     """'searxng, kura,kura' -> 'kura,searxng' (the house's order, no repeats); PrefsError for an unknown app."""
-    names = [_names.room_key(x.strip()) for x in value.split(",") if x.strip()]    # nogon is read as hister (0.38)
+    names = [_names.room_key(x.strip()) for x in value.split(",") if x.strip()]    # hister is read as nogon (0.41)
     bad = [n for n in names if n not in APPS]
     if bad:
         raise PrefsError("apps_hidden: unknown app %r (one of %s)" % (bad[0], ", ".join(APPS)))
@@ -203,7 +204,7 @@ class Store:
         rows = db.execute("SELECT key, value, updated FROM prefs WHERE principal = ? ORDER BY key", (principal,))
         values, updated = {}, {}
         for k, v, u in rows:
-            values[k], updated[k] = v, u
+            values[k], updated[k] = _as_read(k, v), u
         rev = db.execute("SELECT rev FROM prefs_rev WHERE principal = ?", (principal,)).fetchone()
         return (rev[0] if rev else 0), values, updated
 
@@ -275,6 +276,17 @@ class Store:
     def principals(self):
         with self.lock, self._conn() as db:
             return [r[0] for r in db.execute("SELECT DISTINCT principal FROM prefs ORDER BY principal")]
+
+
+def _as_read(key, value):
+    """A stored value as the house reads it now: an apps_hidden written before 0.41 names `hister`, read as `nogon`
+    (the row stays as it is until its next write). Anything the schema refuses is returned unchanged."""
+    if key == "apps_hidden" and isinstance(value, str):
+        try:
+            return _apps(value)
+        except PrefsError:
+            return value
+    return value
 
 
 class _NoClose:

@@ -2,14 +2,14 @@
 // Each "page load" imports a fresh copy of the real machiya.js into a fake DOM: one room (an origin with its own
 // localStorage and host cookies) in one "device" (a cookie jar whose machiya_* cookies are shared by every room, as
 // MACHIYA_COOKIE_DOMAIN does). The rooms' /api/prefs are fake stores: one per room (a standalone stack) or one for all
-// (the account, hister-login). Prints {scenario: {...}} as JSON; the Python test asserts on it.
+// (the account, nogon-login). Prints {scenario: {...}} as JSON; the Python test asserts on it.
 import fs from "node:fs";
 import path from "node:path";
 
 // as an ES module (a plain .js file would load as CommonJS, cached once by its path): a data: URL per load
 const JS = fs.readFileSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../ui/machiya.js"), "utf8");
 const DOMAIN = "example.test";
-const APPS = ["shiori", "konbini", "niwa", "kura", "hister", "searxng", "machiya"];
+const APPS = ["shiori", "konbini", "niwa", "kura", "nogon", "searxng", "machiya"];
 let loadNo = 0, clock = 1000;
 
 delete globalThis.BroadcastChannel;                   // one page at a time here; tabs are tested in the browser
@@ -72,7 +72,9 @@ function el(props = {}) {
 
 // one page load of `room` on `device`; settings: build the /settings page's controls too
 // extra: a deployment's extra rooms (MACHIYA_EXTRA_ROOMS), drawn as switcher rows marked data-extra-room
-async function visit(device, room, store, { settings = false, appPrefs = null, deviceRow = false, extra = [] } = {}) {
+// rooms: switcher rows of the built-in apps, by their data-room; apps: the Apps switches /settings draws
+async function visit(device, room, store, { settings = false, appPrefs = null, deviceRow = false, extra = [],
+                                           rooms = [], apps = APPS } = {}) {
   // the first render, as shell.prefs()/shell.page() draw it from the cookies (the shared one first)
   const jar = { ...(device.host[room] || {}), ...Object.fromEntries(Object.entries(device.shared)
     .filter(([k]) => k.startsWith("machiya_")).map(([k, v]) => [k.slice(8), v])) };
@@ -87,7 +89,7 @@ async function visit(device, room, store, { settings = false, appPrefs = null, d
       const c = el({ type: "select-one", dataset: { set: key, cookie: "" } });
       controls[key] = c; all.push(c);
     }
-    for (const a of APPS) {
+    for (const a of apps) {
       const c = el({ type: "checkbox", checked: true, dataset: { set: "show_" + a } });
       controls["show_" + a] = c; all.push(c);
     }
@@ -101,6 +103,7 @@ async function visit(device, room, store, { settings = false, appPrefs = null, d
     }
   }
   const rows = Object.fromEntries(extra.map((a) => [a, el({ dataset: { room: a, extraRoom: a } })]));
+  for (const a of rooms) rows[a] = el({ dataset: { room: a } });
   const deviceRowEl = el({ hidden: true });
   const deviceToggle = deviceRow ? el({ type: "checkbox" }) : null;
   const deviceSelect = deviceRow ? el({ value: "standard", closest: () => deviceRowEl }) : null;
@@ -124,6 +127,7 @@ async function visit(device, room, store, { settings = false, appPrefs = null, d
       return null;
     },
     querySelectorAll(sel) {
+      if (sel.includes(", ")) return sel.split(", ").flatMap((one) => this.querySelectorAll(one));
       if (sel === "[data-set]") return all;
       if (sel === "[data-extra-room]") return Object.values(rows);
       const r = sel.match(/^\.rooms \.menu \[data-room="(.+)"\]$/);
@@ -304,6 +308,31 @@ const out = {};
   out.extra = { putsAfterExtra, puts: account.puts, here, niwa: n.hidden(), afterAccount: n2.hidden(),
                 cookie: laptop.cookies().machiya_show_example, phone: p.hidden(),
                 phoneCookie: phone.cookies().machiya_show_example ?? null, account: account.prefs };
+}
+
+// 9. Hister is now Nogon (vaultkit 0.41): a switch this browser or the account kept under the old id still hides
+//    Nogon, a page that still uses the old id (genkan, until it moves) is matched too, and what is written is nogon
+{
+  const account = new Store("account");
+  const laptop = new Device("laptop"), phone = new Device("phone"), old = new Device("old");
+  laptop.shared.machiya_show_hister = "false";               // chosen before 0.41
+  const k = await visit(laptop, "kura", account, { settings: true, rooms: ["nogon", "hister"] });
+  const oldCookie = k.hidden();
+  const filled = { ...account.prefs };
+  const control = k.controls.show_nogon.checked;
+  await k.change("show_nogon", true);
+  const afterOn = { hidden: k.hidden(), cookie: laptop.cookies().machiya_show_nogon, account: account.prefs.apps_hidden };
+  account.set({ apps_hidden: "hister,searxng" });             // a row the account stored before 0.41
+  const p = await visit(phone, "niwa", account, { rooms: ["nogon", "hister", "searxng"] });
+  const phonePuts = account.puts.length;
+  const g = await visit(old, "genkan", account, { settings: true, apps: ["hister"], rooms: ["hister"] });
+  const genkanBefore = g.hidden();
+  await g.change("show_hister", true);                        // an old page's own switch, under the old id
+  out.renamed = { oldCookie, filled, control, afterOn, phone: p.hidden(), phonePuts,
+                  phoneCookie: phone.cookies().machiya_show_nogon ?? null,
+                  phoneOld: phone.cookies().machiya_show_hister ?? null, genkanBefore, genkan: g.hidden(),
+                  genkanCookie: old.cookies().machiya_show_nogon ?? null,
+                  genkanOld: old.cookies().machiya_show_hister ?? null, puts: account.puts, account: account.prefs };
 }
 
 console.log(JSON.stringify(out));

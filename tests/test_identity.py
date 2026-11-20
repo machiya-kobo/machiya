@@ -894,7 +894,7 @@ class NoScryptTest(unittest.TestCase):
 import hashlib, io, json, os, sys, tempfile
 del hashlib.scrypt                                           # as on OpenBSD
 sys.path.insert(0, sys.argv[1])
-from vaultkit import identity, histerauth, signin, shell, prefs   # must import
+from vaultkit import identity, nogonauth, histerauth, signin, shell, prefs   # must import
 out = {"have": identity.HAVE_SCRYPT}
 d = tempfile.mkdtemp()
 path = os.path.join(d, "identity.toml")
@@ -908,10 +908,10 @@ env = {"MACHIYA_IDENTITY_FILE": path, "KURA_AUTH": "open"}
 out["open"] = identity.load_for("kura", env, bind="127.0.0.1") is not None
 out["tailscale"] = identity.load_for("kura", dict(env, KURA_AUTH="tailscale", KURA_BIND_BEHIND_PROXY="1"),
                                      bind="0.0.0.0") is not None
-h = histerauth.load_for("kura", {"KURA_AUTH": "hister", "KURA_AUTH_SIGNIN_URL": "https://h/machiya/signin",
-                                 "KURA_HISTER_USERS": "owner", "KURA_AUTH_URL": "http://hl:8081",
-                                 "KURA_AUTH_FALLBACK": "none", "KURA_PUBLIC_URL": "https://kura.x"})
-out["hister"] = h is not None
+h = nogonauth.load_for("kura", {"KURA_AUTH": "nogon", "KURA_AUTH_SIGNIN_URL": "https://h/machiya/signin",
+                                "KURA_NOGON_USERS": "owner", "KURA_AUTH_URL": "http://hl:8081",
+                                "KURA_AUTH_FALLBACK": "none", "KURA_PUBLIC_URL": "https://kura.x"})
+out["nogon"] = h is not None
 try:
     identity.load_for("kura", dict(env, KURA_SIGNIN="1"), bind="127.0.0.1")
     out["signin"] = "started"
@@ -942,7 +942,7 @@ print(json.dumps(out))
         self.assertEqual(r.returncode, 0, r.stderr[-2000:])
         out = json.loads(r.stdout.strip().splitlines()[-1])
         self.assertFalse(out["have"])
-        self.assertTrue(out["open"] and out["tailscale"] and out["hister"])
+        self.assertTrue(out["open"] and out["tailscale"] and out["nogon"])
         self.assertIn("KURA_SIGNIN=1", out["signin"])
         self.assertIn("no scrypt", out["signin"])
         self.assertEqual(out["sign_in"][0], 503)
