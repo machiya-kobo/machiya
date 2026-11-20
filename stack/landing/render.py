@@ -3,6 +3,7 @@ Everything an app said is escaped here; nothing from an answer is ever markup.""
 import datetime
 import os
 import re
+import sys
 
 import deploys
 import probes
@@ -227,12 +228,37 @@ def main_html(snap, history, logs, links, targets, now, tz=None):
     return "".join(out)
 
 
+_links_seen = {}
+
+
+def outside_links(env=None):
+    """LANDING_LINKS (0.7.6): the deployment's other front pages, `Name|https://url` separated by ";", e.g.
+    "Annai|https://annai.example.ts.net;genkan|https://genkan.example.ts.net". Shown in the footer of every page.
+    An entry that isn't a name (1-40 printable characters) and an https:// URL is skipped with one line on stderr."""
+    raw = (env if env is not None else os.environ).get("LANDING_LINKS") or ""
+    if raw in _links_seen:
+        return _links_seen[raw]
+    out = []
+    for part in (p.strip() for p in raw.split(";")):
+        if not part:
+            continue
+        name, _, url = part.partition("|")
+        name, url = name.strip(), url.strip()
+        if not (0 < len(name) <= 40 and name.isprintable() and url.startswith("https://") and len(url) > 8
+                and not any(c.isspace() or c in "\"<>" for c in url)):
+            print("LANDING_LINKS: skipped %r (needs Name|https://url)" % part[:60], file=sys.stderr)
+            continue
+        out.append((url, name))
+    _links_seen[raw] = out
+    return out
+
+
 def footer(snap, now):
     apps = snap["apps"]
     present = [a for a in apps.values() if a["state"] != "absent"]
     up = sum(1 for a in present if a["state"] not in probes.BAD)
     text = "checked %s · %d of %d up" % (ago(snap["checked"], now), up, len(present))
-    return house.footer(ROOM, {"text": text, "state": FOOT.get(snap["overall"]["state"], "ok")})
+    return house.footer(ROOM, {"text": text, "state": FOOT.get(snap["overall"]["state"], "ok")}, links=outside_links())
 
 
 def shell_page(ctx, title, current, links, body, scripts=True):

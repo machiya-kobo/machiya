@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.7.6
+
+- LANDING_LINKS: the deployment's other front pages (`Name|https://url`, separated by `;`) in every page's footer, so the landing links to them (owner, 2026-11-20: keep the separate front pages, cross-linked).
+
 ## 0.7.5
 
 - Home: today's web searches (LANDING_SEARCH_COUNTS, every SearXNG search) are on SearXNG's tile, not Shiori's (owner, 2026-11-20). Shiori's tile says what it is ("search").

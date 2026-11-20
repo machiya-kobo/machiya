@@ -1111,6 +1111,17 @@ class Launcher(Stack):
         for key in ("shiori", "niwa", "bare", "hister"):
             self.assertIn('data-app="%s"' % key, nav)
 
+    def test_outside_links(self):
+        """0.7.6: LANDING_LINKS puts the deployment's other front pages in the footer; bad entries are skipped."""
+        self.assertEqual(render.outside_links({}), [])
+        got = render.outside_links({"LANDING_LINKS": "Annai|https://annai.example.ts.net; bad|http://x ;genkan|https://genkan.example.ts.net/;|https://n"})
+        self.assertEqual(got, [("https://annai.example.ts.net", "Annai"), ("https://genkan.example.ts.net/", "genkan")])
+        l, snap, _ = self.today()
+        with mock.patch.dict(os.environ, {"LANDING_LINKS": "Annai|https://annai.example.ts.net"}):
+            foot = render.footer(snap, NOW)
+        self.assertIn('<a href="https://annai.example.ts.net">Annai</a>', foot)
+        self.assertNotIn("annai", render.footer(snap, NOW))
+
     def test_pill_counts(self):
         self.assertIn(">1 needs a look<", render.pill({"state": "error", "count": 1, "text": "x"}))
         self.assertIn(">3 need a look<", render.pill({"state": "error", "count": 3, "text": "x"}))
