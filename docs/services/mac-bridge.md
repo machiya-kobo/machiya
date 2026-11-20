@@ -21,10 +21,10 @@
 
 ## Credentials
 
-The Mac holds one room token (`mht_`, [identity.md](../identity.md#room-tokens)) with two scopes: `kura`, and `classic-bridge` (a token service in [hister-login](hister-login.md)'s `HISTER_LOGIN_TOKEN_SERVICES`).
+The Mac holds one room token (`mht_`, [identity.md](../identity.md#room-tokens)) with two scopes: `kura`, and `classic-bridge` (a token service in [nogon-login](nogon-login.md)'s `NOGON_LOGIN_TOKEN_SERVICES`).
 
 - **Kura's port** passes the token on; Kura checks its own scope.
-- **Hister's port** checks the token with [hister-login](hister-login.md) (`GET /v1/check`) and only then adds Hister's own token, which stays on the server and never crosses the LAN.
+- **Hister's port** checks the token with [nogon-login](nogon-login.md) (`GET /v1/check`) and only then adds Hister's own token, which stays on the server and never crosses the LAN.
 - Revoking the token on the sessions page shuts both ports.
 
 **The trade-off:** the Mac's token and its searches cross the LAN in plain HTTP. The LAN is the trust boundary; keep the bridge off any network you don't trust.

@@ -84,7 +84,7 @@ It goes only to Kura, Konbini and Niwa at their configured https address, and ne
 - Without the token, or when refused, the WIP and vault counts and Today's room sections are left out quietly. Kura's open `vault_count` still shows.
 
 **Other tokens.** None by default.
-- `LANDING_TOKEN_FILE` goes to Kura, Niwa and Konbini over https only. Use a room token from [hister-login](hister-login.md) (`mht_…`, [identity.md](../identity.md#room-tokens)) for your reads, and Hister's token then goes to Hister only. Or, for rooms with an identity file, that file's token.
+- `LANDING_TOKEN_FILE` goes to Kura, Niwa and Konbini over https only. Use a room token from [nogon-login](nogon-login.md) (`mht_…`, [identity.md](../identity.md#room-tokens)) for your reads, and Hister's token then goes to Hister only. Or, for rooms with an identity file, that file's token.
 - `LANDING_CHANGELOG_TOKEN_FILE` goes only to the changelog URLs.
 
 ## Recent deploys: where they come from
@@ -112,7 +112,7 @@ Only you can open it, as with the rooms.
 |---|---|
 | `tailscale` (default) | a `Tailscale-User-Login` in `LANDING_USERS` |
 | `open` | anyone; for localhost, with a `Host` allow-list |
-| `hister` | Hister's users, exactly as for Konbini and Niwa ([hister-login](hister-login.md), vaultkit's `histerauth`) |
+| `hister` | Hister's users, exactly as for Konbini and Niwa ([nogon-login](nogon-login.md), vaultkit's `histerauth`) |
 | `header` | with the identity file: a proxy's login header |
 
 With `hister`:

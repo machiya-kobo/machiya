@@ -304,7 +304,7 @@ def c4_open_redirect(browser, engine):
 def c5_loop_guard(browser, engine):
     """A machiya_sso that never reaches the room (here: the helper misconfigured with no cookie domain, so the cookie
     stays on hister.*): one trip to the helper, then a page with a Sign In link, not a redirect loop."""
-    compose("up", "-d", "hister-login", HELPER_COOKIE_DOMAIN="")
+    compose("up", "-d", "nogon-login", HELPER_COOKIE_DOMAIN="")
     time.sleep(4)
     try:
         ctx = context(browser)
@@ -329,7 +329,7 @@ def c5_loop_guard(browser, engine):
                "machiya_sso landed on %s" % (hops, p.url, href[:70], guard and guard["domain"], sso and sso["domain"]))
         ctx.close()
     finally:
-        compose("up", "-d", "hister-login")
+        compose("up", "-d", "nogon-login")
         time.sleep(4)
 
 
@@ -337,7 +337,7 @@ def c6_outages(browser, engine):
     ctx, p = signed_in_context(browser, extra_http_headers=TS)
     fresh = context(browser, extra_http_headers=TS)                    # a device that never signed in
     out = {}
-    for what, container in (("helper", "machiya-login-hister-login-1"), ("hister", "machiya-login-hister-1")):
+    for what, container in (("helper", "machiya-login-nogon-login-1"), ("hister", "machiya-login-hister-1")):
         podman("stop", "-t", "2", container)
         time.sleep(31)                                                  # past every cached "signed in" (30 s)
         row = {}
@@ -515,11 +515,11 @@ def sessions_and_shots(browser):
 
 
 def outage_shots(browser):
-    podman("stop", "-t", "2", "machiya-login-hister-login-1")
+    podman("stop", "-t", "2", "machiya-login-nogon-login-1")
     time.sleep(12)
     files = screenshots(browser, "fallback-banner-niwa", NIWA + "/", headers=TS)
     files += screenshots(browser, "kura-503", KURA + "/", headers=TS)
-    podman("start", "machiya-login-hister-login-1")
+    podman("start", "machiya-login-nogon-login-1")
     time.sleep(12)
     return files
 

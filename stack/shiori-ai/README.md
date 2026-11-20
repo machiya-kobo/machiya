@@ -44,14 +44,14 @@ shiori-ai has a gate of its own, so it is safe without anything in front. `SHIOR
 | Mode | Who gets in | Where it may listen |
 |---|---|---|
 | `tailscale` (default) | a `Tailscale-User-Login` in `SHIORI_AI_USERS` (`*` = anyone the tailnet lets through). With `SHIORI_AI_TRUSTED_PROXIES` set, the header counts only from those addresses | `127.0.0.1`, or anywhere with `SHIORI_AI_TRUSTED_PROXIES` or `SHIORI_AI_BIND_BEHIND_PROXY=1`. Otherwise it refuses to start |
-| `proxy` | only connections from `SHIORI_AI_TRUSTED_PROXIES`: a proxy that signs people in itself, such as the nginx serving Shiori's pages with `auth_request` to [hister-login](../../docs/services/hister-login.md) | anywhere; it refuses to start without `SHIORI_AI_TRUSTED_PROXIES` |
+| `proxy` | only connections from `SHIORI_AI_TRUSTED_PROXIES`: a proxy that signs people in itself, such as the nginx serving Shiori's pages with `auth_request` to [nogon-login](../../docs/services/nogon-login.md) | anywhere; it refuses to start without `SHIORI_AI_TRUSTED_PROXIES` |
 | `open` | everyone | `127.0.0.1`, or anywhere with `SHIORI_AI_BIND_BEHIND_PROXY=1`: for a container whose port is published on the host's `127.0.0.1` only |
 
 On top of the gate, `summarize` and `answer` take only requests from Shiori's own page: `Sec-Fetch-Site: same-origin`, or, from a client without Fetch Metadata, `Origin: https://<Host>`. So the proxy must pass `Host` as the page's own host. `status`, `healthz`, `/api/status` and `/api/changelog` are open in every mode.
 
 ## Room tokens
 
-A headless caller sends a room token from [hister-login](../../docs/services/hister-login.md), as for [shiori-feed](../shiori-feed/README.md#room-tokens): `SHIORI_AI_AUTH_URL`, `SHIORI_AI_PUBLIC_URL` and `SHIORI_AI_HISTER_USERS` (never `*`), then `Authorization: Bearer mht_…` in `tailscale` or `proxy` mode. A request a token lets in skips the same-origin check: a bearer token isn't a cookie another site's page can ride on. Notes, code and local files are refused all the same.
+A headless caller sends a room token from [nogon-login](../../docs/services/nogon-login.md), as for [shiori-feed](../shiori-feed/README.md#room-tokens): `SHIORI_AI_AUTH_URL`, `SHIORI_AI_PUBLIC_URL` and `SHIORI_AI_HISTER_USERS` (never `*`), then `Authorization: Bearer mht_…` in `tailscale` or `proxy` mode. A request a token lets in skips the same-origin check: a bearer token isn't a cookie another site's page can ride on. Notes, code and local files are refused all the same.
 
 ## Settings
 
@@ -69,8 +69,8 @@ A headless caller sends a room token from [hister-login](../../docs/services/his
 | `SHIORI_AI_AUTH` | `tailscale` | `tailscale`, `proxy` or `open` (above) |
 | `SHIORI_AI_USERS` | — | the Tailscale logins allowed in `tailscale` mode; `*` = anyone; unset = nobody |
 | `SHIORI_AI_TRUSTED_PROXIES` | — | addresses or CIDRs of the proxy |
-| `SHIORI_AI_AUTH_URL` | — | [hister-login](../../docs/services/hister-login.md)'s address: turns on room tokens (with the next two) |
-| `SHIORI_AI_PUBLIC_URL` | — | the address the room tokens are issued for (its origin is what hister-login checks) |
+| `SHIORI_AI_AUTH_URL` | — | [nogon-login](../../docs/services/nogon-login.md)'s address: turns on room tokens (with the next two) |
+| `SHIORI_AI_PUBLIC_URL` | — | the address the room tokens are issued for (its origin is what nogon-login checks) |
 | `SHIORI_AI_HISTER_USERS` | — | the Hister users a room token may act as, comma-separated (never `*`) |
 | `SHIORI_AI_BIND_BEHIND_PROXY` | — | `1`: only the proxy (or the host's own `127.0.0.1` port) reaches the listener's network. Prefer `SHIORI_AI_TRUSTED_PROXIES` |
 | `SHIORI_AI_BIND`, `SHIORI_AI_PORT` | `127.0.0.1`, `8080` | the listener. The image sets `0.0.0.0` |

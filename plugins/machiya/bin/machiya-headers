@@ -2,8 +2,8 @@
 """The headers for machiya-mcp (plugin 0.4.0): a room token, `Authorization: Bearer mht_…`, printed as JSON for a Claude
 Code `headersHelper` on a machiya-mcp server added by hand (`claude mcp add`; Claude Code 2.1 runs no headersHelper for a
 plugin's own server, so the plugin itself sends the token as a fixed X-Machiya-Token header from its settings env). machiya-mcp takes one beside the Tailscale header (machiya-mcp 0.8.0): an agent on a tagged machine
-(an agents' VM, say) has no Tailscale login. The token is one hister-login made for machiya-mcp (its sessions page, Room
-Tokens, or `hister_login.py token mint --rooms machiya-mcp`); it opens machiya-mcp only, never Hister or a room.
+(an agents' VM, say) has no Tailscale login. The token is one nogon-login made for machiya-mcp (its sessions page, Room
+Tokens, or `nogon_login.py token mint --rooms machiya-mcp`); it opens machiya-mcp only, never Hister or a room.
 
 Where the token may come from and go (the lesson of sweep MACH-M-1):
 - only from $MACHIYA_TOKEN_FILE (its first line), whose path install.sh saves; never from pass, never a fallback;

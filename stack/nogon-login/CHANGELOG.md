@@ -1,4 +1,12 @@
-# Changelog: hister-login
+# Changelog: nogon-login (hister-login until 0.7.3)
+
+## 0.8.0
+
+- **Renamed nogon-login** (Hister is now Nogon; the owner, 2026-11-19: rename everything). The image is `nogon-login`, its tags are `nogon-login-v*`, the code is `stack/nogon-login/nogon_login.py`.
+- Settings are `NOGON_LOGIN_*`. `HISTER_LOGIN_*` are still read when the new name isn't set, logged once each, until the rename's stage 3. `NOGON_LOGIN_NOGON_URL` replaces `HISTER_LOGIN_HISTER_URL`.
+- The database file stays `/data/hister-login.sqlite3`, and the image no longer sets it in ENV, so a deployment's own setting always wins.
+- nginx's `/v1/nginx` answer carries `X-Nogon-Cookie` and `X-Nogon-User`, plus `X-Hister-*` until stage 3. `/healthz` reports `nogon` beside `hister`. `/machiya/api/app-session` takes `{"nogon": S}` as well as `{"hister": S}`.
+- vaultkit 0.37.0 → 0.38.0: `AUTH=nogon`, `<P>_NOGON_USERS` and `nogon=` in `MACHIYA_ROOMS` are accepted.
 
 ## 0.7.3
 

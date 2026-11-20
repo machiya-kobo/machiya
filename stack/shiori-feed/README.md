@@ -29,7 +29,7 @@ shiori-feed has a gate of its own, so it is safe without anything in front. `SHI
 | Mode | Who gets in | Where it may listen |
 |---|---|---|
 | `tailscale` (default) | a `Tailscale-User-Login` in `SHIORI_FEED_USERS` (`*` = anyone the tailnet lets through). With `SHIORI_FEED_TRUSTED_PROXIES` set, the header counts only from those addresses | `127.0.0.1`, or anywhere with `SHIORI_FEED_TRUSTED_PROXIES` or `SHIORI_FEED_BIND_BEHIND_PROXY=1`. Otherwise it refuses to start: anyone who reaches the port could send the header |
-| `proxy` | only connections from `SHIORI_FEED_TRUSTED_PROXIES`: a proxy that signs people in itself, such as nginx with `auth_request` to [hister-login](../../docs/services/hister-login.md) | anywhere; it refuses to start without `SHIORI_FEED_TRUSTED_PROXIES` |
+| `proxy` | only connections from `SHIORI_FEED_TRUSTED_PROXIES`: a proxy that signs people in itself, such as nginx with `auth_request` to [nogon-login](../../docs/services/nogon-login.md) | anywhere; it refuses to start without `SHIORI_FEED_TRUSTED_PROXIES` |
 | `open` | everyone | `127.0.0.1`, or anywhere with `SHIORI_FEED_BIND_BEHIND_PROXY=1`: for a container whose port is published on the host's `127.0.0.1` only, as in the reference compose |
 
 `/shiori/healthz`, `/shiori/api/status` and `/shiori/api/changelog` are open in every mode. The proxy in front must drop a `Tailscale-User-Login` a client sends (Tailscale Serve does).
@@ -38,13 +38,13 @@ A feed reader on the tailnet can read the feeds straight from a Tailscale Serve 
 
 ## Room tokens
 
-A headless caller, like a feed reader on a tagged machine, sends no Tailscale login. Instead of opening the gate with `SHIORI_FEED_USERS=*`, give it a room token from [hister-login](../../docs/services/hister-login.md):
+A headless caller, like a feed reader on a tagged machine, sends no Tailscale login. Instead of opening the gate with `SHIORI_FEED_USERS=*`, give it a room token from [nogon-login](../../docs/services/nogon-login.md):
 
-- `SHIORI_FEED_AUTH_URL`: hister-login's address (`http://hister-login:8081`);
+- `SHIORI_FEED_AUTH_URL`: nogon-login's address (`http://nogon-login:8081`);
 - `SHIORI_FEED_PUBLIC_URL`: the address the tokens are issued for (the hosted pages' own, say);
 - `SHIORI_FEED_HISTER_USERS`: the Hister users a token may act as (never `*`).
 
-In `tailscale` or `proxy` mode the caller then sends `Authorization: Bearer mht_…` (or `X-Machiya-Token: mht_…`). hister-login confirms each token; a good answer is kept 30 s and a refusal 5 s. A request that carries a token is decided by the token alone, and a bad or another room's token is refused. Tokens are never logged.
+In `tailscale` or `proxy` mode the caller then sends `Authorization: Bearer mht_…` (or `X-Machiya-Token: mht_…`). nogon-login confirms each token; a good answer is kept 30 s and a refusal 5 s. A request that carries a token is decided by the token alone, and a bad or another room's token is refused. Tokens are never logged.
 
 ## Settings
 
@@ -56,8 +56,8 @@ In `tailscale` or `proxy` mode the caller then sends `Authorization: Bearer mht_
 | `SHIORI_FEED_AUTH` | `tailscale` | `tailscale`, `proxy` or `open` (above) |
 | `SHIORI_FEED_USERS` | — | the Tailscale logins allowed in `tailscale` mode; `*` = anyone; unset = nobody |
 | `SHIORI_FEED_TRUSTED_PROXIES` | — | addresses or CIDRs of the proxy: `172.31.250.2/32` |
-| `SHIORI_FEED_AUTH_URL` | — | [hister-login](../../docs/services/hister-login.md)'s address: turns on room tokens (with the next two) |
-| `SHIORI_FEED_PUBLIC_URL` | — | the address the room tokens are issued for (its origin is what hister-login checks) |
+| `SHIORI_FEED_AUTH_URL` | — | [nogon-login](../../docs/services/nogon-login.md)'s address: turns on room tokens (with the next two) |
+| `SHIORI_FEED_PUBLIC_URL` | — | the address the room tokens are issued for (its origin is what nogon-login checks) |
 | `SHIORI_FEED_HISTER_USERS` | — | the Hister users a room token may act as, comma-separated (never `*`) |
 | `SHIORI_FEED_BIND_BEHIND_PROXY` | — | `1`: only the proxy (or the host's own `127.0.0.1` port) reaches the listener's network, so in `tailscale` mode the header may come from any address there. Prefer `SHIORI_FEED_TRUSTED_PROXIES` |
 | `SHIORI_FEED_BIND`, `SHIORI_FEED_PORT` | `127.0.0.1`, `8080` | the listener. The image sets `0.0.0.0` |

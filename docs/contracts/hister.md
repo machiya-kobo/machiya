@@ -7,7 +7,7 @@ How Machiya's services use [Hister](../services/hister.md). Hister is upstream c
 Upstream Hister is now Nogon (v0.22.0). The owner chose on 2026-11-19 to rename everything Machiya itself calls Hister, in three stages:
 
 1. **Readers (vaultkit 0.38.0 on):** every name below is read in both spellings, and nothing that is written changes.
-   - A setting spelled with `NOGON` wins over its `HISTER` twin, even when it is empty, as upstream does with its own. The old name is logged once. Examples: `KURA_NOGON_URL` over `KURA_HISTER_URL`, `<P>_NOGON_USERS` over `<P>_HISTER_USERS`, `NOGON_LOGIN_*` over `HISTER_LOGIN_*`.
+   - A setting spelled with `NOGON` wins over its `HISTER` twin, even when it is empty, as upstream does with its own. The old name is logged once. Examples: `KURA_NOGON_URL` over `KURA_HISTER_URL`, `<P>_NOGON_USERS` over `<P>_HISTER_USERS`, `NOGON_LOGIN_*` over `NOGON_LOGIN_*`.
    - `<P>_AUTH=nogon` is the same as `hister`.
    - The room id `nogon` is the same as `hister` in `MACHIYA_ROOMS` and the account's `apps_hidden`.
    - The helper is renamed `nogon-login`.
@@ -38,7 +38,7 @@ Upstream Hister is now Nogon (v0.22.0). The owner chose on 2026-11-19 to rename 
 | `POST /api/delete` `{"query": "url:\"…\""}` | Kura (a note deleted, renamed or moved), code-import (a repo, doc, issue or release gone; only its own documents) |
 | `GET /api/document?url=<url>` | machiya-mcp (`pages_set_label` checks the page is not a note, card or code document), code-import (whose is this URL?), feed-import (is it known?) |
 | `GET /health` | probes (open: 200 `OK` while Hister runs) |
-| `GET /api/profile` | hister-login only ([Sign-in](#sign-in)) |
+| `GET /api/profile` | nogon-login only ([Sign-in](#sign-in)) |
 | `POST /api/label` `{url, label}`, `POST /api/update` `{query, changes: {label}}` | machiya-mcp (`pages_set_label`, `pages_relabel`; one exact `url:"…"` match per update) |
 | `GET /api/rules`, `POST /api/add_alias`, `POST /api/delete_alias` (form posts) | machiya-mcp (`collections_*`: only `@` aliases whose value is purely labels) |
 | `POST /mcp` (Hister's MCP, below) | nobody in Machiya since 2026-10-05 (AI clients read pages through machiya-mcp's `pages_search` / `pages_read`; the machiya plugin denies Hister's MCP tools) |
@@ -128,12 +128,12 @@ What follows describes Hister's MCP for anyone who connects it outside Machiya (
 
 ## Sign-in
 
-With `app.user_handling: true` Hister has users, and [hister-login](../services/hister-login.md) makes a Hister sign-in count in the rooms. What a caller or a room must know:
+With `app.user_handling: true` Hister has users, and [nogon-login](../services/nogon-login.md) makes a Hister sign-in count in the rooms. What a caller or a room must know:
 
-- **Who am I:** `GET /api/profile` with a session cookie, `X-Access-Token` or `Authorization: Bearer` answers `{"user_id", "username", "is_admin"}`, and 403 without a valid credential. **With user handling off it answers 200 with an empty body to anyone:** a bare 200 is never "signed in". Only hister-login calls it; rooms ask the helper.
+- **Who am I:** `GET /api/profile` with a session cookie, `X-Access-Token` or `Authorization: Bearer` answers `{"user_id", "username", "is_admin"}`, and 403 without a valid credential. **With user handling off it answers 200 with an empty body to anyone:** a bare 200 is never "signed in". Only nogon-login calls it; rooms ask the helper.
 - **The helper's answers** (`GET /v1/check` on its internal port, with `X-Machiya-Session: mhs_…|mhr_…|mht_…` or `X-Access-Token`, and the asking room's `X-Machiya-Room: <origin>`): `200 {"username", "user_id", "via": "session"|"token", "kind", "room"}`; `401 {"reason": "signed-out"|"wrong-room"|"legacy-off"}` (never fall back to another identity on this); `503 {"reason": "hister-unavailable"|"user-handling-off"}` (a room may fall back to its Tailscale identity, or refuse). `POST /v1/redeem` trades a room's one-time code for its room session; `POST /v1/signout` ends a session everywhere; `GET /healthz` is 503 unless the helper and Hister are both fine.
-- **The cookies** (hister-login 0.3.0): the helper's `__Host-machiya_sso=mhs_…` on Hister's host and each room's `__Host-machiya_sso_<room>=mhr_…` on the room's host are opaque, host-only, and mean nothing to Hister: `hister.*` never accepts them. The old `machiya_sso` on the shared cookie domain is set only while `HISTER_LOGIN_LEGACY` has `domain-cookie`. Hister's own session cookie (`hister`) stays host-only on Hister's host.
-- **Hister's token belongs to Hister's callers** (Kura's push, the rooms' own Hister calls, importers, scripts). It is never a room's credential once `HISTER_LOGIN_LEGACY=none`: rooms and tools take room tokens (`mht_…`, [identity.md](../identity.md#room-tokens)) instead, which open only the rooms they name and never Hister.
+- **The cookies** (nogon-login 0.3.0): the helper's `__Host-machiya_sso=mhs_…` on Hister's host and each room's `__Host-machiya_sso_<room>=mhr_…` on the room's host are opaque, host-only, and mean nothing to Hister: `hister.*` never accepts them. The old `machiya_sso` on the shared cookie domain is set only while `NOGON_LOGIN_LEGACY` has `domain-cookie`. Hister's own session cookie (`hister`) stays host-only on Hister's host.
+- **Hister's token belongs to Hister's callers** (Kura's push, the rooms' own Hister calls, importers, scripts). It is never a room's credential once `NOGON_LOGIN_LEGACY=none`: rooms and tools take room tokens (`mht_…`, [identity.md](../identity.md#room-tokens)) instead, which open only the rooms they name and never Hister.
 - **Behind a proxy:** Hister re-sends `Set-Cookie: hister=<session>` on every signed-in answer (its sliding expiry). A proxy that adds a Hister session for the browser (the hosted pages' nginx with `auth_request`) must drop it: `proxy_hide_header Set-Cookie;`.
 - **Rooms in `AUTH=hister`** ([identity.md](../identity.md#hister-sign-in-authhister)) accept their own cookie, `Authorization: Bearer mhs_…` (Shiori's apps), a room token (`Bearer mht_…`) and, until the switch, the shared cookie and the owner's Hister token; an API call without one gets `401 {"error": "sign in", "signin": "<the helper's sign-in address>"}`, which a page follows by navigating there.
 

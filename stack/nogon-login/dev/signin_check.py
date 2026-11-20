@@ -33,7 +33,7 @@ from urllib.parse import quote, urlsplit
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, ".."), os.path.join(HERE, "..", "tests")]
 
-import hister_login as hl                      # noqa: E402
+import nogon_login as hl                      # noqa: E402
 from fake_hister import FakeHister             # noqa: E402
 from playwright.sync_api import sync_playwright   # noqa: E402
 
@@ -81,9 +81,9 @@ def run(tmp):
             with open(os.path.join(tmp, mode, name), "w") as f:
                 f.write(text % mode if name == "fill.js" else text)
     fake = FakeHister()
-    env = {"HISTER_LOGIN_PUBLIC_URL": "https://" + HISTER, "HISTER_LOGIN_HISTER_URL": fake.url,
-           "HISTER_LOGIN_DB": tmp + "/hl.db", "HISTER_LOGIN_PROVIDERS": "oidc", "HISTER_LOGIN_LEGACY": "none",
-           "HISTER_LOGIN_PROXIED_ORIGINS": "https://" + SEARCH, "HISTER_LOGIN_RETURN_HOSTS": SEARCH,
+    env = {"NOGON_LOGIN_PUBLIC_URL": "https://" + HISTER, "NOGON_LOGIN_NOGON_URL": fake.url,
+           "NOGON_LOGIN_DB": tmp + "/hl.db", "NOGON_LOGIN_PROVIDERS": "oidc", "NOGON_LOGIN_LEGACY": "none",
+           "NOGON_LOGIN_PROXIED_ORIGINS": "https://" + SEARCH, "NOGON_LOGIN_RETURN_HOSTS": SEARCH,
            "MACHIYA_ROOMS": "hister=https://" + HISTER}
     login = hl.Login(hl.Settings(env))
     servers = hl.serve(login, "127.0.0.1", 0, 0)

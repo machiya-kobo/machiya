@@ -24,8 +24,8 @@ x-native:
     "niwa:8080": 127.0.0.1:19232
     "konbini:8081": 127.0.0.1:19233
     "hister:4433": 127.0.0.1:19224
-    "hister-login:8080": 127.0.0.1:19235
-    "hister-login:8081": 127.0.0.1:19236
+    "nogon-login:8080": 127.0.0.1:19235
+    "nogon-login:8081": 127.0.0.1:19236
     "searxng:8080": 127.0.0.1:19237
     "machiya-mcp:8080": 127.0.0.1:19226
     "smallweb:8080": 127.0.0.1:19239
@@ -73,32 +73,32 @@ services:
             HISTER__SERVER__OAUTH__OIDC__CONFIGURATION_URL: "http://127.0.0.1:19240/.well-known/openid-configuration"}
       env_file: "${DEV_DATA}/secrets/hister.env"
 
-  hister-login:
+  nogon-login:
     <<: *svc
-    build: ../../stack/hister-login
+    build: ../../stack/nogon-login
     environment:
       <<: *rooms-env
-      HISTER_LOGIN_PUBLIC_URL: ${DEV_URL}:19204
-      HISTER_LOGIN_HISTER_URL: http://hister:4433
-      HISTER_LOGIN_PROVIDERS: oidc
-      HISTER_LOGIN_OIDC_LABEL: "Tailscale (dev stub)"
-      HISTER_LOGIN_RETURN_HOSTS: "${DEV_HOST}:19200,${DEV_HOST}:19201,${DEV_HOST}:19202,${DEV_HOST}:19203,${DEV_HOST}:19204"
-      HISTER_LOGIN_DB: /data/hister-login.sqlite3
-      # hister-login 0.3.0: none = the switch (rooms take only their own cookie, room tokens and apps' ids); empty keeps
+      NOGON_LOGIN_PUBLIC_URL: ${DEV_URL}:19204
+      NOGON_LOGIN_NOGON_URL: http://hister:4433
+      NOGON_LOGIN_PROVIDERS: oidc
+      NOGON_LOGIN_OIDC_LABEL: "Tailscale (dev stub)"
+      NOGON_LOGIN_RETURN_HOSTS: "${DEV_HOST}:19200,${DEV_HOST}:19201,${DEV_HOST}:19202,${DEV_HOST}:19203,${DEV_HOST}:19204"
+      NOGON_LOGIN_DB: /data/hister-login.sqlite3
+      # nogon-login 0.3.0: none = the switch (rooms take only their own cookie, room tokens and apps' ids); empty keeps
       # the old shared cookie and Hister's raw token working (the default, for stacks with older rooms)
-      HISTER_LOGIN_LEGACY: ${DEV_AUTH_LEGACY:-domain-cookie,hister-token}
-      HISTER_LOGIN_TOKEN_SERVICES: "machiya-mcp=${DEV_URL}:19206,smallweb=${DEV_URL}:19207"
+      NOGON_LOGIN_LEGACY: ${DEV_AUTH_LEGACY:-domain-cookie,hister-token}
+      NOGON_LOGIN_TOKEN_SERVICES: "machiya-mcp=${DEV_URL}:19206,smallweb=${DEV_URL}:19207"
     volumes:
       - ${DEV_DATA}/login:/data
       - ${DEV_DATA}/secrets/room-token:/secrets/room-token:ro     # registered at `dev up` (token add)
     depends_on: [hister]
     x-native:
-      cmd: ["python3", "-u", "hister_login.py"]
-      cwd: "${MACHIYA_SRC}/stack/hister-login"
+      cmd: ["python3", "-u", "nogon_login.py"]
+      cwd: "${MACHIYA_SRC}/stack/nogon-login"
       paths: {/data: "${DEV_DATA}/login", /secrets: "${DEV_DATA}/secrets"}
-      env: {HISTER_LOGIN_BIND: "127.0.0.1", HISTER_LOGIN_PORT: "19235", HISTER_LOGIN_INTERNAL_PORT: "19236"}
+      env: {NOGON_LOGIN_BIND: "127.0.0.1", NOGON_LOGIN_PORT: "19235", NOGON_LOGIN_INTERNAL_PORT: "19236"}
 
-  stub-idp:                                           # a tsidp-shaped OIDC provider (stack/hister-login/dev)
+  stub-idp:                                           # a tsidp-shaped OIDC provider (stack/nogon-login/dev)
     <<: *svc
     image: public.ecr.aws/docker/library/python:3.13-alpine
     command: ["python3", "/dev/stub_idp.py"]
@@ -110,10 +110,10 @@ services:
       STUB_EMAIL: owner@dev.idp.example
       STUB_CLIENT_SECRET_FILE: /secrets/oidc-client-secret
     volumes:
-      - ../../stack/hister-login/dev/stub_idp.py:/dev/stub_idp.py:ro
+      - ../../stack/nogon-login/dev/stub_idp.py:/dev/stub_idp.py:ro
       - ${DEV_DATA}/secrets/oidc-client-secret:/secrets/oidc-client-secret:ro
     x-native:
-      cmd: ["python3", "-u", "${MACHIYA_SRC}/stack/hister-login/dev/stub_idp.py"]
+      cmd: ["python3", "-u", "${MACHIYA_SRC}/stack/nogon-login/dev/stub_idp.py"]
       paths: {/secrets: "${DEV_DATA}/secrets"}
       env: {STUB_BIND: "127.0.0.1", STUB_PORT: "19240"}
 
@@ -138,7 +138,7 @@ services:
       FRONT_SITES: >-
         {"19200": "/=http://landing:8080", "19201": "/=http://kura:8080", "19202": "/=http://niwa:8080",
          "19203": "/=http://konbini:8081",
-         "19204": "/machiya/=http://hister-login:8080 =/api/oauth/callback=http://hister-login:8080 /=http://hister:4433",
+         "19204": "/machiya/=http://nogon-login:8080 =/api/oauth/callback=http://nogon-login:8080 /=http://hister:4433",
          "19205": "/=http://searxng:8080", "19206": "/=http://machiya-mcp:8080", "19207": "/=http://smallweb:8080",
          "19208": "/=http://stub-idp:9000"}
     volumes:
@@ -146,7 +146,7 @@ services:
       - ${DEV_DATA}/certs:/certs:ro
     ports:
       - "${DEV_BIND:-127.0.0.1}:19200-19208:19200-19208"
-    depends_on: [hister, hister-login, stub-idp]
+    depends_on: [hister, nogon-login, stub-idp]
     x-native:
       cmd: ["python3", "-u", "${DEV_ROOT}/front.py"]
       paths: {/certs: "${DEV_DATA}/certs"}
@@ -175,7 +175,7 @@ services:
     environment:
       <<: *rooms-env
       KURA_AUTH: hister
-      KURA_AUTH_URL: http://hister-login:8081
+      KURA_AUTH_URL: http://nogon-login:8081
       KURA_AUTH_SIGNIN_URL: ${DEV_URL}:19204/machiya/signin
       KURA_HISTER_USERS: owner
       KURA_AUTH_FALLBACK: none                        # production's rule: Kura never falls back
@@ -194,7 +194,7 @@ services:
       - ${DEV_DATA}/kura:/data
       - ${DEV_DATA}/mirror/vault:/vault:ro
       - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
-    depends_on: [vault-mirror, hister-login]
+    depends_on: [vault-mirror, nogon-login]
     x-native:
       cmd: ["python3", "-u", "kura.py"]
       cwd: "${KURA_SRC}/app"
@@ -207,7 +207,7 @@ services:
     environment:
       <<: *rooms-env
       NIWA_AUTH: hister
-      NIWA_AUTH_URL: http://hister-login:8081
+      NIWA_AUTH_URL: http://nogon-login:8081
       NIWA_AUTH_SIGNIN_URL: ${DEV_URL}:19204/machiya/signin
       NIWA_HISTER_USERS: owner
       NIWA_AUTH_FALLBACK: tailscale                   # production's rule: Niwa falls back to the tailnet login
@@ -226,7 +226,7 @@ services:
       NIWA_KURA_URL: ${DEV_URL}:19201
       NIWA_KONBINI_URL: ${DEV_URL}:19203
       NIWA_KONBINI_API_URL: http://konbini:8081
-      NIWA_KONBINI_TOKEN_FILE: /secrets/room-token       # a room token (hister-login 0.3.0), never Hister's
+      NIWA_KONBINI_TOKEN_FILE: /secrets/room-token       # a room token (nogon-login 0.3.0), never Hister's
       NIWA_GOPHER_PUBLIC_PORT: "19212"
       NIWA_HISTER_URL: http://hister:4433
       NIWA_HISTER_TOKEN_FILE: /secrets/owner-token
@@ -242,7 +242,7 @@ services:
     ports:
       - "${DEV_BIND:-127.0.0.1}:19211:1965"
       - "${DEV_BIND:-127.0.0.1}:19212:7070"
-    depends_on: [vault-mirror, hister-login]
+    depends_on: [vault-mirror, nogon-login]
     x-native:
       cmd: ["python3", "-u", "niwa.py"]
       cwd: "${NIWA_SRC}/app"
@@ -255,7 +255,7 @@ services:
     environment:
       <<: *rooms-env
       KANBAN_AUTH: hister
-      KANBAN_AUTH_URL: http://hister-login:8081
+      KANBAN_AUTH_URL: http://nogon-login:8081
       KANBAN_AUTH_SIGNIN_URL: ${DEV_URL}:19204/machiya/signin
       KANBAN_HISTER_USERS: owner
       KANBAN_AUTH_FALLBACK: tailscale                 # production's rule: Konbini falls back to the tailnet login
@@ -284,7 +284,7 @@ services:
       - ${DEV_DATA}/vault.git:${DEV_DATA}/vault.git
       - ${DEV_DATA}/mirror/vault:${DEV_DATA}/mirror/vault:ro
       - ${DEV_DATA}/secrets/owner-token:/secrets/owner-token:ro
-    depends_on: [vault-mirror, hister-login]
+    depends_on: [vault-mirror, nogon-login]
     x-native:
       cmd: ["python3", "-u", "app.py"]
       cwd: "${KONBINI_SRC}/app"
@@ -298,7 +298,7 @@ services:
     environment:
       <<: *rooms-env
       LANDING_AUTH: hister                            # as the rooms (landing 0.3.0); fallback tailscale, as advised
-      LANDING_AUTH_URL: http://hister-login:8081
+      LANDING_AUTH_URL: http://nogon-login:8081
       LANDING_AUTH_SIGNIN_URL: ${DEV_URL}:19204/machiya/signin
       LANDING_HISTER_USERS: owner
       LANDING_AUTH_FALLBACK: tailscale
@@ -337,7 +337,7 @@ services:
       KONBINI_URL: http://konbini:8081
       NIWA_URL: http://niwa:8080
       HISTER_URL: http://hister:4433
-      MCP_TOKEN_FILE: /secrets/room-token             # a room token for Kura, Konbini and Niwa (hister-login 0.3.0)
+      MCP_TOKEN_FILE: /secrets/room-token             # a room token for Kura, Konbini and Niwa (nogon-login 0.3.0)
       HISTER_TOKEN_FILE: /secrets/owner-token
       MCP_LOG: /data/mcp.log
       MCP_ROLLBACK_DIR: /data/rollback

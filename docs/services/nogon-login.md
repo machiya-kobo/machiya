@@ -1,12 +1,14 @@
-# hister-login: Hister's users as the one sign-in
+# nogon-login: Nogon's users as the one sign-in
 
-hister-login makes a [Hister](hister.md) sign-in count in every Machiya app (these docs call them rooms: [Kura](https://github.com/machiya-kobo/kura), [Niwa](https://github.com/machiya-kobo/niwa), [Konbini](https://github.com/machiya-kobo/konbini) and the landing page). It uses Hister's own users (`app.user_handling: true`, v0.20.0+), with a password sign-in and OIDC.
+Formerly **hister-login** (renamed in 0.8.0, when upstream Hister became Nogon; see [the rename](../contracts/hister.md#names-hister-is-now-nogon)). The old `HISTER_LOGIN_*` settings are still read until the rename's last stage. Images up to 0.7.3 are `hister-login`, tagged `hister-login-v*`.
+
+nogon-login makes a [Hister](hister.md) sign-in count in every Machiya app (these docs call them rooms: [Kura](https://github.com/machiya-kobo/kura), [Niwa](https://github.com/machiya-kobo/niwa), [Konbini](https://github.com/machiya-kobo/konbini) and the landing page). It uses Hister's own users (`app.user_handling: true`, v0.20.0+), with a password sign-in and OIDC.
 
 - Sign in once, in any room, in [Shiori](https://github.com/machiya-kobo/shiori)'s hosted pages or in Hister. Every room then knows you, each through a host-only cookie of its own.
 - Sign out anywhere, and every room forgets you within 30 seconds.
 - Hister is not patched.
 
-Code: [stack/hister-login/](../../stack/hister-login/) (settings in its README). The rooms' side is [vaultkit](../vaultkit.md)'s `histerauth.py` (`<ROOM>_AUTH=hister`, [identity.md](../identity.md#hister-sign-in-authhister)).
+Code: [stack/nogon-login/](../../stack/nogon-login/) (settings in its README). The rooms' side is [vaultkit](../vaultkit.md)'s `histerauth.py` (`<ROOM>_AUTH=hister`, [identity.md](../identity.md#hister-sign-in-authhister)).
 
 It's optional. Without it, a room keeps its Tailscale gate or the identity file. A room in `hister` mode without the helper runs on its Tailscale identity alone.
 
@@ -15,7 +17,7 @@ It's optional. Without it, a room keeps its Tailscale gate or the identity file.
 ```mermaid
 flowchart LR
   B[Browser / Shiori] -->|"__Host-machiya_sso_&lt;room&gt;=mhr_… (that room only)"| R[Kura · Niwa · Konbini · landing]
-  B -->|"hister.*: /machiya/, /api/oauth/callback (__Host-machiya_sso=mhs_…)"| L[hister-login<br/>SQLite: id → Hister session, room sessions, codes, room tokens;<br/>prefs.sqlite3: each user's settings]
+  B -->|"hister.*: /machiya/, /api/oauth/callback (__Host-machiya_sso=mhs_…)"| L[nogon-login<br/>SQLite: id → Hister session, room sessions, codes, room tokens;<br/>prefs.sqlite3: each user's settings]
   B -->|"hister.*: everything else"| H[(Hister)]
   R -->|"POST /v1/redeem (a code); GET /v1/check + X-Machiya-Room, cached 30 s; GET/PUT /v1/prefs"| L
   A[pm · machiya-mcp · scripts] -->|"Bearer mht_… (a room token)"| R
@@ -31,8 +33,8 @@ flowchart LR
 - The proxy in front (Tailscale Serve, say) sends `/machiya/…` and the single path `/api/oauth/callback` to the helper's public port. Everything else goes to Hister.
 - The internal port is reachable only from the rooms' network. The proxy never routes it.
 - A Tailscale Serve Proxy handler **strips its mount path** before forwarding, so the targets must add it back:
-  - `/machiya/` → `http://hister-login:8080/machiya/`
-  - `/api/oauth/callback` → `http://hister-login:8080/api/oauth/callback`
+  - `/machiya/` → `http://nogon-login:8080/machiya/`
+  - `/api/oauth/callback` → `http://nogon-login:8080/api/oauth/callback`
 
   Without that, the helper gets `/healthz` instead of `/machiya/healthz` and answers 404.
 
@@ -46,7 +48,7 @@ See also [identity.md](../identity.md#one-cookie-per-room).
 - They are opaque. The helper keeps the mapping to the browser's Hister session.
 - Hister's own `hister` cookie stays on Hister's host.
 - `MACHIYA_SSO_COOKIE` renames the base (letters, digits, `_`, `-`). The rooms and the landing page read the same setting.
-- While `HISTER_LOGIN_LEGACY` includes `domain-cookie`, the helper also sets the old `machiya_sso` cookie on `MACHIYA_COOKIE_DOMAIN`. It's off unless you set it (0.5.0); so is `hister-token`, which lets rooms take Hister's raw token.
+- While `NOGON_LOGIN_LEGACY` includes `domain-cookie`, the helper also sets the old `machiya_sso` cookie on `MACHIYA_COOKIE_DOMAIN`. It's off unless you set it (0.5.0); so is `hister-token`, which lets rooms take Hister's raw token.
 
 ### Sign-in
 
@@ -86,8 +88,8 @@ Signing out ends the session everywhere.
 Room tokens (`mht_…`, [identity.md](../identity.md#room-tokens)) are for pm, [machiya-mcp](mcp.md), landing, Niwa→Konbini, scripts and extensions, in place of Hister's raw token.
 
 - Each acts as one Hister user.
-- Each opens only the rooms it names, plus machiya-mcp and [smallweb](../../stack/smallweb) (named in `HISTER_LOGIN_TOKEN_SERVICES`). Never Hister.
-- Make them on the sessions page, or with `hister_login.py token mint`.
+- Each opens only the rooms it names, plus machiya-mcp and [smallweb](../../stack/smallweb) (named in `NOGON_LOGIN_TOKEN_SERVICES`). Never Hister.
+- Make them on the sessions page, or with `nogon_login.py token mint`.
 
 ### Sessions page
 
@@ -100,14 +102,14 @@ Room tokens (`mht_…`, [identity.md](../identity.md#room-tokens)) are for pm, [
 
 **One public MCP connector** (0.7.0; the owner's decision of 2026-10-28): Claude Duet, which runs in Anthropic's cloud, searches and reads your saved pages and default-vault notes through a read-only [machiya-mcp](mcp.md) on a Tailscale Funnel host. The helper is that connector's OAuth 2.1 server. Hister, Kura and the helper's other ports stay tailnet-only.
 
-- **Its own port** (`HISTER_LOGIN_OAUTH_PORT`; off when unset). Funnel sends it `/oauth/` and `/.well-known/oauth-authorization-server`; everything else on that host goes to the connector. It answers nothing else.
-- **Registration is open** (RFC 7591, so Duet's own "Add custom connector" form works), but a client may only name return addresses in `HISTER_LOGIN_OAUTH_REDIRECTS` (Claude's callback). At most 10 an hour; one nobody allowed is forgotten after a day.
+- **Its own port** (`NOGON_LOGIN_OAUTH_PORT`; off when unset). Funnel sends it `/oauth/` and `/.well-known/oauth-authorization-server`; everything else on that host goes to the connector. It answers nothing else.
+- **Registration is open** (RFC 7591, so Duet's own "Add custom connector" form works), but a client may only name return addresses in `NOGON_LOGIN_OAUTH_REDIRECTS` (Claude's callback). At most 10 an hour; one nobody allowed is forgotten after a day.
 - **Allowing it takes you.** `/oauth/authorize` checks the request first:
   - an unknown client or a return address it didn't register gets a page, never a redirect;
   - S256 PKCE is required;
   - the `resource` must be the connector's.
 - **Then it signs you in on that host** with the usual room trip through the helper's sign-in on Hister's host. That host is tailnet-only, so only a tailnet device can finish it. The host's sign-in lasts an hour and opens no room.
-- **Allow or Deny:** only users in `HISTER_LOGIN_OAUTH_USERS` see the page.
+- **Allow or Deny:** only users in `NOGON_LOGIN_OAUTH_USERS` see the page.
 - **Tokens:**
   - The code (`mha_`) lasts 60 s and works once.
   - The access token (`mho_`) lasts an hour, bound to the connector's address.
@@ -123,7 +125,7 @@ Shiori's apps get an id in one of two ways:
 - or they open `/machiya/signin?app=1&return=shiori://signed-in` in an ephemeral web session and get `#sid=…&hister=…` back.
 
 Rules for the second way:
-- The return is exactly `<scheme>://signed-in` (`HISTER_LOGIN_APP_SCHEMES`, default `shiori`).
+- The return is exactly `<scheme>://signed-in` (`NOGON_LOGIN_APP_SCHEMES`, default `shiori`).
 - The flow finishes only on the app's own web session (`Sec-Fetch-Site: none`) or this page's own navigation (`same-origin`).
 - Any other navigation, a link from another site say, gets a confirmation page. Its Continue is a same-origin `POST /machiya/signin`, and nothing is created until then.
 
@@ -143,7 +145,7 @@ The next successful sign-in clears the marker. `provider=` without `auto=1` (a t
 
 ### Settings that follow you
 
-The helper keeps each person's shared settings ([contracts/prefs.md](../contracts/prefs.md)) in their own file, `prefs.sqlite3`, beside the sessions file (`HISTER_LOGIN_PREFS_DB`). Each Hister user's settings are keyed by `hi:<sha256(username)[:32]>`, derived only from the credential the helper resolved itself.
+The helper keeps each person's shared settings ([contracts/prefs.md](../contracts/prefs.md)) in their own file, `prefs.sqlite3`, beside the sessions file (`NOGON_LOGIN_PREFS_DB`). Each Hister user's settings are keyed by `hi:<sha256(username)[:32]>`, derived only from the credential the helper resolved itself.
 
 - **The rooms and the landing page** keep their same-origin `/api/prefs`. They forward it to the internal `GET`/`PUT /v1/prefs` with the caller's own credential: exactly one of `X-Machiya-Session` or `X-Access-Token`, as for `/v1/check`, with `X-Machiya-Room`.
 - **Shiori's apps, extensions and scripts** call the public `GET`/`PUT /machiya/api/prefs` (on Hister's own host) with `Authorization: Bearer mhs_…`, a room token or a Hister token.
@@ -155,22 +157,22 @@ The helper keeps each person's shared settings ([contracts/prefs.md](../contract
 
 The hosted pages (`search.*` and `shiori.*`) are static pages in front of Hister, served by `shiori-web`'s nginx. They can't trade a code themselves, so the helper does it for them.
 
-nginx sends a few `/machiya/` paths on those hosts to the helper's public port, with the original `Host`. The helper answers them only for a host in `HISTER_LOGIN_PROXIED_ORIGINS`, as that host's room (`__Host-machiya_sso_shiori`).
+nginx sends a few `/machiya/` paths on those hosts to the helper's public port, with the original `Host`. The helper answers them only for a host in `NOGON_LOGIN_PROXIED_ORIGINS`, as that host's room (`__Host-machiya_sso_shiori`).
 
 ```nginx
-# search.* and shiori.* (shiori-web): the helper's side of the hosts' sign-in (hister-login 0.3.0)
+# search.* and shiori.* (shiori-web): the helper's side of the hosts' sign-in (nogon-login 0.3.0)
 location ~ ^/machiya/(start|callback|signed-out|signout|api/prefs)$ {
-    proxy_pass http://hister-login:8080;
+    proxy_pass http://nogon-login:8080;
     proxy_set_header Host $host;
 }
-location /machiya/static/ { proxy_pass http://hister-login:8080; proxy_set_header Host $host; }
+location /machiya/static/ { proxy_pass http://nogon-login:8080; proxy_set_header Host $host; }
 map $http_cookie $machiya_room_sid {                  # nginx's $cookie_ can't name a cookie with a "-"
     "~(?:^|;\s*)__Host-machiya_sso_shiori=(?<v>mhr_[A-Za-z0-9_-]{43})" $v;
     default "";
 }
 location = /_machiya_auth {
     internal;
-    proxy_pass http://hister-login:8081/v1/nginx;
+    proxy_pass http://nogon-login:8081/v1/nginx;
     proxy_pass_request_body off;
     proxy_set_header Content-Length "";
     proxy_set_header X-Machiya-Session $machiya_room_sid;
@@ -193,7 +195,7 @@ location / {                                          # the Hister route (as bef
 - **The trip:** a page's 401 goes to `…hister…/machiya/signin?return=<page>` as usual. The helper sees no state for that host, so it sends the browser through `<host>/machiya/start`. That sets the state cookie on the host and comes back. Then a code goes to `<host>/machiya/callback`, and the room cookie is set there. The pages need no change for this.
 - **Sign Out** must post to `/machiya/signout` on the pages' own origin.
 - `GET /v1/nginx` answers 200 with `X-Hister-Cookie: hister=<session>` for nginx's own hop to Hister, else 401 or 503.
-- It answers 200 only for an origin in `HISTER_LOGIN_PROXIED_ORIGINS`, with a room session made for that same origin (0.5.0). Another room's session, an app's or a browser's id, or any other origin gets the 401 of a signed-out browser. The internal port can't tell who is asking, so `X-Machiya-Room` alone proves nothing.
+- It answers 200 only for an origin in `NOGON_LOGIN_PROXIED_ORIGINS`, with a room session made for that same origin (0.5.0). Another room's session, an app's or a browser's id, or any other origin gets the 401 of a signed-out browser. The internal port can't tell who is asking, so `X-Machiya-Room` alone proves nothing.
 - That location must replace the browser's `Cookie` header **and** have `proxy_hide_header Set-Cookie;`. Hister re-sends its session cookie on every signed-in answer. Without it, the raw Hister session would reach the browser on the pages' host.
 
 ## When something is down
@@ -211,22 +213,22 @@ Two health checks:
 ## Run it
 
 ```sh
-HISTER_LOGIN_PUBLIC_URL=https://hister.example.ts.net HISTER_LOGIN_HISTER_URL=http://hister:4433 \
-  MACHIYA_COOKIE_DOMAIN=example.ts.net python3 stack/hister-login/hister_login.py
+NOGON_LOGIN_PUBLIC_URL=https://hister.example.ts.net NOGON_LOGIN_NOGON_URL=http://hister:4433 \
+  MACHIYA_COOKIE_DOMAIN=example.ts.net python3 stack/nogon-login/nogon_login.py
 ```
 
-The image (`stack/hister-login/Dockerfile`) runs as uid 1000 with its state in `/data`:
-- `hister-login.sqlite3` (0600, WAL): an id stored only as its SHA-256, the Hister session it maps to, the user, the times;
+The image (`stack/nogon-login/Dockerfile`) runs as uid 1000 with its state in `/data`:
+- `nogon-login.sqlite3` (0600, WAL): an id stored only as its SHA-256, the Hister session it maps to, the user, the times;
 - `prefs.sqlite3` (0600): each user's settings.
 
 Back both up together, with Hister's own database.
 
-**Preferences on the command line.** Run these where the helper runs, e.g. `docker exec hister-login python3 /app/hister_login.py prefs …`:
+**Preferences on the command line.** Run these where the helper runs, e.g. `docker exec nogon-login python3 /app/nogon_login.py prefs …`:
 - `prefs import --user NAME [--tailscale LOGIN] [--principal KEY] [--dry-run] FILE…` seeds an account from the rooms' old `prefs.sqlite3` files, which it opens read-only. For each key, the newest `updated` across the files wins, and only when it's newer than the account's own. So a second run changes nothing.
 - `prefs show --user NAME` lists what the account holds.
 - `prefs delete --user NAME` forgets it (an account removed).
 
-**Test stack.** `stack/hister-login/dev/gate0.sh` brings up a throwaway stack (Hister with users and OIDC, the helper, three stand-in rooms, a stub OIDC provider, a TLS front for `*.machiya.test`), runs the Playwright checks in Chromium and WebKit, and removes it.
+**Test stack.** `stack/nogon-login/dev/gate0.sh` brings up a throwaway stack (Hister with users and OIDC, the helper, three stand-in rooms, a stub OIDC provider, a TLS front for `*.machiya.test`), runs the Playwright checks in Chromium and WebKit, and removes it.
 
 ### Hister's side
 

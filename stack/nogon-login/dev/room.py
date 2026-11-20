@@ -1,4 +1,4 @@
-"""A stand-in room for the hister-login dev stack (gate 0): the smallest server that uses vaultkit.histerauth the way
+"""A stand-in room for the nogon-login dev stack (gate 0): the smallest server that uses vaultkit.histerauth the way
 Kura, Niwa and Konbini will. ROOM=kura|niwa|konbini picks the settings prefix (KURA_, NIWA_, KANBAN_).
 
   GET  /              a page: who is signed in, the fallback banner, a Sign Out button and the Rooms menu
@@ -13,7 +13,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-sys.path.insert(0, "/app")                 # the hister-login image's vendored vaultkit
+sys.path.insert(0, "/app")                 # the nogon-login image's vendored vaultkit
 
 from vaultkit import histerauth, shell, signin as vsignin   # noqa: E402
 

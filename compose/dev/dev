@@ -263,7 +263,7 @@ def make_secrets(data):
     put("forgejo-token", "devfj_" + secrets.token_urlsafe(24))           # code-import's fake forges
     put("github-lantern-token", "devgh_" + secrets.token_urlsafe(24))
     put("github-workshop-token", "devgh_" + secrets.token_urlsafe(24))
-    # a room token (hister-login 0.3.0) for the stack's own callers of the rooms (machiya-mcp, Niwa -> Konbini,
+    # a room token (nogon-login 0.3.0) for the stack's own callers of the rooms (machiya-mcp, Niwa -> Konbini,
     # landing's owner reads) and for agents: registered with the helper at `up` (token add), never Hister's token
     put("room-token", "mht_" + secrets.token_urlsafe(32))
 
@@ -364,7 +364,7 @@ def make_owner(env, data):
     if os.path.exists(tok) and os.path.getsize(tok):
         return
     cmd, extra = hister_cmd(env, data, "create-user", OWNER, "--admin", tty=True)
-    r = subprocess.run([sys.executable, os.path.join(MACHIYA, "stack", "hister-login", "dev", "tty_create_user.py"),
+    r = subprocess.run([sys.executable, os.path.join(MACHIYA, "stack", "nogon-login", "dev", "tty_create_user.py"),
                         os.path.join(data, "secrets", "owner-password")] + cmd,
                        env=dict(os.environ, **extra), capture_output=True, text=True)
     if r.returncode != 0 or "User created" not in r.stdout:
@@ -525,7 +525,7 @@ PROCS = {}          # native: the services this `up` started, so a wait can tell
 def native_up(env, data):
     run = os.path.join(data, "run")
     os.makedirs(run, exist_ok=True)
-    order = ["stub-idp", "hister", "hister-login", "front", "fixtures", "fake-newsblur", "vault-mirror", "kura",
+    order = ["stub-idp", "hister", "nogon-login", "front", "fixtures", "fake-newsblur", "vault-mirror", "kura",
              "niwa", "konbini", "landing", "smallweb", "machiya-mcp", "feed-import", "fake-forgejo", "fake-github",
              "code-import"]
     plan = {p[0]: p for p in native_plan(env)}
@@ -660,15 +660,15 @@ def register_room_token(env, data):
     args = ["token", "add", "--user", OWNER, "--label", "dev stack", "--rooms", TOKEN_ROOMS]
     if env["DEV_ENGINE"] == "native":
         plan = {p[0]: p for p in native_plan(env)}
-        _, _, cwd, extra, _ = plan["hister-login"]
-        r = subprocess.run([sys.executable, "hister_login.py"] + args + ["--from-file",
+        _, _, cwd, extra, _ = plan["nogon-login"]
+        r = subprocess.run([sys.executable, "nogon_login.py"] + args + ["--from-file",
                            os.path.join(data, "secrets", "room-token")], cwd=cwd, env=dict(os.environ, **extra),
                            capture_output=True, text=True)
     else:
-        r = compose(env, data, "exec", "-T", "hister-login", "python3", "/app/hister_login.py", *args,
+        r = compose(env, data, "exec", "-T", "nogon-login", "python3", "/app/nogon_login.py", *args,
                     "--from-file", "/secrets/room-token", check=False, capture=True)
     if r.returncode != 0:
-        die("hister-login refused the stack's room token: %s" % (r.stdout + r.stderr).strip()[-400:])
+        die("nogon-login refused the stack's room token: %s" % (r.stdout + r.stderr).strip()[-400:])
     say("room token: %s" % r.stdout.strip().splitlines()[-1] if r.stdout.strip() else "room token registered")
 
 
@@ -719,7 +719,7 @@ def cmd_up(a):
              None if env.get("DEV_REMOTE_HISTER") else "hister")
     wait_for(lambda: ready(19204, "/health"), 60, "the front (19204)", "front")
     wait_for(lambda: ready(19204, "/machiya/healthz", lambda b: b.get("hister") == "ok"), 60, "the helper",
-             "hister-login")
+             "nogon-login")
     register_room_token(env, data)
     wait_for(lambda: ready(19201, "/api/status", lambda b: b.get("ready")), 180, "Kura", "kura")
     wait_for(lambda: ready(19202, "/api/status", lambda b: b.get("ready")), 180, "Niwa", "niwa")
@@ -808,7 +808,7 @@ def status(env, data):
     print("  agents: MACHIYA_MCP_URL=http://%s:19226/mcp MACHIYA_TOKEN_FILE=%s (pages, notes and the board; a room "
           "token for the rooms, machiya-mcp and smallweb, never Hister; Hister's own MCP is not for AI clients)"
           % (ADDR[0], os.path.join(data, "secrets", "room-token")))
-    print("  sign-in: each room keeps its own host-only cookie (hister-login 0.3.0); legacy: %s"
+    print("  sign-in: each room keeps its own host-only cookie (nogon-login 0.3.0); legacy: %s"
           % (env.get("DEV_AUTH_LEGACY") or "domain-cookie,hister-token (the default)"))
     if env.get("DEV_SIGNIN_PROVIDER"):
         print("  sign-in: automatic through the stub OIDC provider (MACHIYA_SIGNIN_PROVIDER=%s); after Sign Out, the "
@@ -900,7 +900,7 @@ def main():
                    help="MACHIYA_SIGNIN_PROVIDER for the rooms and landing: oidc (the default, as production: a page "
                         "signs itself in through the stub OIDC provider) or '' (the helper's page)")
     p.add_argument("--auth-legacy", default="",
-                   help="HISTER_LOGIN_LEGACY: none (the switch: rooms take only their own cookie, room tokens and apps' "
+                   help="NOGON_LOGIN_LEGACY: none (the switch: rooms take only their own cookie, room tokens and apps' "
                         "ids) or empty (default: the old shared cookie and Hister's raw token still work)")
     p.set_defaults(fn=cmd_init)
     p = sub.add_parser("up")

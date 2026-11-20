@@ -12,7 +12,7 @@ on:
     tags:
       - "mcp-v*"
       - "landing-v*"
-      - "hister-login-v*"
+      - "nogon-login-v*"
       - "smallweb-v*"
       - "vault-mirror-v*"
       - "feed-import-v*"
@@ -58,7 +58,7 @@ jobs:
           case "$TAG" in
             mcp-v*)          name=machiya-mcp;     context=stack/mcp;          file=stack/mcp/Dockerfile ;;
             landing-v*)      name=machiya-landing; context=stack/landing;      file=stack/landing/Dockerfile ;;
-            hister-login-v*) name=hister-login;    context=stack/hister-login; file=stack/hister-login/Dockerfile ;;
+            nogon-login-v*) name=nogon-login;    context=stack/nogon-login; file=stack/nogon-login/Dockerfile ;;
             smallweb-v*)     name=smallweb;        context=stack/smallweb;     file=stack/smallweb/Dockerfile ;;
             vault-mirror-v*) name=vault-mirror;    context=.;                  file=stack/vault-mirror/Dockerfile ;;
             feed-import-v*)  name=feed-import;     context=.;                  file=stack/feed-import/Dockerfile ;;

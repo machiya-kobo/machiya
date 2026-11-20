@@ -177,20 +177,20 @@ then start Kura as [its README](https://github.com/machiya-kobo/kura#quickstart)
 
 ## Hister sign-in (`AUTH=hister`)
 
-A room mode **without the identity file**: the room asks [hister-login](services/hister-login.md) whether the caller is signed in to Hister, so one sign-in (password, or Hister's OIDC provider such as tsidp) covers Hister and every room, and a sign-out anywhere ends it everywhere within 30 seconds. One owner: everyone admitted is the owner, as with the Tailscale gate.
+A room mode **without the identity file**: the room asks [nogon-login](services/nogon-login.md) whether the caller is signed in to Hister, so one sign-in (password, or Hister's OIDC provider such as tsidp) covers Hister and every room, and a sign-out anywhere ends it everywhere within 30 seconds. One owner: everyone admitted is the owner, as with the Tailscale gate.
 
 **Ways in**, the first present decides (a present but invalid one is **401**, never passed over):
 
 1. **A room token** (`Authorization: Bearer mht_…`): scripts, pm, machiya-mcp, landing, Niwa→Konbini, an extension ([below](#room-tokens));
 2. **A Shiori app's id** (`Authorization: Bearer mhs_…`), the app's own per-device sign-in;
 3. **The room's own cookie** (`__Host-machiya_sso_<room>=mhr_…`), a browser's ([below](#one-cookie-per-room));
-4. **Legacy**, only while hister-login's `HISTER_LOGIN_LEGACY` allows them: the owner's Hister token (`X-Access-Token`, or any other Bearer) and the old shared-domain cookie `machiya_sso`;
+4. **Legacy**, only while nogon-login's `NOGON_LOGIN_LEGACY` allows them: the owner's Hister token (`X-Access-Token`, or any other Bearer) and the old shared-domain cookie `machiya_sso`;
 5. **Nothing**: a page goes to the helper's sign-in and comes back with its own cookie; an API call gets `401 {"error": "sign in", "signin": "<address>"}` (vaultkit's `machiya.js` takes the page there when the room opts in). With `MACHIYA_SIGNIN_PROVIDER` (below) the sign-in is automatic.
 
 | | Kura | Niwa | Konbini |
 |---|---|---|---|
 | the mode | `KURA_AUTH=hister` | `NIWA_AUTH=hister` | `KANBAN_AUTH=hister` |
-| the helper, internal (`http://hister-login:8081`) | `KURA_AUTH_URL` | `NIWA_AUTH_URL` | `KANBAN_AUTH_URL` |
+| the helper, internal (`http://nogon-login:8081`) | `KURA_AUTH_URL` | `NIWA_AUTH_URL` | `KANBAN_AUTH_URL` |
 | the helper's sign-in page (required) | `KURA_AUTH_SIGNIN_URL` | `NIWA_AUTH_SIGNIN_URL` | `KANBAN_AUTH_SIGNIN_URL` |
 | Hister usernames admitted (required; never `*`) | `KURA_HISTER_USERS` | `NIWA_HISTER_USERS` | `KANBAN_HISTER_USERS` |
 | when sign-in is unavailable: `tailscale` or `none` | `KURA_AUTH_FALLBACK` | `NIWA_AUTH_FALLBACK` | `KANBAN_AUTH_FALLBACK` |
@@ -203,7 +203,7 @@ A room mode **without the identity file**: the room asks [hister-login](services
 
 - **Refused at start:** no sign-in address or usernames, a `*`, `none` without the helper's address, no public address, or an identity file at the same time (not combined yet). No helper address with the `tailscale` fallback runs on the Tailscale identity alone, with a warning, so a room still stands alone.
 - **Signed out never falls back.** Only "nobody answered" does: the helper or Hister unreachable, a 5xx, or Hister's user handling off. Then a room with `tailscale` admits the owner's Tailscale login with a banner ("Signed in through the tailnet: sign-in is unavailable"), caches nothing and counts it (`fallback_total`); a room with `none` answers 503. A Hister account outside `*_HISTER_USERS` is 403, never a fallback (OAuth creates accounts on its own).
-- **The cookies** are host-only since vaultkit 0.22 and hister-login 0.3.0 (decided 2026-10-05, after the sweep found the shared `machiya_sso` reaching every host under the tailnet's domain, agents' machines among them): see [One cookie per room](#one-cookie-per-room). Hister's own session never leaves Hister's host.
+- **The cookies** are host-only since vaultkit 0.22 and nogon-login 0.3.0 (decided 2026-10-05, after the sweep found the shared `machiya_sso` reaching every host under the tailnet's domain, agents' machines among them): see [One cookie per room](#one-cookie-per-room). Hister's own session never leaves Hister's host.
 - **Automatic sign-in** (`MACHIYA_SIGNIN_PROVIDER=oidc`, decided 2026-10-05). An installed web app on an iPhone has its own cookie jar, so each would otherwise ask once. With this setting, a room or landing that needs a sign-in sends the page to the helper with `provider=oidc&auto=1`, and the helper goes straight through Hister's OIDC provider (tsidp knows the device), so there is no page and no tap.
   - **The helper's page shows instead after a deliberate sign-out.** A room's `/signout` sets that room's own marker (`__Host-machiya_sso_<room>_out`), and the helper remembers every helper session ended on purpose for 30 days, so the next automatic trip from any room shows its page and sets the helper's marker (`__Host-machiya_sso_out`). The helper's own sign-out and its sessions page set that marker at once. The next successful sign-in clears them, so "Sign Out" never bounces straight back in.
   - **It also shows after a round trip that failed.** The callback lands on the page with "Sign in with Tailscale didn't work…" and a 10-minute marker, so it never loops.
@@ -217,11 +217,11 @@ Each room keeps a cookie of its own, set by the room for its host alone. One sig
 
 | Cookie | Host | Holds | Set by |
 |---|---|---|---|
-| `__Host-machiya_sso` | Hister's (the helper's) | the helper's browser session `mhs_…` | hister-login |
+| `__Host-machiya_sso` | Hister's (the helper's) | the helper's browser session `mhs_…` | nogon-login |
 | `__Host-machiya_sso_<room>` (`kura`, `niwa`, `konbini`, `landing`; `shiori` on the hosted pages' hosts) | the room's | a room session `mhr_…`, good in that room only | the room, from a one-time code |
 | `__Host-machiya_sso_<room>_state` | the room's | the nonce of a trip to the helper (10 minutes) | the room |
 | `__Host-machiya_sso_<room>_try`, `…_out` | the room's | the loop guard (30 s); the deliberate sign-out marker (30 days) | the room |
-| `machiya_sso` (legacy) | `Domain=MACHIYA_COOKIE_DOMAIN` | the helper's session, as before | hister-login, only while `HISTER_LOGIN_LEGACY` has `domain-cookie` |
+| `machiya_sso` (legacy) | `Domain=MACHIYA_COOKIE_DOMAIN` | the helper's session, as before | nogon-login, only while `NOGON_LOGIN_LEGACY` has `domain-cookie` |
 
 All are `Secure; HttpOnly; SameSite=Lax; Path=/` with **no `Domain`**. The `__Host-` prefix makes the browser refuse any version of them that another host sets or that carries a `Domain`, so no other site on the tailnet (or a link that injects a header) can plant or overwrite one. Over plain http (a stack without TLS) the prefix and `Secure` are dropped.
 
@@ -249,7 +249,7 @@ Anything else shows the sign-in page with a link, never a loop. The answer is a 
 - also **machiya-mcp and smallweb themselves**, which take one beside the Tailscale header (`MCP_AUTH_URL`, `SMALLWEB_AUTH_URL`), for an agent on a tagged machine with no Tailscale login.
 
 **What a token is:**
-- `mht_` and 43 characters, made by hister-login;
+- `mht_` and 43 characters, made by nogon-login;
 - the helper keeps it only as a hash, under a name you give it;
 - it acts as one Hister user;
 - it opens **only the rooms it names** (their origins), never Hister. A leak in one room gives no one Hister.
@@ -257,9 +257,9 @@ Anything else shows the sign-in page with a link, never a loop. The answer is a 
 **Make one** on the helper's sessions page (Room Tokens: a name, tick the rooms; it is shown once), or where the helper runs:
 
 ```sh
-python3 hister_login.py token mint --user <owner> --label "pm on the laptop" --rooms konbini,niwa --out /run/secrets/pm-room-token
-python3 hister_login.py token list
-python3 hister_login.py token revoke <id>
+python3 nogon_login.py token mint --user <owner> --label "pm on the laptop" --rooms konbini,niwa --out /run/secrets/pm-room-token
+python3 nogon_login.py token list
+python3 nogon_login.py token revoke <id>
 ```
 
 Send it as `Authorization: Bearer mht_…`, from a file, never in a URL or argv. Revoke it on the sessions page, where each token shows when it was last used.
@@ -275,14 +275,14 @@ Send it as `Authorization: Bearer mht_…`, from a file, never in a URL or argv.
 | landing's owner reads | `LANDING_TOKEN_FILE` = a room token | kura, niwa, konbini |
 | an agent → machiya-mcp, smallweb | a room token (the machiya plugin's `MACHIYA_TOKEN_FILE`) | machiya-mcp, smallweb |
 | everything that calls **Hister** (Kura's push, the rooms' own Hister calls, importers, scripts) | Hister's token, unchanged | Hister |
-| Claude Duet → the public connector (`mcp-public`, 2026-10-28) | an OAuth access token (`mho_`, an hour) from hister-login's [OAuth server](services/hister-login.md#the-oauth-server), allowed by you from a tailnet device | that connector only: saved pages and default-vault notes, read-only; no room, never Hister |
+| Claude Duet → the public connector (`mcp-public`, 2026-10-28) | an OAuth access token (`mho_`, an hour) from nogon-login's [OAuth server](services/nogon-login.md#the-oauth-server), allowed by you from a tailnet device | that connector only: saved pages and default-vault notes, read-only; no room, never Hister |
 
 ### Moving to it (readers first, writers after)
 
-1. **hister-login 0.3.0**, with `HISTER_LOGIN_LEGACY` at its default then (`domain-cookie,hister-token`; since 0.5.0 the default is `none`, so a move like this one sets it). Nothing changes for old rooms: the helper still sets the shared `machiya_sso` beside its host-only cookie.
+1. **nogon-login 0.3.0**, with `NOGON_LOGIN_LEGACY` at its default then (`domain-cookie,hister-token`; since 0.5.0 the default is `none`, so a move like this one sets it). Nothing changes for old rooms: the helper still sets the shared `machiya_sso` beside its host-only cookie.
 2. **The rooms and landing** re-vendor vaultkit 0.22 (no code change). They prefer their own cookie and still take the shared one and Hister's token, passing both to the helper.
-3. **The callers** get room tokens (the table above). Shiori's extensions and apps update. Kura and Konbini list the hosted pages' origins, and the hosted pages' nginx changes ([hister-login](services/hister-login.md#shioris-hosted-pages)).
-4. **The switch:** `HISTER_LOGIN_LEGACY=none`. The shared cookie is no longer set, and the rooms refuse it and Hister's raw token (`401 {"reason": "legacy-off"}`). Each browser makes one silent trip per room. Until then, the helper logs (hourly per room) every legacy credential it still accepts. **Rollback:** set the old value again and restart the helper.
+3. **The callers** get room tokens (the table above). Shiori's extensions and apps update. Kura and Konbini list the hosted pages' origins, and the hosted pages' nginx changes ([nogon-login](services/nogon-login.md#shioris-hosted-pages)).
+4. **The switch:** `NOGON_LOGIN_LEGACY=none`. The shared cookie is no longer set, and the rooms refuse it and Hister's raw token (`401 {"reason": "legacy-off"}`). Each browser makes one silent trip per room. Until then, the helper logs (hourly per room) every legacy credential it still accepts. **Rollback:** set the old value again and restart the helper.
 5. Afterwards, rotate Hister's token: it sat in the rooms and their clients for weeks.
 
 ## Security notes

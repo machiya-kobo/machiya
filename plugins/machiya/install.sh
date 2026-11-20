@@ -12,7 +12,7 @@
 #   install.sh hister-remove   only the move off the older separate `hister` server (`hister` does the same).
 # Environment: MACHIYA_MCP_URL (default https://machiya-mcp.example.ts.net/mcp), MACHIYA_REPO (this checkout; default: the
 # one this script is in), MACHIYA_AGENT_NAME (what the board's history says; default user@host), MACHIYA_TOKEN_FILE (0.4.0:
-# a file holding a room token hister-login made for machiya-mcp, for a machine with no Tailscale login, such as a tagged
+# a file holding a room token nogon-login made for machiya-mcp, for a machine with no Tailscale login, such as a tagged
 # agents' VM: its value is saved in the settings' env as MACHIYA_MCP_TOKEN, which the plugin sends as X-Machiya-Token;
 # Claude Code runs no headersHelper for a plugin's server, so a fixed header is the way; only a room token (mht_), and
 # only for an https or loopback MACHIYA_MCP_URL). The URL, when set, is saved in the settings' env, where the plugin's

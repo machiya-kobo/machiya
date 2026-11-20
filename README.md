@@ -105,7 +105,7 @@ Each extra is its own app with a public image on `ghcr.io/machiya-kobo`. Run it,
 |---|---|---|
 | Subscribe to a search as RSS | [shiori-feed](docs/services/shiori-feed.md) | `SHIORI_FEED_URL` |
 | AI Answer and Summarize | [shiori-ai](docs/services/shiori-ai.md), with an Anthropic API key | `SHIORI_AI_URL` |
-| One sign-in for every app | [hister-login](docs/services/hister-login.md) | `SHIORI_LOGIN_URL` |
+| One sign-in for every app | [nogon-login](docs/services/nogon-login.md) | `SHIORI_LOGIN_URL` |
 
 Want them all? Run the full stack below.
 

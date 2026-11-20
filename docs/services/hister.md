@@ -15,7 +15,7 @@ Machiya runs Hister unchanged. This repo holds its [reference config](../../conf
 
 - The tailnet grant is the gate, because Hister holds your browsing history.
 - With user handling on (`app.user_handling: true`), every call also needs a sign-in or your token. Machiya's callers already send the token ([contracts/hister.md](../contracts/hister.md#every-call)).
-- [hister-login](hister-login.md) makes a Hister sign-in count in every Machiya app.
+- [nogon-login](nogon-login.md) makes a Hister sign-in count in every Machiya app.
 
 ## MCP
 

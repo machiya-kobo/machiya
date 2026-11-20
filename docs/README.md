@@ -11,7 +11,7 @@ Start with the [README](../README.md) for what Machiya is, then:
 | change the look | [design.md](design.md), [ui.md](ui.md) (shared stylesheet, script, shell) |
 | write copy (page, READMEs, UI text) | [voice.md](voice.md) |
 | reuse the vault code | [vaultkit.md](vaultkit.md) |
-| add people, agents, sign-in or Shiori devices | [identity.md](identity.md) (optional; off by default); Hister's users as the sign-in: [services/hister-login.md](services/hister-login.md) |
+| add people, agents, sign-in or Shiori devices | [identity.md](identity.md) (optional; off by default); Hister's users as the sign-in: [services/nogon-login.md](services/nogon-login.md) |
 | connect Claude Code | [services/mcp.md](services/mcp.md) and the plugin in [../plugins/machiya/](../plugins/machiya/) |
 
 **Words used throughout.** A **room** is one of Machiya's web apps (Kura, Niwa, Konbini); the **owner** is the user a deployment is for (the Tailscale login in `*_USERS`, or the identity file's `owner = true` principal); the **vault** is the Markdown notes in a git repository; a **card** is a note the board shows as a project; a **work vault** (or **private vault**) is any other vault that must never reach a search index, a model or a feed; a **shared vault** is one the owner marked `+shared` in Kura's config, treated like the default vault at its `/v/<name>/` address. A **principal** is who is calling, as the identity file names it: a person, an agent or a service. A **grant** is what a principal may do in one room (`kura` `read` with its vaults, `konbini` `write`, …). The **identity file** is the optional, read-only TOML file (`MACHIYA_IDENTITY_FILE`) that lists the principals, how each proves who it is, and their grants ([identity.md](identity.md)).
@@ -24,7 +24,7 @@ Start with the [README](../README.md) for what Machiya is, then:
 - **[stack/](../stack/)**: small services beside the apps:
   - `mcp/`: one MCP server for the board, notes, saved pages, labels, collections and the garden ([docs](services/mcp.md))
   - `landing/`: the stack's front page and its `/status` page ([docs](services/landing.md))
-  - `hister-login/`: Hister's users as the one sign-in for every app ([docs](services/hister-login.md))
+  - `nogon-login/`: Hister's users as the one sign-in for every app ([docs](services/nogon-login.md))
   - `smallweb/`: Gemini and Gopher search for Shiori, and saving the pages Shiori asks for into Hister
   - `feed-import/`: what you read and star in a feed reader, into Hister
   - `code-import/`: your Forgejo and GitHub repos, into Hister for Shiori's Code view ([docs](services/code-import.md))

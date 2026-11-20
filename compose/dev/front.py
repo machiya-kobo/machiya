@@ -1,13 +1,13 @@
 """The dev stack's front door (stdlib only, dev only): Tailscale Serve's job in production. It listens on every
 public port, terminates TLS with the throwaway dev certificate (or passes plain http when a real Tailscale Serve sits
 in front of it), and forwards to the service: on Hister's port, `/machiya/` and the one path `/api/oauth/callback` go
-to the hister-login helper and everything else to Hister, as Serve does on Hister's name.
+to the nogon-login helper and everything else to Hister, as Serve does on Hister's name.
 
 One request per connection (answers carry `Connection: close`); a WebSocket upgrade is piped both ways until either side
 closes. X-Forwarded-For/-Proto/-Host are added when the client didn't send them (a Serve in front sets its own).
 
     FRONT_SITES     JSON {"PORT": "ROUTE ROUTE ...", ...}; a ROUTE is PREFIX=URL (longest prefix wins) or =PATH=URL
-                    (that path exactly), e.g. {"19204": "/machiya/=http://hister-login:8080 /=http://hister:4433"}
+                    (that path exactly), e.g. {"19204": "/machiya/=http://nogon-login:8080 /=http://hister:4433"}
     FRONT_BIND      0.0.0.0
     FRONT_TLS_CERT, FRONT_TLS_KEY   PEM files: https on every port; empty: plain http
 """

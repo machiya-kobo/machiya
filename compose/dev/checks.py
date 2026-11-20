@@ -6,7 +6,7 @@ synthetic seed is where it should be, the MCP and feed-import work. HTTP checks 
 
 Talks to DEV_ADDR:<port> (127.0.0.1, or the --bind of a second stack) for the HTTP checks and to DEV_URL (the public
 base the stack was made with) in the browser. --browser also checks the settings that follow a person
-(docs/contracts/prefs.md) and the automatic sign-in (MACHIYA_SIGNIN_PROVIDER), and stops and starts hister-login
+(docs/contracts/prefs.md) and the automatic sign-in (MACHIYA_SIGNIN_PROVIDER), and stops and starts nogon-login
 once to show the rooms carry on without it. The dummy owner's password and token are read from DIR/secrets and never printed. Each check prints
 PASS/FAIL with its evidence; the exit code is the number of failures.
 """
@@ -88,9 +88,9 @@ def mcp(port, method, params=None, headers=None):
 # -- HTTP ------------------------------------------------------------------------------------------------------------
 
 def http_checks(data, tok, password, rtok="", denv=None):
-    bearer = {"Authorization": "Bearer " + (rtok or tok)}        # the rooms: a room token (hister-login 0.3.0)
+    bearer = {"Authorization": "Bearer " + (rtok or tok)}        # the rooms: a room token (nogon-login 0.3.0)
     probes = [("landing", 19200, "/healthz"), ("kura", 19201, "/api/status"), ("niwa", 19202, "/api/status"),
-              ("konbini", 19203, "/api/health"), ("hister", 19204, "/health"), ("hister-login", 19204,
+              ("konbini", 19203, "/api/health"), ("hister", 19204, "/health"), ("nogon-login", 19204,
               "/machiya/healthz"), ("searxng", 19205, "/healthz"), ("machiya-mcp", 19206, "/healthz"),
               ("smallweb", 19207, "/api/status"), ("stub-oidc", 19208, "/.well-known/openid-configuration"),
               ("fixtures", 19209, "/healthz"), ("fake-newsblur", 19210, "/healthz"),
@@ -107,7 +107,7 @@ def http_checks(data, tok, password, rtok="", denv=None):
                sorted(optional)) if optional else ""))
 
     st, body, _ = http("GET", L(19204, "/machiya/healthz"))
-    record("hister-login: Hister has users (hister ok)", isinstance(body, dict) and body.get("hister") == "ok",
+    record("nogon-login: Hister has users (hister ok)", isinstance(body, dict) and body.get("hister") == "ok",
            str(body))
 
     gates = {}
@@ -239,7 +239,7 @@ def http_checks(data, tok, password, rtok="", denv=None):
            "tokens)", not leaks, ", ".join(leaks))
 
 
-# -- room sessions (hister-login 0.3.0, vaultkit 0.22: docs/identity.md "One cookie per room") -----------------------
+# -- room sessions (nogon-login 0.3.0, vaultkit 0.22: docs/identity.md "One cookie per room") -----------------------
 
 def set_cookies(hdrs):
     return list(hdrs.get_all("Set-Cookie") or []) if hdrs else []
@@ -256,7 +256,7 @@ def cookie_named(cookies, name):
 def room_session_checks(data, password, tok, rtok, denv):
     """At the HTTP level, as a browser would: a room's code works once, only at its room, only with its browser's
     nonce; the room's cookie is host-only; a room session works in its own room only; Sign Out in one room ends the
-    others; with HISTER_LOGIN_LEGACY=none Hister's raw token opens no room while the room token does."""
+    others; with NOGON_LOGIN_LEGACY=none Hister's raw token opens no room while the room token does."""
     import base64
     import hashlib
     pub = os.environ.get("DEV_URL", "https://localhost").rstrip("/")
@@ -346,14 +346,14 @@ def room_session_checks(data, password, tok, rtok, denv):
                 for name, port, path in (("kura", 19201, "/api/search?q=x"), ("konbini", 19203, "/api/cards"),
                                          ("niwa", 19202, "/api/suggestions"))} if rtok else {}
     if legacy == "none":
-        record("the switch (HISTER_LOGIN_LEGACY=none): Hister's raw owner token opens no room (Bearer or "
+        record("the switch (NOGON_LOGIN_LEGACY=none): Hister's raw owner token opens no room (Bearer or "
                "X-Access-Token: 401 legacy-off); the room token opens every room",
                set(raw_tok.values()) == {401} and xat[0] == 401 and isinstance(xat[1], dict)
                and xat[1].get("reason") == "legacy-off" and room_tok and set(room_tok.values()) == {200},
                "raw token %s, X-Access-Token %s %s; room token %s" % (raw_tok, xat[0], xat[1] if isinstance(
                    xat[1], dict) else "", room_tok))
     else:
-        record("before the switch (HISTER_LOGIN_LEGACY=%s): Hister's raw token still opens the rooms, and so does the "
+        record("before the switch (NOGON_LOGIN_LEGACY=%s): Hister's raw token still opens the rooms, and so does the "
                "room token" % (legacy or "default"), set(raw_tok.values()) == {200} and set(room_tok.values()) == {200},
                "raw token %s; room token %s" % (raw_tok, room_tok))
     # Sign Out in Kura ends Niwa's session of the same browser (the helper session and every room session made from it)
@@ -653,7 +653,7 @@ def prefs_checks(pw, U, signin, shots, denv, tok):
     their cookies, and the change waits and lands when it is back. Screenshots of the Shared section (landing's
     Settings: desktop and phone, light and dark)."""
     engine_cmd = denv.get("DEV_ENGINE", "podman")
-    helper = "%s-hister-login-1" % (denv.get("DEV_PROJECT") or "machiya-dev")
+    helper = "%s-nogon-login-1" % (denv.get("DEV_PROJECT") or "machiya-dev")
     clear = {"theme": None, "palette": None, "text_size": None, "apps_hidden": None}
     http("PUT", L(19204, "/machiya/api/prefs"), {"prefs": clear}, headers={"X-Access-Token": tok})
     browser = pw.chromium.launch()
@@ -749,7 +749,7 @@ def prefs_checks(pw, U, signin, shots, denv, tok):
     # the helper down: the rooms keep working on their cookies (Niwa, Konbini and landing through the Tailscale
     # fallback, as Serve's header would let them; Kura, with no fallback, says sign-in is unavailable)
     if engine_cmd == "native":
-        print("SKIP  [prefs] the helper down (a native stack: stop hister-login by hand)")
+        print("SKIP  [prefs] the helper down (a native stack: stop nogon-login by hand)")
         browser.close()
         return
     login = (denv.get("DEV_TAILNET_USERS") or "owner@dev").split(",")[0].strip()

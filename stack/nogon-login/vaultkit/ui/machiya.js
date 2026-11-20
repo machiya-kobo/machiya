@@ -7,7 +7,9 @@
 //     device's own textSizeDevice and the Apps show_* switches are written as machiya_<key> cookies on that domain, so
 //     one choice covers every room on this device (ts.net is on the Public Suffix List: <tailnet>.ts.net is the site,
 //     every room shares its cookies). Without it they are the room's own cookies.
-//  2. the Apps setting: rooms and neighbours switched off are hidden from the switcher.
+//  2. the Apps setting: rooms and neighbours switched off are hidden from the switcher. A deployment's extra rooms
+//     (MACHIYA_EXTRA_ROOMS: rows marked data-extra-room) too, but their switches stay on this device (the shared
+//     cookies): the account's apps_hidden names only APPS.
 //  3. menus (2026-10-05): the Rooms menu (<details class="rooms">, the header's and the phone's Rooms sheet), a room's own
 //     <details data-menu>, open <dialog>s and popovers close on Escape, a click outside (the menus), a link or form
 //     inside them, and whenever the page is shown again (pageshow, popstate, pagehide), so the back/forward cache never
@@ -59,6 +61,10 @@ const PALETTES = ["tokyo-night", "solarized", "nord", "dracula", "catppuccin", "
 const TEXT_SIZES = ["xsmall", "small", "standard", "large", "xlarge"];
 // the switcher's rows (vaultkit/prefs.py APPS; a test checks they match): apps_hidden <-> show_<app>
 const APPS = ["shiori", "konbini", "niwa", "kura", "hister", "searxng", "machiya"];
+// the deployment's extra rooms (shell.extra_rooms): only the page knows their keys
+const EXTRA = [...new Set([...document.querySelectorAll("[data-extra-room]")].map((el) => el.dataset.extraRoom))]
+  .filter((a) => /^[a-z0-9-]{1,32}$/.test(a) && !APPS.includes(a));
+const ROWS = [...APPS, ...EXTRA];                     // every switcher row this page may hide
 const rawFetch = window.fetch ? window.fetch.bind(window) : null;   // 6. never takes the page to sign in (8.)
 let sheetDevice = null;                               // 10. the open sheet's This Device size, not yet saved ("" = off)
 
@@ -133,7 +139,7 @@ function showControl(key, value) {
 const settings = load();
 const appliedNow = {};                                // what this page shows now, so a re-read applies only changes
 // the Apps switches: the show_* cookies (another room may have changed them) win over this room's localStorage copy
-for (const a of APPS) {
+for (const a of ROWS) {
   const c = cookieOf("show_" + a);
   if (c !== null) settings["show_" + a] = c !== "false";
 }
@@ -163,7 +169,7 @@ const accountKeys = () => [...Object.keys(SHARED_KEYS), "apps_hidden", ...Object
 const accountKeyOf = (local) => {
   if (local === "textSize") return "text_size";
   if (local === "theme" || local === "palette") return local;
-  if (local.startsWith("show_")) return "apps_hidden";
+  if (local.startsWith("show_")) return APPS.includes(local.slice(5)) ? "apps_hidden" : "";   // extra rooms: this device
   return Object.keys(APP_LOCAL).find((k) => APP_LOCAL[k] === local) || "";
 };
 
@@ -379,7 +385,7 @@ function refresh() {
   }
   const d = deviceSize();
   if (appliedNow.textSizeDevice !== d) { appliedNow.textSizeDevice = d; apply("textSizeDevice", d); syncDeviceControls(); }
-  for (const a of APPS) {
+  for (const a of ROWS) {
     const c = cookieOf("show_" + a);
     if (c === null) continue;
     const on = c !== "false";

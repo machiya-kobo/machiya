@@ -53,7 +53,7 @@ The ports are the same numbers on 127.0.0.2, and the checks and `status` use tha
 
 ## Ports
 
-Everything is on `127.0.0.1` (`--bind` changes it). The public ports go through `front`, which does what Tailscale Serve does in a deployment: TLS (a throwaway CA, `$DEV_DATA/certs/ca.crt`, because the sign-in helper only sends a browser back to an `https` address), and on Hister's port it sends `/machiya/` and `/api/oauth/callback` to the hister-login helper.
+Everything is on `127.0.0.1` (`--bind` changes it). The public ports go through `front`, which does what Tailscale Serve does in a deployment: TLS (a throwaway CA, `$DEV_DATA/certs/ca.crt`, because the sign-in helper only sends a browser back to an `https` address), and on Hister's port it sends `/machiya/` and `/api/oauth/callback` to the nogon-login helper.
 
 | Port | Service | Notes |
 |---|---|---|
@@ -61,7 +61,7 @@ Everything is on `127.0.0.1` (`--bind` changes it). The public ports go through 
 | 19201 | Kura | `AUTH=hister`, fallback **none** |
 | 19202 | Niwa | `AUTH=hister`, fallback `tailscale` |
 | 19203 | Konbini | `AUTH=hister`, fallback `tailscale` |
-| 19204 | Hister + hister-login | users on; the helper's `/machiya/signin`, `/machiya/sessions` |
+| 19204 | Hister + nogon-login | users on; the helper's `/machiya/signin`, `/machiya/sessions` |
 | 19205 | SearXNG | wikipedia, wiktionary and duckduckgo only: web results are sparse on purpose |
 | 19206 | machiya-mcp | `/mcp` |
 | 19207 | smallweb | |
@@ -75,9 +75,9 @@ Everything is on `127.0.0.1` (`--bind` changes it). The public ports go through 
 
 Sign in as `owner` with the password in `$DEV_DATA/secrets/owner-password`. One sign-in covers every room; sign-out on the helper's sessions page ends it everywhere within 30 s.
 
-**Automatic sign-in.** A stack made since hister-login 0.2.0 sets `MACHIYA_SIGNIN_PROVIDER=oidc` (`--signin-provider oidc`, the default; `--signin-provider ''` for the page), as production does. A room or landing that needs a sign-in then goes through the stub OIDC provider, which plays tsidp and signs the owner in at once: no page and no click. After a Sign Out (a room's, or the helper's) the helper's page shows until the next sign-in. An older `dev.env` has no `DEV_SIGNIN_PROVIDER` and keeps the page.
+**Automatic sign-in.** A stack made since nogon-login 0.2.0 sets `MACHIYA_SIGNIN_PROVIDER=oidc` (`--signin-provider oidc`, the default; `--signin-provider ''` for the page), as production does. A room or landing that needs a sign-in then goes through the stub OIDC provider, which plays tsidp and signs the owner in at once: no page and no click. After a Sign Out (a room's, or the helper's) the helper's page shows until the next sign-in. An older `dev.env` has no `DEV_SIGNIN_PROVIDER` and keeps the page.
 
-**One cookie per room** (hister-login 0.3.0, vaultkit 0.22; [identity.md](identity.md#one-cookie-per-room)). Each room and landing keeps its own host-only `__Host-machiya_sso_<room>`, made from a one-time code; the helper keeps `__Host-machiya_sso`. On the dev stack every room is the same host on different ports, and cookies ignore ports, which is why the names carry the room. `--auth-legacy none` at init makes the stack run **after the switch** (`HISTER_LOGIN_LEGACY=none`): the rooms then take only their own cookie, the apps' ids and room tokens, never the shared `machiya_sso` or Hister's raw token. Without it (an older `dev.env`, or a stack whose rooms vendor an older vaultkit) the helper keeps the old ways working.
+**One cookie per room** (nogon-login 0.3.0, vaultkit 0.22; [identity.md](identity.md#one-cookie-per-room)). Each room and landing keeps its own host-only `__Host-machiya_sso_<room>`, made from a one-time code; the helper keeps `__Host-machiya_sso`. On the dev stack every room is the same host on different ports, and cookies ignore ports, which is why the names carry the room. `--auth-legacy none` at init makes the stack run **after the switch** (`NOGON_LOGIN_LEGACY=none`): the rooms then take only their own cookie, the apps' ids and room tokens, never the shared `machiya_sso` or Hister's raw token. Without it (an older `dev.env`, or a stack whose rooms vendor an older vaultkit) the helper keeps the old ways working.
 
 **How it differs from a deployment.** All rooms share one host name, so cookies (Hister's own `hister` cookie too) are shared by port rather than by a cookie domain, and `MACHIYA_COOKIE_DOMAIN` is empty. landing signs in like the rooms (`AUTH=hister`, fallback `tailscale`); machiya-mcp and smallweb run `AUTH=open`, so the network decides who reaches them: the ports bind to `127.0.0.1`, and on the tailnet only owner-only grants should reach them. machiya-mcp, Niwa (to Konbini) and landing call the rooms with the stack's **room token** (`$DEV_DATA/secrets/room-token`, made at init and registered with the helper at `up`, scoped to the rooms, machiya-mcp and smallweb); every service's Hister calls use the owner's Hister token, which goes to Hister only.
 
@@ -95,7 +95,7 @@ With `--browser`, it also checks that each room's cookie in a real browser is `_
 - screenshots of landing's Appearance section (desktop and phone, light and dark);
 - Theme and Appearance changed in Kura's Settings send one key each, and show in Konbini, Niwa and landing on the next load, and in a second browser (another device);
 - Use This Device's Size stays in its browser;
-- with hister-login stopped (the checks stop and start the `<project>-hister-login-1` container), Niwa, Konbini and landing keep working on their cookies through the Tailscale fallback, and a change made meanwhile waits and lands in the account when the helper is back.
+- with nogon-login stopped (the checks stop and start the `<project>-nogon-login-1` container), Niwa, Konbini and landing keep working on their cookies through the Tailscale fallback, and a change made meanwhile waits and lands in the account when the helper is back.
 
 They need rooms that vendor vaultkit 0.21 and forward `/api/prefs` (`histerauth.forward_prefs`). Older rooms fail the cross-device checks.
 
@@ -116,7 +116,7 @@ sudo tailscale serve status; sudo tailscale funnel status          # every line 
 
 `--tailnet-users` is what Niwa and Konbini admit in their Tailscale fallback. The tailnet policy must grant those ports to the owner's devices only. The ports for agents (19224, 19226) and the stand-ins (19209–19212) stay on `127.0.0.1`.
 
-**The sign-in cookie's name.** Until production's switch (`HISTER_LOGIN_LEGACY=none`), its sign-in cookie is set on the tailnet's whole domain (`MACHIYA_COOKIE_DOMAIN=<tailnet>.ts.net`) and so also reaches the dev host, where a room with legacy reading still on would pick it up: a browser signed in to that stack would bounce between the dev rooms and the helper. (After the switch production sets no shared cookie, and the rooms read only their own.) So the dev stack on a tailnet names its own cookie, `--sso-cookie machiya_dev_sso` (`MACHIYA_SSO_COOKIE` in the helper, the rooms and landing). That needs rooms and a landing that vendor a vaultkit reading `MACHIYA_SSO_COOKIE`: with older ones, leave it unset (the default `machiya_sso`) and use a separate browser profile for the dev stack. To switch an existing stack, set `DEV_SSO_COOKIE=machiya_dev_sso` in `$DEV_DATA/dev.env` and `./dev up`. Tokens (agents, the MCP) are not affected either way.
+**The sign-in cookie's name.** Until production's switch (`NOGON_LOGIN_LEGACY=none`), its sign-in cookie is set on the tailnet's whole domain (`MACHIYA_COOKIE_DOMAIN=<tailnet>.ts.net`) and so also reaches the dev host, where a room with legacy reading still on would pick it up: a browser signed in to that stack would bounce between the dev rooms and the helper. (After the switch production sets no shared cookie, and the rooms read only their own.) So the dev stack on a tailnet names its own cookie, `--sso-cookie machiya_dev_sso` (`MACHIYA_SSO_COOKIE` in the helper, the rooms and landing). That needs rooms and a landing that vendor a vaultkit reading `MACHIYA_SSO_COOKIE`: with older ones, leave it unset (the default `machiya_sso`) and use a separate browser profile for the dev stack. To switch an existing stack, set `DEV_SSO_COOKIE=machiya_dev_sso` in `$DEV_DATA/dev.env` and `./dev up`. Tokens (agents, the MCP) are not affected either way.
 
 ## Agents on the dev stack
 
@@ -269,7 +269,7 @@ The timer starts it at 00:30 Pacific (a full fleet takes about three hours; the 
 
 | Service | Natively |
 |---|---|
-| the rooms, landing, hister-login, machiya-mcp, smallweb, feed-import, code-import, vault-mirror, the stub OIDC provider, the fixtures, the fake NewsBlur, Forgejo and GitHub, the front | Python 3.11+ with `markdown` 3.11+ and `pyyaml`, plus `git` and `openssl` |
+| the rooms, landing, nogon-login, machiya-mcp, smallweb, feed-import, code-import, vault-mirror, the stub OIDC provider, the fixtures, the fake NewsBlur, Forgejo and GitHub, the front | Python 3.11+ with `markdown` 3.11+ and `pyyaml`, plus `git` and `openssl` |
 | Hister | a `hister` binary for the OS (`HISTER_BIN=…` at init, or on `PATH`). It is Go with cgo (SQLite, sqlite-vec): build it with Go 1.26 and a C compiler. Upstream ships Linux (amd64, arm64), macOS and Windows binaries; the Linux ones work for `--hister-bin` (tested on arm64) |
 | SearXNG | left out; run it yourself from a checkout with `SEARXNG_SETTINGS_PATH=compose/dev/config/searxng.yml` on `127.0.0.1:19237` if you need it |
 

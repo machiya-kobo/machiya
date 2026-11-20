@@ -57,7 +57,7 @@ See [contracts/kura-api.md](../contracts/kura-api.md): `/api/search`, `/api/note
 | `tailscale` | the `Tailscale-User-Login` a proxy sets, checked against `KURA_USERS` |
 | `open` | anyone; no check. Bind to `127.0.0.1` only |
 | `header` | your proxy's login header (`KURA_AUTH_HEADER`), with an identity file |
-| `hister` | Hister's users through [hister-login](hister-login.md): `KURA_AUTH_URL`, `KURA_AUTH_SIGNIN_URL`, `KURA_HISTER_USERS`, `KURA_AUTH_FALLBACK` ([identity.md](../identity.md#hister-sign-in-authhister)) |
+| `hister` | Hister's users through [nogon-login](nogon-login.md): `KURA_AUTH_URL`, `KURA_AUTH_SIGNIN_URL`, `KURA_HISTER_USERS`, `KURA_AUTH_FALLBACK` ([identity.md](../identity.md#hister-sign-in-authhister)) |
 
 [Kura's settings page](https://github.com/machiya-kobo/kura/blob/main/docs/settings.md) has every setting.
 

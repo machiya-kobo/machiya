@@ -27,12 +27,12 @@ flowchart LR
 
 Your feeds are your browsing history, so shiori-feed has a gate of its own (`SHIORI_FEED_AUTH`):
 - **`tailscale`** (default): the logins in `SHIORI_FEED_USERS`, from the proxy's addresses in `SHIORI_FEED_TRUSTED_PROXIES`;
-- **`proxy`**: only the proxy at `SHIORI_FEED_TRUSTED_PROXIES` may connect, and it signs people in (nginx with `auth_request` to [hister-login](hister-login.md));
+- **`proxy`**: only the proxy at `SHIORI_FEED_TRUSTED_PROXIES` may connect, and it signs people in (nginx with `auth_request` to [nogon-login](nogon-login.md));
 - **`open`**: `127.0.0.1` only, or a container whose port is published on the host's `127.0.0.1` (`SHIORI_FEED_BIND_BEHIND_PROXY=1`).
 
 A setting that would let anyone in stops the start. A feed reader on the open internet can't reach your feeds.
 
-**Room tokens** (0.2.0), for agents and scripts, as [smallweb](../contracts/smallweb-api.md) takes them: set `SHIORI_FEED_AUTH_URL` to [hister-login](hister-login.md)'s address, `SHIORI_FEED_PUBLIC_URL` to the address the tokens are issued for and `SHIORI_FEED_HISTER_USERS` to the Hister users a token may act as (never `*`). Then, in `tailscale` or `proxy` mode, a caller may send `Authorization: Bearer mht_…` (or `X-Machiya-Token`). hister-login confirms each token; a request with one is decided by the token alone, and a bad or another room's token is refused.
+**Room tokens** (0.2.0), for agents and scripts, as [smallweb](../contracts/smallweb-api.md) takes them: set `SHIORI_FEED_AUTH_URL` to [nogon-login](nogon-login.md)'s address, `SHIORI_FEED_PUBLIC_URL` to the address the tokens are issued for and `SHIORI_FEED_HISTER_USERS` to the Hister users a token may act as (never `*`). Then, in `tailscale` or `proxy` mode, a caller may send `Authorization: Bearer mht_…` (or `X-Machiya-Token`). nogon-login confirms each token; a request with one is decided by the token alone, and a bad or another room's token is refused.
 
 ## Deploying it
 

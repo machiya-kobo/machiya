@@ -39,11 +39,11 @@ class Front(unittest.TestCase):
         self.front = load("front", os.path.join(DEV, "front.py"))
 
     def test_routes_longest_prefix_and_exact(self):
-        r = self.front.parse_routes("/=http://hister:4433 /machiya/=http://hister-login:8080 "
-                                    "=/api/oauth/callback=http://hister-login:8080")
+        r = self.front.parse_routes("/=http://hister:4433 /machiya/=http://nogon-login:8080 "
+                                    "=/api/oauth/callback=http://nogon-login:8080")
         pick = self.front.pick
-        self.assertEqual(pick(r, "/machiya/signin?return=x"), ("hister-login", 8080))
-        self.assertEqual(pick(r, "/api/oauth/callback?code=1"), ("hister-login", 8080))
+        self.assertEqual(pick(r, "/machiya/signin?return=x"), ("nogon-login", 8080))
+        self.assertEqual(pick(r, "/api/oauth/callback?code=1"), ("nogon-login", 8080))
         self.assertEqual(pick(r, "/api/oauth/callbackx"), ("hister", 4433))      # exact means exact
         self.assertEqual(pick(r, "/api/oauth?provider=oidc"), ("hister", 4433))
         self.assertEqual(pick(r, "/"), ("hister", 4433))
@@ -61,7 +61,7 @@ class Front(unittest.TestCase):
         sites = json.loads(spec["services"]["front"]["environment"]["FRONT_SITES"])
         self.assertEqual(sorted(sites), [str(p) for p in range(19200, 19209)])
         hister = self.front.parse_routes(sites["19204"])
-        self.assertEqual(self.front.pick(hister, "/machiya/healthz"), ("hister-login", 8080))
+        self.assertEqual(self.front.pick(hister, "/machiya/healthz"), ("nogon-login", 8080))
         self.assertEqual(self.front.pick(hister, "/mcp"), ("hister", 4433))
 
 
@@ -182,7 +182,7 @@ class NativePlan(unittest.TestCase):
             if skip:
                 continue
             for k, v in extra.items():
-                self.assertNotRegex(v, r"//(hister|kura|niwa|konbini|landing|stub-idp|hister-login|machiya-mcp|"
+                self.assertNotRegex(v, r"//(hister|kura|niwa|konbini|landing|stub-idp|nogon-login|machiya-mcp|"
                                        r"smallweb|searxng|fake-newsblur|fake-forgejo|fake-github|code-import|fixtures):", "%s %s" % (name, k))
                 self.assertFalse(re.match(r"^/(data|vault|secrets|repo|certs|seed|mirror|feed)(/|$)", v),
                                  "%s %s=%s still a container path" % (name, k, v))

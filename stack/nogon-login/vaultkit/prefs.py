@@ -20,7 +20,7 @@ import threading
 import time
 from contextlib import closing
 
-from . import palettes
+from . import names as _names, palettes
 
 VERSION = 1
 THEMES = ("system", "day", "night")                              # Appearance; `auto` is read as `system`
@@ -61,7 +61,7 @@ def known(key):
 
 def _apps(value):
     """'searxng, kura,kura' -> 'kura,searxng' (the house's order, no repeats); PrefsError for an unknown app."""
-    names = [x.strip() for x in value.split(",") if x.strip()]
+    names = [_names.room_key(x.strip()) for x in value.split(",") if x.strip()]    # nogon is read as hister (0.38)
     bad = [n for n in names if n not in APPS]
     if bad:
         raise PrefsError("apps_hidden: unknown app %r (one of %s)" % (bad[0], ", ".join(APPS)))

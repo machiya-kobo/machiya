@@ -105,7 +105,7 @@ A note that already has an open suggestion isn't suggested again: the tool repor
 Only you. Without the identity file, `MCP_AUTH` decides:
 
 - **`tailscale`** (default): a request needs a `Tailscale-User-Login` listed in `MCP_USERS` (empty = nobody).
-  - With `MCP_AUTH_URL` set, a request may instead carry a **room token** that [hister-login](hister-login.md) issued for this server (`Authorization: Bearer mht_…`), acting as one of `MCP_HISTER_USERS` ([identity.md](../identity.md#room-tokens)). This is for an agent on a tagged machine, which has no Tailscale login. It never gets Hister's raw token.
+  - With `MCP_AUTH_URL` set, a request may instead carry a **room token** that [nogon-login](nogon-login.md) issued for this server (`Authorization: Bearer mht_…`), acting as one of `MCP_HISTER_USERS` ([identity.md](../identity.md#room-tokens)). This is for an agent on a tagged machine, which has no Tailscale login. It never gets Hister's raw token.
   - A bad, revoked or other service's token gets 401. It never falls back to the header.
 - **`open`** (localhost or a trusted LAN; warns at startup) ignores the header and logs the caller as `local`.
 
@@ -179,8 +179,8 @@ No proof, or a bad one, gets **401** and never falls through to a login. A princ
 
 **Search your pages and notes from Claude Duet.** Duet runs in Anthropic's cloud, so it can't reach the tailnet. A second machiya-mcp with `MCP_AUTH=oauth` sits on a Tailscale Funnel host and serves four read tools: `pages_search`, `pages_read`, `notes_search` and `notes_read`. Nothing else exists there: no board, no writes, no resources, no prompts. Hister and Kura stay tailnet-only.
 
-- **Sign-in is OAuth 2.1.** [hister-login](hister-login.md) is the authorization server, on the same Funnel host. You add the connector from a tailnet device, sign in, and allow it. Each connector shows on hister-login's sessions page, and you can revoke it there.
-- **Only an access token gets in:** `Authorization: Bearer mho_…`. The server asks hister-login's internal `/v1/check` about it (naming itself `X-Machiya-Room: mcp-public`), and hister-login answers `{"username", "kind": "oauth", "scopes", "resource", "client_id"}`. The resource must be this server's `/mcp`, and the user one of `MCP_HISTER_USERS`. A login header, a room token, an identity-file token or Hister's own token never counts, and never falls back to anything else.
+- **Sign-in is OAuth 2.1.** [nogon-login](nogon-login.md) is the authorization server, on the same Funnel host. You add the connector from a tailnet device, sign in, and allow it. Each connector shows on nogon-login's sessions page, and you can revoke it there.
+- **Only an access token gets in:** `Authorization: Bearer mho_…`. The server asks nogon-login's internal `/v1/check` about it (naming itself `X-Machiya-Room: mcp-public`), and nogon-login answers `{"username", "kind": "oauth", "scopes", "resource", "client_id"}`. The resource must be this server's `/mcp`, and the user one of `MCP_HISTER_USERS`. A login header, a room token, an identity-file token or Hister's own token never counts, and never falls back to anything else.
 - **No token, or a bad one:** 401 with `WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource"`, which tells the client where to sign in ([RFC 9728](https://www.rfc-editor.org/rfc/rfc9728)). A token without the tool's scope (`pages:read`, `notes:read`): 403 `insufficient_scope`.
 - **It refuses to start** with `MCP_NOTES_DIR`, `KONBINI_URL`, `NIWA_URL` or the identity file set, or with `MCP_TOOLS` unset or naming anything but those four.
 - **It says little about itself.** `/healthz` says `ok`. `/api/status` and `/api/changelog` are 404.
@@ -196,7 +196,7 @@ MCP_AUTH=oauth
 MCP_TOOLS=pages_search,pages_read,notes_search,notes_read
 MCP_PUBLIC_URL=https://mcp-public.example.ts.net
 MCP_OAUTH_ISSUER=https://mcp-public.example.ts.net
-MCP_AUTH_URL=http://hister-login:8081
+MCP_AUTH_URL=http://nogon-login:8081
 MCP_HISTER_USERS=owner
 KURA_URL=…  HISTER_URL=…  MCP_TOKEN_FILE=…  HISTER_TOKEN_FILE=…
 ```
@@ -214,9 +214,9 @@ Then add `https://mcp-public.example.ts.net/mcp` as a custom connector in Claude
 | `MCP_BIND`, `MCP_PORT` | `0.0.0.0`, `8080` | the listener |
 | `MCP_BIND_BEHIND_PROXY` | off | `1` says the Tailscale sidecar is the only way in (machiya-mcp and its sidecar on a network of their own). Without it, `tailscale` mode **refuses to start** on a non-loopback `MCP_BIND`: a neighboring container could send the login header and pass as you. A server started anyway believes no header. The identity file applies the same rule |
 | `MCP_TRUSTED_PROXIES` | none | addresses or CIDRs, such as the sidecar's fixed address (`172.31.250.10/32` in the reference compose). `Tailscale-User-Login` counts only from there, whatever other networks the server is on (Hister's). Satisfies the bind check, and is safer than `MCP_BIND_BEHIND_PROXY` |
-| `MCP_AUTH_URL` | none | hister-login's internal address (`http://hister-login:8081`, over a private network to it). Turns on room tokens beside the Tailscale header |
+| `MCP_AUTH_URL` | none | nogon-login's internal address (`http://nogon-login:8081`, over a private network to it). Turns on room tokens beside the Tailscale header |
 | `MCP_PUBLIC_URL` | none | this server's public address: the origin a room token must name. With `oauth`, `https://host` and no path; the resource is that plus `/mcp` |
-| `MCP_OAUTH_ISSUER` | none | with `oauth`: the authorization server (hister-login's OAuth listener, `https://host`), named in the protected resource metadata |
+| `MCP_OAUTH_ISSUER` | none | with `oauth`: the authorization server (nogon-login's OAuth listener, `https://host`), named in the protected resource metadata |
 | `MCP_TOOLS` | all | a comma list: only these tools exist (any mode; a name that isn't a tool refuses to start). Required with `oauth`, and only `pages_search`, `pages_read`, `notes_search` and `notes_read` |
 | `MCP_ALLOW_CIDRS` | none | `/mcp` only from these client addresses or CIDRs (Anthropic's: `160.79.104.0/21`). Needs `MCP_CLIENT_ADDR_HEADER` and `MCP_TRUSTED_PROXIES` |
 | `MCP_CLIENT_ADDR_HEADER` | none | the header the proxy puts the client's address in (`X-Forwarded-For`; its last entry counts), believed only from `MCP_TRUSTED_PROXIES` |

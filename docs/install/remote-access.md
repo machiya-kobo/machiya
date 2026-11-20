@@ -39,4 +39,4 @@ With the [identity file](../identity.md), also set `NIWA_BIND_BEHIND_PROXY=1` an
 Other ways in:
 
 - People, agents, passwords or your own auth proxy: [identity.md](../identity.md).
-- Hister's users as the one sign-in for every app: [hister-login](../services/hister-login.md). The reference compose doesn't run it yet; the [dev stack](../dev-stack.md) has it wired up.
+- Hister's users as the one sign-in for every app: [nogon-login](../services/nogon-login.md). The reference compose doesn't run it yet; the [dev stack](../dev-stack.md) has it wired up.

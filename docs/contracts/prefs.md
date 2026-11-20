@@ -3,7 +3,7 @@
 One set of settings that follows the signed-in person to every Machiya app and every device. It was asked for on 2026-10-05 ("If I sign in and then change settings that affect all apps, like theme, I expect them to change in every app") and the design's questions were settled the same day. This page is the contract for every reader and writer:
 
 - the rooms (Kura, Niwa, Konbini) and landing, through vaultkit (`vaultkit/prefs.py`, `signin.handle_prefs`, `histerauth.forward_prefs`, `ui/machiya.js`);
-- [hister-login](../services/hister-login.md), which keeps the account's copy;
+- [nogon-login](../services/nogon-login.md), which keeps the account's copy;
 - Shiori's apps, extensions and hosted pages.
 
 Changes to this contract go through the lead, as for the Kura and Konbini APIs. Readers change first (accept old and new), writers after.
@@ -42,8 +42,8 @@ Anything else is **400**. At most 100 keys per person, and a body of at most 512
 | Endpoint | Who calls it | Credential |
 |---|---|---|
 | `GET`, `PUT /api/prefs` on each room and landing | `machiya.js` | the room's own gate. In `AUTH=hister` mode with the helper it **forwards** (below); otherwise it is the room's own store |
-| `GET`, `PUT /v1/prefs` on hister-login's internal port (8081) | the rooms and landing, forwarding | exactly one of `X-Machiya-Session: mhs_…|mhr_…|mht_…` (with the room's `X-Machiya-Room`) or `X-Access-Token: <Hister token>`, as for `/v1/check`; anything else is 400 |
-| `GET`, `PUT /machiya/api/prefs` on hister-login's public port (8080, on Hister's host) | Shiori's apps (`Authorization: Bearer mhs_…`), extensions, Linux and scripts (a room token `Authorization: Bearer mht_…`, or a Hister token: `X-Access-Token` or `Bearer`; this is Hister's own host), the hosted pages (their own room cookie, through their nginx, hister-login 0.3.0) | one credential; a `PUT` carried by the cookie must have an `Origin` among the helper's return hosts. There is no CORS: no other site's page may read or write it |
+| `GET`, `PUT /v1/prefs` on nogon-login's internal port (8081) | the rooms and landing, forwarding | exactly one of `X-Machiya-Session: mhs_…|mhr_…|mht_…` (with the room's `X-Machiya-Room`) or `X-Access-Token: <Hister token>`, as for `/v1/check`; anything else is 400 |
+| `GET`, `PUT /machiya/api/prefs` on nogon-login's public port (8080, on Hister's host) | Shiori's apps (`Authorization: Bearer mhs_…`), extensions, Linux and scripts (a room token `Authorization: Bearer mht_…`, or a Hister token: `X-Access-Token` or `Bearer`; this is Hister's own host), the hosted pages (their own room cookie, through their nginx, nogon-login 0.3.0) | one credential; a `PUT` carried by the cookie must have an `Origin` among the helper's return hosts. There is no CORS: no other site's page may read or write it |
 
 **GET** answers `200` with `Cache-Control: no-store` and `ETag: "<rev>"`; with a matching `If-None-Match` it answers `304`:
 
@@ -75,7 +75,7 @@ Anything else is **400**. At most 100 keys per person, and a body of at most 512
 
 ## Who owns the data
 
-**One store, in hister-login**, keyed by the Hister user. The key is `hi:<sha256(username)[:32]>` (the rooms' existing form, so Kura's rows carry over), kept in its own file, `prefs.sqlite3`, beside the sessions file. The helper derives the key **only from the credential it resolves itself**: no endpoint takes a user id, so a caller can only read or write the account it proves.
+**One store, in nogon-login**, keyed by the Hister user. The key is `hi:<sha256(username)[:32]>` (the rooms' existing form, so Kura's rows carry over), kept in its own file, `prefs.sqlite3`, beside the sessions file. The helper derives the key **only from the credential it resolves itself**: no endpoint takes a user id, so a caller can only read or write the account it proves.
 
 | Caller | Account preferences? |
 |---|---|
@@ -83,9 +83,9 @@ Anything else is **400**. At most 100 keys per person, and a body of at most 512
 | the Tailscale fallback, `open` mode | no: 503 or the room's own store |
 | a room with no helper (identity file, Tailscale, open, or hister mode without `*_AUTH_URL`) | the room's own store, with the same API and the same client rules |
 
-**Each write is logged by key name** (hister-login 0.6.1): one line with the writer (the room, the hosted pages' host or the credential's kind), its User-Agent, the keys sent and the keys that changed, and the rev; never a value.
+**Each write is logged by key name** (nogon-login 0.6.1): one line with the writer (the room, the hosted pages' host or the credential's kind), its User-Agent, the keys sent and the keys that changed, and the rev; never a value.
 
-**Sign-out leaves preferences alone**: they are account data, not session data. `hister_login.py prefs delete --user NAME` removes them, for an account that is deleted (and might be made again under the same name).
+**Sign-out leaves preferences alone**: they are account data, not session data. `nogon_login.py prefs delete --user NAME` removes them, for an account that is deleted (and might be made again under the same name).
 
 ## The forwarding rule (rooms and landing in hister mode)
 
@@ -135,7 +135,7 @@ Text Size is the one Shared setting a device may override (decided 2026-10-05). 
 
 ## Migration (once, at the switch)
 
-1. **Shared keys from the rooms' old stores.** Run `hister_login.py prefs import --user <Hister username> [--tailscale <login>] <file>…` on the helper's host, over Kura's, Niwa's, Konbini's and landing's old `prefs.sqlite3`, which it opens read-only.
+1. **Shared keys from the rooms' old stores.** Run `nogon_login.py prefs import --user <Hister username> [--tailscale <login>] <file>…` on the helper's host, over Kura's, Niwa's, Konbini's and landing's old `prefs.sqlite3`, which it opens read-only.
    - For each key, the value with the newest `updated` across the files wins. It is kept only when it is newer than what the account already holds, so a second run changes nothing.
    - A file's rows count as the user's when their principal is `hi:<sha256(user)>`, the `tailscale_uid` of a `--tailscale` login, or a `--principal` given. A file with a single principal is taken as the user's, and the command says so.
    - `--dry-run` shows the result without writing. `prefs show --user` shows what the account holds afterwards.

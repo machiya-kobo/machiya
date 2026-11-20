@@ -47,7 +47,7 @@ if [[ ! -s $DEV_DATA/certs/tls.crt ]]; then
 fi
 
 step "the helper image"
-podman build -q -t localhost/hister-login:dev .. >/dev/null
+podman build -q -t localhost/nogon-login:dev .. >/dev/null
 
 step "§8 step 1: Hister without users, dummy pool data, the numbers, a snapshot"
 HISTER_USER_HANDLING=false compose up -d hister >/dev/null

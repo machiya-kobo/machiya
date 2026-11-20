@@ -8,7 +8,7 @@ Machiya 町家 is a set of small self-hosted apps around an Obsidian vault kept 
 |---|---|
 | `vaultkit/` | the shared vault core (Python): reading notes, wikilinks, rendering, sign-in, the page shell and the palettes |
 | `ui/` | the shared stylesheet and script (`machiya.css`, `machiya.js`); the style guide is `docs/style-guide.md` |
-| `stack/` | small services with their own tests: `mcp` (the MCP server), `landing`, `hister-login`, `smallweb`, `feed-import`, `code-import`, `vault-mirror`, `shiori-feed`, `shiori-ai` |
+| `stack/` | small services with their own tests: `mcp` (the MCP server), `landing`, `nogon-login`, `smallweb`, `feed-import`, `code-import`, `vault-mirror`, `shiori-feed`, `shiori-ai` |
 | `plugins/machiya/` | the Claude Code plugin for the MCP server |
 | `docs/` | architecture, principles, services, API contracts (`docs/contracts/`), the frontmatter schema, install guides |
 | `compose/` | the reference stack (`compose.yml`) and a dev stack with dummy data (`compose/dev/`) |
