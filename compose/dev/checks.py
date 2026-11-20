@@ -461,9 +461,10 @@ def browser_checks(data, password, shots, base, sso_cookie="machiya_sso", denv=N
             if auto:
                 return False
             raise
-        page.fill("input[name=username]", "owner")
-        page.fill("input[name=password]", password)
-        page.click("#hister-signin button[type=submit]")
+        # no <form> and nameless fields since hister-login 0.4.1 (a password manager's auto-submit can't loop)
+        page.fill("#signin-username", "owner")
+        page.fill("#signin-password", password)
+        page.click("#hister-signin button")
         return True
 
     def page_shown(p):
