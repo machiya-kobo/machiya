@@ -26,13 +26,13 @@ APPS = [
     ("konbini", "Konbini", "rooms", "board"),
     ("niwa", "Niwa", "rooms", "garden"),
     ("kura", "Kura", "rooms", "notes"),
-    ("hister", "Hister", "engines", "pages"),
+    ("hister", "Nogon", "engines", "pages"),
     ("searxng", "SearXNG", "engines", "the web"),
     ("machiya-mcp", "machiya-mcp", "services", "MCP for agents"),
     ("smallweb", "smallweb", "services", "Gemini and Gopher"),
     ("vault-mirror", "vault-mirror", "services", "the vault's shared copy"),
-    ("feed-import", "feed-import", "services", "feeds into Hister"),
-    ("code-import", "code-import", "services", "code into Hister"),
+    ("feed-import", "feed-import", "services", "feeds into Nogon"),
+    ("code-import", "code-import", "services", "code into Nogon"),
 ]
 NAMES = {k: n for k, n, _, _ in APPS}
 ROOMS_WITH_TOKEN = ("kura", "niwa", "konbini")
@@ -469,7 +469,8 @@ def machiya_mcp(base, now, timeout, headers):
 def smallweb(base, now, timeout, headers):
     """GET /api/status (open; contracts/smallweb-api.md): ready, error, pages saved to Hister."""
     d = fetch_json(base + "/api/status", headers, timeout)
-    h = d.get("hister") if isinstance(d.get("hister"), dict) else {}
+    h = d.get("nogon", d.get("hister"))                  # nogon since smallweb's rename release, hister before
+    h = h if isinstance(h, dict) else {}
     saved = num(h.get("saved"))
     err = text(d.get("error"))
     state = "error" if err else ("starting" if d.get("ready") is False else "up")
@@ -701,17 +702,17 @@ def sync_rows(apps, now, board_behind_since=None):
     push = kd.get("push") if kd else None
     if push:
         st = "error" if push.get("error") else (age_state(push.get("at"), now, "push") or "up")
-        bits = [plural(int(push["docs"]), "note") + " in Hister" if push.get("docs") is not None else "",
+        bits = [plural(int(push["docs"]), "note") + " in Nogon" if push.get("docs") is not None else "",
                 plural(int(push["failed"]), "failure") if push.get("failed") else ""]
-        rows.append({"key": "push", "label": "Notes indexed", "source": "Kura → Hister", "state": st, "at": push.get("at"),
+        rows.append({"key": "push", "label": "Notes indexed", "source": "Kura → Nogon", "state": st, "at": push.get("at"),
                      "text": " · ".join(x for x in bits if x), "error": push.get("error", "")})
     if h.get("state") == "up":
-        rows.append({"key": "pages", "label": "Pages indexed", "source": "Hister",
+        rows.append({"key": "pages", "label": "Pages indexed", "source": "Nogon",
                      "state": age_state(hd.get("newest"), now, "pages") or "up", "at": hd.get("newest"),
                      "text": "newest page" if hd.get("newest") else "", "error": ""})
     elif h.get("state") in BAD:
-        rows.append({"key": "pages", "label": "Pages indexed", "source": "Hister", "state": "error", "at": None,
-                     "text": "", "error": "Hister is %s" % ("down" if h["state"] == "down" else "failing")})
+        rows.append({"key": "pages", "label": "Pages indexed", "source": "Nogon", "state": "error", "at": None,
+                     "text": "", "error": "Nogon is %s" % ("down" if h["state"] == "down" else "failing")})
     f = apps.get("feed-import") or {}
     fd = f.get("data") or {}
     if f.get("state") not in (None, "absent", "down") and fd:

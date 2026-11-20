@@ -1,5 +1,12 @@
 # Changelog: machiya-landing
 
+## 0.7.0
+
+- Says Nogon, upstream Hister's new name (owner, 2026-11-19): the status rows ("Pages indexed", "Notes indexed", "Kura → Nogon"), the engines list, and the Account notes ("Signed in with Nogon.").
+- Both names accepted, the rename's stage 1: `LANDING_AUTH=nogon` (same as `hister`), `LANDING_NOGON_TOKEN_FILE` (`LANDING_HISTER_TOKEN_FILE` still read), `nogon=` in `LANDING_PROBES` and `MACHIYA_ROOMS`, and smallweb's status field `nogon` (`hister` still read).
+- vaultkit 0.36.0 → 0.38.0.
+- The Python base re-pinned to today's digest.
+
 ## 0.6.7
 
 - vaultkit re-vendored (0.29.0 → 0.30.1); 0.6.6 was tagged but never built.

@@ -6,15 +6,19 @@ app/vaultkit/ui/).
 An app builds pages with `page(ctx, room, title, body, ...)`; `ctx` needs `.theme` (and optionally `.text`), which
 `prefs(cookie_header)` reads from the cookies machiya.js writes. Room links come from MACHIYA_ROOMS (see rooms()):
 a room or neighbour that isn't configured is simply left out, so an app standing alone shows no switcher at all.
+A deployment can add rooms of its own with MACHIYA_EXTRA_ROOMS (see extra_rooms()).
 """
 import hashlib
 import html
 import json
 import os
 import re
-from urllib.parse import unquote
+import sys
+import unicodedata
+from collections import namedtuple
+from urllib.parse import unquote, urlsplit
 
-from . import palettes
+from . import names, palettes
 
 ROOMS = [   # (key, name, seal, what it is) front to back through the house, then the neighbours
     ("shiori", "Shiori", "栞", "search"),
@@ -22,7 +26,7 @@ ROOMS = [   # (key, name, seal, what it is) front to back through the house, the
     ("niwa", "Niwa", "庭", "garden"),
     ("kura", "Kura", "蔵", "notes"),
 ]
-NEIGHBOURS = [("hister", "Hister", "pages"), ("searxng", "SearXNG", "the web")]
+NEIGHBOURS = [("hister", "Nogon", "pages"), ("searxng", "SearXNG", "the web")]
 # The house itself: the stack's front door and status page (stack/landing). Not a room in the order above: with
 # MACHIYA_ROOMS naming `machiya=<url>`, every Rooms menu ends with a "Machiya · home" row (v0.19.1) and the footer's
 # "Part of Machiya" links there; without it, nothing changes.
@@ -46,6 +50,7 @@ GLYPH = {   # one glyph per room everywhere (Shiori uses SF Symbols for the same
     "search": _SVG % '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',                                  # every room's Search tab (v0.16.2)
     "close": _SVG % '<path d="M6 6l12 12M18 6 6 18"/>',                                 # the search pill's clear X (v0.17.1)
     "rooms": _SVG % '<path d="M3 11 12 4l9 7v9H3z"/><path d="M9 20v-5h6v5"/>',                           # the house
+    "door": _SVG % '<path d="M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17M3 21h18M14 12v.01"/>',             # an extra room
     "gear": _SVG % '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1'
                    'a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0'
                    '-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1'
@@ -79,8 +84,116 @@ def rooms(env=None):
         if "=" in part:
             k, v = part.split("=", 1)
             if k.strip() and v.strip():
-                out[k.strip().lower()] = v.strip().rstrip("/")
+                out[names.room_key(k.strip().lower())] = v.strip().rstrip("/")   # nogon= is read as hister (0.38)
     return out
+
+
+# -- extra rooms (MACHIYA_EXTRA_ROOMS, docs/ui.md "Extra rooms") ---------------------------------------------------
+ExtraRoom = namedtuple("ExtraRoom", "key name seal url icon")
+EXTRA_MAX = 8                                       # entries; any more are skipped
+RESERVED_KEYS = {"nogon"}                           # the hister neighbour's id after the Nogon rename (owner, 2026-11-19)
+EXTRA_KEY_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\Z")
+_extra_seen = {}                                    # the setting's value -> its rooms (each value is parsed and warned once)
+
+
+def _builtin_keys():
+    """Keys an extra room may not take: the rooms, the neighbours, the house, the Apps and the per-app namespaces."""
+    from . import prefs
+    return ({r[0] for r in ROOMS} | {n[0] for n in NEIGHBOURS} | {HOUSE[0]} | set(prefs.APPS) | set(prefs.APP_NAMES)
+            | set(GLYPH) | RESERVED_KEYS)
+
+
+def extra_url(url):
+    """An extra room's address (or icon) as given, or "": https://host/... or a path on this room's own origin
+    ("/..."). No other scheme, no user:password@, no whitespace, quotes, angle brackets or backslashes."""
+    if not url or any(c.isspace() or ord(c) < 32 or ord(c) == 127 or c in '<>"\'`\\' for c in url):
+        return ""
+    if url.startswith("/"):
+        return "" if url.startswith("//") else url
+    if not url.startswith("https://"):
+        return ""
+    try:
+        parts = urlsplit(url)
+        parts.port                                  # raises on a malformed port
+    except ValueError:
+        return ""
+    return url if parts.scheme == "https" and parts.hostname and "@" not in parts.netloc else ""
+
+
+def _extra_seal(seal):
+    """One printable character (a letter, number, punctuation or symbol), or "" for none; None when invalid."""
+    if not seal:
+        return ""
+    if len(seal) != 1 or unicodedata.category(seal)[0] not in "LNPS":
+        return None
+    return seal
+
+
+def _parse_extra(raw):
+    out, taken, builtin = [], set(), _builtin_keys()
+    for i, entry in enumerate((x.strip() for x in raw.split(";")), 1):
+        if not entry:
+            continue
+        fields = [f.strip() for f in entry.split("|")]
+        key = fields[0] if fields else ""
+        why = ""
+        if len(fields) not in (4, 5):
+            why = "needs key|name|seal|url or key|name|seal|url|icon"
+        elif not EXTRA_KEY_RE.match(key):
+            why = "the key is 1-32 of a-z, 0-9 and -"
+        elif key in builtin:
+            why = "%s is a built-in key" % key
+        elif key in taken:
+            why = "%s is already an extra room" % key
+        elif not 1 <= len(fields[1]) <= 40 or not fields[1].isprintable():
+            why = "the name is 1-40 printable characters"
+        elif _extra_seal(fields[2]) is None:
+            why = "the seal is one character, or empty"
+        elif not extra_url(fields[3]):
+            why = "the url is https:// or a path on this origin"
+        elif len(fields) == 5 and fields[4] and not extra_url(fields[4]):
+            why = "the icon is https:// or a path on this origin, or empty"
+        elif len(out) >= EXTRA_MAX:
+            why = "at most %d extra rooms" % EXTRA_MAX
+        if why:
+            print("MACHIYA_EXTRA_ROOMS: skipped entry %d (%s)" % (i, why), file=sys.stderr, flush=True)
+            continue
+        taken.add(key)
+        out.append(ExtraRoom(key, fields[1], fields[2], fields[3], fields[4] if len(fields) == 5 else ""))
+    return tuple(out)
+
+
+def extra_rooms(env=None):
+    """[ExtraRoom(key, name, seal, url, icon)] from MACHIYA_EXTRA_ROOMS: a deployment's own rooms, shown in every Rooms
+    menu after the built-in rooms and before the neighbours, and in Settings, Rooms. Entries are separated by ";", fields
+    by "|": `key|Name|seal|url` or `key|Name|seal|url|icon`, e.g.
+    "example|Example Room|例|https://example.example.ts.net". key: 1-32 of a-z, 0-9 and "-", not a built-in one; Name:
+    1-40 printable characters (spaces and any script are fine; "|" and ";" are not); seal: one character or empty;
+    url and icon: https:// or a path on the room's own origin (the icon may be empty). An invalid entry is skipped
+    with one line on stderr (once per value of the setting); the rest still show. Unset or empty: [] and every page
+    is byte-identical to one built without the setting."""
+    raw = (env if env is not None else os.environ).get("MACHIYA_EXTRA_ROOMS") or ""
+    if not raw.strip():
+        return []
+    if raw not in _extra_seen:
+        if len(_extra_seen) > 16:
+            _extra_seen.clear()
+        _extra_seen[raw] = _parse_extra(raw)
+    return list(_extra_seen[raw])
+
+
+def _extra(key):
+    return next((x for x in extra_rooms() if x.key == key), None)
+
+
+def extra_mark(x):
+    """An extra room's mark: its icon (icon URL), else its seal in an outlined square, else the door glyph. Never a
+    room-specific drawing: that stays in the deployment."""
+    if x.icon:
+        return '<img class="seal icon" data-room="%s" src="%s" alt="" aria-hidden="true">' % (e(x.key), e(x.icon))
+    if x.seal:
+        return '<span class="seal extra" data-room="%s" aria-hidden="true">%s</span>' % (e(x.key), e(x.seal))
+    return '<span class="neighbour" aria-hidden="true">%s</span>' % GLYPH["door"]
 
 
 class Prefs:
@@ -195,7 +308,7 @@ def security_headers(csp=CSP):
 COLOR_HINT = "Sec-CH-Prefers-Color-Scheme"
 def _colors(palette, mode):
     v = palettes.PALETTES.get(palette, palettes.PALETTES[palettes.DEFAULT])[3][mode]
-    return {"background_color": v["bg"], "theme_color": v["dark"]}
+    return {"background_color": v["bg"], "theme_color": v["bg"]}   # v0.32.3: the bar is the page's --bg (iOS paints it so anyway)
 
 
 NIGHT = _colors(palettes.DEFAULT, "dark")
@@ -293,20 +406,28 @@ def offline_row():
 
 
 def room_info(key):
-    return next((r for r in ROOMS + [HOUSE] if r[0] == key), (key, key.title(), "", ""))
+    """(key, name, seal, what it is): a room, the house, an extra room (MACHIYA_EXTRA_ROOMS; what is ""), or a guess."""
+    hit = next((r for r in ROOMS + [HOUSE] if r[0] == key), None)
+    if hit:
+        return hit
+    x = _extra(key)
+    return (x.key, x.name, x.seal, "") if x else (key, key.title(), "", "")
 
 
 def mark(room):
     """A room's mark: its own icon (the home-screen icon, drawn by machiya.css), the kanji kept as the tooltip and as a
     fallback for anything that doesn't load the stylesheet."""
+    x = None if any(r[0] == room for r in ROOMS + [HOUSE]) else _extra(room)
+    if x:
+        return extra_mark(x)
     _, name, seal, _ = room_info(room)
     return '<span class="seal icon" data-room="%s" title="%s (%s)" aria-hidden="true">%s</span>' % (room, e(name), seal, seal)
 
 
 def switcher(room, links, cls="rooms", settings=False, who=""):
-    """The Rooms menu: the rooms front to back, then the neighbours; the current room is plain text. With settings,
-    a Settings row closes the menu (phones, where the header's gear is hidden), and `who` (the signed-in name) a row
-    for the account above it."""
+    """The Rooms menu: the rooms front to back, the deployment's extra rooms (MACHIYA_EXTRA_ROOMS), then the
+    neighbours; the current room is plain text. With settings, a Settings row closes the menu (phones, where the
+    header's gear is hidden), and `who` (the signed-in name) a row for the account above it."""
     rows = []
     for key, name, seal, what in ROOMS:
         if key == room:
@@ -314,6 +435,13 @@ def switcher(room, links, cls="rooms", settings=False, who=""):
         elif key in links:
             rows.append('<a href="%s/" data-room="%s">%s%s<small>%s</small></a>'
                         % (e(links[key]), key, mark(key), e(name), e(what)))
+    for x in extra_rooms():                         # their address as given (no "/" added), no "what it is"
+        if x.key == room:
+            rows.append('<b data-room="%s" data-extra-room="%s">%s%s<small>here</small></b>'
+                        % (e(x.key), e(x.key), extra_mark(x), e(x.name)))
+        else:
+            rows.append('<a href="%s" data-room="%s" data-extra-room="%s">%s%s</a>'
+                        % (e(x.url), e(x.key), e(x.key), extra_mark(x), e(x.name)))
     nb = ['<a href="%s/" data-room="%s"><span class="seal icon neighbour-icon" data-room="%s" aria-hidden="true"></span>%s<small>%s</small></a>'
           % (e(links[k]), k, k, e(n), e(w)) for k, n, w in NEIGHBOURS if k in links]      # their own logos (machiya.css)
     key, name, _, what = HOUSE
@@ -351,12 +479,25 @@ def header(room, nav, current, links, subtitle="", tools="", settings=True, who=
                ('<div class="below">%s</div>' % below) if below else ""))
 
 
-def tabbar(tabs, current, room, links, icons=None, who=""):
-    """Phones: the room's own tabs (at most four: [(href, key, label)]) plus a Rooms tab when there are rooms."""
+def tabbar(tabs, current, room, links, icons=None, who="", brand=True):
+    """Phones: the room's own tabs (at most four) plus a Rooms tab when there are rooms. A tab is (href, key, label), or
+    the room's own HTML for a tab that isn't a link (v0.35: a <button> that opens something, or a
+    <details data-menu><summary>…</summary><nav class="menu">…</nav></details> sheet), drawn like the others.
+    brand (v0.35, owner 2026-10-14): the first tab is the app itself, its icon and name, to its home page; give the
+    room's home as the first tab and its icon and label are replaced."""
     icons = icons or {}
-    out = ['<a href="%s"%s>%s<span>%s</span></a>' % (e(href), ' class="here" aria-current="page"' if key == current else "",
-                                                     icons.get(key, GLYPH.get(key, "")), e(label))
-           for href, key, label in tabs[:4]]
+    _, name, _, _ = room_info(room)
+    out = []
+    for i, tab in enumerate(tabs[:4]):
+        if isinstance(tab, str):
+            out.append(tab)
+            continue
+        href, key, label = tab
+        icon = icons.get(key, GLYPH.get(key, ""))
+        if brand and i == 0:
+            icon, label = mark(room), name
+        out.append('<a href="%s"%s>%s<span>%s</span></a>' % (e(href), ' class="here" aria-current="page"' if key == current else "",
+                                                            icon, e(label)))
     menu = switcher(room, links, cls="rooms", settings=True, who=who)
     if menu:
         out.append(menu.replace('<summary title="Rooms" aria-label="Rooms">%s</summary>' % GLYPH["rooms"],
@@ -462,7 +603,7 @@ def page(ctx, room, title, body, tabs=(), current="", links=None, head="", style
         '</head>\n<body class="theme-%s%s room-%s" data-room="%s" data-text="%s"%s>\n%s\n%s\n</body>\n</html>\n'
     ) % (e(title), scheme, colors,
          '<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">\n' if manifest else "",
-         room, room, room, "default" if theme == "day" else "black-translucent", e(name),
+         room, room, room, "default" if theme == "day" else "black-translucent", e(name),   # v0.33: back (owner)
          (prefs_meta(prefs_url) + app_prefs_meta(room)) if prefs_url else "", css, js, head, theme,
          "" if palette == palettes.DEFAULT else " palette-" + palette, room, room, e(text),
          (' data-cookie-domain="%s"' % e(COOKIE_DOMAIN)) if COOKIE_DOMAIN else "", body,
@@ -506,6 +647,7 @@ def row(label, value):
 
 def _app_rows(room, links, shown):
     items = [toggle(name, "show_" + key, shown.get(key, True)) for key, name, _, _ in ROOMS if key != room and key in links]
+    items += [toggle(x.name, "show_" + x.key, shown.get(x.key, True)) for x in extra_rooms() if x.key != room]
     items += [toggle(name, "show_" + key, shown.get(key, True)) for key, name, _ in NEIGHBOURS if key in links]
     if HOUSE[0] in links and room != HOUSE[0]:
         items.append(toggle(HOUSE[1], "show_" + HOUSE[0], shown.get(HOUSE[0], True)))
@@ -658,7 +800,8 @@ def settings_page(sections, room):
     """sections: [(title, [row html…], footnote or "")], or (title, rows, footnote, extra html) for a section with a
     line of its own under the footnote (appearance's state line); None entries are skipped. The sections are shown in
     ORDER (Appearance, the room's own in the order given, Rooms, This Device, Account, About), so a room may pass
-    them in any order. machiya.js saves every change."""
+    them in any order. machiya.js saves every change here; opened from a link it is the Settings sheet (v0.32), which keeps
+    them on Save."""
     flat = []
     for sec in sections:
         if sec:

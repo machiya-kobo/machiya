@@ -209,7 +209,7 @@ def main_html(snap, history, logs, links, targets, now, tz=None):
     if snap["sync"]:
         out.append('<ul class="list card syncs">%s</ul>' % "".join(sync_row(r, now, tz) for r in snap["sync"]))
     else:
-        out.append('<div class="empty"><h2>Nothing to Show</h2><p>Sync shows up when Kura, Konbini, Niwa or Hister answer.</p></div>')
+        out.append('<div class="empty"><h2>Nothing to Show</h2><p>Sync shows up when Kura, Konbini, Niwa or Nogon answer.</p></div>')
     out.append('<h2 class="sechead" id="deploys">Recent Deploys</h2>')
     recent = history.recent(now)
     if recent:
@@ -253,10 +253,10 @@ def page(ctx, snap, history, logs, links, targets, now, tz=None):
                       main_html(snap, history, logs, links, targets, now, tz) + footer(snap, now))
 
 
-ACCOUNT_NOTE = {"hister": "Signed in with Hister. Signing out ends the session in every room.",
-                "app": "Signed in with Hister. Signing out ends the session in every room.",
-                "token": "Signed in with a Hister token.",
-                "fallback": "Signed in through the tailnet: Hister's sign-in is unavailable right now.",
+ACCOUNT_NOTE = {"hister": "Signed in with Nogon. Signing out ends the session in every room.",
+                "app": "Signed in with Nogon. Signing out ends the session in every room.",
+                "token": "Signed in with a Nogon token.",
+                "fallback": "Signed in through the tailnet: Nogon's sign-in is unavailable right now.",
                 "tailscale": "Signed in through the tailnet."}
 
 

@@ -56,7 +56,7 @@ import threading
 import time
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
-from . import prefs as vprefs
+from . import names, prefs as vprefs
 from .identity import Identity, IdentityError, Principal, check_bind, peer_trusted, tailscale_uid, trusted_proxies
 
 SSO_COOKIE = "machiya_sso"              # the base name; the legacy shared-domain cookie itself (read, never set here)
@@ -94,7 +94,7 @@ MAX_RETURN = 2048
 OK, SIGNED_OUT, NOT_ALLOWED, UNAVAILABLE, FALLBACK = "ok", "signed-out", "not-allowed", "unavailable", "fallback"
 CALLBACK = "callback"                   # the way back from the helper: always a redirect (respond)
 BANNER_TEXT = "Signed in through the tailnet: sign-in is unavailable"
-REFUSED_TEXT = {"legacy-off": "this room no longer takes Hister's token or the shared sign-in cookie: use a room "
+REFUSED_TEXT = {"legacy-off": "this room no longer takes Nogon's token or the shared sign-in cookie: use a room "
                               "token (hister-login's sessions page) or sign in",
                 "wrong-room": "that sign-in belongs to another room",
                 "token-expired": "this room token has expired (they last 90 days): make a new one on the sessions "
@@ -931,7 +931,7 @@ def token_gate_for(name, prefix, env=None, fetch=None):
     if not auth_url:
         return None
     return TokenGate(name, auth_url, (env.get(prefix + "_PUBLIC_URL") or "").strip(),
-                     _list(env.get(prefix + "_HISTER_USERS")), fetch=fetch)
+                     _list(names.setting(prefix + "_NOGON_USERS", env)), fetch=fetch)
 
 
 def banner_html(text=BANNER_TEXT):
@@ -983,7 +983,7 @@ def load_for(room, env=None, bind="0.0.0.0", secure=True, fetch=None):
     tailscale fallback, check_bind applies as in tailscale mode (<P>_BIND_BEHIND_PROXY)."""
     env = os.environ if env is None else env
     prefix = {"konbini": "KANBAN"}.get(room, room.upper())
-    if (env.get(prefix + "_AUTH") or "").strip().lower() != "hister":
+    if names.auth_mode(env.get(prefix + "_AUTH")) != "hister":          # nogon too (0.38)
         return None
     if (env.get("MACHIYA_IDENTITY_FILE") or "").strip():
         raise IdentityError("%s_AUTH=hister with an identity file isn't supported yet: unset one of them" % prefix)
@@ -991,7 +991,7 @@ def load_for(room, env=None, bind="0.0.0.0", secure=True, fetch=None):
     url_env = "KANBAN_BOARD_URL" if room == "konbini" else prefix + "_PUBLIC_URL"
     fallback = (env.get(prefix + "_AUTH_FALLBACK") or "tailscale").strip().lower()
     signin = (env.get(prefix + "_AUTH_SIGNIN_URL") or "").strip()
-    users = _list(env.get(prefix + "_HISTER_USERS"))
+    users = _list(names.setting(prefix + "_NOGON_USERS", env))          # <P>_HISTER_USERS still read
     fallback_users = _list(env.get(users_env))
     auth_url = (env.get(prefix + "_AUTH_URL") or "").strip().rstrip("/")
     public_url = (env.get(url_env) or "").strip()
@@ -1000,7 +1000,7 @@ def load_for(room, env=None, bind="0.0.0.0", secure=True, fetch=None):
     if not signin.startswith(("https://", "http://")):
         raise IdentityError("%s_AUTH_SIGNIN_URL must be an http(s) address" % prefix)
     if not users:
-        raise IdentityError("%s_AUTH=hister needs %s_HISTER_USERS (the owner's Hister username)" % (prefix, prefix))
+        raise IdentityError("%s_AUTH=nogon needs %s_NOGON_USERS (the owner's Nogon username)" % (prefix, prefix))
     if "*" in users:
         raise IdentityError("%s_HISTER_USERS: '*' is refused (OAuth creates accounts on its own)" % prefix)
     if fallback not in ("tailscale", "none"):

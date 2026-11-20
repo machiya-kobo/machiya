@@ -285,6 +285,35 @@ class HisterWithUsers(Stack):
         self.assertEqual(secret.get(), "RotatedToken-1")
 
 
+class NogonNames(Stack):
+    """0.7.0, the rename's stage 1: the Nogon names are read next to the Hister ones."""
+
+    def test_nogon_in_machiya_rooms_and_probes(self):
+        env = self.env()
+        env["MACHIYA_ROOMS"] = env["MACHIYA_ROOMS"].replace("hister=", "nogon=")
+        snap = landing.Landing(landing.Config(env), now=lambda: NOW).poll()
+        self.assertEqual(snap["apps"]["hister"]["state"], "up")
+        self.assertEqual(landing.pairs("nogon=http://n:1/,kura=http://k"), {"hister": "http://n:1", "kura": "http://k"})
+
+    def test_auth_nogon_is_hister(self):
+        with self.assertRaises(SystemExit) as cm:          # AUTH=nogon is the sign-in mode: it needs its settings
+            landing.Config(self.env(LANDING_AUTH="nogon"))
+        self.assertIn("LANDING_", str(cm.exception))
+
+    def test_nogon_token_file(self):
+        path = os.path.join(self.tmp, "tok")
+        with open(path, "w") as f:
+            f.write("Tok-1\n")
+        c = landing.Config(self.env(LANDING_NOGON_TOKEN_FILE=path))
+        self.assertIsNotNone(c.hister_token)
+
+    def test_smallweb_nogon_field(self):
+        status = dict(SMALLWEB, nogon={"enabled": True, "saved": 7})
+        status.pop("hister", None)
+        self.fakes["smallweb"].routes["/api/status"] = status
+        self.assertIn("7", json.dumps(self.landing().poll()["apps"]["smallweb"]))
+
+
 class Freshness(Stack):
     def rows(self, snap):
         return {r["key"]: r for r in snap["sync"]}
@@ -295,7 +324,7 @@ class Freshness(Stack):
         self.assertEqual(rows["pull"]["text"], "at 4ca69a1")
         self.assertEqual(rows["board"]["text"], "at 4ca69a1 (the vault's head) · 1 waiting")
         self.assertEqual(rows["garden"]["text"], "at a6857ce · all pushed")
-        self.assertEqual(rows["push"]["text"], "314 notes in Hister")
+        self.assertEqual(rows["push"]["text"], "314 notes in Nogon")
         self.assertTrue(all(r["state"] == "up" for r in rows.values()))
 
     def test_behind_and_broken_by_age(self):
@@ -819,7 +848,7 @@ class ZeroTwo(Stack):
         self.assertEqual(rows()["pages"]["state"], "behind")
         self.fakes["hister"].routes["/health"] = (502, "", "text/plain")
         row = rows()["pages"]
-        self.assertEqual((row["state"], row["error"]), ("error", "Hister is down"))
+        self.assertEqual((row["state"], row["error"]), ("error", "Nogon is down"))
 
 
 class ZeroTwoOne(Stack):
@@ -1250,7 +1279,7 @@ class HisterSignIn(Server):
         self.assertEqual(code, 200)
         self.assertIn("machiya-banner", body)                              # signed in through the tailnet
         code, _, body = self.get(base + "/settings", {"Tailscale-User-Login": "owner@example.com", "Accept": "text/html"})
-        self.assertIn("Hister&#x27;s sign-in is unavailable", body)
+        self.assertIn("Nogon&#x27;s sign-in is unavailable", body)
         self.assertNotIn('action="/signout"', body.split('id="account"')[1].split("</div>")[0])
         self.assertEqual(self.get(base + "/", {"Tailscale-User-Login": "someone@example.com"})[0], 403)
 

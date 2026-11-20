@@ -29,7 +29,7 @@ import deploys                                   # noqa: E402
 import probes                                    # noqa: E402
 import render                                    # noqa: E402
 import today as todaymod                         # noqa: E402
-from vaultkit import changelog, histerauth, identity, read_secret, signin   # noqa: E402
+from vaultkit import changelog, histerauth, identity, names, read_secret, signin   # noqa: E402
 from vaultkit import shell as house              # noqa: E402
 
 with open(os.path.join(HERE, "VERSION"), encoding="utf-8") as _f:
@@ -51,7 +51,7 @@ def pairs(raw):
         if "=" in part:
             k, v = part.split("=", 1)
             if k.strip() and v.strip():
-                out[k.strip().lower()] = v.strip().rstrip("/")
+                out[names.room_key(k.strip().lower())] = v.strip().rstrip("/")     # nogon= is hister (0.38)
     return out
 
 
@@ -62,8 +62,8 @@ def csv(raw):
 class Config:
     def __init__(self, env):
         has_file = bool((env.get("MACHIYA_IDENTITY_FILE") or "").strip())
-        self.auth = (env.get("LANDING_AUTH") or "tailscale").strip().lower()
-        allowed = ("tailscale", "open", "hister", "header") if has_file else ("tailscale", "open", "hister")
+        self.auth = names.auth_mode(env.get("LANDING_AUTH")) or "tailscale"       # nogon is hister (vaultkit 0.38)
+        allowed = ("tailscale", "open", "hister", "header") if has_file else ("tailscale", "open", "hister")   # hister: nogon too
         if self.auth not in allowed:
             raise SystemExit("machiya-landing: LANDING_AUTH must be %s, not %r%s" % (
                 " or ".join(allowed), self.auth, " (header needs MACHIYA_IDENTITY_FILE)" if self.auth == "header" else ""))
@@ -127,7 +127,7 @@ class Config:
         self.poll = max(15, int(env.get("LANDING_POLL") or "60"))
         self.timeout = max(0.5, float(env.get("LANDING_TIMEOUT") or "3"))
         self.token = self.secret(env.get("LANDING_TOKEN_FILE"), "LANDING_TOKEN_FILE")
-        self.hister_token = self.secret_file(env.get("LANDING_HISTER_TOKEN_FILE"), "LANDING_HISTER_TOKEN_FILE")
+        self.hister_token = self.secret_file(names.setting("LANDING_NOGON_TOKEN_FILE", env), "LANDING_NOGON_TOKEN_FILE")
         self.changelogs = {k: v for k, v in pairs(env.get("LANDING_CHANGELOGS")).items() if k in probes.NAMES}  # overrides
         self.changelog_token = self.secret(env.get("LANDING_CHANGELOG_TOKEN_FILE"), "LANDING_CHANGELOG_TOKEN_FILE")
         self.changelog_poll = max(60, int(env.get("LANDING_CHANGELOG_POLL") or "900"))
