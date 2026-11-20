@@ -2,7 +2,8 @@
 # install.sh: install the machiya plugin (machiya-mcp's connection plus the cross-room skills) for the current user.
 #   install.sh [install]   add this repo as a marketplace, install machiya@machiya at user scope, set MACHIYA_AGENT (and
 #                          MACHIYA_MCP_URL when given), and add the permission rules to ~/.claude/settings.json: reads and
-#                          the small writes allowed, the other writes ask, and EVERY Hister MCP tool DENIED under every name
+#                          the small writes allowed, the other writes ask (unless the machine's settings already allow
+#                          them: plugin 0.4.2), and EVERY Hister MCP tool DENIED under every name
 #                          it can appear as (since plugin 0.3.0: Hister's own search and get_preview return vault notes and
 #                          code documents, and its get_history browsing history; pages come from machiya-mcp's pages_search
 #                          and pages_read, which never return notes or code). It also moves a machine off the separate
@@ -55,7 +56,10 @@ stale = [H + "search", H + "get_preview", "mcp__hister__search", "mcp__hister__g
 perm = d.setdefault("permissions", {})
 for key, mine in (("allow", allow), ("ask", ask)):
     cur = perm.setdefault(key, [])
-    perm[key] = [x for x in cur if x not in mine and x not in stale] + (mine if mode == "add" else [])
+    ours = mine
+    if key == "ask":    # plugin 0.4.2: a write the machine's own policy already allows (dotfiles' fleet policy) stays allowed;
+        mine = [x for x in mine if x not in perm["allow"]]      # ask beats allow, so adding it would undo that choice
+    perm[key] = [x for x in cur if x not in ours and x not in stale] + (mine if mode == "add" else [])
     if not perm[key] and key == "ask":
         del perm[key]
 cur = perm.setdefault("deny", [])
