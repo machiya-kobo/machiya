@@ -16,7 +16,7 @@ Code: [stack/landing/](../../stack/landing/) (settings in its README). It shares
 | **Working On** | Konbini `GET /api/cards`: WIP cards in its order (rank, priority), then the most recently updated, with each next step. Top 5; "Now ›" links Konbini's `/now` |
 | **Due Soon** | the same cards: a `due` date in the next 14 days or past, not done or archived |
 | **Notes Changed** | Kura `GET /api/recent?limit=5` |
-| **Saved & Read** | Hister's newest pages (without vault notes and code documents), with a feed reader's reads and stars marked ("Read in NewsBlur"). Needs your token once Hister has users |
+| **Saved & Read** | Nogon's newest pages (without vault notes and code documents), with a feed reader's reads and stars marked ("Read in NewsBlur"); its link opens Nogon. It's at most a poll old (`LANDING_POLL`, 60 s). Needs your token once Nogon has users |
 | **Garden** | Niwa `GET /feed.xml`: published notes tended in the last 30 days |
 
 - A Today section is left out when its app is missing, down or refuses. Nothing on the launcher is an error.

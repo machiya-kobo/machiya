@@ -413,7 +413,7 @@ def home_html(snap, links, targets, search, now, tz=None, shown=None):
     if tiles:
         out.append('<nav class="minis" data-n="%d" aria-label="Rooms">%s</nav>' % (len(tiles), "".join(tiles)))
     secs = []
-    kb, ku, ni, sh = link("konbini"), link("kura"), link("niwa"), link("shiori")
+    kb, ku, ni, ng = link("konbini"), link("kura"), link("niwa"), link("hister")   # 0.7.7: Saved & Read opens Nogon, where its pages live
     if t.get("working") is not None:
         secs.append(section("Working On", ['<li><a href="%s">%s</a>%s%s</li>' % (
             e(c["url"]), e(c["title"]), ('<small>%s</small>' % e(c["area"])) if c.get("area") else "",
@@ -435,7 +435,7 @@ def home_html(snap, links, targets, search, now, tz=None, shown=None):
             e(p["url"]), e(p["title"]), e(p.get("domain") or ""),
             ('<span class="chip read%s">%s</span>' % (" starred" if p.get("starred") else "",
                                                      e(READ_WORD[bool(p.get("starred"))] % p["reader"]))) if p.get("reader") else "",
-            when(p.get("at"), now, tz)) for p in t["pages"]], (sh + "/", "Shiori") if sh else ("", "")))
+            when(p.get("at"), now, tz)) for p in t["pages"]], (ng + "/", "Nogon") if ng else ("", "")))
     if t.get("garden"):
         secs.append(section("Garden", ['<li><a href="%s">%s</a>%s</li>' % (
             e(g["url"]), e(g["title"]), ('<small>tended %s</small>' % e(ago(g["at"], now))) if g.get("at") else "")

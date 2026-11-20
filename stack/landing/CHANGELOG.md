@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.7.7
+
+- Today: Saved & Read links to Nogon ("Nogon ›"), where its pages live, not to Shiori (owner, 2026-11-20). Notes Changed links to Kura and Garden to Niwa the same way.
+
 ## 0.7.6
 
 - LANDING_LINKS: the deployment's other front pages (`Name|https://url`, separated by `;`) in every page's footer, so the landing links to them (owner, 2026-11-20: keep the separate front pages, cross-linked).

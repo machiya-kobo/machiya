@@ -1080,6 +1080,7 @@ class Launcher(Stack):
         self.assertIn("2 days overdue", html)
         self.assertIn("Read in NewsBlur", html)
         self.assertIn("Starred in NewsBlur", html)
+        self.assertIn('Saved &amp; Read<a class="more" href="%s/">Nogon ›</a>' % l.config.links["hister"], html)   # 0.7.7: not Shiori
         self.assertNotIn("form class=\"search launch\"", render.home_html(snap, l.config.links, l.config.targets, "", NOW))
 
     def test_home_extra_rooms(self):
