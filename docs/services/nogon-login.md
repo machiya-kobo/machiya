@@ -8,7 +8,7 @@ nogon-login makes a [Hister](hister.md) sign-in count in every Machiya app (thes
 - Sign out anywhere, and every room forgets you within 30 seconds.
 - Hister is not patched.
 
-Code: [stack/nogon-login/](../../stack/nogon-login/) (settings in its README). The rooms' side is [vaultkit](../vaultkit.md)'s `histerauth.py` (`<ROOM>_AUTH=hister`, [identity.md](../identity.md#hister-sign-in-authhister)).
+Code: [stack/nogon-login/](../../stack/nogon-login/) (settings in its README). The rooms' side is [vaultkit](../vaultkit.md)'s `histerauth.py` (`<ROOM>_AUTH=hister`, [identity.md](../identity.md#nogon-sign-in-authnogon)).
 
 It's optional. Without it, a room keeps its Tailscale gate or the identity file. A room in `hister` mode without the helper runs on its Tailscale identity alone.
 

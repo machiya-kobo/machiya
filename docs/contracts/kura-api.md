@@ -60,7 +60,7 @@ calling instead of `KURA_USERS`. Without the file nothing here applies and the A
 
 ## Hister sign-in
 
-With `KURA_AUTH=hister` ([identity.md](../identity.md#hister-sign-in-authhister), [nogon-login](../services/nogon-login.md)) Kura asks the sign-in helper who is calling, and never falls back to the Tailscale identity (`KURA_AUTH_FALLBACK=none`). Clients should handle these answers now; Kura gives them once a deployment switches the mode.
+With `KURA_AUTH=hister` ([identity.md](../identity.md#nogon-sign-in-authnogon), [nogon-login](../services/nogon-login.md)) Kura asks the sign-in helper who is calling, and never falls back to the Tailscale identity (`KURA_AUTH_FALLBACK=none`). Clients should handle these answers now; Kura gives them once a deployment switches the mode.
 
 - **Credentials**, the first present decides: a room token (`Authorization: Bearer mht_…`, scripts and agents; [identity.md](../identity.md#room-tokens)), `Authorization: Bearer mhs_…` (Shiori's apps), or Kura's own cookie `__Host-machiya_sso_kura` (browsers; vaultkit 0.22). Until nogon-login's switch (`NOGON_LOGIN_LEGACY=none`) also the owner's Hister token (`X-Access-Token`, or another Bearer) and the shared `machiya_sso` cookie; after it they are **401** `{"reason": "legacy-off"}`. A present but invalid one is a **401**. `Bearer mch_…`/`mcd_…` (the identity file's) are a 401 in this mode: the file isn't combined with it yet.
 - **401** `{"error": "sign in", "signin": "<the helper's sign-in address, with return=>"}` for an API call without a valid credential, never a redirect; a page gets a 302 to that address instead. A page that receives the 401 from a `fetch` navigates to `signin` with `return=` set to itself (vaultkit's `machiya.js` does this).

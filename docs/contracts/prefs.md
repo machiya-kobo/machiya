@@ -2,7 +2,7 @@
 
 One set of settings that follows the signed-in person to every Machiya app and every device. It was asked for on 2026-10-05 ("If I sign in and then change settings that affect all apps, like theme, I expect them to change in every app") and the design's questions were settled the same day. This page is the contract for every reader and writer:
 
-- the rooms (Kura, Niwa, Konbini) and landing, through vaultkit (`vaultkit/prefs.py`, `signin.handle_prefs`, `histerauth.forward_prefs`, `ui/machiya.js`);
+- the rooms (Kura, Niwa, Konbini) and landing, through vaultkit (`vaultkit/prefs.py`, `signin.handle_prefs`, `nogonauth.forward_prefs`, `ui/machiya.js`);
 - [nogon-login](../services/nogon-login.md), which keeps the account's copy;
 - Shiori's apps, extensions and hosted pages.
 
@@ -27,7 +27,7 @@ The schema lives in [`vaultkit/prefs.py`](../../vaultkit/prefs.py) and is export
 | `theme` | `system`, `day`, `night` (`auto` is stored as `system`) | Mode |
 | `palette` | the ten keys of `vaultkit/palettes.py` (`tokyo-night` … `ayu`) | Theme |
 | `text_size` | `xsmall`, `small`, `standard`, `large`, `xlarge` (the house's five steps; Shiori maps its own through `HOUSE_STEPS`) | Text Size |
-| `apps_hidden` | a comma list from `shiori, konbini, niwa, kura, hister, searxng, machiya`, stored in that order without repeats; empty = all shown. `nogon` is accepted and stored as `hister` until the rename's stage 3 (vaultkit 0.38.0). A deployment's extra rooms ([ui.md](../ui.md#extra-rooms-machiya_extra_rooms)) are never listed: their switches stay on the device | Apps |
+| `apps_hidden` | a comma list from `shiori, konbini, niwa, kura, nogon, searxng, machiya`, stored in that order without repeats; empty = all shown. `nogon` was `hister` before vaultkit 0.41 ([the rename](hister.md#names-hister-is-now-nogon)): `hister` is still accepted and read as `nogon`, in a PUT, a stored row (answered as `nogon`, rewritten at its next write) and the `show_hister` cookie; only `nogon` is written. A deployment's extra rooms ([ui.md](../ui.md#extra-rooms-machiya_extra_rooms)) are never listed: their switches stay on the device | Apps |
 | `pills` | JSON `{"order": [pill id, …], "hidden": [pill id, …]}`, ids `[a-z0-9_-]{1,32}`, at most 32 each; stored compact. The store checks the shape, Shiori the ids | Pills (Shiori only) |
 | `language`, `time_zone` | reserved: refused until an app uses them | |
 | `<app>.<key>` | `<app>` one of `kura, niwa, konbini, shiori, machiya` (landing); `<key>` is `[a-z0-9_]{1,48}`; the value a string of at most 1024 bytes with no control characters | the app's |
@@ -41,7 +41,7 @@ Anything else is **400**. At most 100 keys per person, and a body of at most 512
 
 | Endpoint | Who calls it | Credential |
 |---|---|---|
-| `GET`, `PUT /api/prefs` on each room and landing | `machiya.js` | the room's own gate. In `AUTH=hister` mode with the helper it **forwards** (below); otherwise it is the room's own store |
+| `GET`, `PUT /api/prefs` on each room and landing | `machiya.js` | the room's own gate. In `AUTH=nogon` mode with the helper it **forwards** (below); otherwise it is the room's own store |
 | `GET`, `PUT /v1/prefs` on nogon-login's internal port (8081) | the rooms and landing, forwarding | exactly one of `X-Machiya-Session: mhs_…|mhr_…|mht_…` (with the room's `X-Machiya-Room`) or `X-Access-Token: <Hister token>`, as for `/v1/check`; anything else is 400 |
 | `GET`, `PUT /machiya/api/prefs` on nogon-login's public port (8080, on Hister's host) | Shiori's apps (`Authorization: Bearer mhs_…`), extensions, Linux and scripts (a room token `Authorization: Bearer mht_…`, or a Hister token: `X-Access-Token` or `Bearer`; this is Hister's own host), the hosted pages (their own room cookie, through their nginx, nogon-login 0.3.0) | one credential; a `PUT` carried by the cookie must have an `Origin` among the helper's return hosts. There is no CORS: no other site's page may read or write it |
 
@@ -87,9 +87,9 @@ Anything else is **400**. At most 100 keys per person, and a body of at most 512
 
 **Sign-out leaves preferences alone**: they are account data, not session data. `nogon_login.py prefs delete --user NAME` removes them, for an account that is deleted (and might be made again under the same name).
 
-## The forwarding rule (rooms and landing in hister mode)
+## The forwarding rule (rooms and landing in nogon mode)
 
-A room keeps its same-origin `/api/prefs`, so `machiya.js`, the page's `<meta name="machiya-prefs">` and the service worker's bypass don't change. In hister mode with the helper (`*_AUTH_URL` set), `vaultkit.histerauth.HisterAuth.forward_prefs(result, method, headers, body, origins)` does this:
+A room keeps its same-origin `/api/prefs`, so `machiya.js`, the page's `<meta name="machiya-prefs">` and the service worker's bypass don't change. In nogon mode with the helper (`*_AUTH_URL` set), `vaultkit.nogonauth.NogonAuth.forward_prefs(result, method, headers, body, origins)` does this:
 
 1. It passes the request to `/v1/prefs` with the **caller's own credential** and the room's origin (`X-Machiya-Room`): the room's own cookie (a room session, vaultkit 0.22), an app's id or a room token as `X-Machiya-Session`, or (legacy) the caller's Hister token as `X-Access-Token`. It never sends a user id.
 2. A `PUT` carried by the cookie must be same-origin with the room (`origins`: its public address), else 403. One with `Authorization` or `X-Access-Token` is a client's.

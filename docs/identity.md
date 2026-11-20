@@ -20,7 +20,7 @@ Machiya's rooms (Kura, Niwa, Konbini) and machiya-mcp can share one **identity f
 
 Turning it on changes nothing until you set `MACHIYA_IDENTITY_FILE` in a room, room by room. Without the file a room behaves exactly as before.
 
-**Or let Hister's users be the sign-in** (`*_AUTH=hister`, [below](#hister-sign-in-authhister)): one owner, one sign-in for Hister and every room, real sign-out, without the identity file.
+**Or let Nogon's users be the sign-in** (`*_AUTH=nogon`, [below](#nogon-sign-in-authnogon)): one owner, one sign-in for Nogon and every room, real sign-out, without the identity file.
 
 ## Turn it on
 
@@ -154,7 +154,7 @@ Stored tokens survive a key rotation; revoke them one by one. Sessions last 30 d
 | | Kura | Niwa | Konbini | machiya-mcp |
 |---|---|---|---|---|
 | the file (all rooms) | `MACHIYA_IDENTITY_FILE` | same | same | same |
-| mode: `tailscale` (default), `header`, `open` (the rooms without the file: also `hister`, [below](#hister-sign-in-authhister)) | `KURA_AUTH` | `NIWA_AUTH` | `KANBAN_AUTH` | `MCP_AUTH` |
+| mode: `tailscale` (default), `header`, `open` (the rooms without the file: also `nogon`, [below](#nogon-sign-in-authnogon)) | `KURA_AUTH` | `NIWA_AUTH` | `KANBAN_AUTH` | `MCP_AUTH` |
 | the proxy's login header | `KURA_AUTH_HEADER` | `NIWA_AUTH_HEADER` | `KANBAN_AUTH_HEADER` | `MCP_AUTH_HEADER` |
 | a header mode on a non-loopback bind | `KURA_BIND_BEHIND_PROXY=1` | `NIWA_BIND_BEHIND_PROXY=1` | `KANBAN_BIND_BEHIND_PROXY=1` | `MCP_BIND_BEHIND_PROXY=1` |
 | Tailscale tagged nodes | `KURA_ACCEPT_APP_CAPS=1` | `NIWA_ACCEPT_APP_CAPS=1` | `KANBAN_ACCEPT_APP_CAPS=1` | `MCP_ACCEPT_APP_CAPS=1` |
@@ -175,24 +175,26 @@ python3 -m vaultkit.identity --file /srv/machiya/identity/identity.toml setup --
 
 then start Kura as [its README](https://github.com/machiya-kobo/kura#quickstart) says, with the directory mounted read-only and the printed lines (`MACHIYA_IDENTITY_FILE`, `KURA_SIGNIN=1`; over plain http also `KURA_PUBLIC_URL=http://<its address>`). The same file can serve more rooms later.
 
-## Hister sign-in (`AUTH=hister`)
+## Nogon sign-in (`AUTH=nogon`)
 
-A room mode **without the identity file**: the room asks [nogon-login](services/nogon-login.md) whether the caller is signed in to Hister, so one sign-in (password, or Hister's OIDC provider such as tsidp) covers Hister and every room, and a sign-out anywhere ends it everywhere within 30 seconds. One owner: everyone admitted is the owner, as with the Tailscale gate.
+Formerly `AUTH=hister` with `<P>_HISTER_USERS`: rooms on vaultkit 0.41 or later refuse to start on the old names, and say the new ones ([the rename](contracts/hister.md#names-hister-is-now-nogon)).
+
+A room mode **without the identity file**: the room asks [nogon-login](services/nogon-login.md) whether the caller is signed in to Nogon, so one sign-in (password, or Nogon's OIDC provider such as tsidp) covers Nogon and every room, and a sign-out anywhere ends it everywhere within 30 seconds. One owner: everyone admitted is the owner, as with the Tailscale gate.
 
 **Ways in**, the first present decides (a present but invalid one is **401**, never passed over):
 
 1. **A room token** (`Authorization: Bearer mht_…`): scripts, pm, machiya-mcp, landing, Niwa→Konbini, an extension ([below](#room-tokens));
 2. **A Shiori app's id** (`Authorization: Bearer mhs_…`), the app's own per-device sign-in;
 3. **The room's own cookie** (`__Host-machiya_sso_<room>=mhr_…`), a browser's ([below](#one-cookie-per-room));
-4. **Legacy**, only while nogon-login's `NOGON_LOGIN_LEGACY` allows them: the owner's Hister token (`X-Access-Token`, or any other Bearer) and the old shared-domain cookie `machiya_sso`;
+4. **Legacy**, only while nogon-login's `NOGON_LOGIN_LEGACY` allows them: the owner's Nogon token (`X-Access-Token`, or any other Bearer) and the old shared-domain cookie `machiya_sso`;
 5. **Nothing**: a page goes to the helper's sign-in and comes back with its own cookie; an API call gets `401 {"error": "sign in", "signin": "<address>"}` (vaultkit's `machiya.js` takes the page there when the room opts in). With `MACHIYA_SIGNIN_PROVIDER` (below) the sign-in is automatic.
 
 | | Kura | Niwa | Konbini |
 |---|---|---|---|
-| the mode | `KURA_AUTH=hister` | `NIWA_AUTH=hister` | `KANBAN_AUTH=hister` |
+| the mode | `KURA_AUTH=nogon` | `NIWA_AUTH=nogon` | `KANBAN_AUTH=nogon` |
 | the helper, internal (`http://nogon-login:8081`) | `KURA_AUTH_URL` | `NIWA_AUTH_URL` | `KANBAN_AUTH_URL` |
 | the helper's sign-in page (required) | `KURA_AUTH_SIGNIN_URL` | `NIWA_AUTH_SIGNIN_URL` | `KANBAN_AUTH_SIGNIN_URL` |
-| Hister usernames admitted (required; never `*`) | `KURA_HISTER_USERS` | `NIWA_HISTER_USERS` | `KANBAN_HISTER_USERS` |
+| Nogon usernames admitted (required; never `*`) | `KURA_NOGON_USERS` | `NIWA_NOGON_USERS` | `KANBAN_NOGON_USERS` |
 | when sign-in is unavailable: `tailscale` or `none` | `KURA_AUTH_FALLBACK` | `NIWA_AUTH_FALLBACK` | `KANBAN_AUTH_FALLBACK` |
 | Tailscale logins admitted in the fallback only (never `*`) | `KURA_USERS` | `NIWA_USERS` | `KANBAN_TAILNET_USERS` |
 | its address, for the way back (required) | `KURA_PUBLIC_URL` | `NIWA_PUBLIC_URL` | `KANBAN_BOARD_URL` |
@@ -201,14 +203,14 @@ A room mode **without the identity file**: the room asks [nogon-login](services/
 | other origins whose room sessions this room accepts (Shiori's hosted pages; optional) | `KURA_AUTH_ACCEPT_ORIGINS` | `NIWA_AUTH_ACCEPT_ORIGINS` | `KANBAN_AUTH_ACCEPT_ORIGINS` |
 | sign in automatically through the helper's provider (`oidc`: tsidp; empty: the helper's page) | `MACHIYA_SIGNIN_PROVIDER` | same | same |
 
-- **Refused at start:** no sign-in address or usernames, a `*`, `none` without the helper's address, no public address, or an identity file at the same time (not combined yet). No helper address with the `tailscale` fallback runs on the Tailscale identity alone, with a warning, so a room still stands alone.
-- **Signed out never falls back.** Only "nobody answered" does: the helper or Hister unreachable, a 5xx, or Hister's user handling off. Then a room with `tailscale` admits the owner's Tailscale login with a banner ("Signed in through the tailnet: sign-in is unavailable"), caches nothing and counts it (`fallback_total`); a room with `none` answers 503. A Hister account outside `*_HISTER_USERS` is 403, never a fallback (OAuth creates accounts on its own).
-- **The cookies** are host-only since vaultkit 0.22 and nogon-login 0.3.0 (decided 2026-10-05, after the sweep found the shared `machiya_sso` reaching every host under the tailnet's domain, agents' machines among them): see [One cookie per room](#one-cookie-per-room). Hister's own session never leaves Hister's host.
-- **Automatic sign-in** (`MACHIYA_SIGNIN_PROVIDER=oidc`, decided 2026-10-05). An installed web app on an iPhone has its own cookie jar, so each would otherwise ask once. With this setting, a room or landing that needs a sign-in sends the page to the helper with `provider=oidc&auto=1`, and the helper goes straight through Hister's OIDC provider (tsidp knows the device), so there is no page and no tap.
+- **Refused at start:** no sign-in address or usernames, a `*`, `none` without the helper's address, no public address, an identity file at the same time (not combined yet), or an old name (`AUTH=hister`, `*_HISTER_USERS` alone; vaultkit 0.41). No helper address with the `tailscale` fallback runs on the Tailscale identity alone, with a warning, so a room still stands alone.
+- **Signed out never falls back.** Only "nobody answered" does: the helper or Nogon unreachable, a 5xx, or Nogon's user handling off. Then a room with `tailscale` admits the owner's Tailscale login with a banner ("Signed in through the tailnet: sign-in is unavailable"), caches nothing and counts it (`fallback_total`); a room with `none` answers 503. A Nogon account outside `*_NOGON_USERS` is 403, never a fallback (OAuth creates accounts on its own).
+- **The cookies** are host-only since vaultkit 0.22 and nogon-login 0.3.0 (decided 2026-10-05, after the sweep found the shared `machiya_sso` reaching every host under the tailnet's domain, agents' machines among them): see [One cookie per room](#one-cookie-per-room). Nogon's own session (its cookie is still named `hister`) never leaves Nogon's host.
+- **Automatic sign-in** (`MACHIYA_SIGNIN_PROVIDER=oidc`, decided 2026-10-05). An installed web app on an iPhone has its own cookie jar, so each would otherwise ask once. With this setting, a room or landing that needs a sign-in sends the page to the helper with `provider=oidc&auto=1`, and the helper goes straight through Nogon's OIDC provider (tsidp knows the device), so there is no page and no tap.
   - **The helper's page shows instead after a deliberate sign-out.** A room's `/signout` sets that room's own marker (`__Host-machiya_sso_<room>_out`), and the helper remembers every helper session ended on purpose for 30 days, so the next automatic trip from any room shows its page and sets the helper's marker (`__Host-machiya_sso_out`). The helper's own sign-out and its sessions page set that marker at once. The next successful sign-in clears them, so "Sign Out" never bounces straight back in.
   - **It also shows after a round trip that failed.** The callback lands on the page with "Sign in with Tailscale didn't work…" and a 10-minute marker, so it never loops.
   - **The room's loop guard links to the plain page.** A tap on "Sign in with Tailscale" (a `provider=` without `auto`) always goes through.
-- **Preferences** ([contracts/prefs.md](contracts/prefs.md)): with the helper, a room's `/api/prefs` is the **account's**. The room forwards it to the helper's `/v1/prefs` with the caller's own credential (`histerauth.forward_prefs`). The fallback has no account preferences (503: the page keeps its local values). Without the helper (Tailscale identity only) the room keeps its own store: keyed by the Tailscale login when the room has exactly one fallback login, otherwise by a hash of the Hister username.
+- **Preferences** ([contracts/prefs.md](contracts/prefs.md)): with the helper, a room's `/api/prefs` is the **account's**. The room forwards it to the helper's `/v1/prefs` with the caller's own credential (`nogonauth.forward_prefs`). The fallback has no account preferences (503: the page keeps its local values). Without the helper (Tailscale identity only) the room keeps its own store: keyed by the Tailscale login when the room has exactly one fallback login, otherwise by a hash of the Nogon username.
 - `/api/status` (Konbini: `/api/health`) stays open for the probes.
 
 ### One cookie per room

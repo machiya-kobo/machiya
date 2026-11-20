@@ -13,12 +13,15 @@ Upstream Hister is now Nogon (v0.22.0). The owner chose on 2026-11-19 to rename 
    - The helper is renamed `nogon-login`.
 2. **The switch:** deployments move to the new names.
 3. **The old names go:** the house's own room id becomes `nogon`, and writers send `Origin: nogon://`.
+   - **vaultkit 0.41.0:** `nogonauth` (`NogonAuth`, `nogon_headers`, which sends `Origin: nogon://`); `histerauth` stays one release as an alias, until 0.42.0.
+   - The house's room id is `nogon`. A stored or old `hister` (in `MACHIYA_ROOMS`, the account's `apps_hidden`, a `show_hister` cookie) is still read as `nogon`; only `nogon` is written.
+   - The old Machiya settings stop a room, naming the new one: `<P>_AUTH=hister` (use `nogon`), and a `<P>_HISTER_*` read through `names.setting()` without its `<P>_NOGON_*` twin.
 
-**What stays:** the names upstream Nogon defines. Its session cookie is still `hister`. `X-Access-Token` and the API paths don't change. Its own `HISTER__*` settings still work, though it prefers `NOGON__*`. Nogon v0.22 accepts both `Origin: hister://` and `nogon://`, so callers keep `hister://` until every Nogon they talk to is v0.22 or later.
+**What stays:** the names upstream Nogon defines. Its session cookie is still `hister`. `X-Access-Token` and the API paths don't change. Its own `HISTER__*` settings still work, though it prefers `NOGON__*`. Nogon v0.22 accepts both `Origin: hister://` and `nogon://`; vaultkit's callers send `nogon://` since 0.41, and the rest follow at their stage-3 release.
 
 ## Every call
 
-- **Send `Origin: hister://`** on POSTs (without it: 403). GETs to `/search` need it unless they ask for JSON (`format=json` or `Accept: application/json`, allowed since v0.20.0); sending it always is simplest.
+- **Send `Origin: nogon://`** on POSTs (without it: 403; Nogon v0.22 and later, which also take the old `hister://`). GETs to `/search` need it unless they ask for JSON (`format=json` or `Accept: application/json`, allowed since v0.20.0); sending it always is simplest.
 - **Send the owner's Hister token** as `X-Access-Token` on every call, read from a file (`<NAME>_HISTER_TOKEN_FILE`; machiya-mcp: `HISTER_TOKEN_FILE`), never from the environment, argv, a URL or a log. A Hister without users ignores it, so send it from now on: once user handling is on ([Sign-in](#sign-in)) every call without it is refused. Re-read the file when it changes: regenerating the token (Hister keeps one per user) replaces it for every caller at once. Unset sends none.
 - **A 403 means "no or an invalid credential"** once users are on (Hister answers 403 with an empty body, never 401). Don't retry it; say so.
 - **Never change ownership.** The owner's token is an admin's: never send `X-Hister-Public`, `X-Hister-Target-User-ID`, or `changes.user_id` in `/api/update`. Every document belongs to the owner.
@@ -135,7 +138,7 @@ With `app.user_handling: true` Hister has users, and [nogon-login](../services/n
 - **The cookies** (nogon-login 0.3.0): the helper's `__Host-machiya_sso=mhs_…` on Hister's host and each room's `__Host-machiya_sso_<room>=mhr_…` on the room's host are opaque, host-only, and mean nothing to Hister: `hister.*` never accepts them. The old `machiya_sso` on the shared cookie domain is set only while `NOGON_LOGIN_LEGACY` has `domain-cookie`. Hister's own session cookie (`hister`) stays host-only on Hister's host.
 - **Hister's token belongs to Hister's callers** (Kura's push, the rooms' own Hister calls, importers, scripts). It is never a room's credential once `NOGON_LOGIN_LEGACY=none`: rooms and tools take room tokens (`mht_…`, [identity.md](../identity.md#room-tokens)) instead, which open only the rooms they name and never Hister.
 - **Behind a proxy:** Hister re-sends `Set-Cookie: hister=<session>` on every signed-in answer (its sliding expiry). A proxy that adds a Hister session for the browser (the hosted pages' nginx with `auth_request`) must drop it: `proxy_hide_header Set-Cookie;`.
-- **Rooms in `AUTH=hister`** ([identity.md](../identity.md#hister-sign-in-authhister)) accept their own cookie, `Authorization: Bearer mhs_…` (Shiori's apps), a room token (`Bearer mht_…`) and, until the switch, the shared cookie and the owner's Hister token; an API call without one gets `401 {"error": "sign in", "signin": "<the helper's sign-in address>"}`, which a page follows by navigating there.
+- **Rooms in `AUTH=nogon`** ([identity.md](../identity.md#nogon-sign-in-authnogon)) accept their own cookie, `Authorization: Bearer mhs_…` (Shiori's apps), a room token (`Bearer mht_…`) and, until the switch, the shared cookie and the owner's Hister token; an API call without one gets `401 {"error": "sign in", "signin": "<the helper's sign-in address>"}`, which a page follows by navigating there.
 
 ## What callers must never do
 
