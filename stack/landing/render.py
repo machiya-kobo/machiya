@@ -325,6 +325,13 @@ def mini(key, name, a, count, href):
             '<span class="mcount">%s%s</span></a>' % (e(key), e(a["state"]), e(href), mark(key), e(name), flag, e(count)))
 
 
+def extra_mini(x):
+    """An extra room (MACHIYA_EXTRA_ROOMS) on the launcher (0.7.2): its mark, name and what it is. The landing doesn't
+    check it, so there is no state and no dot; the whole tile is the link to its own URL."""
+    return ('<a class="mini" data-app="%s" data-extra-room="%s" href="%s">%s<span class="mname">%s</span>'
+            '<span class="mcount">%s</span></a>' % (e(x.key), e(x.key), e(x.url), house.extra_mark(x), e(x.name), e(x.what)))
+
+
 def fact(a, word):
     return next((f for f in a.get("facts") or [] if f.endswith(word)), "")
 
@@ -367,8 +374,11 @@ def home_html(snap, links, targets, search, now, tz=None):
     }
     tiles = [mini(k, n, apps[k], counts[k], link(k)) for k, n, g, _ in probes.APPS
              if g == "rooms" and apps[k]["state"] != "absent" and link(k)]
+    extras = [extra_mini(x) for x in house.extra_rooms()]
+    tiles += extras
     if tiles:
-        out.append('<nav class="minis" aria-label="Rooms">%s</nav>' % "".join(tiles))
+        out.append('<nav class="minis"%s aria-label="Rooms">%s</nav>'
+                   % ((' data-n="%d"' % len(tiles)) if extras else "", "".join(tiles)))
     secs = []
     kb, ku, ni, sh = link("konbini"), link("kura"), link("niwa"), link("shiori")
     if t.get("working") is not None:

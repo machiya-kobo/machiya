@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1072,6 +1073,23 @@ class Launcher(Stack):
         self.assertIn("Read in NewsBlur", html)
         self.assertIn("Starred in NewsBlur", html)
         self.assertNotIn("form class=\"search launch\"", render.home_html(snap, l.config.links, l.config.targets, "", NOW))
+
+    def test_home_extra_rooms(self):
+        """0.7.2: an extra room (MACHIYA_EXTRA_ROOMS) gets a launcher tile after the built-in rooms: mark, name, what."""
+        l, snap, _ = self.today()
+        plain = render.home_html(snap, l.config.links, l.config.targets, "", NOW)
+        self.assertIn('<nav class="minis" aria-label="Rooms">', plain)        # unset: unchanged
+        rooms = ("techo|Tech\u014d|\u5e33|https://techo.example.ts.net|https://techo.example.ts.net/i.svg|agents;"
+                 "bare|Bare Room||https://bare.example.ts.net")
+        with mock.patch.dict(os.environ, {"MACHIYA_EXTRA_ROOMS": rooms}):
+            html = render.home_html(snap, l.config.links, l.config.targets, "", NOW)
+        self.assertIn('<nav class="minis" data-n="6" aria-label="Rooms">', html)
+        self.assertIn('<a class="mini" data-app="techo" data-extra-room="techo" href="https://techo.example.ts.net">'
+                      '<img class="seal icon" data-room="techo" src="https://techo.example.ts.net/i.svg" alt="" aria-hidden="true">'
+                      '<span class="mname">Tech\u014d</span><span class="mcount">agents</span></a>', html)
+        self.assertIn('data-app="bare"', html)
+        self.assertLess(html.index('data-app="kura"'), html.index('data-app="techo"'))
+        self.assertNotIn('class="dot"', html[html.index('data-app="techo"'):html.index("</nav>")])   # not checked
 
     def test_pill_counts(self):
         self.assertIn(">1 needs a look<", render.pill({"state": "error", "count": 1, "text": "x"}))

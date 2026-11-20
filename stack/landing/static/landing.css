@@ -101,7 +101,6 @@ li.app[data-state="absent"] .seal, li.app[data-state="absent"] .glyph { opacity:
 }
 
 /* ---- the launcher (/), 0.2.0: the mark, the day and a status pill; Search everything; the rooms; Today ---------- */
-main.home { max-width: 980px; }
 .hero { display: flex; align-items: center; gap: var(--sp-3); margin: var(--sp-4) 0 var(--sp-3); }
 .hero h1 { margin: 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -.01em; color: var(--fg); }
 .pill { margin-left: auto; display: inline-flex; align-items: center; padding: 5px 12px 5px 10px; border-radius: var(--r-pill);
@@ -136,15 +135,18 @@ form.search.launch input:placeholder-shown ~ .clear { display: none; }
 .mini[data-app="shiori"] { --tile: var(--blue); } .mini[data-app="konbini"] { --tile: var(--magenta); }
 .mini[data-app="niwa"] { --tile: var(--green); } .mini[data-app="kura"] { --tile: var(--orange); }
 .mini:hover { text-decoration: none; border-color: color-mix(in srgb, var(--tile) 60%, var(--line)); }
-.mini .seal.icon { grid-row: 1 / 3; width: 32px; height: 32px; }
+.mini .seal.icon, .mini .seal.extra, .mini .neighbour { grid-row: 1 / 3; width: 32px; height: 32px; }
+@media (min-width: 761px) { .minis[data-n="5"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .minis[data-n="6"] { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .mini .mname { font-weight: 600; color: var(--tile); }
 .mini .mcount { font-size: var(--fs-xs); color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mini[data-state="down"], .mini[data-state="error"] { border-color: color-mix(in srgb, var(--red) 55%, var(--line)); }
 
-/* Today: cards in two columns on wide screens */
+/* Today: cards in two columns on wide screens (inline-block: Safari otherwise draws a sliver of a card at the top of
+   the next column, 0.7.2) */
 .today-head { margin-top: var(--sp-5); }
 .today { columns: 2 340px; column-gap: var(--sp-3); }
-.tsec { break-inside: avoid; margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3) var(--sp-3); }
+.tsec { break-inside: avoid; display: inline-block; width: 100%; box-sizing: border-box; vertical-align: top; margin: 0 0 var(--sp-3); padding: var(--sp-2) var(--sp-3) var(--sp-3); }
 .tsec .sechead { display: flex; align-items: baseline; margin: var(--sp-1) 0 var(--sp-2); }
 .tsec .sechead .more { margin-left: auto; font-size: var(--fs-xs); font-weight: 500; letter-spacing: 0; text-transform: none; }
 .tsec .list > li { padding: 7px 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); }

@@ -1,5 +1,11 @@
 # Changelog: machiya-landing
 
+## 0.7.2
+
+- Home: each extra room (MACHIYA_EXTRA_ROOMS) gets a tile after the built-in rooms, with its icon, name and what it is. The landing doesn't check extra rooms, so their tiles have no state; five tiles share one row on wide screens.
+- Home is as wide as Status, Sync and Deploys (it was 980px, the others 1120px).
+- Today's cards no longer leave a sliver of a card at the top of the second column in Safari.
+
 ## 0.7.1
 
 - vaultkit 0.38.0 → 0.40.0: an extra room in the Rooms menu can say what it is (MACHIYA_EXTRA_ROOMS' sixth field; Techō: "agents", owner 2026-11-20).
