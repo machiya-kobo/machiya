@@ -351,11 +351,18 @@ def mini(key, name, a, count, href):
             '<span class="mcount">%s%s</span></a>' % (e(key), e(a["state"]), e(href), mark(key), e(name), flag, e(count)))
 
 
-def extra_mini(x):
-    """An extra room (MACHIYA_EXTRA_ROOMS) on the launcher (0.7.2): its mark, name and what it is. The landing doesn't
-    check it, so there is no state and no dot; the whole tile is the link to its own URL."""
-    return ('<a class="mini" data-app="%s" data-extra-room="%s" href="%s">%s<span class="mname">%s</span>'
-            '<span class="mcount">%s</span></a>' % (e(x.key), e(x.key), e(x.url), house.extra_mark(x), e(x.name), e(x.what)))
+def extra_mini(x, a=None):
+    """An extra room (MACHIYA_EXTRA_ROOMS) on the launcher (0.7.2): its mark, name and what it is; the whole tile is the
+    link to its own URL. 0.7.8: with its status polled (`a`, Techō's LANDING_TECHO_STATUS), its count and a dot when it
+    isn't up, like a room's; unpolled, no state and no dot."""
+    if not a:
+        return ('<a class="mini" data-app="%s" data-extra-room="%s" href="%s">%s<span class="mname">%s</span>'
+                '<span class="mcount">%s</span></a>' % (e(x.key), e(x.key), e(x.url), house.extra_mark(x), e(x.name), e(x.what)))
+    flag = dot(a["state"]) if a["state"] != "up" else ""
+    count = (a.get("facts") or [""])[0] or x.what
+    return ('<a class="mini" data-app="%s" data-extra-room="%s" data-state="%s" href="%s">%s<span class="mname">%s</span>'
+            '<span class="mcount">%s%s</span></a>' % (e(x.key), e(x.key), e(a["state"]), e(x.url), house.extra_mark(x),
+                                                      e(x.name), flag, e(count)))
 
 
 def fact(a, word):
@@ -384,7 +391,7 @@ def due_word(days):
 def home_html(snap, links, targets, search, now, tz=None, shown=None):
     """The launcher. Its tiles follow Settings, Rooms (0.7.3): the rooms, the extra rooms, then Nogon and SearXNG, in
     the Rooms menu's order; one switched off there (`shown`, shell.shown_of) isn't on Home either."""
-    apps, t = snap["apps"], snap.get("today") or {}
+    apps, t, extras = snap["apps"], snap.get("today") or {}, snap.get("extras") or {}
     shown = shown or {}
 
     def link(key):
@@ -408,7 +415,7 @@ def home_html(snap, links, targets, search, now, tz=None, shown=None):
         return [mini(k, n, apps[k], counts[k], link(k)) for k, n, g, _ in probes.APPS
                 if g == group and shown.get(k) is not False and apps[k]["state"] != "absent" and link(k)]
 
-    tiles = (room_tiles("rooms") + [extra_mini(x) for x in house.extra_rooms() if shown.get(x.key) is not False]
+    tiles = (room_tiles("rooms") + [extra_mini(x, extras.get(x.key)) for x in house.extra_rooms() if shown.get(x.key) is not False]
              + room_tiles("engines"))
     if tiles:
         out.append('<nav class="minis" data-n="%d" aria-label="Rooms">%s</nav>' % (len(tiles), "".join(tiles)))

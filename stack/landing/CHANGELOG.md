@@ -1,5 +1,9 @@
 # Changelog: machiya-landing
 
+## 0.7.8
+
+- Home: Techō's tile shows what's waiting on you ("2 waiting"), or who's online, from Techō's `/api/status`, with a dot when it isn't up (owner, 2026-11-20: a Techō tile next to the rooms). Set `LANDING_TECHO_STATUS` and `LANDING_TECHO_TOKEN_FILE` (Techō 0.7.0's status token); unset, the tile stays as it was.
+
 ## 0.7.7
 
 - Today: Saved & Read links to Nogon ("Nogon ›"), where its pages live, not to Shiori (owner, 2026-11-20). Notes Changed links to Kura and Garden to Niwa the same way.

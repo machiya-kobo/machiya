@@ -1083,6 +1083,41 @@ class Launcher(Stack):
         self.assertIn('Saved &amp; Read<a class="more" href="%s/">Nogon ›</a>' % l.config.links["hister"], html)   # 0.7.7: not Shiori
         self.assertNotIn("form class=\"search launch\"", render.home_html(snap, l.config.links, l.config.targets, "", NOW))
 
+    def test_techo_tile(self):
+        """0.7.8: with LANDING_TECHO_STATUS, Techō's tile shows its count from /api/status (bearer from
+        LANDING_TECHO_TOKEN_FILE) and a dot when it isn't up; unpolled, it stays the plain extra-room tile."""
+        seen = {}
+
+        def fake(url, headers=None, timeout=3.0):
+            seen.update(url=url, headers=dict(headers or {}))
+            return {"version": "0.7.0", "bus": "ok", "waiting": 2, "online": 8, "holds": 1}
+        with mock.patch.object(probes, "fetch_json", fake):
+            a = probes.techo("http://techo:8095/api/status", 3.0, "t" * 20)
+        self.assertEqual(seen["headers"], {"Authorization": "Bearer " + "t" * 20})
+        self.assertEqual((a["state"], a["version"], a["facts"]), ("up", "0.7.0", ["2 waiting"]))
+        with mock.patch.object(probes, "fetch_json", lambda *x, **k: {"bus": "ok", "waiting": 0, "online": 8}):
+            self.assertEqual(probes.techo("http://techo:8095/api/status", 3.0)["facts"], ["8 online"])
+        with mock.patch.object(probes, "fetch_json", lambda *x, **k: {"bus": "down", "error": "no route"}):
+            self.assertEqual(probes.techo("http://techo:8095/api/status", 3.0)["state"], "behind")
+
+        def refuse(*x, **k):
+            raise probes.FetchError("HTTP 401")
+        with mock.patch.object(probes, "fetch_json", refuse):
+            self.assertEqual(probes.techo("http://techo:8095/api/status", 3.0)["state"], "down")
+        l, snap, _ = self.today()
+        rooms = "techo|Tech\u014d|\u5e33|https://techo.example.ts.net||agents"
+        with mock.patch.dict(os.environ, {"MACHIYA_EXTRA_ROOMS": rooms}):
+            plain = render.home_html(snap, l.config.links, l.config.targets, "", NOW)
+            self.assertIn('<span class="mcount">agents</span>', plain)
+            self.assertNotIn('data-extra-room="techo" data-state', plain)
+            snap = dict(snap, extras={"techo": probes.result("up", "0.7.0", "", ["2 waiting"])})
+            html = render.home_html(snap, l.config.links, l.config.targets, "", NOW)
+            self.assertIn('data-extra-room="techo" data-state="up"', html)
+            self.assertIn('<span class="mcount">2 waiting</span>', html)
+            snap = dict(snap, extras={"techo": probes.result("down", error="HTTP 401")})
+            html = render.home_html(snap, l.config.links, l.config.targets, "", NOW)
+            self.assertIn('<i class="dot" data-state="down" aria-hidden="true"></i>agents</span>', html)
+
     def test_home_extra_rooms(self):
         """0.7.2: an extra room (MACHIYA_EXTRA_ROOMS) gets a launcher tile after the built-in rooms: mark, name, what."""
         l, snap, _ = self.today()

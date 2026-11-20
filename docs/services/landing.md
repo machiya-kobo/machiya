@@ -12,7 +12,7 @@ Code: [stack/landing/](../../stack/landing/) (settings in its README). It shares
 |---|---|
 | the day and a **status pill** ("All up", "1 needs a look", "2 behind"), linking `/status` | the status poll |
 | **Search everything** | a plain form to Shiori's search page (`LANDING_SEARCH_URL`, `<url>?q=…`). It's another origin, so there are no live results; the page's CSP allows that one form target. Unset: no field |
-| the four **rooms**, one count each | Hister's page count (Shiori), Konbini's cards in WIP, Niwa's published notes, Kura's notes across every vault |
+| the **rooms**, one count each, in Settings › Rooms' order (one switched off there isn't shown) | Shiori: what it is (search); Konbini's cards in WIP; Niwa's published notes; Kura's notes across every vault; then the extra rooms (`MACHIYA_EXTRA_ROOMS`): Techō says what's waiting on you, or who's online, from its `/api/status` when `LANDING_TECHO_STATUS` is set, else what it is; then Nogon's pages and SearXNG's searches today |
 | **Working On** | Konbini `GET /api/cards`: WIP cards in its order (rank, priority), then the most recently updated, with each next step. Top 5; "Now ›" links Konbini's `/now` |
 | **Due Soon** | the same cards: a `due` date in the next 14 days or past, not done or archived |
 | **Notes Changed** | Kura `GET /api/recent?limit=5` |

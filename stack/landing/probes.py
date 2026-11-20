@@ -445,6 +445,25 @@ def hister(base, now, timeout, headers, token=None):
                   {"docs": docs, "newest": newest, "pages": pages, "repos": repos})
 
 
+def techo(url, timeout, token=""):
+    """Techō's GET /api/status (0.7.8): with LANDING_TECHO_TOKEN_FILE's token as a Bearer (Techō 0.7.0's
+    TECHO_STATUS_TOKEN_FILE opens that one endpoint, counts only). Up with the bus answering; "behind" when Techō is up
+    but its bus isn't; never raises."""
+    try:
+        d = fetch_json(url, {"Authorization": "Bearer " + token} if token else {}, timeout)
+    except FetchError as e:
+        return result("down", error=str(e))
+    except Exception as e:
+        return result("error", error="unreadable answer (%s)" % type(e).__name__)
+    waiting, online, holds = num(d.get("waiting")), num(d.get("online")), num(d.get("holds"))
+    up = d.get("bus") == "ok"
+    fact = (plural(int(waiting), "waiting", "waiting") if waiting else
+            "%s online" % count(int(online)) if online is not None else "")
+    return result("up" if up else "behind", d.get("version"), "", [fact] if up else ["bus down"],
+                  "" if up else text(d.get("error")) or "bus down",
+                  {"waiting": waiting, "online": online, "holds": holds})
+
+
 def searxng(base, now, timeout, headers):
     """GET /healthz ("OK"), then /config for its version."""
     _, _, body = fetch(base + "/healthz", dict(headers, Accept="text/plain"), timeout)

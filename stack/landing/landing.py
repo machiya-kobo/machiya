@@ -128,6 +128,10 @@ class Config:
         self.timeout = max(0.5, float(env.get("LANDING_TIMEOUT") or "3"))
         self.token = self.secret(env.get("LANDING_TOKEN_FILE"), "LANDING_TOKEN_FILE")
         self.hister_token = self.secret_file(names.setting("LANDING_NOGON_TOKEN_FILE", env), "LANDING_NOGON_TOKEN_FILE")
+        self.techo = (env.get("LANDING_TECHO_STATUS") or "").strip()        # 0.7.8: Techō's /api/status, for its tile
+        if self.techo and not self.techo.startswith(("http://", "https://")):
+            raise SystemExit("machiya-landing: LANDING_TECHO_STATUS must be an http(s) address, not %r" % self.techo)
+        self.techo_token = self.secret(env.get("LANDING_TECHO_TOKEN_FILE"), "LANDING_TECHO_TOKEN_FILE")
         self.changelogs = {k: v for k, v in pairs(env.get("LANDING_CHANGELOGS")).items() if k in probes.NAMES}  # overrides
         self.changelog_token = self.secret(env.get("LANDING_CHANGELOG_TOKEN_FILE"), "LANDING_CHANGELOG_TOKEN_FILE")
         self.changelog_poll = max(60, int(env.get("LANDING_CHANGELOG_POLL") or "900"))
@@ -202,8 +206,9 @@ class Landing:
         except Exception as e:                                   # Today is a nicety: never the reason a poll fails
             sys.stderr.write("machiya-landing: today: %s\n" % type(e).__name__)
             today = {}
+        extras = {"techo": probes.techo(c.techo, c.timeout, c.techo_token)} if c.techo else {}    # extra rooms' tiles
         snap = {"checked": now, "version": VERSION, "apps": found, "sync": rows, "overall": probes.overall(found, rows),
-                "today": today}
+                "today": today, "extras": extras}
         self.history.observe(found, now)
         self.fetch_changelogs(found, now)
         with self.lock:
@@ -281,7 +286,9 @@ class Landing:
         return {"ok": True, "version": VERSION, "vaultkit": render.vaultkit_version(), "checked": int(snap["checked"]),
                 "overall": snap["overall"], "apps": apps,
                 "sync": [{k: r.get(k) for k in ("key", "label", "source", "state", "text", "at", "error")} for r in snap["sync"]],
-                "deploys": self.history.recent(self.now())}
+                "deploys": self.history.recent(self.now()),
+                "extras": {k: {x: a[x] for x in ("state", "version", "facts", "error") if x in a}
+                           for k, a in (snap.get("extras") or {}).items()}}
 
 
 def make_handler(landing):
