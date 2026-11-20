@@ -49,7 +49,23 @@ from forges import RETRY_DELAYS, ForgeError, Repo, iso          # noqa: E402
 from github import GitHub                                      # noqa: E402
 from store import Store                                        # noqa: E402
 
-VERSION = "0.1.6"
+VERSION = "0.2.0"
+
+_old_names = set()
+
+
+def nogon_first(env, key):
+    """0.2.0, the rename (Hister is now Nogon): for a <P>_HISTER_<X> setting, <P>_NOGON_<X> when it is set (even empty),
+    else the old name (logged once) until the rename's stage 3. Other names are read as they are."""
+    new = key.replace("HISTER", "NOGON")
+    if new != key:
+        if new in env:
+            return env[new]
+        if key in env and key not in _old_names:
+            _old_names.add(key)
+            print("code-import: %s is an old name, read as %s" % (key, new), file=sys.stderr, flush=True)
+    return env.get(key)
+
 DOC_V = 1               # the documents' shape: part of every fingerprint, so a bump re-sends everything once
 FINAL = ("added", "known", "refused", "rejected", "skipped")
 DOC_EXTS = (".md", ".markdown", ".mdown", ".mkd")
@@ -680,10 +696,10 @@ def build(env, dry_run=False, limit=None, only_repo=None):
                              gap=float(gap) if gap else 0.25, cache=store, **client))
     if not forges:
         raise SystemExit("code-import: no forge: set CODE_IMPORT_FORGEJO_URL and/or CODE_IMPORT_GITHUB_TOKEN_FILES")
-    hister_url = env.get("CODE_IMPORT_HISTER_URL", "")
+    hister_url = nogon_first(env, "CODE_IMPORT_HISTER_URL") or ""
     if not hister_url and not dry_run:
-        raise SystemExit("code-import: CODE_IMPORT_HISTER_URL is required (unset is allowed only with --dry-run)")
-    htoken = tokens.token_file(env.get("CODE_IMPORT_HISTER_TOKEN_FILE"), "CODE_IMPORT_HISTER_TOKEN_FILE")
+        raise SystemExit("code-import: CODE_IMPORT_NOGON_URL is required (unset is allowed only with --dry-run)")
+    htoken = tokens.token_file(nogon_first(env, "CODE_IMPORT_HISTER_TOKEN_FILE"), "CODE_IMPORT_NOGON_TOKEN_FILE")
     hister = histermod.Hister(hister_url, htoken) if hister_url else None
     secrets = env.get("CODE_IMPORT_SECRETS", "redact").strip().lower()
     if secrets not in ("redact", "refuse"):
@@ -711,7 +727,7 @@ def serve(env, once=False, full=False):
     interval = max(60, int(env.get("CODE_IMPORT_INTERVAL", "900")))
     window, tz = pause_window(env.get("CODE_IMPORT_PAUSE")), env.get("CODE_IMPORT_TZ", "UTC")
     imp.log("code-import %s: forges %s, Hister %s, every %d s, a full run every %d s%s" % (
-        VERSION, ",".join(f.name for f in imp.forges), env.get("CODE_IMPORT_HISTER_URL"), interval, imp.full_interval,
+        VERSION, ",".join(f.name for f in imp.forges), nogon_first(env, "CODE_IMPORT_HISTER_URL"), interval, imp.full_interval,
         (", paused " + env.get("CODE_IMPORT_PAUSE")) if window else ""))
     last_ok, fails, stats = None, 0, {}
 

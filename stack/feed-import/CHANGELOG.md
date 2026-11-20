@@ -1,5 +1,9 @@
 # Changelog: feed-import
 
+## 0.2.0
+
+- The rename's stage 1 (Hister is now Nogon; owner, 2026-11-19): `FEED_IMPORT_NOGON_URL` and `FEED_IMPORT_NOGON_TOKEN_FILE` are read first. The `FEED_IMPORT_HISTER_*` names still work until stage 3, each logged once. A NOGON name that is set wins, even when empty.
+
 ## 0.1.3
 
 - **A reader's credentials never follow a redirect.** NewsBlur, Miniflux, Feedbin and FreshRSS calls (and FreshRSS's sign-in) no longer follow a 3xx: urllib would have sent the token, password or `Authorization` header on to wherever it pointed, another host included. A redirect now fails the call, as an error from that reader; point `FEED_IMPORT_*_URL` at the final address.

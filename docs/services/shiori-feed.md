@@ -32,14 +32,14 @@ Your feeds are your browsing history, so shiori-feed has a gate of its own (`SHI
 
 A setting that would let anyone in stops the start. A feed reader on the open internet can't reach your feeds.
 
-**Room tokens** (0.2.0), for agents and scripts, as [smallweb](../contracts/smallweb-api.md) takes them: set `SHIORI_FEED_AUTH_URL` to [nogon-login](nogon-login.md)'s address, `SHIORI_FEED_PUBLIC_URL` to the address the tokens are issued for and `SHIORI_FEED_HISTER_USERS` to the Hister users a token may act as (never `*`). Then, in `tailscale` or `proxy` mode, a caller may send `Authorization: Bearer mht_…` (or `X-Machiya-Token`). nogon-login confirms each token; a request with one is decided by the token alone, and a bad or another room's token is refused.
+**Room tokens** (0.2.0), for agents and scripts, as [smallweb](../contracts/smallweb-api.md) takes them: set `SHIORI_FEED_AUTH_URL` to [nogon-login](nogon-login.md)'s address, `SHIORI_FEED_PUBLIC_URL` to the address the tokens are issued for and `SHIORI_FEED_NOGON_USERS` to the Hister users a token may act as (never `*`). Then, in `tailscale` or `proxy` mode, a caller may send `Authorization: Bearer mht_…` (or `X-Machiya-Token`). nogon-login confirms each token; a request with one is decided by the token alone, and a bad or another room's token is refused.
 
 ## Deploying it
 
 - **Compose:** the `shiori` profile in the reference compose ([compose/compose.yml](../../compose/compose.yml)).
 - **By hand:** the image built from `stack/shiori-feed/` on Hister's network, a non-root user, a read-only root, 64 MB, and:
-  - `SHIORI_FEED_HISTER_URL=http://hister:4433`, `SHIORI_FEED_HISTER_TOKEN_FILE` (a tmpfs file, never the environment);
-  - `SHIORI_FEED_HISTER_PUBLIC_URL`: Hister's address for browsers (the channel's link);
+  - `SHIORI_FEED_NOGON_URL=http://hister:4433`, `SHIORI_FEED_NOGON_TOKEN_FILE` (a tmpfs file, never the environment);
+  - `SHIORI_FEED_NOGON_PUBLIC_URL`: Hister's address for browsers (the channel's link);
   - the gate's settings, above.
 - **Routes:** Shiori's apps build feed addresses on the Hister host, and its hosted pages on their own host. Route `/shiori/` to shiori-feed on both, ahead of Hister.
 - **Monitoring:** probe `/shiori/healthz` (alive) or `/shiori/api/status` (`ok` turns false once three feeds in a row failed to reach Hister). `/shiori/api/changelog` serves this service's CHANGELOG. Neither needs a login. The [landing page](landing.md) shows "feed ok" from them.

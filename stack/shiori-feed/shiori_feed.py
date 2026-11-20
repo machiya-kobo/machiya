@@ -48,7 +48,23 @@ from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from xml.sax.saxutils import escape
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
+
+_old_names = set()
+
+
+def nogon_first(env, key):
+    """0.3.0, the rename (Hister is now Nogon): for a <P>_HISTER_<X> setting, <P>_NOGON_<X> when it is set (even empty),
+    else the old name (logged once) until the rename's stage 3. Other names are read as they are."""
+    new = key.replace("HISTER", "NOGON")
+    if new != key:
+        if new in env:
+            return env[new]
+        if key in env and key not in _old_names:
+            _old_names.add(key)
+            print("shiori-feed: %s is an old name, read as %s" % (key, new), file=sys.stderr, flush=True)
+    return env.get(key)
+
 
 FEED_PATHS = {"/shiori/feed", "/feed"}
 HEALTH_PATHS = {"/shiori/healthz", "/healthz"}
@@ -230,10 +246,10 @@ class Config:
 
     def __init__(self, env=None):
         env = os.environ if env is None else env
-        g = lambda name, default="": (env.get("SHIORI_FEED_" + name) or default).strip()
+        g = lambda name, default="": (nogon_first(env, "SHIORI_FEED_" + name) or default).strip()
         self.hister = g("HISTER_URL").rstrip("/")
         if not self.hister.startswith(("http://", "https://")):
-            raise SystemExit("shiori-feed: SHIORI_FEED_HISTER_URL must be Hister's http(s) address (http://hister:4433)")
+            raise SystemExit("shiori-feed: SHIORI_FEED_NOGON_URL must be Nogon's http(s) address (http://hister:4433)")
         self.public = (g("HISTER_PUBLIC_URL") or self.hister).rstrip("/")
         token = g("HISTER_TOKEN_FILE")
         self.token = None
@@ -383,7 +399,7 @@ def rss(cfg, q, title, docs):
     return ('<?xml version="1.0" encoding="utf-8"?>\n<rss version="2.0"><channel>'
             "<title>%s</title><link>%s</link><description>%s</description>%s</channel></rss>\n" % (
                 x("Shiori – " + (title or q)), x(cfg.public + "/?q=" + urllib.parse.quote(q)),
-                x("Hister search: " + q), "".join(items))).encode("utf-8")
+                x("Nogon search: " + q), "".join(items))).encode("utf-8")
 
 
 # -- HTTP ------------------------------------------------------------------------------------------------------------
@@ -430,11 +446,11 @@ class Handler(BaseHTTPRequestHandler):
         except urllib.error.HTTPError as e:
             log("hister: HTTP %d" % e.code)
             self.server.hister_failed("HTTP %d" % e.code)
-            return self.reply(502, b"Hister failed\n")
+            return self.reply(502, b"Nogon failed\n")
         except (OSError, ValueError) as e:                  # refused, timeouts, too big, bad JSON
             log("hister: %s" % type(e).__name__)
             self.server.hister_failed(type(e).__name__)
-            return self.reply(502, b"Hister failed\n")
+            return self.reply(502, b"Nogon failed\n")
         self.server.hister_ok()
         self.reply(200, rss(self.cfg, q, title, docs), "application/rss+xml; charset=utf-8", "private, max-age=300")
 
@@ -502,7 +518,7 @@ class Server(ThreadingHTTPServer):
         """GET /api/status: never a query, a title or a token."""
         with self.state_lock:
             h = dict(self.hister)
-        error = "Hister failed %d feeds in a row (%s)" % (h["fails"], h["last_error"]) \
+        error = "Nogon failed %d feeds in a row (%s)" % (h["fails"], h["last_error"]) \
             if h["fails"] >= HISTER_FAILS else None
         return {"ok": error is None, "ready": True, "error": error, "version": VERSION, "auth": self.cfg.auth,
                 "room_tokens": self.cfg.room_tokens is not None,
@@ -518,7 +534,7 @@ def make_server(cfg, bind=None, port=None):
 def main():
     cfg = Config()
     server = make_server(cfg)
-    log("%s: listening on %s:%d, auth %s%s%s, Hister %s%s" % (
+    log("%s: listening on %s:%d, auth %s%s%s, Nogon %s%s" % (
         VERSION, cfg.bind, cfg.port, cfg.auth,
         "" if cfg.auth != "tailscale" else " (%s)" % (",".join(sorted(cfg.users)) or "NOBODY: set SHIORI_FEED_USERS"),
         " + room tokens" if cfg.room_tokens and cfg.auth != "open" else "",

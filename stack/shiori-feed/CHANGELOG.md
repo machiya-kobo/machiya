@@ -1,5 +1,11 @@
 # Changelog: shiori-feed
 
+## 0.3.0
+
+- Says Nogon, upstream Hister's new name (owner, 2026-11-19): the feed's title ("Nogon search: …"), its errors ("Nogon failed") and the status error.
+- The rename's stage 1: `SHIORI_FEED_NOGON_URL`, `SHIORI_FEED_NOGON_PUBLIC_URL`, `SHIORI_FEED_NOGON_TOKEN_FILE` and `SHIORI_FEED_NOGON_USERS` are read first. The `SHIORI_FEED_HISTER_*` names still work until stage 3, each logged once. A NOGON name that is set wins, even when empty.
+- The Python base re-pinned to today's digest.
+
 ## 0.2.0
 
 - **Room tokens**, as smallweb and the other services take them: with `SHIORI_FEED_AUTH_URL` (hister-login's internal address), `SHIORI_FEED_PUBLIC_URL` (the address the tokens are issued for) and `SHIORI_FEED_HISTER_USERS`, a caller may send `Authorization: Bearer mht_…` (or `X-Machiya-Token`) in `tailscale` or `proxy` mode. hister-login confirms each token (a good answer is kept 30 s, a refusal 5 s). A request with a token is decided by the token alone, and a bad or another room's token is refused. Tokens are never logged.

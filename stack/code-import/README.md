@@ -116,8 +116,8 @@ Also verified on that Hister:
 | `CODE_IMPORT_GITHUB_API` | `https://api.github.com` | |
 | `CODE_IMPORT_TWINS` | — | `github:your-org=forgejo:your-org,forgejo:you=github:you`: a right-hand repo whose name matches a left-hand one is the same repo, indexed once, on the left |
 | `CODE_IMPORT_EXCLUDE` | — | comma list of repo names (`name` or `owner/name`, any case) never imported, e.g. `notes,password-store,backup`: a repo whose text must never reach Hister (a vault, a password store). Empty by default (0.1.4; it named three repos before). Adding a name withdraws that repo's documents on its source's next completed run |
-| `CODE_IMPORT_HISTER_URL` | — | `http://hister:4433` (required, except for `--dry-run`) |
-| `CODE_IMPORT_HISTER_TOKEN_FILE` | — | the owner's Hister token, sent as `X-Access-Token` on every Hister call ([contracts/hister.md](../../docs/contracts/hister.md)) |
+| `CODE_IMPORT_NOGON_URL` | — | `http://hister:4433` (required, except for `--dry-run`) |
+| `CODE_IMPORT_NOGON_TOKEN_FILE` | — | the owner's Hister token, sent as `X-Access-Token` on every Hister call ([contracts/hister.md](../../docs/contracts/hister.md)) |
 | `CODE_IMPORT_SECRETS` | `redact` | `refuse`: a document with a likely secret isn't sent at all |
 | `CODE_IMPORT_INTERVAL` | `900` | seconds between runs (at least 60) |
 | `CODE_IMPORT_FULL_INTERVAL` | `21600` | seconds between full runs (at least 3600) |
@@ -157,7 +157,7 @@ python3 codeimport.py                                        # the service
 podman build -f stack/code-import/Dockerfile -t code-import:dev .        # from the repo root
 ```
 
-- A dry run asks Hister only which URLs it has, and only if `CODE_IMPORT_HISTER_URL` is set.
+- A dry run asks Hister only which URLs it has, and only if `CODE_IMPORT_NOGON_URL` is set.
 - A dry run reads the forges as a first (full) run would, so with `--limit` it reads fewer blobs, not fewer lists.
 
 ## Tests

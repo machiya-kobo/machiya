@@ -50,7 +50,23 @@ from newsblur import NewsBlur                                  # noqa: E402
 from readers import Entry, ReaderError, secret_file            # noqa: E402
 from store import Store                                        # noqa: E402
 
-VERSION = "0.1.3"
+VERSION = "0.2.0"
+
+_old_names = set()
+
+
+def nogon_first(env, key):
+    """0.2.0, the rename (Hister is now Nogon): for a <P>_HISTER_<X> setting, <P>_NOGON_<X> when it is set (even empty),
+    else the old name (logged once) until the rename's stage 3. Other names are read as they are."""
+    new = key.replace("HISTER", "NOGON")
+    if new != key:
+        if new in env:
+            return env[new]
+        if key in env and key not in _old_names:
+            _old_names.add(key)
+            print("feed-import: %s is an old name, read as %s" % (key, new), file=sys.stderr, flush=True)
+    return env.get(key)
+
 USER_AGENT = "Mozilla/5.0 (compatible; machiya-feed-import/%s; opens what its owner read in a feed reader)" % VERSION
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 WINDOW_RE = re.compile(r"^(%s)[a-z]*\s+([01]?\d|2[0-3]):([0-5]\d)\s*-\s*([01]?\d|2[0-3]):([0-5]\d)$" % "|".join(DAYS), re.I)
@@ -426,10 +442,10 @@ def build(env, dry_run=False, fetch=True):
             raise SystemExit("feed-import: unknown reader %r (known: newsblur, miniflux, freshrss, feedbin)" % name)
     if len(set(names)) != len(names):
         raise SystemExit("feed-import: a reader is named twice in FEED_IMPORT_READERS")
-    hister_url = env.get("FEED_IMPORT_HISTER_URL", "")
+    hister_url = nogon_first(env, "FEED_IMPORT_HISTER_URL") or ""
     if not hister_url and not dry_run:
-        raise SystemExit("feed-import: FEED_IMPORT_HISTER_URL is required (unset is allowed only with --dry-run)")
-    token = histermod.token_file(env.get("FEED_IMPORT_HISTER_TOKEN_FILE"))     # checked at start even for a dry run
+        raise SystemExit("feed-import: FEED_IMPORT_NOGON_URL is required (unset is allowed only with --dry-run)")
+    token = histermod.token_file(nogon_first(env, "FEED_IMPORT_HISTER_TOKEN_FILE"))     # checked at start even for a dry run
     hister = histermod.Hister(hister_url, token) if hister_url else None
     data = env.get("FEED_IMPORT_DATA", "/data")
     store = Store(":memory:" if dry_run else os.path.join(data, "feed-import.sqlite3"))
@@ -454,7 +470,7 @@ def serve(env, once=False):
     interval = max(60, int(env.get("FEED_IMPORT_INTERVAL", "600")))
     window, tz = pause_window(env.get("FEED_IMPORT_PAUSE")), env.get("FEED_IMPORT_TZ", "UTC")
     imp.log("feed-import %s: readers %s, Hister %s, every %d s%s, egress %s" % (
-        VERSION, ",".join(r.name for r in imp.readers), env.get("FEED_IMPORT_HISTER_URL"), interval,
+        VERSION, ",".join(r.name for r in imp.readers), nogon_first(env, "FEED_IMPORT_HISTER_URL"), interval,
         (", paused " + env.get("FEED_IMPORT_PAUSE")) if window else "", env.get("FEED_IMPORT_SOCKS") or "direct"))
     last_ok, fails, carried = None, 0, None
     try:                                     # a run that never finished (a crash, a kill) isn't forgotten on restart

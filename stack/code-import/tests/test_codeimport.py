@@ -1064,7 +1064,7 @@ class CommandLine(Base):
             ({"CODE_IMPORT_FORGEJO_TOKEN_FILE": empty}, "doesn't hold a token"),
             ({"CODE_IMPORT_HISTER_TOKEN_FILE": empty}, "doesn't hold a token"),
             ({"CODE_IMPORT_GITHUB_TOKEN_FILES": "lantern"}, "owner=/path/to/token"),
-            ({"CODE_IMPORT_HISTER_URL": None}, "CODE_IMPORT_HISTER_URL is required"),
+            ({"CODE_IMPORT_HISTER_URL": None}, "CODE_IMPORT_NOGON_URL is required"),
             ({"CODE_IMPORT_SECRETS": "ignore"}, "redact or refuse"),
             ({"CODE_IMPORT_TWINS": "github:a"}, "host:owner=host:owner"),
             ({"CODE_IMPORT_FORGEJO_OWNERS": None}, "names no owner"),

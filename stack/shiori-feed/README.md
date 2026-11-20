@@ -42,7 +42,7 @@ A headless caller, like a feed reader on a tagged machine, sends no Tailscale lo
 
 - `SHIORI_FEED_AUTH_URL`: nogon-login's address (`http://nogon-login:8081`);
 - `SHIORI_FEED_PUBLIC_URL`: the address the tokens are issued for (the hosted pages' own, say);
-- `SHIORI_FEED_HISTER_USERS`: the Hister users a token may act as (never `*`).
+- `SHIORI_FEED_NOGON_USERS`: the Hister users a token may act as (never `*`).
 
 In `tailscale` or `proxy` mode the caller then sends `Authorization: Bearer mht_…` (or `X-Machiya-Token: mht_…`). nogon-login confirms each token; a good answer is kept 30 s and a refusal 5 s. A request that carries a token is decided by the token alone, and a bad or another room's token is refused. Tokens are never logged.
 
@@ -50,15 +50,15 @@ In `tailscale` or `proxy` mode the caller then sends `Authorization: Bearer mht_
 
 | Env | Default | |
 |---|---|---|
-| `SHIORI_FEED_HISTER_URL` | — | Hister's address, `http://hister:4433` (required) |
-| `SHIORI_FEED_HISTER_TOKEN_FILE` | — | a file holding your Hister token (its first line), sent as `X-Access-Token` ([contracts/hister.md](../../docs/contracts/hister.md)); re-read when the file changes. Set but missing or empty stops the start. Unset: no token (a Hister without users ignores it) |
-| `SHIORI_FEED_HISTER_PUBLIC_URL` | `SHIORI_FEED_HISTER_URL` | Hister's address for browsers: the channel's link is its search page |
+| `SHIORI_FEED_NOGON_URL` | — | Hister's address, `http://hister:4433` (required) |
+| `SHIORI_FEED_NOGON_TOKEN_FILE` | — | a file holding your Hister token (its first line), sent as `X-Access-Token` ([contracts/hister.md](../../docs/contracts/hister.md)); re-read when the file changes. Set but missing or empty stops the start. Unset: no token (a Hister without users ignores it) |
+| `SHIORI_FEED_NOGON_PUBLIC_URL` | `SHIORI_FEED_NOGON_URL` | Hister's address for browsers: the channel's link is its search page |
 | `SHIORI_FEED_AUTH` | `tailscale` | `tailscale`, `proxy` or `open` (above) |
 | `SHIORI_FEED_USERS` | — | the Tailscale logins allowed in `tailscale` mode; `*` = anyone; unset = nobody |
 | `SHIORI_FEED_TRUSTED_PROXIES` | — | addresses or CIDRs of the proxy: `172.31.250.2/32` |
 | `SHIORI_FEED_AUTH_URL` | — | [nogon-login](../../docs/services/nogon-login.md)'s address: turns on room tokens (with the next two) |
 | `SHIORI_FEED_PUBLIC_URL` | — | the address the room tokens are issued for (its origin is what nogon-login checks) |
-| `SHIORI_FEED_HISTER_USERS` | — | the Hister users a room token may act as, comma-separated (never `*`) |
+| `SHIORI_FEED_NOGON_USERS` | — | the Hister users a room token may act as, comma-separated (never `*`) |
 | `SHIORI_FEED_BIND_BEHIND_PROXY` | — | `1`: only the proxy (or the host's own `127.0.0.1` port) reaches the listener's network, so in `tailscale` mode the header may come from any address there. Prefer `SHIORI_FEED_TRUSTED_PROXIES` |
 | `SHIORI_FEED_BIND`, `SHIORI_FEED_PORT` | `127.0.0.1`, `8080` | the listener. The image sets `0.0.0.0` |
 | `SHIORI_FEED_PER_MINUTE` | `60` | feeds served per minute, for every caller together; `0` = no limit |
@@ -72,7 +72,7 @@ In `tailscale` or `proxy` mode the caller then sends `Authorization: Bearer mht_
 ## Running
 
 ```sh
-SHIORI_FEED_HISTER_URL=http://127.0.0.1:4433 SHIORI_FEED_AUTH=open python3 shiori_feed.py
+SHIORI_FEED_NOGON_URL=http://127.0.0.1:4433 SHIORI_FEED_AUTH=open python3 shiori_feed.py
 curl 'http://127.0.0.1:8080/shiori/feed?q=label:books'
 podman build -t shiori-feed:dev stack/shiori-feed
 ```

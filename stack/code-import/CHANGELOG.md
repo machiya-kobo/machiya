@@ -1,5 +1,9 @@
 # Changelog: code-import
 
+## 0.2.0
+
+- The rename's stage 1 (Hister is now Nogon; owner, 2026-11-19): `CODE_IMPORT_NOGON_URL` and `CODE_IMPORT_NOGON_TOKEN_FILE` are read first. The `CODE_IMPORT_HISTER_*` names still work until stage 3, each logged once. A NOGON name that is set wins, even when empty.
+
 ## 0.1.6
 
 - The base image is pinned by digest (`tools/pin-bases`), so a rebuild gets exactly the image that was tested. The first release with a signed tag, so the public image on GitHub's registry is built and signed from it.
