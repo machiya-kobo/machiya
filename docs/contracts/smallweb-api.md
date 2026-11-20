@@ -1,8 +1,8 @@
 # smallweb API
 
-The small-web gateway (`stack/smallweb/`): Gemini and Gopher search for Shiori, the pages behind the results, and saving pages (including http(s) ones) to Hister. Contract changes are proposed to the maintainers first, like every contract here.
+The small-web gateway (`stack/smallweb/`): Gemini and Gopher search for Shiori, the pages behind the results, and saving pages (including http(s) ones) to Nogon. Contract changes are proposed to the maintainers first, like every contract here.
 
-Served on its own name, `https://smallweb.example.ts.net` (its own Tailscale Service, owner-only), never same-origin with Hister or Shiori.
+Served on its own name, `https://smallweb.example.ts.net` (its own Tailscale Service, owner-only), never same-origin with Nogon or Shiori.
 
 ## `GET /api/search?q=<text>&source=tlgs,kennedy,veronica&page=<n>`
 
@@ -37,7 +37,7 @@ Served on its own name, `https://smallweb.example.ts.net` (its own Tailscale Ser
 
 | Field | Meaning |
 |---|---|
-| `url` | The canonical URL: lowercase host, no default port, `#` in a gopher selector as `%23`. Hister stores this URL, and Shiori's `recordOpened` gets it too. |
+| `url` | The canonical URL: lowercase host, no default port, `#` in a gopher selector as `%23`. Nogon stores this URL, and Shiori's `recordOpened` gets it too. |
 | `proxy_url` | Where to open it in a browser: `/page` on smallweb. |
 | `snippet`, `marks` | Plain text with the engines' `[brackets]` removed. `marks` are `[start, end)` offsets of the matched words; they may be `[]`. Veronica-2 has no snippets: it gives `kind · host › selector`. |
 | `source`, `sources` | The engine that ranked the hit first, and every engine that returned it (results are deduped on the normalised URL). |
@@ -70,9 +70,9 @@ Served on its own name, `https://smallweb.example.ts.net` (its own Tailscale Ser
   - One response may take 30 s in all.
   - The engines' own hosts go to the proxy by name.
 
-## Saved to Hister
+## Saved to Nogon
 
-A page read through `/page` is saved (in the background) with `POST http://hister:4433/api/add` and `Origin: hister://`. Only pages viewed through smallweb are saved, as listed above (decided 2026-10-05). A `HEAD` never saves. The HTML is an allowlist of document and text tags (0.3.1):
+A page read through `/page` is saved (in the background) with `POST http://nogon:4433/api/add` and `Origin: nogon://` (since 0.6.0; `hister://` before, which Nogon v0.22 still takes). Only pages viewed through smallweb are saved, as listed above (decided 2026-10-05). A `HEAD` never saves. The HTML is an allowlist of document and text tags (0.3.1):
 
 ```json
 {"url": "gemini://example.org/notes/example-page", "title": "An Example Page",
@@ -84,22 +84,22 @@ A page read through `/page` is saved (in the background) with `POST http://histe
 - No `label`: a visited page carries none, the house convention.
 - **Saved:** Gemini `20` with `text/gemini` or `text/plain`; gopher type `0`; gopher type `1` menus with at least 300 characters of text.
 - **Never saved:** the engines' own search pages, anything answered after a prompt or type-7 search (including a direct link to a prompt's answer), `6x`, binaries, pages behind a changed certificate (TOFU mismatch), and a body unchanged since its last save.
-- Find them in Hister with `metadata.source:smallweb`. `gemini://` and `gopher://` URLs are accepted by Hister (`201`), and `%23` in a selector is kept.
+- Find them in Nogon with `metadata.source:smallweb`. `gemini://` and `gopher://` URLs are accepted by Nogon (`201`), and `%23` in a selector is kept.
 - The skip rule for your own `*.ts.net` pages (`^https?://([^/]*\.)?example\.ts\.net…`, see `config/nogon/skip-rules.txt`) keeps the extension from saving the proxy URLs.
 
 ## `POST /api/save {"url": "…", "title": "…", "only_new": true, "via": "…", "query": "…"}`
 
 Three callers:
 - Shiori's "In a Gemini App" setting: a page opened directly in a Gemini client never passes through `/page`, so Shiori asks smallweb to save it (`gemini://`, `gopher://`).
-- Shiori's Add Page action and share target: an `http://` or `https://` page. A browser page can't download other sites (CORS), and Hister's `POST /api/add` with only a URL doesn't fetch the page, so smallweb fetches it and sends Hister the page.
+- Shiori's Add Page action and share target: an `http://` or `https://` page. A browser page can't download other sites (CORS), and Nogon's `POST /api/add` with only a URL doesn't fetch the page, so smallweb fetches it and sends Nogon the page.
 - Shiori's hosted pages with Save Web Results You Open on (0.4.0; off by default): a web result the owner opens, sent with `"only_new": true, "via": "web-result"` and the search as `query`.
 
 The request:
-- Owner-only. The request's `Origin` must be one of: smallweb's own; `hister://` (the native apps); or one listed in `SMALLWEB_ORIGINS` (Shiori's hosted pages, which reach smallweb through a `/smallweb/` route on the web server that hosts them, e.g. `https://shiori.example.ts.net`). With no `Origin`, the request is refused.
+- Owner-only. The request's `Origin` must be one of: smallweb's own; `nogon://` or `hister://` (the native apps: 0.6.0 takes both, so an app from before the rename still saves, and the apps switch to `nogon://` once 0.6.0 is live); or one listed in `SMALLWEB_ORIGINS` (Shiori's hosted pages, which reach smallweb through a `/smallweb/` route on the web server that hosts them, e.g. `https://shiori.example.ts.net`). With no `Origin`, the request is refused.
 - The body is JSON (`Content-Type: application/json`, an object) or a form. `url` is required. `title` is optional and used for http(s) only, when the page has no title of its own.
-- `only_new` (0.4.0; JSON `true`, or `1`/`true` in a form; http(s) only): save the page only if Hister holds **neither** the asked URL **nor** the final one, so an automatic save never replaces a page Hister has (its `api/add` replaces the metadata). smallweb asks `GET /api/document?url=` in Hister's own form of the URL (no fragment, no `utm`/`utm_*` parameters): for the asked URL before fetching, and for the final URL after any redirect. A page Hister holds isn't saved and counts in `/api/status`'s `hister.held`. A lookup that fails (Hister down, any answer but `200`/`404`) isn't saved either and goes in `hister.last_error`. Without `only_new` nothing is looked up, as before: Add Page replaces on purpose.
+- `only_new` (0.4.0; JSON `true`, or `1`/`true` in a form; http(s) only): save the page only if Nogon holds **neither** the asked URL **nor** the final one, so an automatic save never replaces a page Nogon has (its `api/add` replaces the metadata). smallweb asks `GET /api/document?url=` in Nogon's own form of the URL (no fragment, no `utm`/`utm_*` parameters): for the asked URL before fetching, and for the final URL after any redirect. A page Nogon holds isn't saved and counts in `/api/status`'s `nogon.held`. A lookup that fails (Nogon down, any answer but `200`/`404`) isn't saved either and goes in `hister.last_error`. Without `only_new` nothing is looked up, as before: Add Page replaces on purpose.
 - `via` (0.4.0, optional): 1 to 32 of `a-z`, `0-9` and `-`, saved as `metadata.smallweb_via` (Shiori sends `web-result`). `query` (optional): the search that found the page, whitespace collapsed, cut at 200 characters, saved as `metadata.smallweb_query`. `metadata.source` stays `smallweb`: smallweb fetched it.
-- A client shows an option that sends `only_new` only when `/api/status` has `hister.enabled` and `hister.only_new` both `true`. An older smallweb ignores the field and would replace the page.
+- A client shows an option that sends `only_new` only when `/api/status` has `nogon.enabled` and `nogon.only_new` both `true` (`hister.*` before 0.5.0; 0.5.0 sent both). An older smallweb ignores the field and would replace the page.
 - Answers `202 {"queued": true, "url": "<canonical>"}` at once; the fetch and the save happen in the background. The canonical URL:
   - gemini and gopher: as in `/api/search`;
   - http(s): lowercase scheme and host (an international name in its `xn--` form), no default port (`80`, `443`), no fragment, non-ASCII in the path and query percent-encoded.
@@ -138,7 +138,7 @@ The rest of the fetch:
 - **Politeness:** one connection at a time per host, at least 1.5 s apart.
 - **No `robots.txt`:** each save is one page its owner asked for, like a browser visit, not a crawl. smallweb never follows the page's links.
 
-What is saved: the same `POST <SMALLWEB_NOGON_URL>/api/add` with `Origin: hister://` (and, with `SMALLWEB_NOGON_TOKEN_FILE`, `X-Access-Token`: the owner's Hister token; a redirect is never followed), under the final URL (after redirects, canonical), with no `label`:
+What is saved: the same `POST <SMALLWEB_NOGON_URL>/api/add` with `Origin: nogon://` (and, with `SMALLWEB_NOGON_TOKEN_FILE`, `X-Access-Token`: the owner's Nogon token; a redirect is never followed), under the final URL (after redirects, canonical), with no `label`:
 
 ```json
 {"url": "https://example.com/notes/page", "title": "A Page",
@@ -153,10 +153,10 @@ What is saved: the same `POST <SMALLWEB_NOGON_URL>/api/add` with `Origin: hister
 - The unchanged-body dedupe holds: a body unchanged since its last save isn't sent again.
 
 Errors, per save:
-- They go in `/api/status`'s `hister.last_error` (`<time>: save <url>: <why>`) and the log, like a gemini save's.
+- They go in `/api/status`'s `nogon.last_error` (`<time>: save <url>: <why>`) and the log, like a gemini save's.
 - A refused private address is `blocked: private address` (a private vault's: `blocked: private vault address`). It is never a failure, so it doesn't turn `/api/status`'s `error` on.
 - Neither does a page that couldn't be fetched or isn't saved (a timeout, `HTTP 404`, `not saved: image/png`, `more than 5 redirects`, `the page is larger than 5 MB`).
-- Hister's `406`/`422` (its skip rules or sensitive-content check refuse the page) count as not saved, not as an error: `hister.saved` doesn't grow and `error` stays `null`.
+- Nogon's `406`/`422` (its skip rules or sensitive-content check refuse the page) count as not saved, not as an error: `nogon.saved` doesn't grow and `error` stays `null`.
 
 ## `GET /api/status` (open, for the probe)
 
@@ -164,11 +164,12 @@ Errors, per save:
 {"ok": true, "ready": true, "error": null, "version": "0.2.0", "auth": "tailscale", "socks": true,
  "sources": {"tlgs": {"last_ok": 1767225600, "last_error": null}, "kennedy": {…}, "veronica": {…}},
  "nogon": {"enabled": true, "token": true, "saved": 12, "queued": 0, "only_new": true, "held": 3, "last_error": null},
- "hister": {…the same, until the rename's stage 3 (0.5.0)…},
  "known_hosts": 7}
 ```
 
-- `ready` is always `true` once smallweb answers. `error` is `null` unless smallweb itself is broken: the data dir isn't writable, the SOCKS proxy failed twice in a row, or Hister saves failed three times in a row (Hister's own 406/422 answers don't count). A monitoring probe on this endpoint fails on it. An engine or a capsule being down is not an error: see `sources.*.last_error`.
+- `nogon` is Nogon saves: `enabled` (`SMALLWEB_NOGON_URL` is set), `token` (`SMALLWEB_NOGON_TOKEN_FILE` is set), `saved` (pages sent), `queued` (waiting to be sent), `only_new` (always `true`: this smallweb understands `only_new`), `held` (`only_new` saves left alone because Nogon had the page) and `last_error`. It was `hister` up to 0.4.1, and 0.5.0 sent both; since 0.6.0 (the rename's stage 3) only `nogon` (the landing reads `nogon`).
+
+- `ready` is always `true` once smallweb answers. `error` is `null` unless smallweb itself is broken: the data dir isn't writable, the SOCKS proxy failed twice in a row, or Nogon saves failed three times in a row (Nogon's own 406/422 answers don't count). A monitoring probe on this endpoint fails on it. An engine or a capsule being down is not an error: see `sources.*.last_error`.
 
 ## Politeness (part of the contract: callers rely on it, engines are owed it)
 

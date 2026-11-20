@@ -7,7 +7,7 @@ JSON on the board's host (`https://konbini.example.ts.net`), owner-only. Writes 
 
 **With Machiya's identity file** (`MACHIYA_IDENTITY_FILE`, [identity.md](../identity.md)) the file replaces `KANBAN_TAILNET_USERS` and the `X-Agent` test: a caller proves who it is (`Authorization: Bearer mch_…` or `mcd_…`, a Tailscale login or tagged node, a proxy header with `KANBAN_AUTH=header`, or the `machiya_session` cookie with `KANBAN_SIGNIN=1`), and the `konbini` grants decide: `read` for pages and read APIs, `write` for every change (cards, comments, claims, the board's forms), `areas` for new `area/*` lanes and new tags. No proof or a bad one is **401**, a missing grant **403**; an event's actor is the principal, and `X-Agent` stays a label. With the file the board also answers `POST /api/pair` and `GET`/`PUT /api/prefs` (404 without it). The exact fields are in `app/app.py` and `app/store.py` (`parse_note`) in [machiya-kobo/konbini](https://github.com/machiya-kobo/konbini).
 
-**Hister sign-in** (`KANBAN_AUTH=hister`, [identity.md](../identity.md#nogon-sign-in-authnogon), [nogon-login](../services/nogon-login.md)): the board asks the sign-in helper who is calling. Credentials, the first present decides: a room token (`Authorization: Bearer mht_…`: `pm`, the iOS Shortcut, Niwa, machiya-mcp; [identity.md](../identity.md#room-tokens)), `Authorization: Bearer mhs_…` (Shiori's apps), or the board's own cookie `__Host-machiya_sso_konbini` (browsers; vaultkit 0.22); until nogon-login's switch also the owner's Hister token (`X-Access-Token`, or another Bearer) and the shared `machiya_sso` cookie (after it: **401** `{"reason": "legacy-off"}`); a present but invalid one is **401**. An API call without one gets **401** `{"error": "sign in", "signin": "<the helper's sign-in address>"}`, never a redirect (the board's page follows it by navigating there); a page gets a 302. A Hister account that isn't the owner's is **403**. When sign-in is unavailable (the helper or Hister down, or Hister's user handling off) the board admits the owner's Tailscale login in `KANBAN_TAILNET_USERS` with a banner (`KANBAN_AUTH_FALLBACK=tailscale`); a signed-out caller never gets that fallback. Clients should handle the 401 now; the board gives it once a deployment switches the mode. `/healthz` stays open, and in this mode `/api/health` is answered before the sign-in check, so the probes keep working.
+**Nogon sign-in** (`KANBAN_AUTH=nogon`, formerly `hister`; [identity.md](../identity.md#nogon-sign-in-authnogon), [nogon-login](../services/nogon-login.md)): the board asks the sign-in helper who is calling. Credentials, the first present decides: a room token (`Authorization: Bearer mht_…`: `pm`, the iOS Shortcut, Niwa, machiya-mcp; [identity.md](../identity.md#room-tokens)), `Authorization: Bearer mhs_…` (Shiori's apps), or the board's own cookie `__Host-machiya_sso_konbini` (browsers; vaultkit 0.22); until nogon-login's switch also the owner's Nogon token (`X-Access-Token`, or another Bearer) and the shared `machiya_sso` cookie (after it: **401** `{"reason": "legacy-off"}`); a present but invalid one is **401**. An API call without one gets **401** `{"error": "sign in", "signin": "<the helper's sign-in address>"}`, never a redirect (the board's page follows it by navigating there); a page gets a 302. A Nogon account that isn't the owner's is **403**. When sign-in is unavailable (the helper or Nogon down, or Nogon's user handling off) the board admits the owner's Tailscale login in `KANBAN_TAILNET_USERS` with a banner (`KANBAN_AUTH_FALLBACK=tailscale`); a signed-out caller never gets that fallback. Clients should handle the 401 now; the board gives it once a deployment switches the mode. `/healthz` stays open, and in this mode `/api/health` is answered before the sign-in check, so the probes keep working.
 
 ## Read by other services
 
@@ -30,7 +30,7 @@ Field names follow the [frontmatter schema](../frontmatter.md). Konbini reads bo
 `repos` (Konbini 0.29, stage 2 of the Now page) is the card's repo list: `repos:` when the note has it, else `[repo]` when it has `repo:`, else `[]`. Names are as written; compare them case-insensitively.
 
 Readers:
-- **Shiori** maps slug ↔ path for notes it meets through Hister at `/p/<slug>` URLs. It keeps this lookup for as long as such URLs remain in Hister.
+- **Shiori** maps slug ↔ path for notes it meets through Nogon at `/p/<slug>` URLs. It keeps this lookup for as long as such URLs remain in Nogon.
 - A dashboard or any other reader may use it too; it is plain JSON.
 
 ### `GET /api/now` (Konbini 0.29, owner 2026-11-20)
@@ -50,7 +50,7 @@ The board half of Niwa's stream: `{start, end, days, now: {wip, blocked}, entrie
 
 ### `GET /api/health` (alias `GET /api/status`, the probe path every room answers)
 
-→ `{"ok", "imported", "head", "cards", "sync", "hister", "livesync", "auth"}`, for monitoring (`auth`: `tailscale` or `open`).
+→ `{"ok", "imported", "head", "cards", "sync", "nogon", "livesync", "auth"}`, for monitoring (`auth`: `tailscale` or `open`; `nogon`: the Nogon CLI's link-rot state, `ok`, an error or `off`). Konbini 0.28.0 also sends it as `hister`, the name before the rename, until Konbini's stage-3 release drops it (nothing reads it: ops, 2026-11-20).
 
 ### `GET /healthz`
 

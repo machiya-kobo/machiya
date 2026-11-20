@@ -6,7 +6,7 @@
 flowchart TB
     subgraph sources["Sources"]
         vault[("Notes vault<br/>a repository on a Git host<br/>notes folder indexed")]
-        browser["Browsers: Hister's extension,<br/>Shiori's Safari extension<br/>(pages you visit or save)"]
+        browser["Browsers: Nogon's extension,<br/>Shiori's Safari extension<br/>(pages you visit or save)"]
         other["Importers<br/>(feed-import, code-import)"]
     end
 
@@ -19,7 +19,7 @@ flowchart TB
     end
 
     subgraph engines["Engines"]
-        hister[("Hister<br/>hister.*")]
+        nogon[("Nogon<br/>nogon.*")]
         searx[("SearXNG<br/>searxng.*")]
         proxy["Optional egress proxy"]
     end
@@ -29,13 +29,13 @@ flowchart TB
     vault <-->|"ssh rw: board fields"| konbini
     vaultkit -.-> kura & niwa & konbini
 
-    kura -->|"push every note, label:vault"| hister
-    browser --> hister
-    other --> hister
-    konbini -->|"link-rot copies, reading line"| hister
-    niwa -->|"link-rot copies"| hister
+    kura -->|"push every note, label:vault"| nogon
+    browser --> nogon
+    other --> nogon
+    konbini -->|"link-rot copies, reading line"| nogon
+    niwa -->|"link-rot copies"| nogon
 
-    shiori -->|pages| hister
+    shiori -->|pages| nogon
     shiori -->|"notes (search, preview, recent)"| kura
     shiori -->|web| searx
     shiori -.->|"card link"| konbini
@@ -56,8 +56,8 @@ Solid arrows are data; dotted arrows are optional links (the service works witho
 | Board frontmatter (`board`, `next`, `priority`, `rank`, `status/*`), stub notes, `.board/events` | Konbini | Kura (card links) |
 | Garden frontmatter (`publish`, `growth`, `confidence`, `garden_pin`) | Niwa | Kura ("in the garden") |
 | The full-text note index | Kura (rebuilt from git) | Shiori |
-| `label:vault` documents in Hister | Kura (the push) | Hister's own UI and extension |
-| Pages index | Hister | Shiori, Konbini, Niwa |
+| `label:vault` documents in Nogon | Kura (the push) | Nogon's own UI and extension |
+| Pages index | Nogon | Shiori, Konbini, Niwa |
 
 ## A search in Shiori
 
@@ -65,12 +65,12 @@ Solid arrows are data; dotted arrows are optional links (the service works witho
 sequenceDiagram
     actor you as You (phone / Mac / browser)
     participant s as Shiori
-    participant h as Hister
+    participant h as Nogon
     participant k as Kura
     participant x as SearXNG
     you->>s: "docker healthcheck"
     par pages
-        s->>h: /search?q=… -label:vault (Origin: hister://)
+        s->>h: /search?q=… -label:vault (Origin: nogon://)
         h-->>s: pages + <mark> snippets
     and notes
         s->>k: /api/search?q=…&sort=relevance
@@ -102,19 +102,19 @@ flowchart LR
     room -->|"principal + grant?"| ok{{"200 / 401 / 403"}}
 ```
 
-**Or Hister's users** ([nogon-login](services/nogon-login.md), `*_AUTH=hister`): a room asks the helper beside Hister whether the caller is signed in to Hister, so one sign-in covers Hister and every room and a sign-out ends it everywhere.
+**Or Nogon's users** ([nogon-login](services/nogon-login.md), `*_AUTH=nogon`): a room asks the helper beside Nogon whether the caller is signed in to Nogon, so one sign-in covers Nogon and every room and a sign-out ends it everywhere.
 
 ```mermaid
 flowchart LR
     who["browser · Shiori · agents"] -->|"the room's own __Host- cookie, Bearer mhs_… or a room token mht_…"| room["room"]
     room -->|"POST /v1/redeem (a one-time code), GET /v1/check + X-Machiya-Room (internal)"| hl["nogon-login"]
-    hl -->|"GET /api/profile"| h[("Hister")]
+    hl -->|"GET /api/profile"| h[("Nogon")]
     room -->|"signed in / 401 / unavailable: Tailscale fallback or 503"| ok{{"200 / 401 / 503"}}
 ```
 
 - Every name is a **Tailscale Service** served by a tagged sidecar, one Service per room. Tailscale terminates TLS and adds `Tailscale-User-Login`.
 - The **tailnet policy** grants these services to the owner only. Other users (for example a household) can be granted SearXNG only, and nothing else in Machiya.
-- A service checks the header against its allow-list. Server-to-server calls in the example deployment either stay on a Docker network (Kura to Hister over a shared network, with no identity involved) or go out through the host's own tailscaled. The web server that hosts Shiori's pages works that way, so the call arrives as the owner's machine.
+- A service checks the header against its allow-list. Server-to-server calls in the example deployment either stay on a Docker network (Kura to Nogon over a shared network, with no identity involved) or go out through the host's own tailscaled. The web server that hosts Shiori's pages works that way, so the call arrives as the owner's machine.
 - Shiori's hosted pages reach the other services through same-origin routes on that web server (`/searx/`, `/konbini/`, `/kura/`), and never add or rewrite `Origin`. `/kura/` passes Kura's API only, never its reader pages ([Kura contract](contracts/kura-api.md#vaults)).
 
 ## Example deployment
@@ -128,7 +128,7 @@ flowchart TB
         sniwa["niwa"]
         skon["konbini"]
         ssearch["search · shiori"]
-        shister["hister"]
+        snogon["nogon"]
         ssearx["searxng"]
     end
     subgraph host["one Docker host"]
@@ -136,29 +136,29 @@ flowchart TB
         kon["konbini-app"]
         niwa["niwa-app"]
         web["web server (nginx)<br/>Shiori's hosted pages"]
-        hister["hister"]
+        nogon["nogon"]
         searx["searxng"]
-        net(("shared network<br/>with Hister"))
+        net(("shared network<br/>with Nogon"))
     end
     skura --> kura
     skon --> kon
     sniwa --> niwa
     ssearch --> web
-    shister --> hister
+    snogon --> nogon
     ssearx --> searx
     kura --- net
     kon --- net
     web --- net
-    hister --- net
+    nogon --- net
     web -->|"/searx/ /konbini/ /kura/ via the tailnet"| tailnet
 ```
 
-The shared Hister network is an external Docker network created by the Hister stack. Services that talk to Hister (`http://hister:4433`) join it. That's deployment wiring: each service only sees a `HISTER_URL`.
+The shared Nogon network is an external Docker network created by the Nogon stack. Services that talk to Nogon (`http://nogon:4433`) join it. That's deployment wiring: each service only sees a `<P>_NOGON_URL`.
 
 **A service that believes `Tailscale-User-Login` never shares its listening network with strangers** (the owner's rule, 2026-10-05; sweep MACH-M-5, MACH-F-9). Any container on the same Docker network can send that header. So:
 
 - machiya-mcp and smallweb each get a network of their own, shared only with their Tailscale sidecar. **Every member of that network has a pinned address**, the sidecar and the app alike: an app with a dynamic address can take the sidecar's address first when the stack restarts, and the sidecar then fails to start ("Address already in use"; a 3 h outage on 2026-10-05).
-- They name that address in `MCP_TRUSTED_PROXIES` / `SMALLWEB_TRUSTED_PROXIES`, so the header counts only from the sidecar, even though each also joins Hister's network (and smallweb the proxy's) to make its own calls.
+- They name that address in `MCP_TRUSTED_PROXIES` / `SMALLWEB_TRUSTED_PROXIES`, so the header counts only from the sidecar, even though each also joins Nogon's network (and smallweb the proxy's) to make its own calls.
 - In `tailscale` mode, a non-loopback bind without a trusted proxy (or `*_BIND_BEHIND_PROXY=1`) refuses to start.
 
 The rooms do the same through vaultkit's `check_bind` (`<P>_BIND_BEHIND_PROXY`). The reference compose ([`compose/compose.yml`](../compose/compose.yml), profiles `smallweb` and `mcp`) shows the networks and the addresses: `smallweb` is 172.31.250.0/29 with the sidecar at .2 and smallweb at .3, and `machiya-mcp` is 172.31.250.8/29 with the sidecar at .10 and machiya-mcp at .11.
@@ -167,14 +167,14 @@ The rooms do the same through vaultkit's `check_bind` (`<P>_BIND_BEHIND_PROXY`).
 
 | | |
 |---|---|
-| Kura | standalone: its own stack and clone, FTS5 search, the API, the Hister push |
+| Kura | standalone: its own stack and clone, FTS5 search, the API, the Nogon push |
 | Niwa | standalone: its own stack and read-write clone |
 | Konbini | the board only; card pages link notes to Kura |
-| Shiori | notes from Kura; pages from Hister with ` -label:vault` on every query |
+| Shiori | notes from Kura; pages from Nogon with ` -label:vault` on every query |
 | vaultkit | vendored into Kura, Niwa and Konbini |
-| nogon-login | optional, beside Hister: Hister's users as the one sign-in for the rooms (`*_AUTH=hister`) |
+| nogon-login | optional, beside Nogon: Nogon's users as the one sign-in for the rooms (`*_AUTH=nogon`) |
 | landing | optional: the stack's front door (`/`) and status page (`/status`) |
 | machiya-mcp | optional: one MCP endpoint for the rooms (board, notes, labels, garden suggestions) |
-| smallweb | optional: Gemini and Gopher search for Shiori, and page saves into Hister |
-| feed-import, code-import | optional: a feed reader's reads and stars, and your forges' repos, into Hister |
+| smallweb | optional: Gemini and Gopher search for Shiori, and page saves into Nogon |
+| feed-import, code-import | optional: a feed reader's reads and stars, and your forges' repos, into Nogon |
 | vault-mirror | optional: one shared clone of the vault for the whole stack ([principles](principles.md), 2) |

@@ -1,0 +1,151 @@
+# Using Nogon
+
+How Machiya's services use [Nogon](../services/nogon.md). Nogon is upstream code, so these are rules for the callers.
+
+## Names (Hister is now Nogon)
+
+Upstream Hister is now Nogon (v0.22.0). The owner chose on 2026-11-19 to rename everything Machiya itself calls Hister, in three stages:
+
+1. **Readers (vaultkit 0.38.0 on):** every name below is read in both spellings, and nothing that is written changes.
+   - A setting spelled with `NOGON` wins over its `HISTER` twin, even when it is empty, as upstream does with its own. The old name is logged once. Examples: `KURA_NOGON_URL` over `KURA_HISTER_URL`, `<P>_NOGON_USERS` over `<P>_HISTER_USERS`, `NOGON_LOGIN_*` over `HISTER_LOGIN_*`.
+   - `<P>_AUTH=nogon` is the same as `hister`.
+   - The room id `nogon` is the same as `hister` in `MACHIYA_ROOMS` and the account's `apps_hidden`.
+   - The helper is renamed `nogon-login`.
+2. **The switch:** deployments move to the new names.
+3. **The old names go:** the house's own room id becomes `nogon`, and writers send `Origin: nogon://`.
+   - **vaultkit 0.41.0:** `nogonauth` (`NogonAuth`, `nogon_headers`, which sends `Origin: nogon://`); `histerauth` stays one release as an alias, until 0.42.0.
+   - The house's room id is `nogon`. A stored or old `hister` (in `MACHIYA_ROOMS`, the account's `apps_hidden`, a `show_hister` cookie) is still read as `nogon`; only `nogon` is written.
+   - The old Machiya settings stop a room, naming the new one: `<P>_AUTH=hister` (use `nogon`), and a `<P>_HISTER_*` read through `names.setting()` without its `<P>_NOGON_*` twin.
+   - **The lead's other services (3b)** do the same in their own stdlib code: a `<P>_HISTER_*` set without its `<P>_NOGON_*` twin stops the start and names the new one, and every call to Nogon sends `Origin: nogon://` (smallweb 0.6.0, shiori-ai 0.4.0, shiori-feed 0.4.0, feed-import 0.3.0, code-import 0.3.0; nogon-login, landing, machiya-mcp and the rooms at their own stage-3 releases). smallweb's `/api/status` reports only `nogon` since 0.6.0.
+   - **Still taken from old clients until 3c** (every device's Shiori app reads `nogon`): smallweb's `POST /api/save` takes `Origin: hister://` beside `nogon://`, and shiori-feed's `/shiori/api/status` keeps `hister` beside `nogon`.
+
+**What stays:** the names upstream Nogon defines. Its session cookie is still `hister`. `X-Access-Token` and the API paths don't change. Its own `HISTER__*` settings still work, though it prefers `NOGON__*`. Nogon v0.22 accepts both `Origin: hister://` and `nogon://`; vaultkit's callers send `nogon://` since 0.41, and the rest follow at their stage-3 release.
+
+## Every call
+
+- **Send `Origin: nogon://`** on POSTs (without it: 403; Nogon v0.22 and later, which also take the old `hister://`). GETs to `/search` need it unless they ask for JSON (`format=json` or `Accept: application/json`, allowed since v0.20.0); sending it always is simplest.
+- **Send the owner's Nogon token** as `X-Access-Token` on every call, read from a file (`<NAME>_NOGON_TOKEN_FILE`; machiya-mcp: `NOGON_TOKEN_FILE`; formerly `HISTER` in both), never from the environment, argv, a URL or a log. A Nogon without users ignores it, so send it from now on: once user handling is on ([Sign-in](#sign-in)) every call without it is refused. Re-read the file when it changes: regenerating the token (Nogon keeps one per user) replaces it for every caller at once. Unset sends none.
+- **A 403 means "no or an invalid credential"** once users are on (Nogon answers 403 with an empty body, never 401). Don't retry it; say so.
+- **Never change ownership.** The owner's token is an admin's: never send `X-Nogon-Public`, `X-Nogon-Target-User-ID`, or `changes.user_id` in `/api/update`. Every document belongs to the owner.
+- **The `nogon` CLI** (`hister` up to v0.21, still a link in v0.22) gets the token as `NOGON__APP__ACCESS_TOKEN` (v0.22 also reads `HISTER__APP__ACCESS_TOKEN`) in its subprocess's environment only (not `-t`, which puts it in argv).
+- **Probes use `GET /health`** (open, no token), never `/api/stats` or a page, which turn 403 when users are on.
+- In the reference compose, services reach Nogon over a private Docker network (`http://nogon:4433`); devices use `https://nogon.example.ts.net`. A redirect from Nogon is never followed with the token.
+- **Never `nogon index --force` (formerly `hister index`) a URL Nogon already has.** It replaces the imported metadata (tags, archive link). Check with `url:"…"` first.
+- `POST /api/add` with only a URL does **not** fetch the page. Fetch with the `nogon` CLI (`nogon -u <server> index --label <l> <url>`), or send the text yourself.
+- Avoid your backup window if Nogon is stopped for backups: calls hang while it is down.
+
+## Endpoints used
+
+| Call | Who |
+|---|---|
+| `GET /search?q=<query>` (Nogon query language: `label:`, `url:"…"`, `added:`; exclude a label with ` -label:x` appended to the query (works server-side with correct totals: `* -label:vault` = everything minus the notes). Nogon has no `NOT` operator (`NOT` is a plain word) and no `exclude_label` param. `metadata.source:vault` is a query field too, e.g. `-label:vault -metadata.source:vault`. **Every query except the Code area's ends ` -metadata.source:code`** too ([Code documents](#code-documents-metadatasourcecode))) | Shiori, Konbini (reading line, link rot), landing (newest pages), machiya-mcp (labels and collections: the label census, relabel dry runs; every query ends ` -label:vault -metadata.source:vault -metadata.source:code -label:konbini`) |
+| `POST /api/add` `{url, title, text, html?, label, added?, metadata}` | Kura (the note push), code-import (`code`, always with `html`), feed-reader and other importers, Shiori (saves). New documents carry Nogon's `metadata.source` convention: `vault` (Kura), `code` (code-import), the importer's own name (with its own `<name>_*` keys), `shiori`. A metadata value a query should match is [one lowercase token](#metadata-values). |
+| `POST /api/delete` `{"query": "url:\"…\""}` | Kura (a note deleted, renamed or moved), code-import (a repo, doc, issue or release gone; only its own documents) |
+| `GET /api/document?url=<url>` | machiya-mcp (`pages_set_label` checks the page is not a note, card or code document), code-import (whose is this URL?), feed-import (is it known?) |
+| `GET /health` | probes (open: 200 `OK` while Nogon runs) |
+| `GET /api/profile` | nogon-login only ([Sign-in](#sign-in)) |
+| `POST /api/label` `{url, label}`, `POST /api/update` `{query, changes: {label}}` | machiya-mcp (`pages_set_label`, `pages_relabel`; one exact `url:"…"` match per update) |
+| `GET /api/rules`, `POST /api/add_alias`, `POST /api/delete_alias` (form posts) | machiya-mcp (`collections_*`: only `@` aliases whose value is purely labels) |
+| `POST /mcp` (Nogon's MCP, below) | nobody in Machiya since 2026-10-05 (AI clients read pages through machiya-mcp's `pages_search` / `pages_read`; the machiya plugin denies Nogon's MCP tools) |
+| `GET /preview?id=<url>` | links to Nogon's saved copy |
+| `nogon index` (CLI) | Konbini/Niwa link rot (fetch and store a page) |
+
+## The note push (`label:vault`)
+
+Kura pushes every note in the default vault (`personal/`), and only there; other vaults never go in. Each note becomes one document:
+
+```json
+{"url": "https://kura.example.ts.net/n/Projects/Example-Project", "title": "Example Project", "text": "<body, no frontmatter>",
+ "html": "<rendered>", "label": "vault", "added": 1764547200,
+ "metadata": {"source": "vault", "vault_path": "personal/Projects/Example-Project.md", "tags": ["…"], "vault_published": false,
+              "vault_card": "example-project", "ignore_skip_rules": true}}
+```
+
+- Only new or changed notes are pushed; a table remembers each URL and content hash. A deleted, renamed or moved note's document is deleted.
+- `ignore_skip_rules` is needed because the skip rules refuse `*.example.ts.net` on purpose, so the extension never captures Konbini, Niwa or Kura pages.
+- Every note points at its Kura page, project notes included (they do not point at Konbini's `/p/<slug>`); `vault_card` keeps the slug in the metadata.
+- Service-owned keys carry the service's prefix (`vault_*`, Nogon's convention).
+- Notes stay in Nogon permanently, so Nogon's own UI and the extension find them. Shiori reads notes from Kura and appends ` -label:vault` to every Nogon query.
+
+## Aliases
+
+`@pages` = `* -label:vault -metadata.source:vault -metadata.source:code`, `@notes` = `label:vault` and `@code` = `metadata.source:code` (created in Nogon's alias settings), so Nogon's own UI, extension, TUI and MCP split pages, notes and code the way Shiori does. They sit beside your own topic aliases. **Shiori hides any alias whose expansion names the vault or the code** (`label:vault`, `metadata.source:vault` or `metadata.source:code`) from its collections and reserves the collection names "notes", "pages" and "code", so these aliases never appear as Shiori collections; machiya-mcp never lists, creates, changes or removes them.
+
+## Metadata values
+
+**A metadata value a query should match must be one lowercase token** (tested on v0.20.0, 2026-10-04): letters, digits and `_` only. Nogon tokenizes a metadata value when it indexes it (a Unicode word split, then lowercase) but queries `metadata.<key>:<value>` with one unanalyzed term, so `/`, `-`, `.` and `:` split a value into words no query can match whole: `machiya-kobo/kura` never matches, `machiya_kobo__kura` does. A JSON boolean is indexed as a bool and isn't matched by `metadata.x:true`: send `"true"`. Values only for display may be anything. This holds for every service's keys.
+
+## Code documents (`metadata.source:code`)
+
+Background: [services/code-import.md](../services/code-import.md).
+
+[code-import](../services/code-import.md) puts the owner's Forgejo and GitHub repos into Nogon: repo cards, READMEs and docs, issues, PRs and releases. Each one is a document at its real forge URL:
+
+```json
+{"url": "https://github.com/machiya-kobo/kura/pull/3", "title": "Fix the tag page · machiya-kobo/kura#3",
+ "html": "<rendered, escaped>", "text": "…", "added": 1791021600,
+ "metadata": {"source": "code", "client": "code-import", "ignore_skip_rules": true, "code_host": "github",
+              "code_repo": "machiya_kobo__kura", "code_repo_name": "machiya-kobo/kura", "code_kind": "pr",
+              "code_state": "merged", "code_private": "true", "code_updated": 1791021600}}
+```
+
+- **The keys:**
+  - `code_host`: `forgejo|github`;
+  - `code_repo`: `owner__repo`, lowercase, every character other than a-z and 0-9 turned into `_`;
+  - `code_kind`: `repo|readme|doc|issue|pr|release`;
+  - `code_state`: `open|closed|merged`;
+  - `code_private`: `"true"|"false"`;
+  - for display only: `code_repo_name`, `code_number`, `code_path`, `code_tag`, `code_twin_url`, `code_redacted`.
+  - No label.
+- **Every other Nogon query adds ` -metadata.source:code`**, next to ` -label:vault -metadata.source:vault`:
+  - Shiori's Pages, All, counts and collections;
+  - machiya-mcp's suffix and the machiya plugin's skills;
+  - landing's newest pages;
+  - Konbini's reading line.
+  Only the Code area asks for `metadata.source:code`.
+- **Aliases:** `@code` and `@pages` as in [Aliases](#aliases).
+- **Ownership.** code-import replaces or deletes a document only when Nogon says its `metadata.source` is `code`. A URL the owner browsed first stays the owner's page. Other writers keep the existing rule: never re-index a URL Nogon already holds.
+- **Secrets.** Code documents are always sent with `html`, because Nogon's sensitive-content check reads only `html` for a web document. They go through code-import's own scan first. `skip_sensitive_check` is never set.
+- **AI: on-device only, like notes:**
+  - Shiori's AI treats a code result as a note;
+  - `shiori-ai` refuses `metadata.source:code`, as it refuses `vault`;
+  - **AI clients never get code or notes** (decided 2026-10-05): they read pages only through machiya-mcp (`pages_search`, `pages_read`), which adds the exclusions to every query and drops any result that is a note, a card or a code document, failing closed. Nogon's own MCP returns code to any client with the owner's token, so the machiya plugin denies its tools.
+
+## Nogon's MCP
+
+Nogon has its own MCP endpoint. **AI clients don't use it** (decided 2026-10-05: "code and notes stay out of AI", enforced rather than a prompt rule; sweep MACH-M-4, MACH-F-10). Its `search` and `get_preview` return vault notes and code documents to any client with the token, and a query's exclusions are only as good as the model that writes them. AI clients read pages through **machiya-mcp's `pages_search` and `pages_read`** (machiya-mcp 0.8.0):
+
+- every query ends ` -label:vault -metadata.source:vault -metadata.source:code -label:konbini`;
+- every result is checked again, and a note, card, code document, room host or unknown shape is dropped (`withheld: N`);
+- `pages_read` looks the document up and refuses anything that isn't a page;
+- the Nogon token stays on the server.
+
+The machiya plugin (0.3.0) no longer connects Nogon's MCP, and its `install.sh` denies `mcp__plugin_machiya_hister__*` and `mcp__hister__*`. Why this design and not a filtering proxy: it reuses Nogon's REST JSON, which machiya-mcp already parses and tests, and there is no MCP protocol to proxy (sessions, SSE, version negotiation). If a filter fails to parse an answer, the result is dropped.
+
+What follows describes Nogon's MCP for anyone who connects it outside Machiya (tested with v0.20.0).
+
+- **`POST /mcp`**, Streamable HTTP with plain JSON replies (protocol 2025-06-18; no session, `GET /mcp` is 405). It is not CSRF-guarded, so it needs **no `Origin`**.
+- **Tools, all read-only:** `search` (`query` in the query language above, `limit` up to 50, `date_from`/`date_to`, `fields` such as `label`, `domain`, `text`), `get_preview` (one document by exact URL: its whole text, rendered HTML and metadata, **no paging**), `get_history` (visits and opened results). Results are `structuredContent` with the page fields under `untrusted_content`.
+- Nogon's `search` returns vault notes and code documents mixed with pages unless the query starts `@pages`. That's why AI clients don't get it (above).
+- **`get_history` is denied** on every client: browsing history stays out of AI context. The machiya plugin's `install.sh` writes a Claude Code deny rule for every name the tool can have (`mcp__plugin_machiya_hister__get_history`, `mcp__hister__get_history`), which hides it from the model. Another client (the desktop app through a local bridge, say) needs its own way to turn it off.
+- **Auth.** Without users the tailnet grant on Nogon's service is the gate. With Nogon's user handling on, every call needs a user's personal token, `X-Access-Token: <token>` (or `Authorization: Bearer <token>`), the owner's for the owner's documents. Nogon keeps **one token per user**: regenerating it replaces it for every client at once. Configure clients with the header now; a Nogon without users ignores it.
+- Nogon's `search` also returns up to 20 results the owner opened from Nogon's own list for exactly the same query text (`search_history` records); they are not filtered by label.
+
+## Sign-in
+
+With `app.user_handling: true` Nogon has users, and [nogon-login](../services/nogon-login.md) makes a Nogon sign-in count in the rooms. What a caller or a room must know:
+
+- **Who am I:** `GET /api/profile` with a session cookie, `X-Access-Token` or `Authorization: Bearer` answers `{"user_id", "username", "is_admin"}`, and 403 without a valid credential. **With user handling off it answers 200 with an empty body to anyone:** a bare 200 is never "signed in". Only nogon-login calls it; rooms ask the helper.
+- **The helper's answers** (`GET /v1/check` on its internal port, with `X-Machiya-Session: mhs_…|mhr_…|mht_…` or `X-Access-Token`, and the asking room's `X-Machiya-Room: <origin>`): `200 {"username", "user_id", "via": "session"|"token", "kind", "room"}`; `401 {"reason": "signed-out"|"wrong-room"|"legacy-off"}` (never fall back to another identity on this); `503 {"reason": "hister-unavailable"|"user-handling-off"}` (a room may fall back to its Tailscale identity, or refuse). `POST /v1/redeem` trades a room's one-time code for its room session; `POST /v1/signout` ends a session everywhere; `GET /healthz` is 503 unless the helper and Nogon are both fine.
+- **The cookies** (nogon-login 0.3.0): the helper's `__Host-machiya_sso=mhs_…` on Nogon's host and each room's `__Host-machiya_sso_<room>=mhr_…` on the room's host are opaque, host-only, and mean nothing to Nogon: `nogon.*` never accepts them. The old `machiya_sso` on the shared cookie domain is set only while `NOGON_LOGIN_LEGACY` has `domain-cookie`. Nogon's own session cookie (`hister`) stays host-only on Nogon's host.
+- **Nogon's token belongs to Nogon's callers** (Kura's push, the rooms' own Nogon calls, importers, scripts). It is never a room's credential once `NOGON_LOGIN_LEGACY=none`: rooms and tools take room tokens (`mht_…`, [identity.md](../identity.md#room-tokens)) instead, which open only the rooms they name and never Nogon.
+- **Behind a proxy:** Nogon re-sends `Set-Cookie: hister=<session>` on every signed-in answer (its sliding expiry). A proxy that adds a Nogon session for the browser (the hosted pages' nginx with `auth_request`) must drop it: `proxy_hide_header Set-Cookie;`.
+- **Rooms in `AUTH=nogon`** ([identity.md](../identity.md#nogon-sign-in-authnogon)) accept their own cookie, `Authorization: Bearer mhs_…` (Shiori's apps), a room token (`Bearer mht_…`) and, until the switch, the shared cookie and the owner's Nogon token; an API call without one gets `401 {"error": "sign in", "signin": "<the helper's sign-in address>"}`, which a page follows by navigating there.
+
+## What callers must never do
+
+- **Nogon's per-post social extractors are on, behind the skip rules** (`extractors.twitter`, `mastodon` and `bluesky` `enable: true`, [config/nogon/config.yml](../../config/nogon/config.yml)). X, Bluesky and the main Mastodon servers stay in the skip rules, so automatic history never reaches an extractor; an explicit save reaches one with `metadata.ignore_skip_rules: true` (Shiori's share sheet, Shortcuts, Linux `shiori save`; never automatic capture). They stayed off until Shiori 0.5.7 stopped linking stored `javascript:` addresses (sweep SHIO-1): the Mastodon extractor stores permalinks exactly as a page wrote them, so every client must keep refusing non-web schemes. Decided 2026-10-05.
+
+- SearXNG never queries Nogon.
+- No Nogon result, copy or `private_url` appears on gemini, gopher or the public garden export. Those read only `archive_url` (Wayback).
+- Shiori's AI features never summarize a note: they refuse by host (`kura.`, `konbini.`, `niwa.`) and by label `vault`.

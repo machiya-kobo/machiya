@@ -4,11 +4,11 @@
 - a reader (three columns on wide screens: folders, notes, preview; one column plus a tab bar on phones)
 - full-text search
 - a JSON API that [Shiori](https://github.com/machiya-kobo/shiori) uses for notes
-- the push of every note into Hister
+- the push of every note into Nogon
 
 - **URL:** `https://kura.example.ts.net` (for example its own Tailscale Service). Only you can read it.
 - **Repo:** [machiya-kobo/kura](https://github.com/machiya-kobo/kura)
-- **Runs standalone:** its own stack, its own https clone (read-only credentials), FTS5 search, the API, and the Hister push.
+- **Runs standalone:** its own stack, its own https clone (read-only credentials), FTS5 search, the API, and the Nogon push.
 
 ## Pages
 
@@ -23,7 +23,7 @@
 | `/a/<image>` | a vault image |
 
 - Kura never lists or serves `Templates/`.
-- The note URL `https://kura…/n/<path without .md>` is **stable**. Hister documents, Shiori's history and marks, and other notes all key on it.
+- The note URL `https://kura…/n/<path without .md>` is **stable**. Nogon documents, Shiori's history and marks, and other notes all key on it.
 
 ## API
 
@@ -44,8 +44,8 @@ See [contracts/kura-api.md](../contracts/kura-api.md): `/api/search`, `/api/note
 | `KURA_USERS` | — | allowed `Tailscale-User-Login`s, comma-separated. `*` = anyone; unset = nobody |
 | `KURA_PUBLIC_URL` | from `Host` | the base for URLs in API answers. An origin, never a path (`https://kura.example.ts.net`): Kura refuses to start otherwise, because clients tell a work note by `/v/` at the start of its path |
 | `KURA_NIWA_URL`, `KURA_KONBINI_URL` | — | links to the other apps ("in the garden", "card on Konbini", the header apps) |
-| `KURA_HISTER_URL` | — | push every note into Hister as `label:vault` (needs `KURA_PUBLIC_URL`) |
-| `KURA_HISTER_TOKEN_FILE` | — | your Hister token, sent as `X-Access-Token` with the push ([contracts/hister.md](../contracts/hister.md#every-call)) |
+| `KURA_NOGON_URL` | — | push every note into Nogon as `label:vault` (needs `KURA_PUBLIC_URL`). Formerly `KURA_HISTER_URL`, likewise `_TOKEN_FILE` and `_USERS` (Hister is now Nogon) |
+| `KURA_NOGON_TOKEN_FILE` | — | your Nogon token, sent as `X-Access-Token` with the push ([contracts/nogon.md](../contracts/nogon.md#every-call)) |
 | `KURA_VAULTS` | — | more vaults beside the default one, at `/v/<name>/…` (private unless `+shared`) |
 | `MACHIYA_IDENTITY_FILE`, `MACHIYA_COOKIE_DOMAIN`, `MACHIYA_SSO_COOKIE`, `MACHIYA_ROOMS` | — | shared with every Machiya app: the identity file ([identity.md](../identity.md)), the shared cookie domain, the sign-in cookie's name (`machiya_sso`), the Rooms menu |
 | `KURA_DB` | `/data/kura.sqlite3` | the push log (URL + hash per note) |
@@ -57,7 +57,7 @@ See [contracts/kura-api.md](../contracts/kura-api.md): `/api/search`, `/api/note
 | `tailscale` | the `Tailscale-User-Login` a proxy sets, checked against `KURA_USERS` |
 | `open` | anyone; no check. Bind to `127.0.0.1` only |
 | `header` | your proxy's login header (`KURA_AUTH_HEADER`), with an identity file |
-| `hister` | Hister's users through [nogon-login](nogon-login.md): `KURA_AUTH_URL`, `KURA_AUTH_SIGNIN_URL`, `KURA_HISTER_USERS`, `KURA_AUTH_FALLBACK` ([identity.md](../identity.md#nogon-sign-in-authnogon)) |
+| `nogon` | Nogon's users through [nogon-login](nogon-login.md): `KURA_AUTH_URL`, `KURA_AUTH_SIGNIN_URL`, `KURA_NOGON_USERS`, `KURA_AUTH_FALLBACK` ([identity.md](../identity.md#nogon-sign-in-authnogon)). Formerly `hister` |
 
 [Kura's settings page](https://github.com/machiya-kobo/kura/blob/main/docs/settings.md) has every setting.
 
@@ -65,4 +65,4 @@ See [contracts/kura-api.md](../contracts/kura-api.md): `/api/search`, `/api/note
 
 - Read-only: Kura never writes to the vault.
 - Kura owns browsing by folder, tag and backlink. Shiori links to `/t/<tag>` instead of building its own.
-- Kura has its own full-text search (SQLite FTS5). It doesn't depend on Hister to find notes.
+- Kura has its own full-text search (SQLite FTS5). It doesn't depend on Nogon to find notes.

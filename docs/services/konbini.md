@@ -17,7 +17,7 @@
 - Board edits change frontmatter lines only. Konbini commits them under a configurable author in batches, after about 2 minutes idle, then pushes.
 - Events go to `.board/events/*.jsonl` in the vault repo.
 - Calendar, roundups (day, week, month, year), the stream, writing kits and post tracking for the blog.
-- Link rot for links in card notes: Wayback, an optional cold archive, and Hister copies (only you see them; modern pages only). [Niwa](https://github.com/machiya-kobo/niwa) checks published notes itself.
+- Link rot for links in card notes: Wayback, an optional cold archive, and Nogon copies (only you see them; modern pages only). [Niwa](https://github.com/machiya-kobo/niwa) checks published notes itself.
 - "Needs a look" shows the health of an optional vault sync bridge.
 
 ## API

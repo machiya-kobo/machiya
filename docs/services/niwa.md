@@ -34,7 +34,7 @@ Every page is modern HTML5.
 |---|---|
 | [Konbini](https://github.com/machiya-kobo/konbini) | no column badges, no "in bloom", the stream shows only the garden half (planted, tended, stages, suggestions, dead links); the gemini and gopher streams always show only that half |
 | [Kura](https://github.com/machiya-kobo/kura) | no links for you to the full note |
-| Hister | no private link copies, no reading line |
+| Nogon | no private link copies, no reading line |
 
 ## What is served, and what is public
 
@@ -55,7 +55,7 @@ Options:
 - `NIWA_PUBLIC_NOINDEX=1` keeps search engines out.
 - `NIWA_PUBLIC_BIND` binds the public port somewhere other than `NIWA_BIND`.
 
-The public site serves the published notes, their tags and images, the stream of garden events, search and `/feed.xml`. It has no queue, settings, sign-in or writes, and nothing from Konbini, Kura or Hister. How it treats identity: [identity.md](../identity.md#security-notes).
+The public site serves the published notes, their tags and images, the stream of garden events, search and `/feed.xml`. It has no queue, settings, sign-in or writes, and nothing from Konbini, Kura or Nogon. How it treats identity: [identity.md](../identity.md#security-notes).
 
 Before you turn it on:
 - A published note whose scan has errors is held back on every channel (web, public, Gemini, Gopher, feed) until you acknowledge it on the note's page.
@@ -66,10 +66,10 @@ Before you turn it on:
 ## Settings
 
 - `NIWA_REPO_URL` (ssh, read-write; `GIT_SSH_COMMAND` for the key), `NIWA_REPO_SUBDIR`, `NIWA_POLL`
-- `NIWA_AUTH` (`tailscale`, `open`, `header` or `hister`, as [Kura's](kura.md#settings)), `NIWA_USERS`, `NIWA_BIND_BEHIND_PROXY`
+- `NIWA_AUTH` (`tailscale`, `open`, `header` or `nogon`, formerly `hister`, as [Kura's](kura.md#settings)), `NIWA_USERS`, `NIWA_BIND_BEHIND_PROXY`
 - `NIWA_PUBLIC_URL`, `NIWA_HOST`
 - `NIWA_KONBINI_URL`, `NIWA_KURA_URL`
-- `NIWA_HISTER_URL`, `NIWA_HISTER_TOKEN_FILE`, `NIWA_HISTER_PUBLIC`, `NIWA_COLD_MAP`
+- `NIWA_NOGON_URL`, `NIWA_NOGON_TOKEN_FILE`, `NIWA_NOGON_PUBLIC`, `NIWA_COLD_MAP` (formerly `NIWA_HISTER_*`)
 - `NIWA_ARCHIVE` (`wayback` | `none`), `NIWA_DB`
 
 [Niwa's settings page](https://github.com/machiya-kobo/niwa/blob/main/docs/settings.md) has the full table.

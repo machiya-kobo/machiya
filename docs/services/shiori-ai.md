@@ -11,8 +11,8 @@ Summarize a saved page, or answer a web search, from [Shiori](https://github.com
 | | Summarize | AI Answer |
 |---|---|---|
 | **Call** | `POST /shiori/ai/summarize {url, refresh}` | `POST /shiori/ai/answer {q, refresh}` |
-| **Reads** | Hister's stored copy of the page (`/api/preview`) | SearXNG's first 8 web results: titles and snippets only |
-| **Never** | fetches the page; sends a note, code or a local file | fetches a page; reads Hister; takes Hister syntax (`label:`, `url:`, `metadata.`) |
+| **Reads** | Nogon's stored copy of the page (`/api/preview`) | SearXNG's first 8 web results: titles and snippets only |
+| **Never** | fetches the page; sends a note, code or a local file | fetches a page; reads Nogon; takes Nogon syntax (`label:`, `url:`, `metadata.`) |
 | **Answers** | a sentence and two to four points | two sentences and up to three points, citing `[1]`, `[2]` |
 | **Cache** | per page and capture | 24 hours per search |
 
@@ -22,31 +22,31 @@ Summarize a saved page, or answer a web search, from [Shiori](https://github.com
 flowchart LR
     s["Shiori's hosted page"] -->|"POST /shiori/ai/* (same origin)"| p["proxy with sign-in"]
     p --> a["shiori-ai<br/>caps · cache"]
-    a -->|"/api/preview · Origin: hister://"| h["Hister"]
+    a -->|"/api/preview · Origin: nogon://"| h["Nogon"]
     a -->|"/search?format=json"| x["SearXNG"]
     a -->|"Messages API · key from a file"| c["Anthropic"]
 ```
 
 ## Your notes, code and files stay home
 
-- A page on a note host (`SHIORI_AI_NOTE_HOSTS`: `kura`, `konbini`, `niwa`), or any address that isn't http(s) (Hister's local files are `file://`), is refused before Hister is even asked.
+- A page on a note host (`SHIORI_AI_NOTE_HOSTS`: `kura`, `konbini`, `niwa`), or any address that isn't http(s) (Nogon's local files are `file://`), is refused before Nogon is even asked.
 - A page labeled `vault`, with `metadata.source` `vault` or `code`, or of type `local`, is refused after.
 - AI Answer reads only SearXNG's web results, and drops any on a note host.
 - The log has counts: never a URL, a search, a title or text.
 
 ## Who may use it
 
-The same gate as [shiori-feed](shiori-feed.md) (`SHIORI_AI_AUTH`: `tailscale`, `proxy` or `open`), then a same-origin check: only Shiori's own page may post. **Room tokens** (0.2.0), as [shiori-feed](shiori-feed.md) takes them: `SHIORI_AI_AUTH_URL`, `SHIORI_AI_PUBLIC_URL` and `SHIORI_AI_HISTER_USERS`. A request a room token lets in skips the same-origin check, since no other site's page can send one; notes, code and local files are refused all the same.
+The same gate as [shiori-feed](shiori-feed.md) (`SHIORI_AI_AUTH`: `tailscale`, `proxy` or `open`), then a same-origin check: only Shiori's own page may post. **Room tokens** (0.2.0), as [shiori-feed](shiori-feed.md) takes them: `SHIORI_AI_AUTH_URL`, `SHIORI_AI_PUBLIC_URL` and `SHIORI_AI_NOGON_USERS`. A request a room token lets in skips the same-origin check, since no other site's page can send one; notes, code and local files are refused all the same.
 
 The caps (`SHIORI_AI_DAILY_REQUESTS`, 100; `SHIORI_AI_DAILY_INPUT_TOKENS`, 2,000,000; both per UTC day) and a per-minute limit bound the bill.
 
 ## Deploying it
 
 - **Compose:** the `shiori` profile in the reference compose ([compose/compose.yml](../../compose/compose.yml)).
-- **By hand:** the image built from `stack/shiori-ai/`, a non-root user, a read-only root, 128 MB, a `/data` volume, on Hister's network, with egress to `api.anthropic.com`, and:
+- **By hand:** the image built from `stack/shiori-ai/`, a non-root user, a read-only root, 128 MB, a `/data` volume, on Nogon's network, with egress to `api.anthropic.com`, and:
   - `SHIORI_AI_KEY_FILE`: an Anthropic key of its own, with a spend limit, in a tmpfs file;
-  - `SHIORI_AI_HISTER_URL`, `SHIORI_AI_HISTER_TOKEN_FILE`, `SHIORI_AI_SEARXNG_URL` (the `json` format on);
+  - `SHIORI_AI_NOGON_URL`, `SHIORI_AI_NOGON_TOKEN_FILE`, `SHIORI_AI_SEARXNG_URL` (the `json` format on). Formerly `SHIORI_AI_HISTER_*`: since 0.4.0 an old name on its own stops the start, naming the new one;
   - the gate's settings.
-- **Routes:** on the web server that serves Shiori's pages, `/shiori/ai/` to shiori-ai behind its sign-in, with `Host` set to the page's own host. `/shiori/ai/status` and `/shiori/ai/healthz` may skip the sign-in. When shiori-ai is down, answer JSON 503 there: never fall through to Hister.
+- **Routes:** on the web server that serves Shiori's pages, `/shiori/ai/` to shiori-ai behind its sign-in, with `Host` set to the page's own host. `/shiori/ai/status` and `/shiori/ai/healthz` may skip the sign-in. When shiori-ai is down, answer JSON 503 there: never fall through to Nogon.
 - **Shiori's build:** `SHIORI_AI=1`, so the pages offer it.
 - **Monitoring:** probe `/healthz` (alive) or `/api/status` (`ok` turns false when the key file holds no key, or once three requests in a row failed at the engine or SearXNG). `/api/changelog` serves this service's CHANGELOG. Neither needs a login. The [landing page](landing.md) shows "AI on · N left today" from `status`.

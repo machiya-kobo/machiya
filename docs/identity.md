@@ -177,7 +177,7 @@ then start Kura as [its README](https://github.com/machiya-kobo/kura#quickstart)
 
 ## Nogon sign-in (`AUTH=nogon`)
 
-Formerly `AUTH=hister` with `<P>_HISTER_USERS`: rooms on vaultkit 0.41 or later refuse to start on the old names, and say the new ones ([the rename](contracts/hister.md#names-hister-is-now-nogon)).
+Formerly `AUTH=hister` with `<P>_HISTER_USERS`: rooms on vaultkit 0.41 or later refuse to start on the old names, and say the new ones ([the rename](contracts/nogon.md#names-hister-is-now-nogon)).
 
 A room mode **without the identity file**: the room asks [nogon-login](services/nogon-login.md) whether the caller is signed in to Nogon, so one sign-in (password, or Nogon's OIDC provider such as tsidp) covers Nogon and every room, and a sign-out anywhere ends it everywhere within 30 seconds. One owner: everyone admitted is the owner, as with the Tailscale gate.
 
@@ -219,7 +219,7 @@ Each room keeps a cookie of its own, set by the room for its host alone. One sig
 
 | Cookie | Host | Holds | Set by |
 |---|---|---|---|
-| `__Host-machiya_sso` | Hister's (the helper's) | the helper's browser session `mhs_…` | nogon-login |
+| `__Host-machiya_sso` | Nogon's (the helper's) | the helper's browser session `mhs_…` | nogon-login |
 | `__Host-machiya_sso_<room>` (`kura`, `niwa`, `konbini`, `landing`; `shiori` on the hosted pages' hosts) | the room's | a room session `mhr_…`, good in that room only | the room, from a one-time code |
 | `__Host-machiya_sso_<room>_state` | the room's | the nonce of a trip to the helper (10 minutes) | the room |
 | `__Host-machiya_sso_<room>_try`, `…_out` | the room's | the loop guard (30 s); the deliberate sign-out marker (30 days) | the room |
@@ -229,7 +229,7 @@ All are `Secure; HttpOnly; SameSite=Lax; Path=/` with **no `Domain`**. The `__Ho
 
 **The trip.**
 1. A page without the room's cookie goes to `<helper>/machiya/signin?return=<page>&state=<SHA-256 of a nonce>`. The nonce stays in the room's own `…_state` cookie.
-2. The helper knows the browser (Hister's cookie, its own `__Host-machiya_sso`, the automatic provider, or its page). It sends the browser to `<room>/machiya/callback?code=mhc_…`.
+2. The helper knows the browser (Nogon's cookie, its own `__Host-machiya_sso`, the automatic provider, or its page). It sends the browser to `<room>/machiya/callback?code=mhc_…`.
 3. The room (vaultkit's `resolve`, no room code) trades the code over the internal network: `POST /v1/redeem` with `X-Machiya-Code`, `X-Machiya-Room: <its origin>` and `X-Machiya-State: <the nonce>`.
 
 **The code's limits:**
@@ -242,19 +242,19 @@ Anything else shows the sign-in page with a link, never a loop. The answer is a 
 
 **Checks.** Every check names the room (`X-Machiya-Room`), so a room session copied into another room is refused (`401 wrong-room`). A room may accept the sessions of other origins it lists in `<P>_AUTH_ACCEPT_ORIGINS`: Shiori's hosted pages, whose nginx passes their own room cookie on to Kura and Konbini.
 
-**Sign-out** in any room ends the helper session and Hister's, and with them every room session and code made from them. The other rooms follow within their 30-second cache.
+**Sign-out** in any room ends the helper session and Nogon's, and with them every room session and code made from them. The other rooms follow within their 30-second cache.
 
 ### Room tokens
 
-**For callers that aren't a browser or a Shiori app,** in place of Hister's raw owner token:
+**For callers that aren't a browser or a Shiori app,** in place of Nogon's raw owner token:
 - pm, machiya-mcp, landing, Niwa→Konbini, scripts, the Firefox extension;
 - also **machiya-mcp and smallweb themselves**, which take one beside the Tailscale header (`MCP_AUTH_URL`, `SMALLWEB_AUTH_URL`), for an agent on a tagged machine with no Tailscale login.
 
 **What a token is:**
 - `mht_` and 43 characters, made by nogon-login;
 - the helper keeps it only as a hash, under a name you give it;
-- it acts as one Hister user;
-- it opens **only the rooms it names** (their origins), never Hister. A leak in one room gives no one Hister.
+- it acts as one Nogon user;
+- it opens **only the rooms it names** (their origins), never Nogon. A leak in one room gives no one Nogon.
 
 **Make one** on the helper's sessions page (Room Tokens: a name, tick the rooms; it is shown once), or where the helper runs:
 
@@ -276,26 +276,26 @@ Send it as `Authorization: Bearer mht_…`, from a file, never in a URL or argv.
 | Niwa → Konbini | `NIWA_KONBINI_TOKEN_FILE` = a room token | konbini |
 | landing's owner reads | `LANDING_TOKEN_FILE` = a room token | kura, niwa, konbini |
 | an agent → machiya-mcp, smallweb | a room token (the machiya plugin's `MACHIYA_TOKEN_FILE`) | machiya-mcp, smallweb |
-| everything that calls **Hister** (Kura's push, the rooms' own Hister calls, importers, scripts) | Hister's token, unchanged | Hister |
-| Claude Duet → the public connector (`mcp-public`, 2026-10-28) | an OAuth access token (`mho_`, an hour) from nogon-login's [OAuth server](services/nogon-login.md#the-oauth-server), allowed by you from a tailnet device | that connector only: saved pages and default-vault notes, read-only; no room, never Hister |
+| everything that calls **Nogon** (Kura's push, the rooms' own Nogon calls, importers, scripts) | Nogon's token, unchanged | Nogon |
+| Claude Duet → the public connector (`mcp-public`, 2026-10-28) | an OAuth access token (`mho_`, an hour) from nogon-login's [OAuth server](services/nogon-login.md#the-oauth-server), allowed by you from a tailnet device | that connector only: saved pages and default-vault notes, read-only; no room, never Nogon |
 
 ### Moving to it (readers first, writers after)
 
 1. **nogon-login 0.3.0**, with `NOGON_LOGIN_LEGACY` at its default then (`domain-cookie,hister-token`; since 0.5.0 the default is `none`, so a move like this one sets it). Nothing changes for old rooms: the helper still sets the shared `machiya_sso` beside its host-only cookie.
-2. **The rooms and landing** re-vendor vaultkit 0.22 (no code change). They prefer their own cookie and still take the shared one and Hister's token, passing both to the helper.
+2. **The rooms and landing** re-vendor vaultkit 0.22 (no code change). They prefer their own cookie and still take the shared one and Nogon's token, passing both to the helper.
 3. **The callers** get room tokens (the table above). Shiori's extensions and apps update. Kura and Konbini list the hosted pages' origins, and the hosted pages' nginx changes ([nogon-login](services/nogon-login.md#shioris-hosted-pages)).
-4. **The switch:** `NOGON_LOGIN_LEGACY=none`. The shared cookie is no longer set, and the rooms refuse it and Hister's raw token (`401 {"reason": "legacy-off"}`). Each browser makes one silent trip per room. Until then, the helper logs (hourly per room) every legacy credential it still accepts. **Rollback:** set the old value again and restart the helper.
-5. Afterwards, rotate Hister's token: it sat in the rooms and their clients for weeks.
+4. **The switch:** `NOGON_LOGIN_LEGACY=none`. The shared cookie is no longer set, and the rooms refuse it and Nogon's raw token (`401 {"reason": "legacy-off"}`). Each browser makes one silent trip per room. Until then, the helper logs (hourly per room) every legacy credential it still accepts. **Rollback:** set the old value again and restart the helper.
+5. Afterwards, rotate Nogon's token: it sat in the rooms and their clients for weeks.
 
 ## Security notes
 
 - **No secret in the file.** Passwords are scrypt hashes, tokens SHA-256 hashes, pairing codes scrypt hashes. The key that signs sessions and device tokens is `session.key` beside it (0600). Back both up; guard the key like a password.
-- **A Python without scrypt** (one built against LibreSSL, as OpenBSD's is) has no `hashlib.scrypt`. There the password features refuse with a clear message: a room with `*_SIGNIN=1` doesn't start, `POST /api/pair` answers 503, and the CLI's `passwd`, `pair` and `setup --password` stop. Everything else (open, Tailscale, header and Hister modes, tokens) works. Before vaultkit 0.21 every room crashed at import there.
+- **A Python without scrypt** (one built against LibreSSL, as OpenBSD's is) has no `hashlib.scrypt`. There the password features refuse with a clear message: a room with `*_SIGNIN=1` doesn't start, `POST /api/pair` answers 503, and the CLI's `passwd`, `pair` and `setup --password` stop. Everything else (open, Tailscale, header and Nogon modes, tokens) works. Before vaultkit 0.21 every room crashed at import there.
 - **Mount the directory read-only** into each room. Nothing in a room can write identities; the CLI runs on the host that holds the file. A file that turns invalid keeps the last good one (and says so); a bad file at start refuses to start.
-- **Header modes trust whoever reaches the port.** In `tailscale` and `header` mode a room refuses a non-loopback bind unless it's told which peer is the proxy: `*_TRUSTED_PROXIES` (Kura, Konbini and Niwa; identity headers from any other peer are dropped), or `*_BIND_BEHIND_PROXY=1` for a room that has no trusted-proxies setting yet. The proxy is a Tailscale sidecar, or the compose with ports on `127.0.0.1`. Your proxy must strip the login header from what clients send. Since vaultkit 0.29 the check also lives in vaultkit itself: `identity.load_for` and `histerauth.load_for` read `<ROOM>_TRUSTED_PROXIES`, and an identity header (`Tailscale-User-Login`, `Tailscale-App-Capabilities`, the proxy's login header) from any other peer counts for nothing, as if it were never sent, so a room that forgets to strip it can't be fooled. A room passes the peer's address: `Identity.resolve(headers, client)` (every room does already) and `HisterAuth.resolve(headers, …, client=peer)` (new; without it the fallback behaves as before). A token (`Authorization`) works from any peer. The shared parsing is `identity.trusted_proxies(value, setting)` and `identity.peer_trusted(address, nets)`; an app can drop its own copies. With sign-in only, list no Tailscale logins (or keep `tailscale serve` in front): a client could send that header itself.
+- **Header modes trust whoever reaches the port.** In `tailscale` and `header` mode a room refuses a non-loopback bind unless it's told which peer is the proxy: `*_TRUSTED_PROXIES` (Kura, Konbini and Niwa; identity headers from any other peer are dropped), or `*_BIND_BEHIND_PROXY=1` for a room that has no trusted-proxies setting yet. The proxy is a Tailscale sidecar, or the compose with ports on `127.0.0.1`. Your proxy must strip the login header from what clients send. Since vaultkit 0.29 the check also lives in vaultkit itself: `identity.load_for` and `nogonauth.load_for` (`histerauth` before v0.41) read `<ROOM>_TRUSTED_PROXIES`, and an identity header (`Tailscale-User-Login`, `Tailscale-App-Capabilities`, the proxy's login header) from any other peer counts for nothing, as if it were never sent, so a room that forgets to strip it can't be fooled. A room passes the peer's address: `Identity.resolve(headers, client)` (every room does already) and `HisterAuth.resolve(headers, …, client=peer)` (new; without it the fallback behaves as before). A token (`Authorization`) works from any peer. The shared parsing is `identity.trusted_proxies(value, setting)` and `identity.peer_trusted(address, nets)`; an app can drop its own copies. With sign-in only, list no Tailscale logins (or keep `tailscale serve` in front): a client could send that header itself.
 - **Niwa's public garden never consults identity.** With `NIWA_PUBLIC_PORT`, Niwa runs a second web listener for anyone. Like its Gemini and Gopher listeners, it serves only published notes. It reads no `Authorization`, `Tailscale-User-Login`, proxy login header or cookie, sets no cookie, and answers only GET and HEAD on a fixed list of read-only routes. The owner's listener keeps its mode and its bind rules unchanged: a header mode still refuses a non-loopback bind without `NIWA_BIND_BEHIND_PROXY=1`. Never point the public proxy (Funnel, Caddy) at the owner's port. Point it at `NIWA_PUBLIC_PORT`.
 - **Trade-offs to know:**
   - **Throttling locks out.** Five wrong passwords lock that name for 15 minutes for everyone, and 20 failures lock an address; behind a proxy every client shares the proxy's address. Pairing allows 5 tries per address per 10 minutes.
   - **A pairing code works once per room.** Since vaultkit 0.29 a room remembers a code it took, so a second use there is refused; the file is read-only to the rooms, so another room could still take it once until it expires. The short window, the throttle and the one device id in every token it yields (revoked as one) are the rest of the guard; cancel it with `pair --cancel` once the device is in.
-  - **The shared cookie domain.** With the identity file's built-in sign-in, `MACHIYA_COOKIE_DOMAIN` makes one sign-in cover every room, and sends the session cookie to every site under that domain. Use a domain only Machiya's rooms serve, or leave it unset and sign in per room. (In Hister sign-in mode the rooms' cookies are host-only since vaultkit 0.22; the domain only carries the preference cookies and the legacy `machiya_sso` until the switch.)
+  - **The shared cookie domain.** With the identity file's built-in sign-in, `MACHIYA_COOKIE_DOMAIN` makes one sign-in cover every room, and sends the session cookie to every site under that domain. Use a domain only Machiya's rooms serve, or leave it unset and sign in per room. (In Nogon sign-in mode the rooms' cookies are host-only since vaultkit 0.22; the domain only carries the preference cookies and the legacy `machiya_sso` until the switch.)
 - Every state change made with a cookie must be same-origin, and no room changes state on a GET.

@@ -1,9 +1,9 @@
 # code-import (the Code area's importer)
 
-code-import copies your repos on **Forgejo** and **GitHub** into [Hister](hister.md). [Shiori](https://github.com/machiya-kobo/shiori) searches them as its **Code** area, and a result opens the forge's own page.
+code-import copies your repos on **Forgejo** and **GitHub** into [Nogon](nogon.md). [Shiori](https://github.com/machiya-kobo/shiori) searches them as its **Code** area, and a result opens the forge's own page.
 
 - **Code:** [stack/code-import/](../../stack/code-import/). Its README has the settings, the metadata table and the tests.
-- **Status:** phase 1. What it sends follows the Hister contract's [code documents](../contracts/hister.md#code-documents-metadatasourcecode) section.
+- **Status:** phase 1. What it sends follows the Nogon contract's [code documents](../contracts/nogon.md#code-documents-metadatasourcecode) section.
 
 ## What it imports
 
@@ -19,7 +19,7 @@ code-import copies your repos on **Forgejo** and **GitHub** into [Hister](hister
 flowchart LR
     fj["Forgejo<br/>API v1, read-only token"] -->|"GET: repos, trees, blobs,<br/>issue search, releases"| ci["code-import<br/>(listens on nothing)"]
     gh["GitHub<br/>REST, one fine-grained<br/>read-only token per owner"] -->|"GET (conditional: 304s are free)"| ci
-    ci -->|"POST /api/add (always html)<br/>POST /api/delete (ours only)<br/>Origin: hister:// + owner's token"| h["Hister<br/>metadata.source:code"]
+    ci -->|"POST /api/add (always html)<br/>POST /api/delete (ours only)<br/>Origin: nogon:// + owner's token"| h["Nogon<br/>metadata.source:code"]
     s["Shiori · Code pill"] -->|"/search?q=metadata.source:code …"| h
     s -.->|"a result opens"| fj
     s -.-> gh
@@ -32,29 +32,29 @@ flowchart LR
   - it re-reads the docs and releases of repos that were pushed;
   - it fetches issues and PRs changed since its cursor: one search per owner on Forgejo, one conditional list per repo on GitHub.
 - **Every 6 hours, a full run:** it re-reads everything and withdraws what disappeared.
-- **Each item is one Hister document** at its forge URL, with:
+- **Each item is one Nogon document** at its forge URL, with:
   - `metadata.source: code` and the `code_*` keys (the README's table);
   - **no label**;
   - `ignore_skip_rules`, because the skip rules refuse the tailnet's Forgejo.
-- **Secrets.** Every document is sent **with `html`**, because Hister's 422 check reads only `html`. Before that, code-import's own, wider scan redacts likely secrets, or refuses the document with `CODE_IMPORT_SECRETS=refuse`. Files named like secrets are never read, and `skip_sensitive_check` is never sent.
-- **Browsed pages win.** If Hister already holds a URL as an ordinary page (a GitHub issue you opened in the browser), code-import leaves it alone. It replaces and deletes only documents whose `metadata.source` is `code`.
+- **Secrets.** Every document is sent **with `html`**, because Nogon's 422 check reads only `html`. Before that, code-import's own, wider scan redacts likely secrets, or refuses the document with `CODE_IMPORT_SECRETS=refuse`. Files named like secrets are never read, and `skip_sensitive_check` is never sent.
+- **Browsed pages win.** If Nogon already holds a URL as an ordinary page (a GitHub issue you opened in the browser), code-import leaves it alone. It replaces and deletes only documents whose `metadata.source` is `code`.
 - **Withdrawals.** code-import withdraws the documents of a repo that's deleted, renamed, transferred, archived or newly excluded. It also withdraws a deleted doc or release, and (on a full run) a deleted issue.
-- **Reconcile.** Every full run asks Hister (`HEAD /api/document`) for every document code-import added. So does the first run after a start, when the last check is over a day old.
-  - It sends again the ones Hister lost, for example after a "delete matching documents" on Hister's Rules page.
-  - If Hister can't answer, the check stops and nothing is forgotten.
+- **Reconcile.** Every full run asks Nogon (`HEAD /api/document`) for every document code-import added. So does the first run after a start, when the last check is over a day old.
+  - It sends again the ones Nogon lost, for example after a "delete matching documents" on Nogon's Rules page.
+  - If Nogon can't answer, the check stops and nothing is forgotten.
   - The result is `reconcile` per source in `status.json`.
 - **Retries:** a transient failure (a timeout, a reset, a 5xx, a 429) is tried again after 2, 8 and 30 s. 401, 403 and 404 never are.
 - **Sources fail on their own, and fail closed.** Each owner on each forge is a source.
   - A source that still fails is named in `status.json` (`sources`), withdraws nothing, and doesn't stop the others.
   - A source that suddenly lists nothing fails too.
-  - Hister being down stops the whole run.
+  - Nogon being down stops the whole run.
 - **Caps:** `status.json` names any repo with more markdown docs than `CODE_IMPORT_MAX_DOCS` (`caps`). A repo listed in `CODE_IMPORT_README_ONLY` keeps only its card and README.
 - **Logs** carry counts and the URLs of refusals, never titles or text. `status.json` feeds the healthcheck.
 
 ## The Code area in Shiori
 
-- **The pill's query:** `metadata.source:code <words>`, searched as you type. The pill shows Hister's total.
-- **Filters** (each one a Hister term, ANDed):
+- **The pill's query:** `metadata.source:code <words>`, searched as you type. The pill shows Nogon's total.
+- **Filters** (each one a Nogon term, ANDed):
 
   | Filter | Term |
   |---|---|
@@ -64,14 +64,14 @@ flowchart LR
   | repo | `metadata.code_repo:<owner>__<repo>`. The key is lowercase, with every character other than a-z and 0-9 turned into `_`, and the owner and repo joined by `__`: `machiya-kobo/kura` → `machiya_kobo__kura`. A value with `/` or `-` can't be matched (tested on Hister v0.20.0; the README has the table) |
   | private | `metadata.code_private:true` |
 
-- **Every other Hister query** adds ` -metadata.source:code`, next to the existing ` -label:vault -metadata.source:vault -type:local`. That covers Pages, All, the counts, collections and the native twins (HisterKit, `search-core.js`, Linux).
+- **Every other Nogon query** adds ` -metadata.source:code`, next to the existing ` -label:vault -metadata.source:vault -type:local`. That covers Pages, All, the counts, collections and the native twins (HisterKit, `search-core.js`, Linux).
 - **Not in All**, like Files.
 - **A row:**
   - a glyph for `code_kind`;
-  - the title (Hister's);
+  - the title (Nogon's);
   - chips: host, `code_repo_name`, `code_state`, a lock when `code_private` is `"true"`;
   - the date from `code_updated` (also the document's `added`);
-  - Hister's snippet.
+  - Nogon's snippet.
 
   It opens `url`, the forge's page. `code_twin_url` is the other forge's copy.
 - **AI: on-device only, like notes.** A code result is private:
@@ -80,19 +80,19 @@ flowchart LR
 
 ## AI clients
 
-AI clients read pages through [machiya-mcp](mcp.md), whose every Hister query ends ` -metadata.source:code` and which drops any code document Hister returns. They don't get Hister's own MCP, whose `search` returns code ([contracts/hister.md](../contracts/hister.md#histers-mcp)).
+AI clients read pages through [machiya-mcp](mcp.md), whose every Nogon query ends ` -metadata.source:code` and which drops any code document Nogon returns. They don't get Nogon's own MCP, whose `search` returns code ([contracts/nogon.md](../contracts/nogon.md#nogons-mcp)).
 
-The `@code` alias is for Hister's own UI, not for AI clients.
+The `@code` alias is for Nogon's own UI, not for AI clients.
 
 ## Deploying it
 
 - **Tokens, all read-only, each in its own file.** Render them from your secret store to a tmpfs file, never into the environment.
   - A Forgejo (or Gitea) token of the account that owns the repos, scopes `read:repository`, `read:issue`, `read:user`, `read:organization`.
   - One fine-grained GitHub token per resource owner (a user or an org), with Metadata, Contents, Issues and Pull requests set to read, and an expiry. Never a classic token.
-  - Your Hister token, as for [feed-import](../../stack/feed-import).
-- **Compose:** the reference compose has it as the `code` profile ([compose/compose.yml](../../compose/compose.yml); token files in `compose/secrets/`, settings in `.env`). By hand, add a `code-import` service beside Hister (and feed-import):
+  - Your Nogon token, as for [feed-import](../../stack/feed-import).
+- **Compose:** the reference compose has it as the `code` profile ([compose/compose.yml](../../compose/compose.yml); token files in `compose/secrets/`, settings in `.env`). By hand, add a `code-import` service beside Nogon (and feed-import):
   - the image built from `stack/code-import/Dockerfile` (context: the repo root), a non-root user, a small memory limit, a `/data` volume, no ports;
-  - Hister's network;
+  - Nogon's network;
   - egress to your Forgejo and `api.github.com`;
   - the environment, for example:
     - `CODE_IMPORT_FORGEJO_URL=https://forgejo.example.ts.net`
@@ -100,12 +100,12 @@ The `@code` alias is for Hister's own UI, not for AI clients.
     - `CODE_IMPORT_GITHUB_TOKEN_FILES=you=/secrets/github-you-token,your-org=/secrets/github-your-org-token`
     - `CODE_IMPORT_TWINS=github:your-org=forgejo:your-org` (a repo on both is indexed once, from the left-hand forge)
     - `CODE_IMPORT_EXCLUDE=notes,password-store` (repos never to index, such as the vault itself or a password store; none by default)
-    - `CODE_IMPORT_NOGON_URL=http://hister:4433`, `CODE_IMPORT_NOGON_TOKEN_FILE`
-    - `CODE_IMPORT_PAUSE`: Hister's backup window, as feed-import has it.
-- **Hister's aliases:** add `@code` = `metadata.source:code`, and change `@pages` to `* -label:vault -metadata.source:vault -metadata.source:code` ([contracts/hister.md](../contracts/hister.md#aliases)).
+    - `CODE_IMPORT_NOGON_URL=http://nogon:4433`, `CODE_IMPORT_NOGON_TOKEN_FILE` (formerly `CODE_IMPORT_HISTER_*`: since 0.3.0 an old name on its own stops the start)
+    - `CODE_IMPORT_PAUSE`: Nogon's backup window, as feed-import has it.
+- **Nogon's aliases:** add `@code` = `metadata.source:code`, and change `@pages` to `* -label:vault -metadata.source:vault -metadata.source:code` ([contracts/nogon.md](../contracts/nogon.md#aliases)).
 - **Monitoring:** probe `status.json`'s `ok`, as for feed-import. The [landing page](landing.md) shows it with `LANDING_CODE_STATUS`.
 - **First run:** `--dry-run --limit 3` with the real tokens, then start the service. A backfill costs a few hundred calls per forge, spaced 0.25 s (GitHub) and 0.5 s (Forgejo) apart.
-- **Privacy:** private repos' text lands in your Hister, and so in Hister's backups.
+- **Privacy:** private repos' text lands in your Nogon, and so in Nogon's backups.
 
 ## Phase 2 (later)
 

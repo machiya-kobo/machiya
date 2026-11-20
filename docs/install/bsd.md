@@ -189,7 +189,7 @@ TZ=UTC                                      # days on the board and the review; 
 **The other apps are optional URLs.** Leave them out, and the features that need them are off:
 - `*_KONBINI_URL`, `*_KURA_URL`, `*_NIWA_URL`;
 - `MACHIYA_ROOMS` (the Rooms switcher);
-- the Hister settings. A BSD install normally runs without Hister, because its `hister` CLI has no BSD build.
+- the Nogon settings. A BSD install normally runs without Nogon, because its `nogon` CLI (formerly `hister`) has no BSD build.
 
 ## 7. The service (rc.d)
 
@@ -280,5 +280,5 @@ cd /usr/local/share/kura                                          # NetBSD: /usr
 ## Niwa and Konbini extras
 
 - **Niwa's gemini certificate** is made once with `openssl req -x509 -newkey ec …`. OpenBSD's LibreSSL makes it fine (7.9). If it fails, create `gemini.crt`/`gemini.key` next to `NIWA_DB` by hand, and Niwa keeps them.
-- **Link rot and the `hister` CLI** (Niwa, Konbini) are optional. Without `*_HISTER_URL`, dead links still get Wayback copies. Building `hister` needs Go and cgo.
+- **Link rot and the `nogon` CLI** (Niwa, Konbini) are optional. Without `*_NOGON_URL`, dead links still get Wayback copies. Building `nogon` needs Go and cgo.
 - **Konbini's blog kit** (`KANBAN_BLOG`) is optional. Without it, the posts pages are empty.

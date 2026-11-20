@@ -27,7 +27,7 @@ The schema lives in [`vaultkit/prefs.py`](../../vaultkit/prefs.py) and is export
 | `theme` | `system`, `day`, `night` (`auto` is stored as `system`) | Mode |
 | `palette` | the ten keys of `vaultkit/palettes.py` (`tokyo-night` … `ayu`) | Theme |
 | `text_size` | `xsmall`, `small`, `standard`, `large`, `xlarge` (the house's five steps; Shiori maps its own through `HOUSE_STEPS`) | Text Size |
-| `apps_hidden` | a comma list from `shiori, konbini, niwa, kura, nogon, searxng, machiya`, stored in that order without repeats; empty = all shown. `nogon` was `hister` before vaultkit 0.41 ([the rename](hister.md#names-hister-is-now-nogon)): `hister` is still accepted and read as `nogon`, in a PUT, a stored row (answered as `nogon`, rewritten at its next write) and the `show_hister` cookie; only `nogon` is written. A deployment's extra rooms ([ui.md](../ui.md#extra-rooms-machiya_extra_rooms)) are never listed: their switches stay on the device | Apps |
+| `apps_hidden` | a comma list from `shiori, konbini, niwa, kura, nogon, searxng, machiya`, stored in that order without repeats; empty = all shown. `nogon` was `hister` before vaultkit 0.41 ([the rename](nogon.md#names-hister-is-now-nogon)): `hister` is still accepted and read as `nogon`, in a PUT, a stored row (answered as `nogon`, rewritten at its next write) and the `show_hister` cookie; only `nogon` is written. A deployment's extra rooms ([ui.md](../ui.md#extra-rooms-machiya_extra_rooms)) are never listed: their switches stay on the device | Apps |
 | `pills` | JSON `{"order": [pill id, …], "hidden": [pill id, …]}`, ids `[a-z0-9_-]{1,32}`, at most 32 each; stored compact. The store checks the shape, Shiori the ids | Pills (Shiori only) |
 | `language`, `time_zone` | reserved: refused until an app uses them | |
 | `<app>.<key>` | `<app>` one of `kura, niwa, konbini, shiori, machiya` (landing); `<key>` is `[a-z0-9_]{1,48}`; the value a string of at most 1024 bytes with no control characters | the app's |
@@ -42,8 +42,8 @@ Anything else is **400**. At most 100 keys per person, and a body of at most 512
 | Endpoint | Who calls it | Credential |
 |---|---|---|
 | `GET`, `PUT /api/prefs` on each room and landing | `machiya.js` | the room's own gate. In `AUTH=nogon` mode with the helper it **forwards** (below); otherwise it is the room's own store |
-| `GET`, `PUT /v1/prefs` on nogon-login's internal port (8081) | the rooms and landing, forwarding | exactly one of `X-Machiya-Session: mhs_…|mhr_…|mht_…` (with the room's `X-Machiya-Room`) or `X-Access-Token: <Hister token>`, as for `/v1/check`; anything else is 400 |
-| `GET`, `PUT /machiya/api/prefs` on nogon-login's public port (8080, on Hister's host) | Shiori's apps (`Authorization: Bearer mhs_…`), extensions, Linux and scripts (a room token `Authorization: Bearer mht_…`, or a Hister token: `X-Access-Token` or `Bearer`; this is Hister's own host), the hosted pages (their own room cookie, through their nginx, nogon-login 0.3.0) | one credential; a `PUT` carried by the cookie must have an `Origin` among the helper's return hosts. There is no CORS: no other site's page may read or write it |
+| `GET`, `PUT /v1/prefs` on nogon-login's internal port (8081) | the rooms and landing, forwarding | exactly one of `X-Machiya-Session: mhs_…|mhr_…|mht_…` (with the room's `X-Machiya-Room`) or `X-Access-Token: <Nogon token>`, as for `/v1/check`; anything else is 400 |
+| `GET`, `PUT /machiya/api/prefs` on nogon-login's public port (8080, on Nogon's host) | Shiori's apps (`Authorization: Bearer mhs_…`), extensions, Linux and scripts (a room token `Authorization: Bearer mht_…`, or a Nogon token: `X-Access-Token` or `Bearer`; this is Nogon's own host), the hosted pages (their own room cookie, through their nginx, nogon-login 0.3.0) | one credential; a `PUT` carried by the cookie must have an `Origin` among the helper's return hosts. There is no CORS: no other site's page may read or write it |
 
 **GET** answers `200` with `Cache-Control: no-store` and `ETag: "<rev>"`; with a matching `If-None-Match` it answers `304`:
 
@@ -71,17 +71,17 @@ Anything else is **400**. At most 100 keys per person, and a body of at most 512
 | 405 | another method |
 | 413 | body too large |
 | 415 | not JSON |
-| 503 | the store, the helper or Hister can't answer, or the room is in its Tailscale fallback (no account while sign-in is down): `{"error": "preferences unavailable"}` |
+| 503 | the store, the helper or Nogon can't answer, or the room is in its Tailscale fallback (no account while sign-in is down): `{"error": "preferences unavailable"}` |
 
 ## Who owns the data
 
-**One store, in nogon-login**, keyed by the Hister user. The key is `hi:<sha256(username)[:32]>` (the rooms' existing form, so Kura's rows carry over), kept in its own file, `prefs.sqlite3`, beside the sessions file. The helper derives the key **only from the credential it resolves itself**: no endpoint takes a user id, so a caller can only read or write the account it proves.
+**One store, in nogon-login**, keyed by the Nogon user. The key is `hi:<sha256(username)[:32]>` (the rooms' existing form, so Kura's rows carry over), kept in its own file, `prefs.sqlite3`, beside the sessions file. The helper derives the key **only from the credential it resolves itself**: no endpoint takes a user id, so a caller can only read or write the account it proves.
 
 | Caller | Account preferences? |
 |---|---|
-| a Hister sign-in (a room's own cookie, an app's `mhs_` id), a room token, or (legacy, and on the helper's own host) the owner's Hister token | yes |
+| a Nogon sign-in (a room's own cookie, an app's `mhs_` id), a room token, or (legacy, and on the helper's own host) the owner's Nogon token | yes |
 | the Tailscale fallback, `open` mode | no: 503 or the room's own store |
-| a room with no helper (identity file, Tailscale, open, or hister mode without `*_AUTH_URL`) | the room's own store, with the same API and the same client rules |
+| a room with no helper (identity file, Tailscale, open, or nogon mode without `*_AUTH_URL`) | the room's own store, with the same API and the same client rules |
 
 **Each write is logged by key name** (nogon-login 0.6.1): one line with the writer (the room, the hosted pages' host or the credential's kind), its User-Agent, the keys sent and the keys that changed, and the rev; never a value.
 
@@ -91,7 +91,7 @@ Anything else is **400**. At most 100 keys per person, and a body of at most 512
 
 A room keeps its same-origin `/api/prefs`, so `machiya.js`, the page's `<meta name="machiya-prefs">` and the service worker's bypass don't change. In nogon mode with the helper (`*_AUTH_URL` set), `vaultkit.nogonauth.NogonAuth.forward_prefs(result, method, headers, body, origins)` does this:
 
-1. It passes the request to `/v1/prefs` with the **caller's own credential** and the room's origin (`X-Machiya-Room`): the room's own cookie (a room session, vaultkit 0.22), an app's id or a room token as `X-Machiya-Session`, or (legacy) the caller's Hister token as `X-Access-Token`. It never sends a user id.
+1. It passes the request to `/v1/prefs` with the **caller's own credential** and the room's origin (`X-Machiya-Room`): the room's own cookie (a room session, vaultkit 0.22), an app's id or a room token as `X-Machiya-Session`, or (legacy) the caller's Nogon token as `X-Access-Token`. It never sends a user id.
 2. A `PUT` carried by the cookie must be same-origin with the room (`origins`: its public address), else 403. One with `Authorization` or `X-Access-Token` is a client's.
 3. `If-None-Match` goes along, and the helper's answer comes back as it is: 200 with its `ETag`, 304, 400.
 4. The helper unreachable or failing gives 503. Signed out at the helper gives 401 with the sign-in address.
@@ -135,12 +135,12 @@ Text Size is the one Shared setting a device may override (decided 2026-10-05). 
 
 ## Migration (once, at the switch)
 
-1. **Shared keys from the rooms' old stores.** Run `nogon_login.py prefs import --user <Hister username> [--tailscale <login>] <file>…` on the helper's host, over Kura's, Niwa's, Konbini's and landing's old `prefs.sqlite3`, which it opens read-only.
+1. **Shared keys from the rooms' old stores.** Run `nogon_login.py prefs import --user <Nogon username> [--tailscale <login>] <file>…` on the helper's host, over Kura's, Niwa's, Konbini's and landing's old `prefs.sqlite3`, which it opens read-only.
    - For each key, the value with the newest `updated` across the files wins. It is kept only when it is newer than what the account already holds, so a second run changes nothing.
    - A file's rows count as the user's when their principal is `hi:<sha256(user)>`, the `tailscale_uid` of a `--tailscale` login, or a `--principal` given. A file with a single principal is taken as the user's, and the command says so.
    - `--dry-run` shows the result without writing. `prefs show --user` shows what the account holds afterwards.
 2. **Values only devices hold** (every `show_*`, the per-app settings, all of Shiori's): fill the blanks (client rule 4). The first device to sync seeds a key, and every device then follows.
 3. **The rooms' `prefs.sqlite3` files** stay, read-only, for one release (a rollback), then they are deleted.
-4. **The Shiori web app** stops calling Kura's `/kura/api/prefs` and uses `/machiya/api/prefs`. Kura's `/api/prefs` keeps answering older clients, forwarding in hister mode.
+4. **The Shiori web app** stops calling Kura's `/kura/api/prefs` and uses `/machiya/api/prefs`. Kura's `/api/prefs` keeps answering older clients, forwarding in nogon mode.
 
 **Rollout order:** the helper (0.2.0), then the rooms and landing together (a room still on the old `machiya.js` writes its stale store's value into the shared cookie, which the new rule 3 would then send to the account), then Shiori's hosted pages, then the apps.

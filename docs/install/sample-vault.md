@@ -87,7 +87,7 @@ Open them in a browser (the **Rooms** menu in each header moves between them):
 | **Kura** | http://localhost:8083/ | all 27 notes: folders, tags, backlinks, full-text search (try `bamboo`) |
 | **Niwa** | http://localhost:8082/ | the garden: the 9 published notes, growth stages, and a gemini capsule on `gemini://localhost:1965/` |
 | **Konbini** | http://localhost:8081/ | the board: 10 cards across every column, plus Review, Plan and Calendar |
-| **Hister** | http://localhost:4433/ | the pages-and-notes index; Kura has pushed the notes into it (search `bamboo`) |
+| **Nogon** | http://localhost:4433/ | the pages-and-notes index; Kura has pushed the notes into it (search `bamboo`) |
 | **SearXNG** | http://localhost:8888/ | web search (it needs the internet to answer) |
 
 **5. Watch a change travel.** Publishing a note in Niwa commits to the vault; Kura picks the commit up and shows the note as published:

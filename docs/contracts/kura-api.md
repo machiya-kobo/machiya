@@ -7,9 +7,9 @@ Shiori's hosted pages reach it at `/kura/api/…` on their own host. Serving sev
 ## Conventions
 
 - **A note's identity is its path** in the vault: `Projects/Example-Project.md`. `slug` is the path without `.md`. With several vaults, the identity is `(vault, path)` (see [Vaults](#vaults)); for the default vault nothing changes.
-- **`url`** is always `https://kura…/n/<slug>` (percent-encoded) for the default vault, exactly as the reader serves it, and `https://kura…/v/<vault>/n/<slug>` for any other vault. Shiori's history and marks, and Hister documents, key on it; a note's `url` never changes. `https://kura…` is Kura's public address (`KURA_PUBLIC_URL`, else `https://<Host>`), an **origin with no path**: Kura refuses to start with a path in it (0.5.0), so `/n/` or `/v/` always starts a note's path.
+- **`url`** is always `https://kura…/n/<slug>` (percent-encoded) for the default vault, exactly as the reader serves it, and `https://kura…/v/<vault>/n/<slug>` for any other vault. Shiori's history and marks, and Nogon documents, key on it; a note's `url` never changes. `https://kura…` is Kura's public address (`KURA_PUBLIC_URL`, else `https://<Host>`), an **origin with no path**: Kura refuses to start with a path in it (0.5.0), so `/n/` or `/v/` always starts a note's path.
 - **Dates** are unix seconds: `changed` is the exact time of the note's latest commit; `created` is UTC midnight of the note's `date:` frontmatter day. `null` when unknown.
-- **Snippets** are HTML in which only `<mark>` is markup; everything else is escaped, the same as Hister's snippets.
+- **Snippets** are HTML in which only `<mark>` is markup; everything else is escaped, the same as Nogon's snippets.
 - **Paging:** `limit` (default 20, max 100) and `offset`. `total` is always exact. `total: 0` means "found nothing", which is what triggers Shiori's respelling retry.
 - **Errors:** `{"error": "…"}` with 400 (bad parameters), 403, 404, or 503 (the first clone hasn't finished yet).
 - `Templates/` and `CLAUDE.md` files never appear.
@@ -25,7 +25,7 @@ Kura can serve several vaults. The first one configured is the **default vault**
 - A note in any vault but the default always has `published: false` and `card_url: null`, whatever its frontmatter says: Niwa and Konbini read the default vault only, so other vaults (shared or private) get no Niwa or Konbini links.
 - **The `vault` parameter**: one name, a comma list, or `all`; omitted = the default vault; an unknown name is a 400.
   - `/api/search`, `/api/recent`: a list or `all`.
-  - `/api/tags`, `/api/folders`, `/api/note` (`path` + `vault`): one name. `/api/note`'s sanitized `html` (no scripts, iframes, styles or event handlers, and absolute links) works for every vault, so a client previews a work note from it. Hister's `api/preview` never has work notes.
+  - `/api/tags`, `/api/folders`, `/api/note` (`path` + `vault`): one name. `/api/note`'s sanitized `html` (no scripts, iframes, styles or event handlers, and absolute links) works for every vault, so a client previews a work note from it. Nogon's `api/preview` never has work notes.
   - `/api/notes`: `paths` are in `vault`; `urls` carry their vault in the URL (a `/v/…` URL counts as asking for that vault).
   - `/feed.xml` takes **no** `vault`: it is the default vault only, so Shiori's feed and OPML export can never carry work notes off the device. A shared vault has its own feed at `/v/<vault>/feed.xml`; a private vault has none (404).
 - **Query syntax** gains `vault:x`. It only narrows within the vaults the `vault` parameter allows and never widens them: `q=vault:client` without `vault=client` (or `all`) finds nothing. A client that hasn't opted in can't get a work note, even through a query a model wrote.
@@ -35,9 +35,9 @@ Kura can serve several vaults. The first one configured is the **default vault**
 **Rules for clients**
 
 1. Only Kura's reader and Shiori's Notes search ask for a non-default vault.
-2. Kura never pushes a private vault into Hister. The push sends the default vault and the shared ones (label `vault`, a shared note under its `/v/<vault>/n/…` url), and withdraws a vault's documents once it is no longer shared.
-3. Work notes never reach AI. Nothing that feeds a model (Shiori's AI features, the MCP server, a note search) sends `vault`; it gets the default vault, and drops any note whose `vault` isn't the default or a vault `/api/vaults` reports `private: false`, as defence in depth (when in doubt, drop it). **"AI" includes on-device models: Shiori doesn't offer Summarize, labels or AI Answer for a note in a private vault, even on Apple Intelligence.** Shiori's hosted pages' `/shiori/ai/*` read only from Hister, which never holds private-vault notes (it does hold shared ones).
-4. Clients must not send a private vault note's `url` or `title` to Hister (history, add, label, delete). Shiori's Remember What You Open is gated to the default vault and the shared ones.
+2. Kura never pushes a private vault into Nogon. The push sends the default vault and the shared ones (label `vault`, a shared note under its `/v/<vault>/n/…` url), and withdraws a vault's documents once it is no longer shared.
+3. Work notes never reach AI. Nothing that feeds a model (Shiori's AI features, the MCP server, a note search) sends `vault`; it gets the default vault, and drops any note whose `vault` isn't the default or a vault `/api/vaults` reports `private: false`, as defence in depth (when in doubt, drop it). **"AI" includes on-device models: Shiori doesn't offer Summarize, labels or AI Answer for a note in a private vault, even on Apple Intelligence.** Shiori's hosted pages' `/shiori/ai/*` read only from Nogon, which never holds private-vault notes (it does hold shared ones).
+4. Clients must not send a private vault note's `url` or `title` to Nogon (history, add, label, delete). Shiori's Remember What You Open is gated to the default vault and the shared ones.
 
 ## Identity
 
@@ -58,14 +58,14 @@ calling instead of `KURA_USERS`. Without the file nothing here applies and the A
 - `/api/status` stays open; its full view (repo URL, folder, error texts) is the owner's only.
 - `default`, `shared` and `v` are never vault names.
 
-## Hister sign-in
+## Nogon sign-in
 
-With `KURA_AUTH=hister` ([identity.md](../identity.md#nogon-sign-in-authnogon), [nogon-login](../services/nogon-login.md)) Kura asks the sign-in helper who is calling, and never falls back to the Tailscale identity (`KURA_AUTH_FALLBACK=none`). Clients should handle these answers now; Kura gives them once a deployment switches the mode.
+With `KURA_AUTH=nogon` (formerly `hister`; [identity.md](../identity.md#nogon-sign-in-authnogon), [nogon-login](../services/nogon-login.md)) Kura asks the sign-in helper who is calling, and never falls back to the Tailscale identity (`KURA_AUTH_FALLBACK=none`). Clients should handle these answers now; Kura gives them once a deployment switches the mode.
 
-- **Credentials**, the first present decides: a room token (`Authorization: Bearer mht_…`, scripts and agents; [identity.md](../identity.md#room-tokens)), `Authorization: Bearer mhs_…` (Shiori's apps), or Kura's own cookie `__Host-machiya_sso_kura` (browsers; vaultkit 0.22). Until nogon-login's switch (`NOGON_LOGIN_LEGACY=none`) also the owner's Hister token (`X-Access-Token`, or another Bearer) and the shared `machiya_sso` cookie; after it they are **401** `{"reason": "legacy-off"}`. A present but invalid one is a **401**. `Bearer mch_…`/`mcd_…` (the identity file's) are a 401 in this mode: the file isn't combined with it yet.
+- **Credentials**, the first present decides: a room token (`Authorization: Bearer mht_…`, scripts and agents; [identity.md](../identity.md#room-tokens)), `Authorization: Bearer mhs_…` (Shiori's apps), or Kura's own cookie `__Host-machiya_sso_kura` (browsers; vaultkit 0.22). Until nogon-login's switch (`NOGON_LOGIN_LEGACY=none`) also the owner's Nogon token (`X-Access-Token`, or another Bearer) and the shared `machiya_sso` cookie; after it they are **401** `{"reason": "legacy-off"}`. A present but invalid one is a **401**. `Bearer mch_…`/`mcd_…` (the identity file's) are a 401 in this mode: the file isn't combined with it yet.
 - **401** `{"error": "sign in", "signin": "<the helper's sign-in address, with return=>"}` for an API call without a valid credential, never a redirect; a page gets a 302 to that address instead. A page that receives the 401 from a `fetch` navigates to `signin` with `return=` set to itself (vaultkit's `machiya.js` does this).
-- **403** `{"error": …}`: a Hister account that isn't the owner's.
-- **503** `{"error": "sign-in is unavailable", "reason": …}`: the helper or Hister can't answer, or Hister's user handling is off. Kura has no fallback and no grace period: pages and API are closed until sign-in is back.
+- **403** `{"error": …}`: a Nogon account that isn't the owner's.
+- **503** `{"error": "sign-in is unavailable", "reason": …}`: the helper or Nogon can't answer, or Nogon's user handling is off. Kura has no fallback and no grace period: pages and API are closed until sign-in is back.
 - `/api/status` stays open for the probes.
 
 ## A note in a list
@@ -119,7 +119,7 @@ One note in full: the list fields, plus
 - `html`: the rendered note, **sanitized**. No `<script>`, `<iframe>`, `<object>`, `<embed>`, `<style>`, event-handler attributes, or `javascript:`/`data:` URLs. Links and images are absolute (`https://kura…/n/…`, `…/a/…`). Shiori renders it in a WKWebView with JavaScript off, or a sandboxed `srcdoc`, and strips anyway.
 - `markdown`: the raw note, frontmatter included
 - `backlinks`, `outlinks`: `[{"path", "title", "url"}]`
-- `external_links` (for Shiori's "Save This Note's Links"): `[{"url", "text"}]`, the `http(s)`, **`gemini://` and `gopher://`** links in the note's body (markdown links, raw HTML `<a>`, `<scheme://…>` autolinks and **bare URLs in prose**, in lists and tables too, without trailing sentence punctuation or an unbalanced closing bracket, which Obsidian also shows as links; not inline code or code fences; `mailto:` is not one), deduplicated in order (`text` is the link text, the URL itself for a bare URL, `""` for an `<a>` with no text such as an image link), with Kura's own host and the other rooms' hosts (`MACHIYA_ROOMS` and the sister settings; ports ignored) left out. Further filtering (Hister's skip rules, what it already holds) is the client's. **Never for a private vault**: a private-vault note always has `external_links: []`, so no work link can enter a save flow. The default vault and shared vaults have them.
+- `external_links` (for Shiori's "Save This Note's Links"): `[{"url", "text"}]`, the `http(s)`, **`gemini://` and `gopher://`** links in the note's body (markdown links, raw HTML `<a>`, `<scheme://…>` autolinks and **bare URLs in prose**, in lists and tables too, without trailing sentence punctuation or an unbalanced closing bracket, which Obsidian also shows as links; not inline code or code fences; `mailto:` is not one), deduplicated in order (`text` is the link text, the URL itself for a bare URL, `""` for an `<a>` with no text such as an image link), with Kura's own host and the other rooms' hosts (`MACHIYA_ROOMS` and the sister settings; ports ignored) left out. Further filtering (Nogon's skip rules, what it already holds) is the client's. **Never for a private vault**: a private-vault note always has `external_links: []`, so no work link can enter a save flow. The default vault and shared vaults have them.
 
 ### `GET /api/links?folder=<f>&limit=&offset=`
 
@@ -143,7 +143,7 @@ The notes Kura's service worker keeps on a device for good (Machiya's shared wor
 
 ### `GET /api/status`
 
-→ `{"head": "<commit>", "synced_at": <unix>, "notes": 120, "version": "<kura version>", "vaultkit": "v0.1.0", "error": null, "auth": "tailscale"}`, plus `vaults` with several vaults ([Vaults](#vaults)). This one needs no identity and the monitoring probes use it, so it carries no configuration: an error reads `"sync failed"` (or `"push failed"` for the Hister push), and a private vault's entry is only `{"error": …}`. A request that passes the owner gate (every request when `KURA_AUTH=open`; with the identity file, the owner) also gets `"repo": "<url without credentials>"`, `"subdir": "<vault folder>"` and the full error texts. A probe matches `"ready": true` and fails on `"error": "`.
+→ `{"head": "<commit>", "synced_at": <unix>, "notes": 120, "version": "<kura version>", "vaultkit": "v0.1.0", "error": null, "auth": "tailscale"}`, plus `vaults` with several vaults ([Vaults](#vaults)). This one needs no identity and the monitoring probes use it, so it carries no configuration: an error reads `"sync failed"` (or `"push failed"` for the Nogon push), and a private vault's entry is only `{"error": …}`. A request that passes the owner gate (every request when `KURA_AUTH=open`; with the identity file, the owner) also gets `"repo": "<url without credentials>"`, `"subdir": "<vault folder>"` and the full error texts. A probe matches `"ready": true` and fails on `"error": "`.
 
 ### `GET /api/changelog`
 
