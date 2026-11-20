@@ -1,18 +1,18 @@
-"""feed-import: what its owner reads in a feed reader lands in Hister (Machiya, stack/feed-import).
+"""feed-import: what its owner reads in a feed reader lands in Nogon (Machiya, stack/feed-import).
 
 Every FEED_IMPORT_INTERVAL seconds, for each reader (NewsBlur, Miniflux, FreshRSS, Feedbin; readers.Reader):
   1. starred entries first, then read entries, newest first, until a page holds nothing new (the whole history on the
      first run: the backfill);
-  2. an entry's URL that Hister already has is left alone (never re-indexed); a starred one there without a label
+  2. an entry's URL that Nogon already has is left alone (never re-indexed); a starred one there without a label
      gets the starred label (POST /api/label), nothing else changes;
   3. otherwise the ORIGINAL article is fetched once, as a browser would open it (stack/smallweb's checked fetcher:
-     http(s) only, never a private address, at most 5 redirects, 5 MB, 30 s), and sent to Hister as HTML;
+     http(s) only, never a private address, at most 5 redirects, 5 MB, 30 s), and sent to Nogon as HTML;
   4. when that fails for good (4xx, not HTML, blocked, too big; or a timeout/429/5xx on FEED_IMPORT_MAX_TRIES runs),
      or the page is much shorter than the reader's copy (a paywall's teaser), the READER'S COPY of the story is sent
      instead, under the article's URL, marked `<reader>_content: copy`.
 A read entry is a visited page: no label, `added` = when it was read (or the story's date in a backfill). A starred
-entry is a saved page: the first of its reader tags that names a Hister topic label, else FEED_IMPORT_STARRED_LABEL
-(default `starred`), Hister's skip rules ignored (a deliberate save), `added` = the star time (when first seen if the
+entry is a saved page: the first of its reader tags that names a Nogon topic label, else FEED_IMPORT_STARRED_LABEL
+(default `starred`), Nogon's skip rules ignored (a deliberate save), `added` = the star time (when first seen if the
 reader keeps none; the story's date in a backfill).
 
   python3 feedimport.py               the service: a run every FEED_IMPORT_INTERVAL seconds, status in status.json
@@ -21,8 +21,8 @@ reader keeps none; the story's date in a backfill).
                                       take over the older newsblur-import.py's state (once, before the first run)
   python3 feedimport.py --dry-run [--limit N] [--no-fetch] [--stream read|starred]
                                       print what would be sent, at most N entries PER STREAM per reader (default 10:
-                                      up to 10 starred + 10 read); writes nothing anywhere (no state, no Hister writes;
-                                      Hister is only asked which URLs it has, and only if FEED_IMPORT_HISTER_URL is set)
+                                      up to 10 starred + 10 read); writes nothing anywhere (no state, no Nogon writes;
+                                      Nogon is only asked which URLs it has, and only if FEED_IMPORT_NOGON_URL is set)
 """
 import argparse
 import html as htmlmod
@@ -40,7 +40,7 @@ sys.path.insert(0, HERE)
 if not os.path.exists(os.path.join(HERE, "web.py")):          # a checkout: smallweb's fetcher sits beside us
     sys.path.insert(1, os.path.join(os.path.dirname(HERE), "smallweb"))
 
-import hister as histermod                                     # noqa: E402
+import nogon as nogonmod                                       # noqa: E402
 import smolnet                                                 # noqa: E402
 import web                                                     # noqa: E402
 from feedbin import Feedbin                                    # noqa: E402
@@ -50,21 +50,26 @@ from newsblur import NewsBlur                                  # noqa: E402
 from readers import Entry, ReaderError, secret_file            # noqa: E402
 from store import Store                                        # noqa: E402
 
-VERSION = "0.2.1"
+VERSION = "0.3.0"
 
 _old_names = set()
 
 
-def nogon_first(env, key):
-    """0.2.0, the rename (Hister is now Nogon): for a <P>_HISTER_<X> setting, <P>_NOGON_<X> when it is set (even empty),
-    else the old name (logged once) until the rename's stage 3. Other names are read as they are."""
-    new = key.replace("HISTER", "NOGON")
-    if new != key:
-        if new in env:
-            return env[new]
-        if key in env and key not in _old_names:
-            _old_names.add(key)
-            print("feed-import: %s is an old name, read as %s" % (key, new), file=sys.stderr, flush=True)
+def setting(env, key):
+    """A setting, as vaultkit's names.setting() reads one (Hister is now Nogon): a <P>_NOGON_<X> that is set wins, even
+    empty. 0.3.0, the rename's stage 3: its old <P>_HISTER_<X> twin is no longer read. Set on its own it stops the
+    start, naming the new one, so nothing is quietly ignored; set beside it, it is ignored and said once. Other names
+    are read as they are."""
+    old = key.replace("NOGON", "HISTER")
+    if old != key:
+        if key in env:
+            if old in env and old not in _old_names:
+                _old_names.add(old)
+                print("feed-import: %s: an old name, ignored (%s is set; Hister is now Nogon): remove it" % (old, key),
+                      file=sys.stderr, flush=True)
+        elif old in env:
+            raise SystemExit("feed-import: %s is an old name and is no longer read: rename it %s (Hister is now Nogon)"
+                             % (old, key))
     return env.get(key)
 
 USER_AGENT = "Mozilla/5.0 (compatible; machiya-feed-import/%s; opens what its owner read in a feed reader)" % VERSION
@@ -100,7 +105,7 @@ def in_window(window, tz, now=None):
 # -- fetching the original --------------------------------------------------------------------------------------------
 
 class RunFailed(Exception):
-    """A run whose every entry failed: reported like a reader or Hister failure."""
+    """A run whose every entry failed: reported like a reader or Nogon failure."""
 
 
 class Transient(Exception):
@@ -158,7 +163,7 @@ def plain(fragment):
 
 
 def copy_page(title, fragment, url):
-    """The reader's copy as a page of its own (Hister extracts the text from the HTML, as it does a visited page)."""
+    """The reader's copy as a page of its own (Nogon extracts the text from the HTML, as it does a visited page)."""
     t = htmlmod.escape(title or url)
     return ("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>%s</title>"
             "<link rel=\"canonical\" href=\"%s\"></head><body><article><h1>%s</h1>%s</article></body></html>"
@@ -168,9 +173,9 @@ def copy_page(title, fragment, url):
 # -- the importer -------------------------------------------------------------------------------------------------------
 
 class Importer:
-    def __init__(self, readers, store, hister=None, fetch=None, *, dry_run=False, starred_label="", tag_labels=True,
+    def __init__(self, readers, store, nogon=None, fetch=None, *, dry_run=False, starred_label="", tag_labels=True,
                  max_tries=3, copy_ratio=1.5, out=print, clock=time.time):
-        self.readers, self.store, self.hister, self.fetch = readers, store, hister, fetch
+        self.readers, self.store, self.nogon, self.fetch = readers, store, nogon, fetch
         self.dry_run, self.starred_label, self.tag_labels = dry_run, starred_label, tag_labels
         self.max_tries, self.copy_ratio, self.out, self.clock = max_tries, copy_ratio, out, clock
         self._labels = None
@@ -190,26 +195,26 @@ class Importer:
             self.store.put(reader, id, **kw)
 
     def lookup(self, url):
-        return self.hister.document(url) if self.hister else None
+        return self.nogon.document(url) if self.nogon else None
 
     def label_for(self, reader, entry):
-        if self.tag_labels and entry.tags and self.hister:
+        if self.tag_labels and entry.tags and self.nogon:
             if self._labels is None:
-                self._labels = {x.lower(): x for x in self.hister.labels()}
+                self._labels = {x.lower(): x for x in self.nogon.labels()}
             for tag in entry.tags:
                 if tag.strip().lower() in self._labels:
                     return self._labels[tag.strip().lower()]
         return self.starred_label or "starred"
 
     def label_existing(self, reader, entry, url, doc):
-        """A starred entry whose page Hister already has: label it if it has no label; never touch anything else."""
+        """A starred entry whose page Nogon already has: label it if it has no label; never touch anything else."""
         if doc is None or doc.get("label"):
             return doc.get("label") if doc else ""
         label = self.label_for(reader, entry)
         if self.dry_run:
             self.log("  [dry-run] would label %s: %s" % (url, label))
             return label
-        status = self.hister.set_label(url, label)
+        status = self.nogon.set_label(url, label)
         if status >= 300:
             self.log("  label refused (%d): %s" % (status, url))
             return ""
@@ -237,7 +242,7 @@ class Importer:
             e.starred_at = first
         if not starred and e.read_at is None:
             e.read_at = first
-        url = histermod.norm(e.url)
+        url = nogonmod.norm(e.url)
         if not url.lower().startswith(("http://", "https://")):
             self.put(r, e.id, status="skipped", url=e.url, error="no http(s) URL", starred=int(starred))
             self.note(r, "skipped")
@@ -267,7 +272,7 @@ class Importer:
 
         doc_url, content = url, "copy"
         if page is not None:
-            doc_url = histermod.norm(page.url)
+            doc_url = nogonmod.norm(page.url)
             if doc_url != url:
                 doc = self.lookup(doc_url)
                 if doc is not None:
@@ -308,20 +313,20 @@ class Importer:
                                 ensure_ascii=False))
             self.note(r, "would add")
             return
-        status, reply = self.hister.add(doc)
+        status, reply = self.nogon.add(doc)
         if status in (200, 201):
             self.put(r, e.id, status="added", tries=tries, url=doc_url, label=label, content=content,
                      starred=int(starred), error=None, entry=None)
             self.log("  added (%s%s) %s" % (content, ", label " + label if label else "", doc_url))
             self.note(r, "added " + content)
         elif status == 406:
-            self.put(r, e.id, status="skipped", tries=tries, url=doc_url, error="Hister skip rule (406)",
+            self.put(r, e.id, status="skipped", tries=tries, url=doc_url, error="Nogon skip rule (406)",
                      starred=int(starred))
             self.note(r, "skipped")
         else:
             self.put(r, e.id, status="rejected", tries=tries, url=doc_url, error=("HTTP %d %s" % (status, reply))[:300],
                      starred=int(starred))
-            self.log("  rejected by Hister (%d): %s" % (status, doc_url))
+            self.log("  rejected by Nogon (%d): %s" % (status, doc_url))
             self.note(r, "rejected")
 
     def known(self, reader, e, url, doc, starred):
@@ -330,15 +335,15 @@ class Importer:
                  entry=None)
         self.note(reader.name, "known")
         if self.dry_run:
-            self.out(json.dumps({"already_in_hister": url, "label": label or "", "stream": "starred" if starred else "read"}))
+            self.out(json.dumps({"already_in_nogon": url, "label": label or "", "stream": "starred" if starred else "read"}))
 
     def handle_safely(self, reader, e, stream, backfill):
-        """handle(), with anything it raises besides HisterDown and ReaderError (which stop the run) kept to this entry
+        """handle(), with anything it raises besides NogonDown and ReaderError (which stop the run) kept to this entry
         (0.1.2, the 2026-10 sweep, MACH-F-3): the error is recorded, the entry tried again on the next runs, max_tries
         runs in all, then `failed` for good. Before, one malformed permalink or odd charset stopped every run."""
         try:
             self.handle(reader, e, stream, backfill)
-        except (histermod.HisterDown, ReaderError):
+        except (nogonmod.NogonDown, ReaderError):
             raise
         except Exception as x:                         # one bad entry never stops the import
             r = reader.name
@@ -362,7 +367,7 @@ class Importer:
     # -- a run ----------------------------------------------------------------------------------------------------------
 
     def run(self, streams=("starred", "read"), limit=None):
-        """One pass over every reader. Raises HisterDown or ReaderError (nothing half-recorded: the state is written
+        """One pass over every reader. Raises NogonDown or ReaderError (nothing half-recorded: the state is written
         per entry)."""
         self.stats, self.errors = {}, []
         for reader in self.readers:
@@ -391,7 +396,7 @@ class Importer:
 
 def import_legacy(store, path):
     """Take over the state of the older hister/newsblur-import.py (starred saves only, 2026-09-28): a save it sent
-    (`done`) or Hister refused (`rejected`) is recorded as handled, so it is never sent again. One it gave up on
+    (`done`) or Nogon refused (`rejected`) is recorded as handled, so it is never sent again. One it gave up on
     (`failed`, e.g. a site that blocks the server) or still had `pending` is left out: this importer tries it again
     and can store NewsBlur's copy instead. Returns {status: count} of what was recorded."""
     with open(path) as f:
@@ -442,15 +447,15 @@ def build(env, dry_run=False, fetch=True):
             raise SystemExit("feed-import: unknown reader %r (known: newsblur, miniflux, freshrss, feedbin)" % name)
     if len(set(names)) != len(names):
         raise SystemExit("feed-import: a reader is named twice in FEED_IMPORT_READERS")
-    hister_url = nogon_first(env, "FEED_IMPORT_HISTER_URL") or ""
-    if not hister_url and not dry_run:
+    nogon_url = setting(env, "FEED_IMPORT_NOGON_URL") or ""
+    if not nogon_url and not dry_run:
         raise SystemExit("feed-import: FEED_IMPORT_NOGON_URL is required (unset is allowed only with --dry-run)")
-    token = histermod.token_file(nogon_first(env, "FEED_IMPORT_HISTER_TOKEN_FILE"))     # checked at start even for a dry run
-    hister = histermod.Hister(hister_url, token) if hister_url else None
+    token = nogonmod.token_file(setting(env, "FEED_IMPORT_NOGON_TOKEN_FILE"))     # checked at start even for a dry run
+    nogon = nogonmod.Nogon(nogon_url, token) if nogon_url else None
     data = env.get("FEED_IMPORT_DATA", "/data")
     store = Store(":memory:" if dry_run else os.path.join(data, "feed-import.sqlite3"))
     fetcher = Fetcher(env.get("FEED_IMPORT_FETCH_ALLOW", ""), env.get("FEED_IMPORT_SOCKS", "")) if fetch else None
-    return Importer(readers, store, hister, fetcher, dry_run=dry_run,
+    return Importer(readers, store, nogon, fetcher, dry_run=dry_run,
                     starred_label=env.get("FEED_IMPORT_STARRED_LABEL", ""),
                     tag_labels=env.get("FEED_IMPORT_TAG_LABELS", "1") not in ("0", "false", "no"),
                     max_tries=max(1, int(env.get("FEED_IMPORT_MAX_TRIES", "3"))),
@@ -469,8 +474,8 @@ def serve(env, once=False):
     imp, data = build(env)
     interval = max(60, int(env.get("FEED_IMPORT_INTERVAL", "600")))
     window, tz = pause_window(env.get("FEED_IMPORT_PAUSE")), env.get("FEED_IMPORT_TZ", "UTC")
-    imp.log("feed-import %s: readers %s, Hister %s, every %d s%s, egress %s" % (
-        VERSION, ",".join(r.name for r in imp.readers), nogon_first(env, "FEED_IMPORT_HISTER_URL"), interval,
+    imp.log("feed-import %s: readers %s, Nogon %s, every %d s%s, egress %s" % (
+        VERSION, ",".join(r.name for r in imp.readers), setting(env, "FEED_IMPORT_NOGON_URL"), interval,
         (", paused " + env.get("FEED_IMPORT_PAUSE")) if window else "", env.get("FEED_IMPORT_SOCKS") or "direct"))
     last_ok, fails, carried = None, 0, None
     try:                                     # a run that never finished (a crash, a kill) isn't forgotten on restart
@@ -510,7 +515,7 @@ def serve(env, once=False):
                 last_ok, fails = int(time.time()), 0
                 if any(stats.values()):
                     imp.log("run: %s" % json.dumps(stats, sort_keys=True))
-            except (histermod.HisterDown, ReaderError, RunFailed) as e:
+            except (nogonmod.NogonDown, ReaderError, RunFailed) as e:
                 fails += 1
                 error = str(e)
                 imp.log("run failed (%d in a row): %s" % (fails, e))
@@ -545,7 +550,7 @@ def main(argv=None):
         streams = (args.stream,) if args.stream else ("starred", "read")
         try:
             stats = imp.run(streams=streams, limit=args.limit if args.limit is not None else 10)
-        except (histermod.HisterDown, ReaderError) as e:
+        except (nogonmod.NogonDown, ReaderError) as e:
             print("dry run failed: %s" % e, file=sys.stderr)
             return 1
         print("dry run: %s (nothing was written)" % json.dumps(stats, sort_keys=True))

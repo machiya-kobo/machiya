@@ -1,7 +1,7 @@
-"""feed-import's Hister calls (docs/contracts/hister.md): `Origin: hister://` on every call, and the owner's token as
-`X-Access-Token` from FEED_IMPORT_HISTER_TOKEN_FILE (ignored by a Hister without users). The file is checked at start
-(token_file), re-read when it changes, and while a token is set a redirect from Hister is never followed: urllib would
-carry the header to wherever it points.
+"""feed-import's Nogon calls (docs/contracts/nogon.md): `Origin: nogon://` on every call (0.3.0; Nogon v0.22 and later),
+and the owner's token as `X-Access-Token` from FEED_IMPORT_NOGON_TOKEN_FILE (ignored by a Nogon without users). The
+file is checked at start (token_file), re-read when it changes, and while a token is set a redirect from Nogon is never
+followed: urllib would carry the header to wherever it points.
 
 Only four calls: GET /api/document (is this URL known?), POST /api/add (a new page), POST /api/label (label a page
 that has none), GET /api/rules (the topic labels, from the aliases). Never a re-index of a known URL.
@@ -50,16 +50,16 @@ class SecretFile:
 
 
 def token_file(path):
-    """FEED_IMPORT_HISTER_TOKEN_FILE -> a SecretFile, or None when unset (no token, as before). Set but missing, empty
+    """FEED_IMPORT_NOGON_TOKEN_FILE -> a SecretFile, or None when unset (no token, as before). Set but missing, empty
     or not a token: refuse to start (never echoing the file's contents)."""
     path = (path or "").strip()
     if not path:
         return None
     if not os.path.isfile(path):
-        raise SystemExit("feed-import: FEED_IMPORT_HISTER_TOKEN_FILE: no token in %s" % path)
+        raise SystemExit("feed-import: FEED_IMPORT_NOGON_TOKEN_FILE: no token in %s" % path)
     secret = SecretFile(path)
     if not secret.value:
-        raise SystemExit("feed-import: FEED_IMPORT_HISTER_TOKEN_FILE: %s doesn't hold a token on its first line" % path)
+        raise SystemExit("feed-import: FEED_IMPORT_NOGON_TOKEN_FILE: %s doesn't hold a token on its first line" % path)
     return secret
 
 
@@ -68,12 +68,12 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-class HisterDown(Exception):
-    """Hister is unreachable or answered 5xx: the run stops and nothing is counted against an entry."""
+class NogonDown(Exception):
+    """Nogon is unreachable or answered 5xx: the run stops and nothing is counted against an entry."""
 
 
 def norm(url):
-    """The URL as Hister stores it (document.normalizeWebURL in v0.20.0): no fragment, and no utm / utm_* query
+    """The URL as Nogon stores it (document.normalizeWebURL in v0.20.0): no fragment, and no utm / utm_* query
     parameters; when one is dropped the query is re-encoded the way Go's url.Values.Encode does (sorted by key)."""
     u = urllib.parse.urlsplit(url)
     if u.scheme.lower() not in ("http", "https"):
@@ -88,15 +88,15 @@ def norm(url):
     return urllib.parse.urlunsplit((u.scheme, u.netloc, u.path, query, ""))
 
 
-class Hister:
+class Nogon:
     def __init__(self, base, token=None, timeout=60):
-        """token: a SecretFile (FEED_IMPORT_HISTER_TOKEN_FILE), a plain string (tests), or None/"" for none."""
+        """token: a SecretFile (FEED_IMPORT_NOGON_TOKEN_FILE), a plain string (tests), or None/"" for none."""
         self.base, self.timeout = base.rstrip("/"), timeout
         self.token = token if token else None
         self.opener = urllib.request.build_opener(NoRedirect) if self.token else urllib.request.build_opener()
 
     def __repr__(self):                 # never the token
-        return "Hister(%s%s)" % (self.base, ", token" if self.token else "")
+        return "Nogon(%s%s)" % (self.base, ", token" if self.token else "")
 
     def token_value(self):
         if self.token is None:
@@ -104,8 +104,8 @@ class Hister:
         return self.token.get() if hasattr(self.token, "get") else self.token
 
     def call(self, method, path, body=None):
-        """(status, parsed JSON or text). 4xx come back; 5xx and network errors raise HisterDown."""
-        headers = {"Origin": "hister://", "Accept": "application/json"}
+        """(status, parsed JSON or text). 4xx come back; 5xx and network errors raise NogonDown."""
+        headers = {"Origin": "nogon://", "Accept": "application/json"}
         data = None
         if body is not None:
             data = json.dumps(body).encode()
@@ -119,13 +119,13 @@ class Hister:
                 status, raw = r.status, r.read()
         except urllib.error.HTTPError as e:
             if self.token is not None and 300 <= e.code < 400:
-                raise HisterDown("Hister %s %s: a redirect (%d), not followed with the token"
+                raise NogonDown("Nogon %s %s: a redirect (%d), not followed with the token"
                                  % (method, path.split("?")[0], e.code))
             if e.code >= 500:
-                raise HisterDown("Hister %s %s: HTTP %d" % (method, path.split("?")[0], e.code))
+                raise NogonDown("Nogon %s %s: HTTP %d" % (method, path.split("?")[0], e.code))
             status, raw = e.code, e.read()[:500]
         except (urllib.error.URLError, OSError) as e:
-            raise HisterDown("Hister %s %s: %s" % (method, path.split("?")[0], e))
+            raise NogonDown("Nogon %s %s: %s" % (method, path.split("?")[0], e))
         try:
             return status, json.loads(raw) if raw else None
         except ValueError:
@@ -137,7 +137,7 @@ class Hister:
         if status == 404:
             return None
         if status != 200 or not isinstance(doc, dict):
-            raise HisterDown("Hister GET /api/document: HTTP %d" % status)
+            raise NogonDown("Nogon GET /api/document: HTTP %d" % status)
         return doc
 
     def add(self, doc):
@@ -149,7 +149,7 @@ class Hister:
         return status
 
     def labels(self):
-        """The topic labels named in Hister's aliases (label:x and label:(a|b)), as the older importer read them."""
+        """The topic labels named in Nogon's aliases (label:x and label:(a|b)), as the older importer read them."""
         status, rules = self.call("GET", "/api/rules")
         out = set()
         if status == 200 and isinstance(rules, dict):

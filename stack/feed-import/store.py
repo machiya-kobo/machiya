@@ -1,14 +1,14 @@
 """feed-import's state: one sqlite file under FEED_IMPORT_DATA. It is the cursor: every entry a reader has shown us,
-per reader and id, and what became of it. Losing it is safe (Hister is asked before anything is added, so nothing is
+per reader and id, and what became of it. Losing it is safe (Nogon is asked before anything is added, so nothing is
 added twice), only slower: the next run is a backfill.
 
 entries.status:
 - pending   the original couldn't be fetched yet (a timeout, 429, 5xx): the entry itself is kept (`entry`, JSON) and
             tried again from here on the next runs, MAX_TRIES runs in all, however deep it is in the reader's list
-- added     sent to Hister (content: original or copy)
-- known     Hister already had the URL: left alone (a starred one may have been labelled)
-- skipped   not sent: no http(s) URL, no content at all, or Hister's skip rules (406)
-- rejected  Hister refused it (422 sensitive content, another 4xx): final
+- added     sent to Nogon (content: original or copy)
+- known     Nogon already had the URL: left alone (a starred one may have been labelled)
+- skipped   not sent: no http(s) URL, no content at all, or Nogon's skip rules (406)
+- rejected  Nogon refused it (422 sensitive content, another 4xx): final
 - failed    handling it raised (a malformed permalink, a bug) on MAX_TRIES runs: final, with the error (0.1.2); until
             then it is `pending` and tried again
 entries.starred is 1 once the starred stream has been handled for it (labelled, or found already labelled).

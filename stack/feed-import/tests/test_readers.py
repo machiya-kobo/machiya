@@ -1,5 +1,5 @@
 """The Miniflux, FreshRSS and Feedbin readers against local fakes of their APIs (shapes from their docs and source,
-2026-10-04), and one whole run per reader through the pipeline into the fake Hister of test_feedimport. No network.
+2026-10-04), and one whole run per reader through the pipeline into the fake Nogon of test_feedimport. No network.
 Every fake records its requests: the readers may only GET, except FreshRSS's ClientLogin and items/contents (read-only
 POSTs, the only way FreshRSS takes those)."""
 import base64
@@ -16,9 +16,9 @@ sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 
 import feedimport                                               # noqa: E402
-import hister as histermod                                      # noqa: E402
+import nogon as nogonmod                                        # noqa: E402
 import smolnet                                                  # noqa: E402
-import test_feedimport as T                                     # noqa: E402  (its fakes: Hister, the article servers)
+import test_feedimport as T                                     # noqa: E402  (its fakes: Nogon, the article servers)
 from feedbin import Feedbin                                     # noqa: E402
 from freshrss import FreshRSS, decimal_id                       # noqa: E402
 from miniflux import Miniflux                                   # noqa: E402
@@ -191,7 +191,7 @@ class Base(unittest.TestCase):
     def run_import(self, reader):
         f = feedimport.Fetcher(allow="127.0.0.1/32")
         f.polite = smolnet.Polite(default=0)
-        imp = feedimport.Importer([reader], self.store, histermod.Hister(T.H_URL), f, out=lambda *_: None,
+        imp = feedimport.Importer([reader], self.store, nogonmod.Nogon(T.H_URL), f, out=lambda *_: None,
                                   clock=lambda: 1800000000)
         imp.run()
         return {d["url"]: d for d in T.adds()}
@@ -253,7 +253,7 @@ class FreshRSSTests(Base):
             freshrss.IDS = old
         self.assertEqual(sorted(sent), sorted(T.WEB + "/article/f%d" % i for i in (10, 11, 12)))
         f12 = sent[T.WEB + "/article/f12"]
-        self.assertEqual(f12["label"], "books")                     # a FreshRSS label that names a Hister label
+        self.assertEqual(f12["label"], "books")                     # a FreshRSS label that names a Nogon label
         self.assertEqual(f12["metadata"]["freshrss_tags"], ["Books"])       # the folder is not a tag
         self.assertEqual(f12["metadata"]["freshrss_folder"], "Tech")
         self.assertEqual(f12["added"], 1759000000)                  # no star time: the story's date in a backfill
@@ -306,7 +306,7 @@ class Build(unittest.TestCase):
         secret = os.path.join(d, "s")
         with open(secret, "w") as f:
             f.write("x\n")
-        env = {"FEED_IMPORT_HISTER_URL": "http://hister:4433", "FEED_IMPORT_DATA": d,
+        env = {"FEED_IMPORT_NOGON_URL": "http://nogon:4433", "FEED_IMPORT_DATA": d,
                "FEED_IMPORT_READERS": "newsblur,miniflux,freshrss,feedbin",
                "FEED_IMPORT_NEWSBLUR_TOKEN_FILE": secret, "FEED_IMPORT_NEWSBLUR_URL": "https://nb.example",
                "FEED_IMPORT_MINIFLUX_URL": "https://mf.example",

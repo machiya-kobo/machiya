@@ -1,5 +1,13 @@
 # Changelog: feed-import
 
+## 0.3.0
+
+- The rename's stage 3 (Hister is now Nogon):
+  - **The old settings stop the start.** `FEED_IMPORT_HISTER_URL` and `FEED_IMPORT_HISTER_TOKEN_FILE` are no longer read; one set without its `FEED_IMPORT_NOGON_*` twin stops feed-import (a dry run too) with a message naming the new one. Beside its twin it is ignored, and said once.
+  - **Every call to Nogon sends `Origin: nogon://`** (Nogon v0.22 and later), not `hister://`.
+  - A dry run prints `already_in_nogon` (was `already_in_hister`) for an entry Nogon already has.
+  - The code's own names say Nogon: `hister.py` is `nogon.py` (`Nogon`, `NogonDown`). The stored state is unchanged.
+
 ## 0.2.1
 
 - 0.2.0 on today's Python base. 0.2.0 was tagged but never built: its base pin was stale.

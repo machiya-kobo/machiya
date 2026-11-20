@@ -1,8 +1,8 @@
 """feed-import's tests: no network. Three local fakes on 127.0.0.1:
 - NewsBlur (read_stories with its one-story page overlap, starred_story_hashes, starred_stories?h=, feeds), which
   answers `authenticated: false` without the token and records every method it is sent;
-- Hister (/api/document, /api/add, /api/label, /api/rules), which refuses calls without `Origin: hister://`;
-- article servers: a full article, a paywall teaser, 404, 503, a PDF, a redirect to a URL Hister already has.
+- Nogon (/api/document, /api/add, /api/label, /api/rules), which refuses calls without `Origin: nogon://`;
+- article servers: a full article, a paywall teaser, 404, 503, a PDF, a redirect to a URL Nogon already has.
 The fetcher is smallweb's (stack/smallweb/web.py), allowed to reach 127.0.0.1 for the tests only.
 
 Run, from stack/feed-import: python3 -m unittest discover -s tests
@@ -14,7 +14,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 
 import feedimport                                               # noqa: E402
-import hister as histermod                                      # noqa: E402
+import nogon as nogonmod                                        # noqa: E402
 import smolnet                                                  # noqa: E402
 from newsblur import NewsBlur                                   # noqa: E402
 from readers import ReaderError                                 # noqa: E402
@@ -153,7 +153,7 @@ class NewsBlurFake(BaseHTTPRequestHandler):
 NB_SRV, NB_URL = serve(NewsBlurFake)
 
 
-# -- Hister ---------------------------------------------------------------------------------------------------------
+# -- Nogon ---------------------------------------------------------------------------------------------------------
 
 class H:
     docs = {}            # url -> document
@@ -161,7 +161,7 @@ class H:
     down = False
 
 
-class HisterFake(BaseHTTPRequestHandler):
+class NogonFake(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
@@ -181,7 +181,7 @@ class HisterFake(BaseHTTPRequestHandler):
         H.calls.append((method, u.path, body, dict(self.headers)))
         if H.down:
             return self.send(503)
-        if self.headers.get("Origin") != "hister://":
+        if self.headers.get("Origin") != "nogon://":
             return self.send(403)
         if u.path == "/api/document":
             doc = H.docs.get(parse_qs(u.query)["url"][0])
@@ -209,7 +209,7 @@ class HisterFake(BaseHTTPRequestHandler):
         self.handle_any("POST")
 
 
-H_SRV, H_URL = serve(HisterFake)
+H_SRV, H_URL = serve(NogonFake)
 
 
 def adds():
@@ -230,12 +230,12 @@ class Base(unittest.TestCase):
         self.addCleanup(self.store.db.close)
         self.lines = []
 
-    def importer(self, dry_run=False, token="", hister=True, fetch=True, **kw):
+    def importer(self, dry_run=False, token="", nogon=True, fetch=True, **kw):
         nb = NewsBlur(NB_URL, TOKEN, page=3, gap=0)
         f = feedimport.Fetcher(allow="127.0.0.1/32") if fetch else None
         if f:
             f.polite = smolnet.Polite(default=0)
-        h = histermod.Hister(H_URL, token) if hister else None
+        h = nogonmod.Nogon(H_URL, token) if nogon else None
         return feedimport.Importer([nb], self.store, h, f, dry_run=dry_run, out=self.lines.append,
                                    clock=lambda: 1800000000, **kw)
 
@@ -244,11 +244,11 @@ class Base(unittest.TestCase):
 
 
 class Units(unittest.TestCase):
-    def test_norm_matches_hister(self):
-        self.assertEqual(histermod.norm("https://a.example/p?b=2&utm_source=x&a=1#frag"), "https://a.example/p?a=1&b=2")
-        self.assertEqual(histermod.norm("https://a.example/p?z=1&a=2#x"), "https://a.example/p?z=1&a=2")
-        self.assertEqual(histermod.norm("https://a.example/p?utm=1"), "https://a.example/p")
-        self.assertEqual(histermod.norm("mailto:x@example.com"), "mailto:x@example.com")
+    def test_norm_matches_nogon(self):
+        self.assertEqual(nogonmod.norm("https://a.example/p?b=2&utm_source=x&a=1#frag"), "https://a.example/p?a=1&b=2")
+        self.assertEqual(nogonmod.norm("https://a.example/p?z=1&a=2#x"), "https://a.example/p?z=1&a=2")
+        self.assertEqual(nogonmod.norm("https://a.example/p?utm=1"), "https://a.example/p")
+        self.assertEqual(nogonmod.norm("mailto:x@example.com"), "mailto:x@example.com")
 
     def test_pause_window(self):
         w = feedimport.pause_window("Sun 02:20-02:50")
@@ -347,7 +347,7 @@ class Pipeline(Base):
         self.assertEqual((gone["metadata"]["newsblur_content"], gone["metadata"]["newsblur_copy_reason"]),
                          ("copy", "HTTP 404"))
         s1, s2 = sent[WEB + "/article/s1"], sent[WEB + "/article/s2"]
-        self.assertEqual((s1["label"], s1["added"]), ("books", 1750000001))    # the matching Hister label's spelling
+        self.assertEqual((s1["label"], s1["added"]), ("books", 1750000001))    # the matching Nogon label's spelling
         self.assertEqual((s2["label"], s2["added"]), ("starred", 1750000002))
         self.assertTrue(s1["metadata"]["ignore_skip_rules"] and s1["metadata"]["newsblur_starred"])
         self.assertEqual(labels_set(), [{"url": WEB + "/article/visited", "label": "starred"}])
@@ -397,7 +397,7 @@ class Pipeline(Base):
         self.assertEqual(adds(), [])
         self.assertEqual(self.store.get("newsblur", "r1")["url"], WEB + "/article/known")
 
-    def test_hister_refusals(self):
+    def test_nogon_refusals(self):
         NB.read = [story("r1", "/article/skipme", "Skipped"), story("r2", "/article/sensitive", "Sensitive")]
         self.importer().run()
         self.assertEqual(self.store.get("newsblur", "r1")["status"], "skipped")
@@ -406,10 +406,10 @@ class Pipeline(Base):
         self.importer().run()                                                 # a save ignores skip rules
         self.assertEqual(self.store.get("newsblur", "r1")["status"], "added")
 
-    def test_hister_down(self):
+    def test_nogon_down(self):
         NB.read = [story("r1", "/article/1", "One")]
         H.down = True
-        with self.assertRaises(histermod.HisterDown):
+        with self.assertRaises(nogonmod.NogonDown):
             self.importer().run()
         self.assertIsNone(self.store.get("newsblur", "r1"))
 
@@ -423,10 +423,10 @@ class Pipeline(Base):
         self.assertTrue(all("X-Access-Token" not in c[3] for c in H.calls))
 
     def test_token_file_sent_on_every_call_and_reread(self):
-        path = os.path.join(self.tmp, "hister.token")
+        path = os.path.join(self.tmp, "nogon.token")
         with open(path, "w") as f:
             f.write("owner-token-one\n")
-        secret = histermod.token_file(path)
+        secret = nogonmod.token_file(path)
         H.docs[WEB + "/article/known"] = {"url": WEB + "/article/known", "label": ""}
         NB.read = [story("r1", "/article/1", "One")]
         NB.starred = [(story("s1", "/article/known", "Known"), 1700000000)]
@@ -443,7 +443,7 @@ class Pipeline(Base):
         self.assertTrue(H.calls and all(c[3].get("X-Access-Token") == "owner-token-two" for c in H.calls))
         os.unlink(path)                                           # vanished: the last good value stays
         self.assertEqual(secret.get(), "owner-token-two")
-        self.assertNotIn("owner-token", repr(secret) + repr(histermod.Hister(H_URL, secret)))
+        self.assertNotIn("owner-token", repr(secret) + repr(nogonmod.Nogon(H_URL, secret)))
         self.assertFalse(any("owner-token" in x for x in self.lines))
 
     def test_token_file_refusals(self):
@@ -454,13 +454,13 @@ class Pipeline(Base):
             f.write("secret with spaces\n")
         for path in (empty, spaced, os.path.join(self.tmp, "missing"), self.tmp):
             with self.assertRaises(SystemExit, msg=path) as cm:
-                histermod.token_file(path)
+                nogonmod.token_file(path)
             self.assertNotIn("secret with", str(cm.exception))
-        self.assertIsNone(histermod.token_file(""))
-        self.assertIsNone(histermod.token_file(None))
+        self.assertIsNone(nogonmod.token_file(""))
+        self.assertIsNone(nogonmod.token_file(None))
         env = {"FEED_IMPORT_READERS": "newsblur", "FEED_IMPORT_NEWSBLUR_URL": NB_URL,
-               "FEED_IMPORT_NEWSBLUR_TOKEN_FILE": spaced, "FEED_IMPORT_HISTER_URL": H_URL,
-               "FEED_IMPORT_HISTER_TOKEN_FILE": empty, "FEED_IMPORT_DATA": os.path.join(self.tmp, "data")}
+               "FEED_IMPORT_NEWSBLUR_TOKEN_FILE": spaced, "FEED_IMPORT_NOGON_URL": H_URL,
+               "FEED_IMPORT_NOGON_TOKEN_FILE": empty, "FEED_IMPORT_DATA": os.path.join(self.tmp, "data")}
         with self.assertRaises(SystemExit):
             feedimport.build(env)
 
@@ -478,12 +478,12 @@ class Pipeline(Base):
                 self.send_header("Content-Length", "0")
                 self.end_headers()
         srv, url = serve(Redirect)
-        with self.assertRaises(histermod.HisterDown) as cm:
-            histermod.Hister(url, "owner-token").document("https://x.test/a")
+        with self.assertRaises(nogonmod.NogonDown) as cm:
+            nogonmod.Nogon(url, "owner-token").document("https://x.test/a")
         self.assertIn("not followed", str(cm.exception))
         self.assertNotIn("owner-token", str(cm.exception))
         self.assertEqual(elsewhere, [])
-        self.assertIsNone(histermod.Hister(url).document("https://x.test/a"))  # without a token, as before (404)
+        self.assertIsNone(nogonmod.Nogon(url).document("https://x.test/a"))  # without a token, as before (404)
         self.assertEqual(len(elsewhere), 1)
         self.assertNotIn("X-Access-Token", elsewhere[0])
 
@@ -533,10 +533,10 @@ class Pipeline(Base):
         self.assertEqual(self.store.counts(), {})
         printed = [json.loads(x) for x in self.lines if x.startswith("{")]
         self.assertEqual(len([p for p in printed if "would_add" in p]), 10)
-        self.assertIn({"already_in_hister": WEB + "/article/known", "label": "starred", "stream": "starred"}, printed)
+        self.assertIn({"already_in_nogon": WEB + "/article/known", "label": "starred", "stream": "starred"}, printed)
         self.assertTrue(any("would label" in x for x in self.lines))
 
-    def test_dry_run_cli_without_hister(self):
+    def test_dry_run_cli_without_nogon(self):
         NB.read = [story("r1", "/article/1", "One")]
         tok = os.path.join(self.tmp, "token")
         with open(tok, "w") as f:
@@ -557,7 +557,7 @@ class Pipeline(Base):
         self.assertIn('"would_add"', out.getvalue())
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "data")))
         with self.assertRaises(SystemExit):
-            feedimport.build(env)                                            # a real run needs Hister
+            feedimport.build(env)                                            # a real run needs Nogon
         with self.assertRaises(SystemExit) as cm:                            # no default NewsBlur server
             feedimport.build({k: v for k, v in env.items() if k != "FEED_IMPORT_NEWSBLUR_URL"}, dry_run=True)
         self.assertIn("FEED_IMPORT_NEWSBLUR_URL", str(cm.exception))
@@ -623,6 +623,29 @@ class Health(Base):
         self.assertEqual(seen[0]["failures_in_a_row"], 3)
         self.assertIn("didn't finish", seen[0]["error"])
         self.assertTrue(status["ok"])                        # a good run clears it
+
+
+class NogonNames(unittest.TestCase):
+    """0.3.0, the rename's stage 3: FEED_IMPORT_NOGON_<X> only; an old FEED_IMPORT_HISTER_<X> on its own stops the start."""
+
+    def test_setting(self):
+        with self.assertRaises(SystemExit) as cm:
+            feedimport.setting({"FEED_IMPORT_HISTER_URL": "h"}, "FEED_IMPORT_NOGON_URL")
+        self.assertIn("FEED_IMPORT_HISTER_URL is an old name", str(cm.exception))
+        self.assertIn("rename it FEED_IMPORT_NOGON_URL", str(cm.exception))
+        err = io.StringIO()
+        with redirect_stderr(err):
+            both = {"FEED_IMPORT_HISTER_TOKEN_FILE": "h", "FEED_IMPORT_NOGON_TOKEN_FILE": ""}
+            self.assertEqual(feedimport.setting(both, "FEED_IMPORT_NOGON_TOKEN_FILE"), "")   # set, even empty: it wins
+            self.assertEqual(feedimport.setting(both, "FEED_IMPORT_NOGON_TOKEN_FILE"), "")
+        self.assertEqual(err.getvalue().count("FEED_IMPORT_HISTER_TOKEN_FILE: an old name, ignored"), 1)   # said once
+        self.assertIsNone(feedimport.setting({}, "FEED_IMPORT_DATA"))
+
+    def test_build_refuses_old_names(self):
+        for old in ("FEED_IMPORT_HISTER_URL", "FEED_IMPORT_HISTER_TOKEN_FILE"):
+            with self.assertRaises(SystemExit) as cm:
+                feedimport.build({old: "x", "FEED_IMPORT_READERS": ""}, dry_run=True)
+            self.assertIn(old + " is an old name", str(cm.exception))
 
 
 if __name__ == "__main__":

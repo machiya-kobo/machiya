@@ -1,4 +1,4 @@
-# feed-import (machiya-kobo/machiya stack/feed-import): what its owner reads in a feed reader, into Hister. Stdlib Python.
+# feed-import (machiya-kobo/machiya stack/feed-import): what its owner reads in a feed reader, into Nogon. Stdlib Python.
 # Build context: the machiya repo root, because the original articles are fetched with stack/smallweb's checked fetcher
 # (web.py + smolnet.py, unchanged). Runs as uid 1000; the state (one sqlite file) and status.json live in /data.
 # It listens on nothing.
@@ -8,7 +8,7 @@ WORKDIR /app
 COPY stack/smallweb/web.py stack/smallweb/smolnet.py /app/
 COPY stack/feed-import/feedimport.py stack/feed-import/readers.py stack/feed-import/newsblur.py \
      stack/feed-import/miniflux.py stack/feed-import/freshrss.py stack/feed-import/feedbin.py \
-     stack/feed-import/hister.py stack/feed-import/store.py /app/
+     stack/feed-import/nogon.py stack/feed-import/store.py /app/
 ENV FEED_IMPORT_DATA=/data PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER 1000:1000
 HEALTHCHECK --interval=120s --timeout=5s --start-period=60s --retries=2 \

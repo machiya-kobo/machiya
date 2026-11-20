@@ -1,6 +1,6 @@
 # feed-import
 
-Puts what you read in a feed reader into [Hister](../../docs/services/hister.md), on its own.
+Puts what you read in a feed reader into [Nogon](../../docs/services/nogon.md), on its own.
 
 - **Stories you read** go in as visited pages: no label.
 - **Stories you star** go in as saved pages, with a label.
@@ -14,29 +14,29 @@ The readers are NewsBlur, Miniflux, FreshRSS and Feedbin, all through one interf
 Runs happen every `FEED_IMPORT_INTERVAL` seconds. For each reader:
 
 1. **Starred, then read.** It reads the starred entries, then the read ones, newest first, and stops at the first page with nothing new. The first run walks the whole history: that is the backfill. Entries that are pending a retry are taken from the state, not from the reader's pages.
-2. **Hister is asked first** (`GET /api/document`). If Hister already has the URL, nothing is sent: a page is never indexed again ([contracts/hister.md](../../docs/contracts/hister.md)). The one exception: a starred entry whose page has no label gets the starred label (`POST /api/label`).
+2. **Nogon is asked first** (`GET /api/document`). If Nogon already has the URL, nothing is sent: a page is never indexed again ([contracts/nogon.md](../../docs/contracts/nogon.md)). The one exception: a starred entry whose page has no label gets the starred label (`POST /api/label`).
 3. **The original article is fetched once**, as a browser would open it. It uses stack/smallweb's checked fetcher:
    - http(s) only, and never a private address unless `FEED_IMPORT_FETCH_ALLOW` names it;
    - every redirect is checked; at most 5 MB and 30 s.
-   The page goes to Hister as HTML (`POST /api/add`) and Hister extracts the text, as it does for a visited page. If the redirect lands on a URL Hister already has, nothing is sent.
+   The page goes to Nogon as HTML (`POST /api/add`) and Nogon extracts the text, as it does for a visited page. If the redirect lands on a URL Nogon already has, nothing is sent.
 4. **The reader's copy** of the story is stored instead, under the article's URL with `<reader>_content: copy`, in these cases:
    - the original can't be fetched for good: a 4xx, not HTML, refused, or too big;
    - it timed out, got a 429 or got a 5xx on `FEED_IMPORT_MAX_TRIES` runs;
    - its text is under 1/`FEED_IMPORT_COPY_RATIO` of the copy's, which looks like a paywall teaser. A copy under 500 characters never triggers this.
    An entry with neither an original nor a copy is skipped.
 
-### What Hister gets
+### What Nogon gets
 
 | | A read story | A starred story |
 |---|---|---|
-| `label` | none | the first of its reader tags that names a Hister topic label (from the aliases in `/api/rules`), else `FEED_IMPORT_STARRED_LABEL` (default `starred`). Only NewsBlur and FreshRSS have the owner's own tags on an entry |
+| `label` | none | the first of its reader tags that names a Nogon topic label (from the aliases in `/api/rules`), else `FEED_IMPORT_STARRED_LABEL` (default `starred`). Only NewsBlur and FreshRSS have the owner's own tags on an entry |
 | `added` | the read time if the reader has one (Miniflux: `changed_at`). Otherwise when it was first seen read, or in a backfill the story's own date | the star time if the reader has one (NewsBlur; Miniflux: `changed_at`). Otherwise when first seen, or the story's date in a backfill |
 | skip rules | apply (406 means skipped) | ignored (`metadata.ignore_skip_rules`): a save is deliberate |
 | `metadata` | `source`, `via` = the reader, `client: feed-import`, and the reader's own keys (`newsblur_story_hash`, `_feed_id`, `_feed`, `_folder`, `_tags`, `_stream`, `_content`, `_copy_reason`, `_permalink`, `_starred`) | the same |
 
-- Hister's answers: 422 (sensitive content) and any other 4xx are final. If Hister is down (5xx, unreachable), the run stops and nothing is counted against an entry.
-- A Hister page has one label. The reader's feed and folder go in metadata, not labels. Hister v0.20.0 matches a metadata query only on a whole value in lowercase, so these work: `metadata.source:newsblur`, `metadata.newsblur_feed_id:7`, `metadata.newsblur_stream:read` and `metadata.newsblur_content:copy`. Feed titles and folders are there for display: a mixed-case value like `Tech` isn't matched.
-- Unstarring changes nothing in Hister.
+- Nogon's answers: 422 (sensitive content) and any other 4xx are final. If Nogon is down (5xx, unreachable), the run stops and nothing is counted against an entry.
+- A Nogon page has one label. The reader's feed and folder go in metadata, not labels. Nogon v0.20.0 matches a metadata query only on a whole value in lowercase, so these work: `metadata.source:newsblur`, `metadata.newsblur_feed_id:7`, `metadata.newsblur_stream:read` and `metadata.newsblur_content:copy`. Feed titles and folders are there for display: a mixed-case value like `Tech` isn't matched.
+- Unstarring changes nothing in Nogon.
 
 ## NewsBlur
 
@@ -87,10 +87,10 @@ Every reader call carries its credentials, so feed-import never follows a redire
 | `FEED_IMPORT_FEEDBIN_USER` | — | the Feedbin account's e-mail (required for feedbin) |
 | `FEED_IMPORT_FEEDBIN_PASSWORD_FILE` | — | a file holding its password (required for feedbin) |
 | `FEED_IMPORT_FEEDBIN_LOOKBACK` | `14` | days of read entries each run walks |
-| `FEED_IMPORT_NOGON_URL` | — | `http://hister:4433` (required, except for `--dry-run`) |
-| `FEED_IMPORT_NOGON_TOKEN_FILE` | — | the owner's Hister token (the file's first line), sent as `X-Access-Token` on every Hister call ([contracts/hister.md](../../docs/contracts/hister.md)); a Hister without users ignores it. Set but missing, empty or not a token: refuses to start. Re-read when the file changes (a file that vanishes keeps the last good value); while it is set, a redirect from Hister is never followed. Unset means no token is sent |
+| `FEED_IMPORT_NOGON_URL` | — | `http://nogon:4433` (required, except for `--dry-run`). Formerly `FEED_IMPORT_HISTER_URL`, likewise `_TOKEN_FILE` (Hister is now Nogon): since 0.3.0 an old name set on its own stops the start, naming the new one |
+| `FEED_IMPORT_NOGON_TOKEN_FILE` | — | the owner's Nogon token (the file's first line), sent as `X-Access-Token` on every Nogon call ([contracts/nogon.md](../../docs/contracts/nogon.md)); a Nogon without users ignores it. Set but missing, empty or not a token: refuses to start. Re-read when the file changes (a file that vanishes keeps the last good value); while it is set, a redirect from Nogon is never followed. Unset means no token is sent |
 | `FEED_IMPORT_INTERVAL` | `600` | seconds between runs (at least 60) |
-| `FEED_IMPORT_PAUSE` | — | `Sun 02:20-02:50`: no runs in that weekly slot (Hister's backup), in `FEED_IMPORT_TZ` (default `UTC`) |
+| `FEED_IMPORT_PAUSE` | — | `Sun 02:20-02:50`: no runs in that weekly slot (Nogon's backup), in `FEED_IMPORT_TZ` (default `UTC`) |
 | `FEED_IMPORT_STARRED_LABEL` | `starred` | label for a starred page that no tag matches |
 | `FEED_IMPORT_TAG_LABELS` | `1` | `0`: never take a label from the reader's tags |
 | `FEED_IMPORT_MAX_TRIES` | `3` | runs that may retry a timeout, 429 or 5xx before the copy is stored |
@@ -103,7 +103,7 @@ Every reader call carries its credentials, so feed-import never follows a redire
 
 A failed run (0.1.2) is any of these:
 
-- a reader or Hister failing;
+- a reader or Nogon failing;
 - a run that crashed (the loop logs the traceback and carries on);
 - a run in which every entry raised;
 - a run that never finished: the status a restart finds still says `running`.
@@ -114,7 +114,7 @@ One entry that raises (a malformed permalink, say) is recorded with its error an
 
 ```sh
 python3 feedimport.py --dry-run --limit 10            # print what would be sent: at most 10 per stream per reader
-                                                       # (10 starred + 10 read); no state, no Hister writes
+                                                       # (10 starred + 10 read); no state, no Nogon writes
 python3 feedimport.py --dry-run --no-fetch --stream read
 python3 feedimport.py --import-legacy state.json       # once: take over an older newsblur-import.py script's state
 python3 feedimport.py --once                           # one run
@@ -122,7 +122,7 @@ python3 feedimport.py                                  # the service
 podman build -f stack/feed-import/Dockerfile -t feed-import:dev .     # from the repo root
 ```
 
-- A dry run asks Hister only which URLs it has, and only if `FEED_IMPORT_NOGON_URL` is set.
+- A dry run asks Nogon only which URLs it has, and only if `FEED_IMPORT_NOGON_URL` is set.
 - A dry run still fetches the originals (GETs) unless you pass `--no-fetch`.
 
 ## Tests
@@ -131,7 +131,7 @@ podman build -f stack/feed-import/Dockerfile -t feed-import:dev .     # from the
 cd stack/feed-import && python3 -m unittest discover -s tests
 ```
 
-The tests need no network. They run against local fakes of NewsBlur, Miniflux, FreshRSS, Feedbin, Hister and the article servers, with smallweb's fetcher allowed to reach `127.0.0.1`. Every fake records its requests, and a test fails if a reader sends anything that could change state.
+The tests need no network. They run against local fakes of NewsBlur, Miniflux, FreshRSS, Feedbin, Nogon and the article servers, with smallweb's fetcher allowed to reach `127.0.0.1`. Every fake records its requests, and a test fails if a reader sends anything that could change state.
 
 ## Layout
 
@@ -140,5 +140,5 @@ The tests need no network. They run against local fakes of NewsBlur, Miniflux, F
 | `feedimport.py` | the pipeline, the dry run, the service loop and `status.json` |
 | `readers.py` | the interface (`Entry`, `Reader`) and the readers' shared HTTP client |
 | `newsblur.py`, `miniflux.py`, `freshrss.py`, `feedbin.py` | the readers |
-| `hister.py` | the four Hister calls and Hister's URL normalisation |
+| `nogon.py` | the four Nogon calls and Nogon's URL normalisation |
 | `store.py` | the state |

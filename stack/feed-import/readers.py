@@ -10,7 +10,7 @@ anything read or unread, stars, tags or changes its server's state in any other 
 
 Each entry carries the reader's own copy of the story (`html`), so feed-import can store that when the original article
 can't be fetched. Readers put their own metadata in `meta`, with keys prefixed by the reader's name (`newsblur_*`),
-Hister's convention for importers.
+Nogon's convention for importers.
 """
 import base64
 import json
@@ -51,7 +51,7 @@ class Entry:
     feed: str = ""                       # the feed's title
     folder: str = ""                     # the reader's folder (category) of that feed
     tags: list = field(default_factory=list)    # the owner's own tags on the entry (NewsBlur: a saved story's tags)
-    meta: dict = field(default_factory=dict)    # reader-prefixed metadata for Hister
+    meta: dict = field(default_factory=dict)    # reader-prefixed metadata for Nogon
 
 
 class Reader:
