@@ -38,7 +38,7 @@ import smolnet   # noqa: E402
 import web       # noqa: E402
 from store import Store   # noqa: E402
 
-VERSION = "0.4.1"
+VERSION = "0.5.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -60,13 +60,30 @@ def socks_addr(value):
     return "%s:%d" % (u.hostname, u.port)
 
 
+_old_names = set()
+
+
+def setting(name, default=""):
+    """0.5.0, the rename (Hister is now Nogon): SMALLWEB_NOGON_<X>, else SMALLWEB_HISTER_<X> (logged once) until the
+    rename's stage 3. A NOGON name that is set wins, even empty, as upstream Nogon does with its own."""
+    if name in os.environ:
+        return os.environ[name]
+    old = name.replace("NOGON", "HISTER")
+    if old in os.environ:
+        if old not in _old_names:
+            _old_names.add(old)
+            print("smallweb: %s is an old name, read as %s" % (old, name), file=sys.stderr, flush=True)
+        return os.environ[old]
+    return default
+
+
 AUTH = auth_mode(os.environ.get("SMALLWEB_AUTH"))
 BIND = os.environ.get("SMALLWEB_BIND", "0.0.0.0").strip() or "0.0.0.0"
 PORT = int(os.environ.get("SMALLWEB_PORT", "8080"))
 USERS = set(filter(None, (u.strip() for u in os.environ.get("SMALLWEB_USERS", "").split(","))))
 PUBLIC_URL = os.environ.get("SMALLWEB_PUBLIC_URL", "").rstrip("/")
 SOCKS = socks_addr(os.environ.get("SMALLWEB_SOCKS"))
-HISTER = os.environ.get("SMALLWEB_HISTER_URL", "").rstrip("/")
+HISTER = setting("SMALLWEB_NOGON_URL").rstrip("/")
 # Origins besides smallweb's own that may POST /api/save: Shiori's native apps send Origin: hister://, and Shiori's
 # hosted pages reach smallweb through a reverse proxy, so their browser Origin is that site's (list it in SMALLWEB_ORIGINS).
 ORIGINS = {o.strip().rstrip("/") for o in ["hister://"] + os.environ.get("SMALLWEB_ORIGINS", "").split(",") if o.strip()}
@@ -92,7 +109,7 @@ USER_AGENT = "smallweb/%s (Machiya; saves a page its owner asked for)" % VERSION
 # `Authorization: Bearer mht_…`, a room token hister-login issued for SMALLWEB_PUBLIC_URL's origin, acting as one of
 # SMALLWEB_HISTER_USERS: an agent on a tagged machine has no Tailscale login, and never gets Hister's raw token.
 AUTH_URL = (os.environ.get("SMALLWEB_AUTH_URL") or "").strip().rstrip("/")
-HISTER_USERS = set(filter(None, (u.strip() for u in os.environ.get("SMALLWEB_HISTER_USERS", "").split(","))))
+HISTER_USERS = set(filter(None, (u.strip() for u in setting("SMALLWEB_NOGON_USERS").split(","))))
 RTOKEN_RE = re.compile(r"mht_[A-Za-z0-9_-]{43}\Z")
 _ROOM_TOKENS = {}                       # sha256(token) -> (expires, username or None); 30 s good, 5 s refused
 _ROOM_TOKENS_LOCK = threading.Lock()
@@ -122,7 +139,7 @@ def same_origin(headers, public_url=None):
 
 
 if AUTH_URL and (not PUBLIC_URL.startswith(("https://", "http://")) or not HISTER_USERS or "*" in HISTER_USERS):
-    raise SystemExit("smallweb: SMALLWEB_AUTH_URL (room tokens) needs SMALLWEB_PUBLIC_URL and SMALLWEB_HISTER_USERS "
+    raise SystemExit("smallweb: SMALLWEB_AUTH_URL (room tokens) needs SMALLWEB_PUBLIC_URL and SMALLWEB_NOGON_USERS "
                      "(never *)")
 
 
@@ -553,14 +570,14 @@ def hister_token(path):
     if not path:
         return None
     if not os.path.isfile(path):
-        raise SystemExit("smallweb: SMALLWEB_HISTER_TOKEN_FILE: no token in %s" % path)
+        raise SystemExit("smallweb: SMALLWEB_NOGON_TOKEN_FILE: no token in %s" % path)
     secret = SecretFile(path)
     if not secret.value:
-        raise SystemExit("smallweb: SMALLWEB_HISTER_TOKEN_FILE: %s doesn't hold a token on its first line" % path)
+        raise SystemExit("smallweb: SMALLWEB_NOGON_TOKEN_FILE: %s doesn't hold a token on its first line" % path)
     return secret
 
 
-HISTER_TOKEN = hister_token(os.environ.get("SMALLWEB_HISTER_TOKEN_FILE"))
+HISTER_TOKEN = hister_token(setting("SMALLWEB_NOGON_TOKEN_FILE") or None)
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -641,10 +658,10 @@ def held(url):
     except urllib.error.HTTPError as ex:
         if ex.code == 404:
             return False
-        note_save(url, "not saved: Hister's lookup answered %d" % ex.code)
+        note_save(url, "not saved: Nogon's lookup answered %d" % ex.code)
         return True
     except (urllib.error.URLError, OSError) as ex:
-        note_save(url, "not saved: Hister's lookup failed: %s" % ex)
+        note_save(url, "not saved: Nogon's lookup failed: %s" % ex)
         return True
     hister_state["held"] += 1
     return True
@@ -737,18 +754,19 @@ def problems():
     if SOCKS and smolnet.PROXY["fails"] >= 2:
         out.append(smolnet.PROXY["error"])
     if HISTER and hister_state["fails"] >= 3:
-        out.append("Hister saves failing (%d in a row): %s" % (hister_state["fails"], hister_state["last_error"]))
+        out.append("Nogon saves failing (%d in a row): %s" % (hister_state["fails"], hister_state["last_error"]))
     return out
 
 
 def status():
     errors = problems()
+    saves = {"enabled": bool(HISTER), "token": HISTER_TOKEN is not None, "saved": store.save_count(),
+             "queued": save_state["pending"], "only_new": True, "held": hister_state["held"],
+             "last_error": hister_state["last_error"]}
     return {"ok": not errors, "ready": True, "error": "; ".join(errors) or None,
             "version": VERSION, "auth": AUTH, "socks": bool(SOCKS),
             "sources": {k: dict(v) for k, v in health.items()},
-            "hister": {"enabled": bool(HISTER), "token": HISTER_TOKEN is not None, "saved": store.save_count(), "queued": save_state["pending"],
-                       "only_new": True, "held": hister_state["held"],
-                       "last_error": hister_state["last_error"]},
+            "nogon": saves, "hister": saves,      # 0.5.0: "nogon"; "hister" until the rename's stage 3
             "known_hosts": store.tofu_count()}
 
 
@@ -1020,7 +1038,7 @@ def check_bind(bind=None):
 
 
 def main():
-    print("smallweb %s: auth %s%s, listening on %s:%d; egress %s; Hister %s" % (
+    print("smallweb %s: auth %s%s, listening on %s:%d; egress %s; Nogon %s" % (
         VERSION, AUTH, "" if AUTH == "open" else " (%s)" % (",".join(sorted(USERS)) or "NOBODY: set SMALLWEB_USERS"),
         BIND, PORT, ("SOCKS " + SOCKS) if SOCKS else "DIRECT (set SMALLWEB_SOCKS)", HISTER or "off"), flush=True)
     print("smallweb: http(s) saves never fetch a private address%s" % (
@@ -1028,7 +1046,7 @@ def main():
             sorted(FETCH_ALLOW[0]) + [str(n) for n in FETCH_ALLOW[1]])), flush=True)
     if AUTH == "open":
         print("smallweb: WARNING: SMALLWEB_AUTH=open: no identity check. Anyone who can reach %s:%d can search and "
-              "read through smallweb and add pages to Hister. Use it only on localhost or a trusted LAN." % (BIND, PORT),
+              "read through smallweb and add pages to Nogon. Use it only on localhost or a trusted LAN." % (BIND, PORT),
               flush=True)
     check_bind()
     store.prune()

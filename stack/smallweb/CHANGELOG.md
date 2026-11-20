@@ -1,5 +1,11 @@
 # Changelog: smallweb
 
+## 0.5.0
+
+- Says Nogon, upstream Hister's new name (owner, 2026-11-19): the About text, save notes, the status error and the log lines.
+- The rename's stage 1: `SMALLWEB_NOGON_URL`, `SMALLWEB_NOGON_USERS` and `SMALLWEB_NOGON_TOKEN_FILE` are read first, and the `SMALLWEB_HISTER_*` names still work (each logged once). `/api/status` reports the saves as `nogon`, and as `hister` too until stage 3.
+- The Python base re-pinned to today's digest.
+
 ## 0.4.1
 
 - The python:3.13-alpine base is re-pinned to its current digest. 0.4.0 was tagged but never built (push-image refused its stale pin), so 0.4.1 is the first release with `only_new`.

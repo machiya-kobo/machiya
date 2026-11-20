@@ -628,7 +628,8 @@ class Gateway(unittest.TestCase):
         smallweb.hister_state["fails"] = 3
         try:
             d = json.loads(get("/api/status", user=None)[2])
-            self.assertTrue(d["error"].startswith("Hister saves failing"))
+            self.assertTrue(d["error"].startswith("Nogon saves failing"))
+            self.assertEqual(d["nogon"], d["hister"])                        # 0.5.0: both, until stage 3
             self.assertFalse(d["ok"])
         finally:
             smallweb.hister_state["fails"] = 0
@@ -886,7 +887,7 @@ class Gateway(unittest.TestCase):
         self.assertEqual((meta["source"], meta["smallweb_via"]), ("smallweb", "web-result"))
         self.assertEqual(meta["smallweb_query"], ("old macs " + "x" * 300)[:200])
         # a failed lookup never risks a replace
-        self.assert_not_saved(WEB + "/ok?t=lookup-fails", "Hister's lookup answered 500", only_new=True)
+        self.assert_not_saved(WEB + "/ok?t=lookup-fails", "Nogon's lookup answered 500", only_new=True)
         # without only_new nothing is looked up, as before (Add Page replaces on purpose)
         n = len(HISTER_LOOKUPS)
         self.assertEqual(self.save(WEB + "/ok?t=held")[0], 202)
@@ -1308,3 +1309,19 @@ class RoomTokenTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NogonNames(unittest.TestCase):
+    """0.5.0, the rename's stage 1: SMALLWEB_NOGON_<X> first, SMALLWEB_HISTER_<X> still read."""
+
+    def test_setting(self):
+        import contextlib
+        import io
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"SMALLWEB_HISTER_URL": "http://h:1"}, clear=False), \
+                contextlib.redirect_stderr(io.StringIO()):
+            os.environ.pop("SMALLWEB_NOGON_URL", None)
+            self.assertEqual(smallweb.setting("SMALLWEB_NOGON_URL"), "http://h:1")
+            os.environ["SMALLWEB_NOGON_URL"] = ""
+            self.assertEqual(smallweb.setting("SMALLWEB_NOGON_URL"), "")          # set, even empty: it wins
+        self.assertEqual(smallweb.setting("SMALLWEB_NOGON_NOTHING", "d"), "d")

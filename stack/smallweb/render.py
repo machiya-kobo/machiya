@@ -192,7 +192,7 @@ def page(title, body, url="", native=True, archive=None, notice="", status="", q
     ) % (e(title or url or "smallweb"), "home" if home else "reader", head, top,
          ('<p class="notice">%s</p>' % notice) if notice else "", body, tail,
          ('<span class="status">%s</span> ' % e(status)) if status else "",
-         "Gemini and Gopher through smallweb, for you only. Pages you open are saved to Hister.")
+         "Gemini and Gopher through smallweb, for you only. Pages you open are saved to Nogon.")
 
 
 def results(q, data, sources=None):

@@ -138,7 +138,7 @@ The rest of the fetch:
 - **Politeness:** one connection at a time per host, at least 1.5 s apart.
 - **No `robots.txt`:** each save is one page its owner asked for, like a browser visit, not a crawl. smallweb never follows the page's links.
 
-What is saved: the same `POST <SMALLWEB_HISTER_URL>/api/add` with `Origin: hister://` (and, with `SMALLWEB_HISTER_TOKEN_FILE`, `X-Access-Token`: the owner's Hister token; a redirect is never followed), under the final URL (after redirects, canonical), with no `label`:
+What is saved: the same `POST <SMALLWEB_NOGON_URL>/api/add` with `Origin: hister://` (and, with `SMALLWEB_NOGON_TOKEN_FILE`, `X-Access-Token`: the owner's Hister token; a redirect is never followed), under the final URL (after redirects, canonical), with no `label`:
 
 ```json
 {"url": "https://example.com/notes/page", "title": "A Page",
@@ -163,7 +163,8 @@ Errors, per save:
 ```json
 {"ok": true, "ready": true, "error": null, "version": "0.2.0", "auth": "tailscale", "socks": true,
  "sources": {"tlgs": {"last_ok": 1767225600, "last_error": null}, "kennedy": {…}, "veronica": {…}},
- "hister": {"enabled": true, "token": true, "saved": 12, "queued": 0, "only_new": true, "held": 3, "last_error": null},
+ "nogon": {"enabled": true, "token": true, "saved": 12, "queued": 0, "only_new": true, "held": 3, "last_error": null},
+ "hister": {…the same, until the rename's stage 3 (0.5.0)…},
  "known_hosts": 7}
 ```
 
