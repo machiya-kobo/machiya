@@ -30,6 +30,7 @@ The conventions follow what Obsidian's own tools use (TaskNotes, Tasks, Bases, D
 | `completedDate` | YYYY-MM-DD | Konbini (move to done) | Konbini, TaskNotes, Bases | |
 | `rank` | number (order within a column) | Konbini | Konbini | |
 | `project` | slug (the card's id) | you, Konbini | Konbini, pm, Shiori (card links) | |
+| `repos` | list of repo names, e.g. `[techo, workshop, dotfiles]`: the repos whose work counts toward this card. A name is matched case-insensitively against a repo's name or a URL's last segment (`.git` dropped) | you, Konbini (PATCH `repos`, when the owner confirms a mapping) | Konbini (the Now page, "has a card"), machiya-mcp (`board_list_cards` `repo=`), Oyakata's nightly scan | `repo` (one name or URL; read as a one-entry list when `repos` is absent) |
 | `publish`, `growth`, `confidence`, `garden_pin` | garden fields | Niwa (owner only) | Niwa, Kura | |
 
 `garden_pin` is the one snake_case field.

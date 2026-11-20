@@ -19,7 +19,7 @@ JSON on the board's host (`https://konbini.example.ts.net`), owner-only. Writes 
 {"slug": "example-project", "title": "Example Project", "path": "Projects/Example Project.md", "board": "wip", "priority": 1,
  "summary": "…", "next": "…", "blocked_by": "", "area": "tools", "areas": ["tools"], "effort": "l",
  "topics": ["search"], "machines": ["server1"], "type": "project", "status": "active", "tags": ["…"],
- "repo": "…", "publish": false, "growth": "", "updated": "2026-01-15", "post": "", "post_url": "",
+ "repo": "…", "repos": ["…"], "publish": false, "growth": "", "updated": "2026-01-15", "post": "", "post_url": "",
  "rank": null, "checks_done": 3, "checks_total": 5,
  "waiting": "", "created": "2026-01-02", "started": "2026-01-05", "completedDate": "", "due": "",
  "stream": "Example Stream", "goal": "", "dependsOn": ["Other Project"]}
@@ -27,9 +27,22 @@ JSON on the board's host (`https://konbini.example.ts.net`), owner-only. Writes 
 
 Field names follow the [frontmatter schema](../frontmatter.md). Konbini reads both the legacy and the current names, and the card keeps its legacy keys with the same values: `board` is the column (from `status:` or `board:`), `priority` is 1-3 (from `high`/`normal`/`low` or 1-3), `blocked_by` is the `waiting:` text (or `blocked_by:`), and `status` is the old `status/*` value (derived from the column when a note has no tag). Added beside them: `waiting` (= `blocked_by`), `created`, `started`, `completedDate`, `due` (YYYY-MM-DD or ""), `stream` and `goal` (link targets or text, ""), `dependsOn` (link targets without `[[ ]]`, []).
 
+`repos` (Konbini 0.29, stage 2 of the Now page) is the card's repo list: `repos:` when the note has it, else `[repo]` when it has `repo:`, else `[]`. Names are as written; compare them case-insensitively.
+
 Readers:
 - **Shiori** maps slug ↔ path for notes it meets through Hister at `/p/<slug>` URLs. It keeps this lookup for as long as such URLs remain in Hister.
 - A dashboard or any other reader may use it too; it is plain JSON.
+
+### `GET /api/now` (Konbini 0.29, owner 2026-11-20)
+
+What's being worked on, the Now page's data. **The one home of the "active in the last N days" rule**: `NOW_DAYS = 7` in Konbini's `app/common.py`, days counted in the board's time zone (America/Los_Angeles). Oyakata's Wednesday WIP check reads `quiet` from here (through machiya-mcp `board_now`) and never recomputes it.
+
+→ `{"days": 7, "since": "<iso>", "working": [card, …], "quiet": [card, …], "uncarded": [host, …], "live": [agent, …]}`
+
+- `working`: cards with activity since `since`, newest first: `{"slug", "title", "path", "board", "at": "<iso>", "line": "the latest thing that happened", "source": "commit" | "event" | "claim" | "changelog" | "log", "live": ["<agent>", …]}`. Activity is commits on the card's `repos`, board events and claims, change-log rows (`Systems/Change Logs`) that name the card, and the card's Log rows. They are weighted in that order when picking `line`; any of them makes the card active.
+- `quiet`: WIP cards with no activity since `since`: `{"slug", "title", "path", "last_at": "<iso>" | null}`, oldest first.
+- `uncarded`: change-log rows since `since` that name no card, by host: `{"host", "rows": [{"date", "change", "path"}]}`. Read-only: neither Konbini nor this endpoint proposes cards (Oyakata's nightly scan is the one thing that does).
+- `live` (stage 3, `[]` until then): agents working right now, from the workshop bus's presence (read-only observer identity `konbini`): `{"agent", "state", "since", "note", "card": "<slug>" | null, "card_known": true | false}`. Only states `working` and `waiting_owner` are live. An unknown slug is `card_known: false` ("working, no card"). **`session_url` is dropped on read: never stored, logged, rendered or returned.**
 
 ### `GET /api/digest?days=30`
 
@@ -70,7 +83,7 @@ Sections come in a fixed order: `wip` (WIP over the area's limit; 3 per area by 
 |---|---|
 | `GET /api/cards/<slug>/kit` | a card's writing kit |
 | `GET /api/events`, `/api/roundup`, `/api/links`, `/api/rev`, `/api/stream` (SSE) | history, roundups, link rot, change feed |
-| `PATCH /api/cards/<slug>` | board fields (`board` or `status`, `next`, `blocked_by` or `waiting`, `priority` as 1-3 or high/normal/low, `rank`, `dependsOn`, `stream`, `goal`, `due`); the note is written under the names it already uses. A move sets `started` (first move to WIP) and `completedDate` (move to done; cleared when reopened) |
+| `PATCH /api/cards/<slug>` | board fields (`board` or `status`, `next`, `blocked_by` or `waiting`, `priority` as 1-3 or high/normal/low, `rank`, `dependsOn`, `stream`, `goal`, `due`, `repos`); the note is written under the names it already uses. A move sets `started` (first move to WIP) and `completedDate` (move to done; cleared when reopened) |
 | `POST /api/cards` | a new stub note (`pm new`); also takes `description` and `stream` (0.16.0) |
 | `POST /api/cards/<slug>/events` | a log line |
 | `POST`/`DELETE /api/cards/<slug>/claim` | an agent's "working on this" badge (15 min) |
@@ -91,5 +104,7 @@ Sections come in a fixed order: `wip` (WIP over the area's limit; 3 per area by 
 **`dependsOn` in a PATCH:** a list of names, or one string of names separated by commas; each is a card's slug or title, or a note name (`[[X]]` is accepted too). It's stored as a block list of quoted links to the note's file name (`dependsOn:\n  - "[[Kura]]"`, the frontmatter schema), compared by the card each name points to, so re-sending the same dependencies changes nothing. `""` or `[]` removes the field. A card that depends on itself → 422. `pm dep <slug> +x -y` builds on it.
 
 **`stream` in a PATCH:** the card's workstream, a string (a name, or a `[[link]]` kept as written); `""` removes the field. Written as the `stream:` scalar (the frontmatter schema) and logged as a change. `pm stream <slug> <name|->` sets or clears it.
+
+**`repos` in a PATCH (Konbini 0.29):** a list of repo names, or one string of names separated by commas; each is 1-100 characters of `[A-Za-z0-9._-]` (a URL is cut to its last segment, `.git` dropped), deduplicated case-insensitively, keeping the first spelling. Written as the `repos:` block list, and a legacy `repo:` is removed in the same write (its value is kept only if it's in the new list). Logged as a change. `[]` or `""` removes both. The board sets it when the owner confirms a mapping; machiya-mcp `board_set_repos(slug, repos)` sends it.
 
 **`goal` and `due` in a PATCH:** `goal` is a string (the goal the card counts toward; `""` removes it); `due` is a date `YYYY-MM-DD` (`""` removes it, anything else → 422). Written as the `goal:` / `due:` scalars (the frontmatter schema) and logged as changes; a goal's target on `/goals` is the latest `due` among its cards. `pm goal <slug> <name|->` and `pm due <slug> <YYYY-MM-DD|->` set or clear them.
