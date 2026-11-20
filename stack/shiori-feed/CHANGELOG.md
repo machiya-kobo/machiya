@@ -1,5 +1,9 @@
 # Changelog: shiori-feed
 
+## 0.3.1
+
+- 0.3.0 on today's Python base. 0.3.0 was tagged but never built: its base pin was stale (its note above wrongly says it was re-pinned).
+
 ## 0.3.0
 
 - Says Nogon, upstream Hister's new name (owner, 2026-11-19): the feed's title ("Nogon search: …"), its errors ("Nogon failed") and the status error.

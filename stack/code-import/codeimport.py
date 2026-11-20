@@ -49,7 +49,7 @@ from forges import RETRY_DELAYS, ForgeError, Repo, iso          # noqa: E402
 from github import GitHub                                      # noqa: E402
 from store import Store                                        # noqa: E402
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 _old_names = set()
 

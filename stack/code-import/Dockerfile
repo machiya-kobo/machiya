@@ -1,7 +1,7 @@
 # code-import (machiya-kobo/machiya stack/code-import): the owner's Forgejo and GitHub repos, into Hister. Stdlib Python.
 # Build context: the machiya repo root (as feed-import). Runs as uid 1000; the state (one sqlite file) and status.json
 # live in /data. It listens on nothing. The dev fakes (dev/) and the tests stay out of the image.
-FROM public.ecr.aws/docker/library/python:3.13-alpine@sha256:8bcfa47b04b853a17aaf909362b847b2112fd6ec4105ea553ef9a43bafbb5916
+FROM public.ecr.aws/docker/library/python:3.13-alpine@sha256:9ef1a599f863231c3d91e941389bfdc4a2d6070557243d54df1a4e57015b960e
 RUN apk add --no-cache tzdata && adduser -D -u 1000 -h /data -s /sbin/nologin codeimport
 WORKDIR /app
 COPY stack/code-import/codeimport.py stack/code-import/forges.py stack/code-import/forgejo.py \

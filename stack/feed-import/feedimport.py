@@ -50,7 +50,7 @@ from newsblur import NewsBlur                                  # noqa: E402
 from readers import Entry, ReaderError, secret_file            # noqa: E402
 from store import Store                                        # noqa: E402
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 _old_names = set()
 

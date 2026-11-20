@@ -1,5 +1,9 @@
 # Changelog: feed-import
 
+## 0.2.1
+
+- 0.2.0 on today's Python base. 0.2.0 was tagged but never built: its base pin was stale.
+
 ## 0.2.0
 
 - The rename's stage 1 (Hister is now Nogon; owner, 2026-11-19): `FEED_IMPORT_NOGON_URL` and `FEED_IMPORT_NOGON_TOKEN_FILE` are read first. The `FEED_IMPORT_HISTER_*` names still work until stage 3, each logged once. A NOGON name that is set wins, even when empty.

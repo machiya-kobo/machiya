@@ -48,7 +48,7 @@ from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from xml.sax.saxutils import escape
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 _old_names = set()
 
