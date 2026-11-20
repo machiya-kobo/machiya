@@ -114,6 +114,8 @@ garden: garden: 1 change (publish Candle vs LED)
 
 (In the browser, that's Niwa's **Publish** button.)
 
+**Upgrading from Hister names.** Hister is now [Nogon](https://nogon.eu/) (2026-11), and the compose reads only the new names. In a `.env` from before, rename every `HISTER` in a setting to `NOGON` (`HISTER_PUBLIC_URL` to `NOGON_PUBLIC_URL`, `KURA_HISTER_URL` to `KURA_NOGON_URL`, and so on), `hister=` in `MACHIYA_ROOMS` to `nogon=`, and `http://hister:4433` to `http://nogon:4433`. The data folder's default stays `data/hister`, so your saved pages carry over as they are.
+
 **6. Stop it, or start over.** Your data is the `data/` folder next to `compose.yml`:
 
 <!-- quickstart: stop -->
