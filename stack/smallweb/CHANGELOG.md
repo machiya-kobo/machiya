@@ -1,5 +1,9 @@
 # Changelog: smallweb
 
+## 0.7.0
+
+- **The rename's stage 3c (owner, 2026-11-21):** `/api/save` takes `Origin: nogon://` only; `hister://` gets a 403. Shiori's apps send `nogon://` since 1.30.1, and mac-bridge never calls it.
+
 ## 0.6.0
 
 - The rename's stage 3 (Hister is now Nogon):

@@ -38,7 +38,7 @@ import smolnet   # noqa: E402
 import web       # noqa: E402
 from store import Store   # noqa: E402
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -88,10 +88,10 @@ USERS = set(filter(None, (u.strip() for u in os.environ.get("SMALLWEB_USERS", ""
 PUBLIC_URL = os.environ.get("SMALLWEB_PUBLIC_URL", "").rstrip("/")
 SOCKS = socks_addr(os.environ.get("SMALLWEB_SOCKS"))
 NOGON = setting("SMALLWEB_NOGON_URL").rstrip("/")
-# Origins besides smallweb's own that may POST /api/save: Shiori's native apps send Origin: nogon:// (0.6.0; an app
-# from before the rename still sends hister://, so both are taken), and Shiori's hosted pages reach smallweb through a
+# Origins besides smallweb's own that may POST /api/save: Shiori's native apps send Origin: nogon:// (0.7.0: only that;
+# hister://, the name before the rename, went in its stage 3c), and Shiori's hosted pages reach smallweb through a
 # reverse proxy, so their browser Origin is that site's (list it in SMALLWEB_ORIGINS).
-APP_ORIGINS = ["nogon://", "hister://"]
+APP_ORIGINS = ["nogon://"]
 ORIGINS = {o.strip().rstrip("/") for o in APP_ORIGINS + os.environ.get("SMALLWEB_ORIGINS", "").split(",") if o.strip()}
 DATA = os.environ.get("SMALLWEB_DATA", "/data")
 # http(s) saves never reach a private address (loopback, RFC 1918, CGNAT/Tailscale, link-local, …) unless it is listed

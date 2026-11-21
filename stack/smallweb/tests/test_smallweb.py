@@ -756,9 +756,9 @@ class Gateway(unittest.TestCase):
         self.assertTrue(wait_for(lambda: any(d["url"].endswith("/saveme") for _, d in NOGON_DOCS)))
         code, _, out = get("/api/save", data=json.dumps({"url": CAP + "/two"}).encode(), headers=dict(js, Origin="nogon://"))
         self.assertEqual((code, json.loads(out)["url"]), (202, "gemini://capsule.test:%d/two" % GEM_PORT))
-        # 0.6.0: an app from before the rename still sends Origin: hister://, and is still taken
-        code, _, out = get("/api/save", data=json.dumps({"url": CAP + "/three"}).encode(), headers=dict(js, Origin="hister://"))
-        self.assertEqual((code, json.loads(out)["url"]), (202, "gemini://capsule.test:%d/three" % GEM_PORT))
+        # 0.7.0: Origin: hister://, the name before the rename, is refused (stage 3c)
+        self.assertEqual(get("/api/save", data=json.dumps({"url": CAP + "/three"}).encode(),
+                             headers=dict(js, Origin="hister://"))[0], 403)
         self.assertEqual(get("/api/save", data=body, headers=dict(js, Origin="nogon://evil"))[0], 403)
         self.assertEqual(get("/api/save", data=b'{"url": "ftp://example.com/"}', headers=dict(js, Origin="nogon://"))[0], 400)
         self.assertEqual(get("/api/save", data=body, user="other@test", headers=dict(js, Origin="nogon://"))[0], 403)
@@ -817,7 +817,7 @@ class Gateway(unittest.TestCase):
         # https, a form body, and the asked title used only when the page has none; saved under the final URL
         code, _, out = get("/api/save", data=urllib.parse.urlencode({"url": "https://web.test:%d/untitled" % WEBS_PORT,
                                                                       "title": "Asked  Title"}).encode(),
-                           headers={"Origin": "hister://"})          # an app from before the rename
+                           headers={"Origin": "nogon://"})           # Shiori's apps
         self.assertEqual(code, 202)
         self.assertTrue(wait_for(lambda: self.docs_for("/untitled")))
         doc = self.docs_for("/untitled")[0]
