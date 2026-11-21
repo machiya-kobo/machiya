@@ -27,7 +27,7 @@ JSON on the board's host (`https://konbini.example.ts.net`), owner-only. Writes 
 
 Field names follow the [frontmatter schema](../frontmatter.md). Konbini reads both the legacy and the current names, and the card keeps its legacy keys with the same values: `board` is the column (from `status:` or `board:`), `priority` is 1-3 (from `high`/`normal`/`low` or 1-3), `blocked_by` is the `waiting:` text (or `blocked_by:`), and `status` is the old `status/*` value (derived from the column when a note has no tag). Added beside them: `waiting` (= `blocked_by`), `created`, `started`, `completedDate`, `due` (YYYY-MM-DD or ""), `stream` and `goal` (link targets or text, ""), `dependsOn` (link targets without `[[ ]]`, []).
 
-`repos` (Konbini 0.29, stage 2 of the Now page) is the card's repo list: `repos:` when the note has it, else `[repo]` when it has `repo:`, else `[]`. Names are as written; compare them case-insensitively.
+`repos` (Konbini 0.29.0, with the Now page's stage 1) is the card's repo list: `repos:` when the note has it, else `[repo]` when it has `repo:`, else `[]`. Names are as written; compare them case-insensitively.
 
 Readers:
 - **Shiori** maps slug ↔ path for notes it meets through Nogon at `/p/<slug>` URLs. It keeps this lookup for as long as such URLs remain in Nogon.
@@ -105,6 +105,6 @@ Sections come in a fixed order: `wip` (WIP over the area's limit; 3 per area by 
 
 **`stream` in a PATCH:** the card's workstream, a string (a name, or a `[[link]]` kept as written); `""` removes the field. Written as the `stream:` scalar (the frontmatter schema) and logged as a change. `pm stream <slug> <name|->` sets or clears it.
 
-**`repos` in a PATCH (Konbini 0.29):** a list of repo names, or one string of names separated by commas; each is 1-100 characters of `[A-Za-z0-9._-]` (a URL is cut to its last segment, `.git` dropped), deduplicated case-insensitively, keeping the first spelling. Written as the `repos:` block list, and a legacy `repo:` is removed in the same write (its value is kept only if it's in the new list). Logged as a change. `[]` or `""` removes both. The board sets it when the owner confirms a mapping; machiya-mcp `board_set_repos(slug, repos)` sends it.
+**`repos` in a PATCH (Konbini 0.31.0, the Now page's stage 2; machiya-mcp 0.13.0's `board_set_repos`):** a list of repo names, or one string of names separated by commas; each is 1-100 characters of `[A-Za-z0-9._-]` (a URL is cut to its last segment, `.git` dropped), deduplicated case-insensitively, keeping the first spelling. Written as the `repos:` block list, and a legacy `repo:` is removed in the same write (its value is kept only if it's in the new list). Logged as a change. `[]` or `""` removes both. The board sets it when the owner confirms a mapping; machiya-mcp `board_set_repos(slug, repos)` sends it.
 
 **`goal` and `due` in a PATCH:** `goal` is a string (the goal the card counts toward; `""` removes it); `due` is a date `YYYY-MM-DD` (`""` removes it, anything else → 422). Written as the `goal:` / `due:` scalars (the frontmatter schema) and logged as changes; a goal's target on `/goals` is the latest `due` among its cards. `pm goal <slug> <name|->` and `pm due <slug> <YYYY-MM-DD|->` set or clear them.
