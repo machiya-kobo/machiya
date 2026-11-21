@@ -29,7 +29,7 @@ import deploys                                   # noqa: E402
 import probes                                    # noqa: E402
 import render                                    # noqa: E402
 import today as todaymod                         # noqa: E402
-from vaultkit import changelog, histerauth, identity, names, read_secret, signin   # noqa: E402
+from vaultkit import changelog, identity, names, nogonauth, read_secret, signin   # noqa: E402
 from vaultkit import shell as house              # noqa: E402
 
 with open(os.path.join(HERE, "VERSION"), encoding="utf-8") as _f:
@@ -51,8 +51,17 @@ def pairs(raw):
         if "=" in part:
             k, v = part.split("=", 1)
             if k.strip() and v.strip():
-                out[names.room_key(k.strip().lower())] = v.strip().rstrip("/")     # nogon= is hister (0.38)
+                out[names.room_key(k.strip().lower())] = v.strip().rstrip("/")     # a stored hister= is nogon
     return out
+
+
+def nogon_setting(read, *args):
+    """A setting read through vaultkit.names (setting, auth_mode). 0.8.0, the rename's stage 3: its old Hister name
+    (LANDING_HISTER_<X> on its own, LANDING_AUTH=hister) is no longer read and stops the page, naming the new one."""
+    try:
+        return read(*args)
+    except names.OldName as e:
+        raise SystemExit("machiya-landing: %s" % e)
 
 
 def csv(raw):
@@ -62,8 +71,8 @@ def csv(raw):
 class Config:
     def __init__(self, env):
         has_file = bool((env.get("MACHIYA_IDENTITY_FILE") or "").strip())
-        self.auth = names.auth_mode(env.get("LANDING_AUTH")) or "tailscale"       # nogon is hister (vaultkit 0.38)
-        allowed = ("tailscale", "open", "hister", "header") if has_file else ("tailscale", "open", "hister")   # hister: nogon too
+        self.auth = nogon_setting(names.auth_mode, env.get("LANDING_AUTH"), "LANDING_AUTH") or "tailscale"   # hister stops it (0.8.0)
+        allowed = ("tailscale", "open", "nogon", "header") if has_file else ("tailscale", "open", "nogon")
         if self.auth not in allowed:
             raise SystemExit("machiya-landing: LANDING_AUTH must be %s, not %r%s" % (
                 " or ".join(allowed), self.auth, " (header needs MACHIYA_IDENTITY_FILE)" if self.auth == "header" else ""))
@@ -84,17 +93,17 @@ class Config:
                 self.identity = identity.load_for("landing", env, bind=self.bind)
             except identity.IdentityError as e:
                 raise SystemExit("machiya-landing: identity: %s" % e)
-        # 0.3.0: Hister's users as the sign-in, like the rooms (vaultkit.histerauth): LANDING_AUTH=hister with
-        # LANDING_AUTH_SIGNIN_URL, LANDING_HISTER_USERS, LANDING_PUBLIC_URL, LANDING_AUTH_URL and the tailscale fallback
+        # 0.3.0: Nogon's users as the sign-in, like the rooms (vaultkit.nogonauth): LANDING_AUTH=nogon with
+        # LANDING_AUTH_SIGNIN_URL, LANDING_NOGON_USERS, LANDING_PUBLIC_URL, LANDING_AUTH_URL and the tailscale fallback
         # (LANDING_USERS; LANDING_BIND_BEHIND_PROXY=1), so the status page still opens when sign-in is down.
         self.public_url = (env.get("LANDING_PUBLIC_URL") or "").strip().rstrip("/")
         if self.public_url and not self.public_url.startswith(("https://", "http://")):
             raise SystemExit("machiya-landing: LANDING_PUBLIC_URL must be an http(s) address, not %r" % self.public_url)
         self.secure = self.public_url.startswith("https://") if self.public_url else self.auth != "open"
-        self.hister_auth = None
-        if self.auth == "hister":
+        self.nogon_auth = None
+        if self.auth == "nogon":
             try:
-                self.hister_auth = histerauth.load_for("landing", env, bind=self.bind, secure=self.secure)
+                self.nogon_auth = nogonauth.load_for("landing", env, bind=self.bind, secure=self.secure)
             except identity.IdentityError as e:
                 raise SystemExit("machiya-landing: %s" % e)
         state_dir = os.path.dirname((env.get("LANDING_STATE") or "").strip())
@@ -104,7 +113,7 @@ class Config:
         self.links = house.rooms(env)                     # MACHIYA_ROOMS: the rooms' and engines' public addresses
         self.targets = dict(self.links)                   # where each app is polled
         self.targets.update(pairs(env.get("LANDING_APPS")))     # more apps: machiya-mcp=…,smallweb=…
-        self.targets.update(pairs(env.get("LANDING_PROBES")))   # a different address to poll (hister=http://hister:4433)
+        self.targets.update(pairs(env.get("LANDING_PROBES")))   # a different address to poll (nogon=http://nogon:4433)
         mirror = (env.get("LANDING_MIRROR_STATUS") or "").strip()
         if mirror:
             self.targets["vault-mirror"] = mirror
@@ -127,7 +136,7 @@ class Config:
         self.poll = max(15, int(env.get("LANDING_POLL") or "60"))
         self.timeout = max(0.5, float(env.get("LANDING_TIMEOUT") or "3"))
         self.token = self.secret(env.get("LANDING_TOKEN_FILE"), "LANDING_TOKEN_FILE")
-        self.hister_token = self.secret_file(names.setting("LANDING_NOGON_TOKEN_FILE", env), "LANDING_NOGON_TOKEN_FILE")
+        self.nogon_token = self.secret_file(nogon_setting(names.setting, "LANDING_NOGON_TOKEN_FILE", env), "LANDING_NOGON_TOKEN_FILE")
         self.techo = (env.get("LANDING_TECHO_STATUS") or "").strip()        # 0.7.8: Techō's /api/status, for its tile
         if self.techo and not self.techo.startswith(("http://", "https://")):
             raise SystemExit("machiya-landing: LANDING_TECHO_STATUS must be an http(s) address, not %r" % self.techo)
@@ -185,7 +194,7 @@ class Landing:
         c = self.config
         keys = [k for k, _, _, _ in probes.APPS]
         with ThreadPoolExecutor(max_workers=len(keys)) as pool:
-            found = dict(zip(keys, pool.map(lambda k: probes.probe(k, c.targets.get(k, ""), now, c.timeout, c.token, c.hister_token), keys)))
+            found = dict(zip(keys, pool.map(lambda k: probes.probe(k, c.targets.get(k, ""), now, c.timeout, c.token, c.nogon_token), keys)))
         kura, konbini = (found["kura"].get("data") or {}), (found["konbini"].get("data") or {})
         if kura.get("head") and konbini.get("head") and kura["head"] != konbini["head"]:
             self.board_behind_since = self.board_behind_since or now
@@ -319,7 +328,7 @@ def make_handler(landing):
             self.send(code, json.dumps(obj, ensure_ascii=False, indent=1), "application/json; charset=utf-8",
                       [("Cache-Control", "no-store")])
 
-        _hres = None                       # the Hister sign-in's answer, worked out once per request
+        _hres = None                       # the Nogon sign-in's answer, worked out once per request
         _body_read = False                 # this request's body was read in full (reset per request)
 
         def handle_one_request(self):
@@ -354,7 +363,7 @@ def make_handler(landing):
 
         def hres(self):
             if self._hres is None:
-                self._hres = config.hister_auth.resolve(self.headers, is_page=self.browser_page(), path=self.path)
+                self._hres = config.nogon_auth.resolve(self.headers, is_page=self.browser_page(), path=self.path)
             return self._hres
 
         def host_ok(self):
@@ -377,7 +386,7 @@ def make_handler(landing):
                 if not who.principal.can("landing", "read"):
                     return None, 403, "not allowed here"
                 return who.principal, 200, ""
-            if config.hister_auth is not None:
+            if config.nogon_auth is not None:
                 res = self.hres()
                 return res.principal, res.status, res.reason
             if config.auth == "open":
@@ -391,41 +400,41 @@ def make_handler(landing):
             return p is not None, status, reason
 
         def refuse(self, status, reason):
-            if config.hister_auth is not None and self.host_ok():   # a 302 to sign in, a 401 page or JSON, 403, 503
-                code, headers, body = config.hister_auth.respond(self.hres(), is_page=self.browser_page(),
+            if config.nogon_auth is not None and self.host_ok():   # a 302 to sign in, a 401 page or JSON, 403, 503
+                code, headers, body = config.nogon_auth.respond(self.hres(), is_page=self.browser_page(),
                                                                  ctx=house.prefs(self.headers.get("Cookie")))
                 ctype = dict(headers).get("Content-Type", "text/plain")
                 return self.send(code, body, ctype, [(k, v) for k, v in headers if k != "Content-Type"])
             return self.send(status, "%s\n" % reason, "text/plain; charset=utf-8", [("Cache-Control", "no-store")])
 
         def forwards(self):
-            """In hister mode with the helper, /api/prefs is the account's (0.4.0): forwarded to the helper."""
-            return config.hister_auth is not None and not config.hister_auth.standalone
+            """In nogon mode with the helper, /api/prefs is the account's (0.4.0): forwarded to the helper."""
+            return config.nogon_auth is not None and not config.nogon_auth.standalone
 
         def context(self, principal):
             """Theme, text size and palette (cookies; the account's for a browser that has none yet), plus: who is
             signed in (the header's person button and Settings' Account), the fallback banner, /api/prefs when there
             is somewhere to keep preferences, and where Settings' Shared section says they are kept."""
-            res = self._hres if config.hister_auth is not None else None
+            res = self._hres if config.nogon_auth is not None else None
             ctx = house.prefs(self.headers.get("Cookie"), account=res.prefs if res is not None else None)
-            ctx.signin = config.hister_auth is not None
-            ctx.banner = config.hister_auth is not None and self._hres is not None and self._hres.banner
+            ctx.signin = config.nogon_auth is not None
+            ctx.banner = config.nogon_auth is not None and self._hres is not None and self._hres.banner
             via = getattr(principal, "via", "") if principal is not None else ""
             ctx.who = principal.name if principal is not None and via not in ("open", "") else ""
             ctx.account = {"name": ctx.who, "via": via,
-                           "signout": config.hister_auth is not None and via in ("hister", "app", "token")} if ctx.who else None
+                           "signout": config.nogon_auth is not None and via in ("nogon", "app", "token")} if ctx.who else None
             ctx.prefs_url = "/api/prefs" if principal is not None and (self.forwards() or config.prefs_path) else ""
             if self.forwards():
-                ctx.prefs_state = config.hister_auth.prefs_state(res)
+                ctx.prefs_state = config.nogon_auth.prefs_state(res)
             else:
                 ctx.prefs_state = "room" if ctx.prefs_url else "standalone"
             return ctx
 
         def prefs(self, principal, body=b""):
-            """GET/PUT /api/prefs: the account's (forwarded with the caller's own credential) in hister mode with the
+            """GET/PUT /api/prefs: the account's (forwarded with the caller's own credential) in nogon mode with the
             helper, else this page's own store (LANDING_PREFS), else 404."""
-            if config.hister_auth is not None:
-                out = config.hister_auth.forward_prefs(self.hres(), self.command, self.headers, body, self.origins(),
+            if config.nogon_auth is not None:
+                out = config.nogon_auth.forward_prefs(self.hres(), self.command, self.headers, body, self.origins(),
                                                        config.secure)
                 if out is not None:
                     return self.reply(*out)
@@ -508,12 +517,12 @@ def make_handler(landing):
 
         def do_POST(self):
             path = unquote(urlsplit(self.path).path)
-            if path == "/signout" and config.hister_auth is not None:     # before the gate: works while sign-in is down
+            if path == "/signout" and config.nogon_auth is not None:     # before the gate: works while sign-in is down
                 if self.body(signin.MAX_FORM) is None:
                     return self.send(413, "request body too large\n", "text/plain")
                 if not signin.same_origin(self.headers, config.secure, self.origins()):
                     return self.send(403, "cross-site sign-out refused\n", "text/plain", [("Cache-Control", "no-store")])
-                _, cookies = config.hister_auth.signout(self.headers)
+                _, cookies = config.nogon_auth.signout(self.headers)
                 return self.send(303, "", "text/plain", [("Cache-Control", "no-store"), ("Location", "/")]
                                  + [("Set-Cookie", c) for c in cookies])
             self.send(405, "", "text/plain", [("Allow", "GET, HEAD, PUT")])
@@ -572,9 +581,9 @@ def main():
     config = Config(os.environ)
     if config.auth == "open":
         sys.stderr.write("machiya-landing: LANDING_AUTH=open, no identity check: use it on localhost only\n")
-    elif config.hister_auth is not None:
-        h = config.hister_auth
-        sys.stderr.write("machiya-landing: LANDING_AUTH=hister: %s, sign-in %s, fallback %s%s\n" % (
+    elif config.nogon_auth is not None:
+        h = config.nogon_auth
+        sys.stderr.write("machiya-landing: LANDING_AUTH=nogon: %s, sign-in %s, fallback %s%s\n" % (
             ",".join(sorted(h.users)), h.signin, h.fallback,
             " (%s)" % ",".join(sorted(h.fallback_users)) if h.fallback == "tailscale" else ""))
     elif not config.users and config.identity is None:

@@ -7,7 +7,7 @@ import sys
 
 import deploys
 import probes
-from vaultkit import histerauth
+from vaultkit import nogonauth
 from vaultkit import shell as house
 from vaultkit import verify as vk_verify
 
@@ -87,7 +87,7 @@ def dot(state):
 def mark(key):
     if key in dict((k, 1) for k, _, _, _ in house.ROOMS):
         return '<span class="seal icon" data-room="%s" aria-hidden="true"></span>' % e(key)
-    if key in ("hister", "searxng"):
+    if key in ("nogon", "searxng"):
         return '<span class="seal icon neighbour-icon" data-room="%s" aria-hidden="true"></span>' % e(key)
     return '<span class="glyph" aria-hidden="true">%s</span>' % ICONS["service"]
 
@@ -263,12 +263,12 @@ def footer(snap, now):
 
 def shell_page(ctx, title, current, links, body, scripts=True):
     """The rooms' shell around a body (0.3.0, as Niwa's): the signed-in person button, the fallback banner at the top
-    of <main> when Hister's sign-in is down, the sign-in meta (machiya.js: Sign Out in the Rooms menu, a 401 goes to
+    of <main> when Nogon's sign-in is down, the sign-in meta (machiya.js: Sign Out in the Rooms menu, a 401 goes to
     sign in) and /api/prefs (theme and text size follow the person) when there's a principal and a place to keep them."""
     who = getattr(ctx, "who", "")
     if getattr(ctx, "banner", False):
-        body = re.sub(r"(<main[^>]*>)", lambda m: m.group(1) + histerauth.banner_html(), body, count=1)
-    head = histerauth.signin_meta("/signout") if getattr(ctx, "signin", False) else ""
+        body = re.sub(r"(<main[^>]*>)", lambda m: m.group(1) + nogonauth.banner_html(), body, count=1)
+    head = nogonauth.signin_meta("/signout") if getattr(ctx, "signin", False) else ""
     return house.page(ctx, ROOM, title, house.header(ROOM, NAV, current, links, who=who) + body, TABS, current, links=links,
                       head=head, stylesheets=[static_url("landing.css")], scripts=[static_url("landing.js")] if scripts else [],
                       icons=ICONS, prefs_url=getattr(ctx, "prefs_url", ""), who=who)
@@ -279,7 +279,7 @@ def page(ctx, snap, history, logs, links, targets, now, tz=None):
                       main_html(snap, history, logs, links, targets, now, tz) + footer(snap, now))
 
 
-ACCOUNT_NOTE = {"hister": "Signed in with Nogon. Signing out ends the session in every room.",
+ACCOUNT_NOTE = {"nogon": "Signed in with Nogon. Signing out ends the session in every room.",
                 "app": "Signed in with Nogon. Signing out ends the session in every room.",
                 "token": "Signed in with a Nogon token.",
                 "fallback": "Signed in through the tailnet: Nogon's sign-in is unavailable right now.",
@@ -287,7 +287,7 @@ ACCOUNT_NOTE = {"hister": "Signed in with Nogon. Signing out ends the session in
 
 
 def account_section(account):
-    """Settings' Account (0.3.0): who is signed in and how, and Sign Out (a same-origin POST /signout) for a Hister
+    """Settings' Account (0.3.0): who is signed in and how, and Sign Out (a same-origin POST /signout) for a Nogon
     sign-in. None when nobody is named (open mode)."""
     if not account:
         return None
@@ -401,13 +401,13 @@ def home_html(snap, links, targets, search, now, tz=None, shown=None):
     out = ['<main class="landing home" data-checked="%d">' % int(snap["checked"])]
     out.append('<section class="hero"><h1>%s</h1>%s</section>' % (e(date.strftime("%A %-d %B")), pill(snap["overall"])))
     out.append(search_pill(search))
-    hd = (apps.get("hister") or {}).get("data") or {}
+    hd = (apps.get("nogon") or {}).get("data") or {}
     counts = {
         "shiori": what_of("shiori"),
         "konbini": ("%s in WIP" % probes.count(t["wip"])) if t.get("wip") is not None else (fact(apps["konbini"], "WIP") or fact(apps["konbini"], "cards")),
         "niwa": fact(apps["niwa"], "published"),
         "kura": plural_or(((apps["kura"].get("data") or {}).get("total_notes")), "note", fact(apps["kura"], "notes")),
-        "hister": plural_or(hd.get("docs"), "page", what_of("hister")),           # 0.7.4: what it holds
+        "nogon": plural_or(hd.get("docs"), "page", what_of("nogon")),           # 0.7.4: what it holds
         "searxng": searches(apps["shiori"].get("searches_today"), what_of("searxng")),   # 0.7.5: web searches
     }
 
@@ -420,7 +420,7 @@ def home_html(snap, links, targets, search, now, tz=None, shown=None):
     if tiles:
         out.append('<nav class="minis" data-n="%d" aria-label="Rooms">%s</nav>' % (len(tiles), "".join(tiles)))
     secs = []
-    kb, ku, ni, ng = link("konbini"), link("kura"), link("niwa"), link("hister")   # 0.7.7: Saved & Read opens Nogon, where its pages live
+    kb, ku, ni, ng = link("konbini"), link("kura"), link("niwa"), link("nogon")   # 0.7.7: Saved & Read opens Nogon, where its pages live
     if t.get("working") is not None:
         secs.append(section("Working On", ['<li><a href="%s">%s</a>%s%s</li>' % (
             e(c["url"]), e(c["title"]), ('<small>%s</small>' % e(c["area"])) if c.get("area") else "",

@@ -26,7 +26,7 @@ ROOMS = [   # (key, name, seal, what it is) front to back through the house, the
     ("niwa", "Niwa", "庭", "garden"),
     ("kura", "Kura", "蔵", "notes"),
 ]
-NEIGHBOURS = [("hister", "Nogon", "pages"), ("searxng", "SearXNG", "the web")]
+NEIGHBOURS = [("nogon", "Nogon", "pages"), ("searxng", "SearXNG", "the web")]   # nogon: `hister` before 0.41
 # The house itself: the stack's front door and status page (stack/landing). Not a room in the order above: with
 # MACHIYA_ROOMS naming `machiya=<url>`, every Rooms menu ends with a "Machiya · home" row (v0.19.1) and the footer's
 # "Part of Machiya" links there; without it, nothing changes.
@@ -44,7 +44,7 @@ GLYPH = {   # one glyph per room everywhere (Shiori uses SF Symbols for the same
                       '<rect x="17" y="4" width="4" height="13" rx="1"/>',                           # columns
     "niwa": _SVG % '<path d="M12 22v-8M12 14c0-4 3-7 8-7-1 5-4 7-8 7zM12 14c0-4-3-7-8-7 1 5 4 7 8 7z"/>',  # sprout
     "kura": _SVG % '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M8 7h7"/>',     # book
-    "hister": _SVG % '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',                         # history
+    "nogon": _SVG % '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',                          # history
     "searxng": _SVG % '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',  # web
     "person": _SVG % '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',               # who's signed in
     "search": _SVG % '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',                                  # every room's Search tab (v0.16.2)
@@ -76,22 +76,23 @@ def source_url(env=None):
 # -- configuration ----------------------------------------------------------------------------------------------
 
 def rooms(env=None):
-    """{key: url} from MACHIYA_ROOMS="shiori=https://…,konbini=https://…,niwa=…,kura=…,hister=…,searxng=…,machiya=…"
-    (no trailing slashes). Unset or empty = no links; a key may be left out. `machiya` is the house (HOUSE)."""
+    """{key: url} from MACHIYA_ROOMS="shiori=https://…,konbini=https://…,niwa=…,kura=…,nogon=…,searxng=…,machiya=…"
+    (no trailing slashes). Unset or empty = no links; a key may be left out. `machiya` is the house (HOUSE). The old
+    key `hister=` is read as `nogon` (0.41)."""
     raw = (env if env is not None else os.environ).get("MACHIYA_ROOMS", "")
     out = {}
     for part in raw.split(","):
         if "=" in part:
             k, v = part.split("=", 1)
             if k.strip() and v.strip():
-                out[names.room_key(k.strip().lower())] = v.strip().rstrip("/")   # nogon= is read as hister (0.38)
+                out[names.room_key(k.strip().lower())] = v.strip().rstrip("/")   # hister= is read as nogon (0.41)
     return out
 
 
 # -- extra rooms (MACHIYA_EXTRA_ROOMS, docs/ui.md "Extra rooms") ---------------------------------------------------
 ExtraRoom = namedtuple("ExtraRoom", "key name seal url icon what", defaults=("",))   # what: v0.40
 EXTRA_MAX = 8                                       # entries; any more are skipped
-RESERVED_KEYS = {"nogon"}                           # the hister neighbour's id after the Nogon rename (owner, 2026-11-19)
+RESERVED_KEYS = set(names.ROOM_ALIASES)             # hister: the nogon neighbour's old id, still read as nogon (0.41)
 EXTRA_KEY_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\Z")
 _extra_seen = {}                                    # the setting's value -> its rooms (each value is parsed and warned once)
 
@@ -229,7 +230,7 @@ def is_shared(key):
 def prefs(cookie_header, account=None):
     """The first render's settings. A shared cookie (machiya_<key>, written for every room when MACHIYA_COOKIE_DOMAIN
     is set) wins over the room's own cookie of the same key. account (v0.21): the account's shared preferences (a
-    fresh browser has no cookies yet: histerauth's Result.prefs, {"theme", "palette", "text_size", "apps_hidden"}),
+    fresh browser has no cookies yet: nogonauth's Result.prefs, {"theme", "palette", "text_size", "apps_hidden"}),
     used for whatever the cookies don't say."""
     jar = {}
     for part in (cookie_header or "").split(";"):
@@ -238,13 +239,16 @@ def prefs(cookie_header, account=None):
             jar[k.strip()] = unquote(v.strip())
     for k in [k for k in jar if k.startswith(SHARED_PREFIX)]:
         jar[k[len(SHARED_PREFIX):]] = jar.pop(k)
+    for old, new in names.ROOM_ALIASES.items():         # 0.41: a show_hister cookie is read as show_nogon (nogon wins)
+        if "show_" + old in jar:
+            jar.setdefault("show_" + new, jar.pop("show_" + old))
     if isinstance(account, dict):
         for key, local in (("theme", "theme"), ("palette", "palette"), ("text_size", "textSize")):
             if local not in jar and isinstance(account.get(key), str):
                 jar[local] = account[key]
         hidden = account.get("apps_hidden")
         if isinstance(hidden, str):
-            for app in [a for a in hidden.split(",") if a]:
+            for app in [names.room_key(a.strip()) for a in hidden.split(",") if a.strip()]:
                 jar.setdefault("show_" + app, "false")
     theme = jar.get("theme", "system")
     return Prefs("system" if theme == "auto" else theme, jar.get("textSize", "standard"),
@@ -443,6 +447,7 @@ def switcher(room, links, cls="rooms", settings=False, who=""):
     """The Rooms menu: the rooms front to back, the deployment's extra rooms (MACHIYA_EXTRA_ROOMS), then the
     neighbours; the current room is plain text. With settings, a Settings row closes the menu (phones, where the
     header's gear is hidden), and `who` (the signed-in name) a row for the account above it."""
+    links = _links(links)
     rows = []
     for key, name, seal, what in ROOMS:
         if key == room:
@@ -661,7 +666,13 @@ def row(label, value):
     return '<div class="item"><span>%s</span><span class="value">%s</span></div>' % (e(label), value)
 
 
+def _links(links):
+    """A room's links with the house's keys (0.41: a `hister` key, from a room that builds its own, is `nogon`)."""
+    return {names.room_key(k): v for k, v in (links or {}).items()}
+
+
 def _app_rows(room, links, shown):
+    links, shown = _links(links), _links(shown)
     items = [toggle(name, "show_" + key, shown.get(key, True)) for key, name, _, _ in ROOMS if key != room and key in links]
     items += [toggle(x.name, "show_" + x.key, shown.get(x.key, True)) for x in extra_rooms() if x.key != room]
     items += [toggle(name, "show_" + key, shown.get(key, True)) for key, name, _ in NEIGHBOURS if key in links]
@@ -759,9 +770,9 @@ def shared_section(ctx, room, links=None, state="standalone", who="", signin="",
     """Settings' first section (v0.23, docs/ui.md "Settings"): Theme, Appearance, Text Size and, under it, Use This
     Device's Size, the same rows in the same order in every app. The footnote, "Follows you on every Machiya app when
     signed in.", is there when an account exists; the state line says where the choices are kept now: `state` is
-      account      signed in, saved to the account (hister-login's store): "Saved to your account."
+      account      signed in, saved to the account (nogon-login's store): "Saved to your account."
       signed-out   a sign-in exists, nobody is signed in: "Kept in this browser. Sign In" (signin= link)
-      unavailable  the account can't be reached (the helper or Hister down, the Tailscale fallback)
+      unavailable  the account can't be reached (the helper or Nogon down, the Tailscale fallback)
       standalone   no account here: "Kept for every room in this browser." (a shared cookie domain), else "Kept in
                    this browser."
       room         a room's own store (identity file): "Saved for you in <Room>."

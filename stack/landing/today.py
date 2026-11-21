@@ -4,12 +4,12 @@
   after that; with each card's next step.
 - Due soon: cards with a `due` date in the next 14 days (or overdue), not done.
 - Notes changed: Kura's newest changes (GET /api/recent).
-- Saved & read: Hister's newest pages, vault notes left out, a feed reader's reads and stars marked (the Hister probe's
-  search; the owner's token when Hister has users).
+- Saved & read: Nogon's newest pages, vault notes left out, a feed reader's reads and stars marked (the Nogon probe's
+  search; the owner's token when Nogon has users).
 - Garden: Niwa's most recently tended published notes (GET /feed.xml), the last 30 days.
 
 Every section is optional: an app that is missing, down or refuses leaves its section out (None), never an error.
-Only GETs; the same timeouts and size limit as the probes. These reads are the owner's (the rooms run AUTH=hister), so
+Only GETs; the same timeouts and size limit as the probes. These reads are the owner's (the rooms run AUTH=nogon), so
 they carry the owner's token (probes.owner_headers: only to the room's configured address, never across a redirect).
 """
 import datetime
@@ -103,22 +103,22 @@ def gather(config, apps, now, today=None):
         try:
             link = (config.links.get("konbini") or t).rstrip("/")
             out["working"], out["due"], out["wip"] = konbini(t, link, today, config.timeout,
-                                                             probes.owner_headers("konbini", t, config.token, config.hister_token))
+                                                             probes.owner_headers("konbini", t, config.token, config.nogon_token))
         except probes.FetchError:
             pass
     t = target("kura")
     if t:
         try:
-            out["notes"] = kura(t, config.timeout, probes.owner_headers("kura", t, config.token, config.hister_token))
+            out["notes"] = kura(t, config.timeout, probes.owner_headers("kura", t, config.token, config.nogon_token))
         except probes.FetchError:
             pass
     t = target("niwa")
     if t:
         try:
-            out["garden"] = niwa(t, now, config.timeout, probes.owner_headers("niwa", t, config.token, config.hister_token)) or None
+            out["garden"] = niwa(t, now, config.timeout, probes.owner_headers("niwa", t, config.token, config.nogon_token)) or None
         except probes.FetchError:
             pass
-    h = apps.get("hister") or {}
+    h = apps.get("nogon") or {}
     if h.get("state") == "up" and (h.get("data") or {}).get("pages"):
         out["pages"] = h["data"]["pages"][:PAGES]
     return out

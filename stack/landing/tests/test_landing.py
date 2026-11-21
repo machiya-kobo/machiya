@@ -86,11 +86,11 @@ KONBINI = {"ok": True, "version": "0.11.6", "head": KURA["head"], "cards": 78,
 NIWA = {"version": "0.4.8", "vaultkit": "v0.17.2", "head": "a6857ce8c2", "notes": 314, "published": 1,
         "sync": {"pending": 0, "ahead": 0, "error": None}, "ready": True, "error": None}
 SHIORI = (200, '<link rel="stylesheet" href="/_shiori/app.css?v=7598f33efebd">', "text/html")
-HISTER = {"/health": (200, "", "text/plain"), "/api/stats": {"doc_count": 1968, "alias_count": 14},
+NOGON = {"/health": (200, "", "text/plain"), "/api/stats": {"doc_count": 1968, "alias_count": 14},
           "/search": {"total": 1968, "documents": [{"url": "https://example.com/", "added": NOW - 9000, "updated": NOW - 600}]}}
 SEARXNG = {"/healthz": (200, "OK", "text/plain"), "/config": {"version": "2026.9.25+12f8b6515"}}
-MCP = {"ok": True, "version": "0.7.0", "auth": "tailscale", "rooms": ["hister", "konbini", "kura", "niwa"], "tools": 36}
-SMALLWEB = {"ok": True, "ready": True, "error": None, "version": "0.2.0", "hister": {"enabled": True, "saved": 12}}
+MCP = {"ok": True, "version": "0.7.0", "auth": "tailscale", "rooms": ["nogon", "konbini", "kura", "niwa"], "tools": 36}
+SMALLWEB = {"ok": True, "ready": True, "error": None, "version": "0.2.0", "nogon": {"enabled": True, "saved": 12}}
 
 
 class Stack(unittest.TestCase):
@@ -102,14 +102,14 @@ class Stack(unittest.TestCase):
             "konbini": Fake({"/api/health": lambda: dict(KONBINI)}),
             "niwa": Fake({"/api/status": lambda: dict(NIWA)}),
             "shiori": Fake({"/": SHIORI}),
-            "hister": Fake(dict(HISTER)),
+            "nogon": Fake(dict(NOGON)),
             "searxng": Fake(SEARXNG),
             "machiya-mcp": Fake({"/api/status": MCP}),
             "smallweb": Fake({"/api/status": SMALLWEB}),
         }
-        hister = self.fakes["hister"]
-        pages = HISTER["/search"]
-        hister.routes["/search"] = lambda: {"total": 0, "documents": []} if "code_kind" in hister.seen[-1]["query"] else pages
+        nogon = self.fakes["nogon"]
+        pages = NOGON["/search"]
+        nogon.routes["/search"] = lambda: {"total": 0, "documents": []} if "code_kind" in nogon.seen[-1]["query"] else pages
         self.tmp = tempfile.mkdtemp(prefix="landing-test-")
 
     def tearDown(self):
@@ -117,7 +117,7 @@ class Stack(unittest.TestCase):
             f.close()
 
     def env(self, **kw):
-        rooms = ",".join("%s=%s" % (k, self.fakes[k].url) for k in ("shiori", "konbini", "niwa", "kura", "hister", "searxng"))
+        rooms = ",".join("%s=%s" % (k, self.fakes[k].url) for k in ("shiori", "konbini", "niwa", "kura", "nogon", "searxng"))
         env = {"LANDING_AUTH": "open", "LANDING_BIND": "127.0.0.1", "MACHIYA_ROOMS": rooms,
                "LANDING_APPS": "machiya-mcp=%s,smallweb=%s" % (self.fakes["machiya-mcp"].url, self.fakes["smallweb"].url),
                "LANDING_STATE": os.path.join(self.tmp, "landing.json")}
@@ -133,7 +133,7 @@ class Readers(Stack):
         snap = self.landing().poll()
         a = snap["apps"]
         self.assertEqual({k: v["state"] for k, v in a.items()},
-                         {"shiori": "up", "konbini": "up", "niwa": "up", "kura": "up", "hister": "up", "searxng": "up",
+                         {"shiori": "up", "konbini": "up", "niwa": "up", "kura": "up", "nogon": "up", "searxng": "up",
                           "machiya-mcp": "up", "smallweb": "up", "vault-mirror": "absent",
                           "feed-import": "absent", "code-import": "absent"})
         self.assertEqual((a["kura"]["version"], a["kura"]["vaultkit"]), ("0.6.8", "0.17.2"))
@@ -141,17 +141,17 @@ class Readers(Stack):
         self.assertEqual(a["konbini"]["facts"], ["78 cards"])
         self.assertEqual(a["niwa"]["facts"], ["1 published"])                       # 0.2.0: published only
         self.assertEqual(a["shiori"]["version"], "build 7598f33")
-        self.assertEqual(a["hister"]["facts"], ["1.9k pages"])
-        self.assertEqual(a["hister"]["data"]["newest"], NOW - 600)
+        self.assertEqual(a["nogon"]["facts"], ["1.9k pages"])
+        self.assertEqual(a["nogon"]["data"]["newest"], NOW - 600)
         self.assertEqual(a["searxng"]["version"], "2026.9.25")
         self.assertEqual(a["machiya-mcp"]["facts"], ["36 tools", "4 rooms"])
         self.assertEqual(a["smallweb"]["facts"], ["12 saved"])
         self.assertEqual(snap["overall"], {"state": "up", "text": "Everything is up"})
 
-    def test_hister_gets_its_origin_and_vault_notes_and_code_are_left_out(self):
+    def test_nogon_gets_its_origin_and_vault_notes_and_code_are_left_out(self):
         self.landing().poll()
-        seen = [s for s in self.fakes["hister"].seen if s["method"] == "GET"]      # the MCP POST needs no Origin
-        self.assertTrue(seen and all(s["headers"].get("origin") == "hister://" for s in seen))
+        seen = [s for s in self.fakes["nogon"].seen if s["method"] == "GET"]      # the MCP POST needs no Origin
+        self.assertTrue(seen and all(s["headers"].get("origin") == "nogon://" for s in seen))
         search = [s for s in seen if s["path"] == "/search"][0]
         self.assertIn("-label%3Avault", search["query"])
         self.assertIn("-metadata.source%3Acode", search["query"])           # code-import's documents aren't pages
@@ -196,7 +196,7 @@ class Readers(Stack):
     def test_token_only_for_rooms_over_https(self):
         self.assertEqual(probes.auth_headers("kura", "https://kura.example.ts.net", "mch_x"), {"Authorization": "Bearer mch_x"})
         self.assertEqual(probes.auth_headers("kura", "http://kura:8080", "mch_x"), {})
-        self.assertEqual(probes.auth_headers("hister", "https://hister.example.ts.net", "mch_x"), {})
+        self.assertEqual(probes.auth_headers("nogon", "https://nogon.example.ts.net", "mch_x"), {})
         self.assertEqual(probes.auth_headers("machiya-mcp", "https://mcp.example.ts.net", "mch_x"), {})
         self.assertEqual(probes.auth_headers("kura", "https://kura.example.ts.net", ""), {})
         path = os.path.join(self.tmp, "token")
@@ -218,15 +218,15 @@ class Readers(Stack):
         self.assertEqual(self.landing(LANDING_MIRROR_STATUS=path).poll()["apps"]["vault-mirror"]["state"], "error")
 
 
-class HisterWithUsers(Stack):
-    """Hister with user handling on: /health stays open (up or down), /api/stats and /search need the owner's token
-    (LANDING_HISTER_TOKEN_FILE, X-Access-Token, Hister only); without it the page is up with no count, never down."""
+class NogonWithUsers(Stack):
+    """Nogon with user handling on: /health stays open (up or down), /api/stats and /search need the owner's token
+    (LANDING_NOGON_TOKEN_FILE, X-Access-Token, Nogon only); without it the page is up with no count, never down."""
 
-    TOKEN = "LandingHisterToken0123456789"
+    TOKEN = "LandingNogonToken0123456789"
 
     def gated(self, body):
         def route():
-            seen = self.fakes["hister"].seen[-1]["headers"]
+            seen = self.fakes["nogon"].seen[-1]["headers"]
             if seen.get("x-access-token") != self.TOKEN:
                 return (403, b"", "text/plain")
             return body() if callable(body) else body
@@ -234,48 +234,48 @@ class HisterWithUsers(Stack):
 
     def setUp(self):
         super().setUp()
-        self.fakes["hister"].routes.update({"/api/stats": self.gated(HISTER["/api/stats"]),
-                                            "/search": self.gated(self.fakes["hister"].routes["/search"])})
-        self.file = os.path.join(self.tmp, "hister.token")
+        self.fakes["nogon"].routes.update({"/api/stats": self.gated(NOGON["/api/stats"]),
+                                            "/search": self.gated(self.fakes["nogon"].routes["/search"])})
+        self.file = os.path.join(self.tmp, "nogon.token")
         with open(self.file, "w") as f:
             f.write(self.TOKEN + "\n")
 
     def test_without_a_token_up_and_no_count(self):
-        a = self.landing().poll()["apps"]["hister"]
-        self.assertEqual((a["state"], a["facts"], a["data"]["docs"]), ("up", ["page count needs LANDING_HISTER_TOKEN_FILE"], None))
-        self.assertTrue(all("x-access-token" not in s["headers"] for s in self.fakes["hister"].seen))
+        a = self.landing().poll()["apps"]["nogon"]
+        self.assertEqual((a["state"], a["facts"], a["data"]["docs"]), ("up", ["page count needs LANDING_NOGON_TOKEN_FILE"], None))
+        self.assertTrue(all("x-access-token" not in s["headers"] for s in self.fakes["nogon"].seen))
 
     def test_with_the_token_the_count_and_nowhere_else(self):
-        land = self.landing(LANDING_HISTER_TOKEN_FILE=self.file)
+        land = self.landing(LANDING_NOGON_TOKEN_FILE=self.file)
         snap = land.poll()
-        a = snap["apps"]["hister"]
+        a = snap["apps"]["nogon"]
         self.assertEqual((a["state"], a["facts"], a["data"]["newest"]), ("up", ["1.9k pages"], NOW - 600))
-        health = [s for s in self.fakes["hister"].seen if s["path"] == "/health"]
+        health = [s for s in self.fakes["nogon"].seen if s["path"] == "/health"]
         self.assertTrue(health and all("x-access-token" not in s["headers"] for s in health))   # /health: no token
         owner_paths = {"/api/cards", "/api/vaults", "/api/recent", "/feed.xml"}       # 0.2.3: the rooms' owner reads
         for key, fake in self.fakes.items():
-            if key != "hister":
+            if key != "nogon":
                 self.assertTrue(all("x-access-token" not in s["headers"] for s in fake.seen
                                     if not (key in ("kura", "konbini", "niwa") and s["path"] in owner_paths)
                                     and not (key == "konbini" and s["path"] == "/api/health")), key)
-        self.assertNotIn(self.TOKEN, json.dumps(snap) + repr(land.config.hister_token))
+        self.assertNotIn(self.TOKEN, json.dumps(snap) + repr(land.config.nogon_token))
 
     def test_a_refused_token_says_so(self):
         with open(self.file, "w") as f:
             f.write("SomeOtherToken\n")
-        a = self.landing(LANDING_HISTER_TOKEN_FILE=self.file).poll()["apps"]["hister"]
+        a = self.landing(LANDING_NOGON_TOKEN_FILE=self.file).poll()["apps"]["nogon"]
         self.assertEqual((a["state"], a["facts"]), ("up", ["page count: the token was refused"]))
 
     def test_health_down_is_down(self):
-        self.fakes["hister"].routes["/health"] = (502, b"bad gateway", "text/plain")
-        self.assertEqual(self.landing(LANDING_HISTER_TOKEN_FILE=self.file).poll()["apps"]["hister"]["state"], "down")
+        self.fakes["nogon"].routes["/health"] = (502, b"bad gateway", "text/plain")
+        self.assertEqual(self.landing(LANDING_NOGON_TOKEN_FILE=self.file).poll()["apps"]["nogon"]["state"], "down")
 
     def test_bad_token_file_refuses_and_rotation_is_picked_up(self):
         empty = os.path.join(self.tmp, "empty")
         open(empty, "w").close()
         for path in (empty, os.path.join(self.tmp, "missing"), self.tmp):
             with self.assertRaises(SystemExit) as cm:
-                landing.Config(self.env(LANDING_HISTER_TOKEN_FILE=path))
+                landing.Config(self.env(LANDING_NOGON_TOKEN_FILE=path))
             self.assertNotIn(self.TOKEN, str(cm.exception))
         secret = probes.SecretFile(self.file)
         with open(self.file + ".new", "w") as f:
@@ -287,32 +287,64 @@ class HisterWithUsers(Stack):
 
 
 class NogonNames(Stack):
-    """0.7.0, the rename's stage 1: the Nogon names are read next to the Hister ones."""
+    """0.8.0, the rename's stage 3 (Hister is now Nogon): the app key is nogon, the old settings stop the page, and what
+    was stored under the old id still reads."""
 
-    def test_nogon_in_machiya_rooms_and_probes(self):
+    def test_a_stored_hister_room_id_still_reads_as_nogon(self):
         env = self.env()
-        env["MACHIYA_ROOMS"] = env["MACHIYA_ROOMS"].replace("hister=", "nogon=")
+        env["MACHIYA_ROOMS"] = env["MACHIYA_ROOMS"].replace("nogon=", "hister=")
         snap = landing.Landing(landing.Config(env), now=lambda: NOW).poll()
-        self.assertEqual(snap["apps"]["hister"]["state"], "up")
-        self.assertEqual(landing.pairs("nogon=http://n:1/,kura=http://k"), {"hister": "http://n:1", "kura": "http://k"})
+        self.assertEqual(snap["apps"]["nogon"]["state"], "up")
+        self.assertNotIn("hister", snap["apps"])
+        self.assertEqual(landing.pairs("hister=http://n:1/,kura=http://k"), {"nogon": "http://n:1", "kura": "http://k"})
 
-    def test_auth_nogon_is_hister(self):
+    def test_auth_nogon_is_the_sign_in_mode(self):
         with self.assertRaises(SystemExit) as cm:          # AUTH=nogon is the sign-in mode: it needs its settings
             landing.Config(self.env(LANDING_AUTH="nogon"))
         self.assertIn("LANDING_", str(cm.exception))
 
-    def test_nogon_token_file(self):
+    def test_auth_hister_stops_the_page(self):
+        with self.assertRaises(SystemExit) as cm:
+            landing.Config(self.env(LANDING_AUTH="hister"))
+        self.assertIn("LANDING_AUTH=nogon", str(cm.exception))
+        self.assertTrue(str(cm.exception).startswith("machiya-landing: "))
+
+    def test_an_old_token_file_name_alone_stops_the_page(self):
         path = os.path.join(self.tmp, "tok")
         with open(path, "w") as f:
             f.write("Tok-1\n")
-        c = landing.Config(self.env(LANDING_NOGON_TOKEN_FILE=path))
-        self.assertIsNotNone(c.hister_token)
+        with self.assertRaises(SystemExit) as cm:
+            landing.Config(self.env(LANDING_HISTER_TOKEN_FILE=path))
+        self.assertIn("LANDING_NOGON_TOKEN_FILE", str(cm.exception))
+        c = landing.Config(self.env(LANDING_NOGON_TOKEN_FILE=path, LANDING_HISTER_TOKEN_FILE="/nowhere"))   # beside: ignored
+        self.assertEqual(c.nogon_token.get(), "Tok-1")
 
-    def test_smallweb_nogon_field(self):
-        status = dict(SMALLWEB, nogon={"enabled": True, "saved": 7})
-        status.pop("hister", None)
-        self.fakes["smallweb"].routes["/api/status"] = status
-        self.assertIn("7", json.dumps(self.landing().poll()["apps"]["smallweb"]))
+    def test_an_old_users_name_alone_stops_the_sign_in(self):
+        env = self.env(LANDING_AUTH="nogon", LANDING_AUTH_URL="http://127.0.0.1:9", LANDING_HISTER_USERS="owner",
+                       LANDING_AUTH_SIGNIN_URL="https://nogon.example.ts.net/machiya/signin",
+                       LANDING_PUBLIC_URL="https://machiya.example.ts.net")
+        with self.assertRaises(SystemExit) as cm:
+            landing.Config(env)
+        self.assertIn("LANDING_NOGON_USERS", str(cm.exception))
+
+    def test_smallweb_reports_nogon_only(self):
+        self.assertEqual(self.landing().poll()["apps"]["smallweb"]["facts"], ["12 saved"])
+        self.fakes["smallweb"].routes["/api/status"] = dict(SMALLWEB, nogon=None, hister={"enabled": True, "saved": 7})
+        self.assertEqual(self.landing().poll()["apps"]["smallweb"]["facts"], [])            # the old twin: not read
+
+    def test_the_nogon_probe_sends_the_nogon_origin(self):
+        self.landing().poll()
+        self.assertEqual(probes.NOGON_ORIGIN, "nogon://")
+        self.assertTrue(all(s["headers"].get("origin") == "nogon://" for s in self.fakes["nogon"].seen if s["method"] == "GET"))
+
+    def test_a_history_kept_under_hister_reads_as_nogon(self):
+        path = os.path.join(self.tmp, "old.json")
+        with open(path, "w") as f:
+            json.dump({"since": NOW - 99, "seen": {"hister": {"version": "v0.20.0", "at": NOW - 99}},
+                       "events": [{"app": "hister", "from": "v0.19.0", "to": "v0.20.0", "at": NOW - 99}, {"from": "x"}]}, f)
+        h = deploys.History(path)
+        self.assertEqual(list(h.seen), ["nogon"])
+        self.assertEqual([e.get("app") for e in h.events], ["nogon", None])
 
 
 class Freshness(Stack):
@@ -418,7 +450,7 @@ class History(unittest.TestCase):
     def test_observe_and_persist(self):
         path = os.path.join(tempfile.mkdtemp(prefix="landing-test-"), "h.json")
         h = deploys.History(path)
-        apps = {"kura": {"state": "up", "version": "0.6.7", "vaultkit": "0.17.1"}, "hister": {"state": "up", "version": ""},
+        apps = {"kura": {"state": "up", "version": "0.6.7", "vaultkit": "0.17.1"}, "nogon": {"state": "up", "version": ""},
                 "niwa": {"state": "down", "version": ""}}
         self.assertTrue(h.observe(apps, NOW))
         self.assertEqual(h.events, [])                                   # first sight is not a deploy
@@ -697,7 +729,7 @@ class Changelogs(Stack):
         asked = lambda k: [x["path"] for x in self.fakes[k].seen].count("/api/changelog")
         self.assertEqual((asked("kura"), asked("niwa"), asked("konbini")), (1, 1, 1))
         self.assertEqual(asked("smallweb") + asked("machiya-mcp"), 2)
-        self.assertEqual(asked("hister") + asked("searxng") + asked("shiori"), 0)   # engines don't serve one
+        self.assertEqual(asked("nogon") + asked("searxng") + asked("shiori"), 0)   # engines don't serve one
         clock[0] += 120
         self.fakes["kura"].routes["/api/status"] = dict(KURA, synced_at=clock[0])     # 0.6.8: in the log already
         snap = l.poll()
@@ -736,7 +768,7 @@ class Changelogs(Stack):
 
 SHIORI_STATUS = {"version": "0.1.0", "build": "9862094", "built": "2026-10-04T16:06:25Z"}
 AI = {"enabled": True, "engine": "anthropic", "model": "m", "remaining": 87, "answer": True}
-MCP_INIT = {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-06-18", "serverInfo": {"name": "hister", "version": "v0.20.0"}}}
+MCP_INIT = {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-06-18", "serverInfo": {"name": "nogon", "version": "v0.20.0"}}}
 CARDS = {"cards": [
     {"slug": "a", "title": "Alpha", "board": "wip", "rank": None, "priority": 1, "updated": "2026-01-01", "next": "do a", "area": "tools", "due": ""},
     {"slug": "b", "title": "Beta", "board": "wip", "rank": None, "priority": None, "updated": "2026-01-03", "next": "", "area": "", "due": ""},
@@ -761,7 +793,7 @@ PAGES = {"total": 3, "documents": [
 
 
 class ZeroTwo(Stack):
-    """0.2.0: Shiori's status, Hister's version, Niwa's published count, the mirror's and feed-import's files, Pages."""
+    """0.2.0: Shiori's status, Nogon's version, Niwa's published count, the mirror's and feed-import's files, Pages."""
 
     def test_shiori_status_ai_and_feed(self):
         self.fakes["shiori"].routes.update({"/_shiori/status.json": SHIORI_STATUS, "/shiori/ai/status": AI,
@@ -779,25 +811,25 @@ class ZeroTwo(Stack):
         a = self.landing().poll()["apps"]["shiori"]
         self.assertEqual(a["version"], "build 7598f33")                               # no status.json: the build stamp
 
-    def test_hister_version_from_its_mcp(self):
-        self.fakes["hister"].routes["POST /mcp"] = MCP_INIT
-        probes.HISTER_VERSION.clear()
-        path = os.path.join(self.tmp, "hister-token")
+    def test_nogon_version_from_its_mcp(self):
+        self.fakes["nogon"].routes["POST /mcp"] = MCP_INIT
+        probes.NOGON_VERSION.clear()
+        path = os.path.join(self.tmp, "nogon-token")
         with open(path, "w") as f:
             f.write("owner-token\n")
         clock = [NOW]
-        l = landing.Landing(landing.Config(self.env(LANDING_HISTER_TOKEN_FILE=path)), now=lambda: clock[0])
-        self.assertEqual(l.poll()["apps"]["hister"]["version"], "0.20.0")
-        posts = [x for x in self.fakes["hister"].seen if x["method"] == "POST"]
+        l = landing.Landing(landing.Config(self.env(LANDING_NOGON_TOKEN_FILE=path)), now=lambda: clock[0])
+        self.assertEqual(l.poll()["apps"]["nogon"]["version"], "0.20.0")
+        posts = [x for x in self.fakes["nogon"].seen if x["method"] == "POST"]
         self.assertEqual(len(posts), 1)
         self.assertEqual(json.loads(posts[0]["body"])["method"], "initialize")
         self.assertEqual(posts[0]["headers"].get("x-access-token"), "owner-token")
         clock[0] += 60
         l.poll()
-        self.assertEqual(len([x for x in self.fakes["hister"].seen if x["method"] == "POST"]), 1)   # cached
-        probes.HISTER_VERSION.clear()
-        del self.fakes["hister"].routes["POST /mcp"]
-        self.assertEqual(self.landing().poll()["apps"]["hister"]["version"], "")                  # unreadable: none
+        self.assertEqual(len([x for x in self.fakes["nogon"].seen if x["method"] == "POST"]), 1)   # cached
+        probes.NOGON_VERSION.clear()
+        del self.fakes["nogon"].routes["POST /mcp"]
+        self.assertEqual(self.landing().poll()["apps"]["nogon"]["version"], "")                  # unreadable: none
 
     def test_mirror_version_and_feed_import(self):
         mirror, feeds = os.path.join(self.tmp, "mirror.json"), os.path.join(self.tmp, "feeds.json")
@@ -847,7 +879,7 @@ class ZeroTwo(Stack):
         self.fakes["kura"].routes["/api/status"] = dict(KURA, synced_at=clock[0], push=dict(KURA["push"], at=clock[0]))
         self.fakes["konbini"].routes["/api/health"] = dict(KONBINI, livesync={"status": {"daemon": "running", "last_cycle_ts": clock[0]}})
         self.assertEqual(rows()["pages"]["state"], "behind")
-        self.fakes["hister"].routes["/health"] = (502, "", "text/plain")
+        self.fakes["nogon"].routes["/health"] = (502, "", "text/plain")
         row = rows()["pages"]
         self.assertEqual((row["state"], row["error"]), ("error", "Nogon is down"))
 
@@ -893,18 +925,18 @@ class ZeroTwoOne(Stack):
         with open(path, "w") as f:
             json.dump({"updated": "2026-01-01T00:00:00Z", "today": 312, "yesterday": 290, "month": 4210, "year": 51234,
                        "by_day": {"2026-01-01": 312}}, f)
-        self.fakes["shiori"].routes["/_shiori/status.json"] = dict(SHIORI_STATUS, hister="v0.19.9")
+        self.fakes["shiori"].routes["/_shiori/status.json"] = dict(SHIORI_STATUS, nogon="v0.19.9")
         l = self.landing(LANDING_SEARCH_COUNTS=path)
         snap = l.poll()
         a = snap["apps"]["shiori"]
         self.assertEqual(a["more"], "Searches 312 today · 4.2k mo · 51.2k yr")
         html = render.main_html(snap, l.history, l.logs, l.config.links, l.config.targets, NOW)
         self.assertIn("Searches 312 today", html)
-        self.assertNotIn("0.19.9", html)                        # Shiori's built-against Hister isn't shown
+        self.assertNotIn("0.19.9", html)                        # Shiori's built-against Nogon isn't shown
         home = render.home_html(snap, l.config.links, l.config.targets, "", NOW)       # 0.7.5: SearXNG searches, Nogon pages
         shiori = home[home.index('data-app="shiori"'):home.index('data-app="konbini"')]
         self.assertNotIn("searches", shiori)
-        nogon = home[home.index('data-app="hister"'):home.index('data-app="searxng"')]
+        nogon = home[home.index('data-app="nogon"'):home.index('data-app="searxng"')]
         self.assertIn("1.9k pages", nogon)
         searx = home[home.index('data-app="searxng"'):home.index("</nav>")]
         self.assertIn("312 searches today", searx)
@@ -916,8 +948,8 @@ class ZeroTwoOne(Stack):
 
 
 class OwnerToken(Stack):
-    """0.2.3: the rooms run AUTH=hister, so their owner-only reads carry the owner's token (X-Access-Token, from
-    LANDING_HISTER_TOKEN_FILE) to the configured room address only; the open probes stay credential-free."""
+    """0.2.3: the rooms run AUTH=nogon, so their owner-only reads carry the owner's token (X-Access-Token, from
+    LANDING_NOGON_TOKEN_FILE) to the configured room address only; the open probes stay credential-free."""
 
     def setUp(self):
         super().setUp()
@@ -946,7 +978,7 @@ class OwnerToken(Stack):
         self.assertEqual(snap["overall"]["state"], "up")
 
     def test_with_the_token_only_owner_reads_carry_it(self):
-        snap = self.landing(LANDING_HISTER_TOKEN_FILE=self.path).poll()
+        snap = self.landing(LANDING_NOGON_TOKEN_FILE=self.path).poll()
         a, t = snap["apps"], snap["today"]
         self.assertEqual(a["kura"]["facts"], ["2 vaults · 324 notes"])
         self.assertEqual(a["konbini"]["facts"], ["3 in WIP", "78 cards"])
@@ -962,10 +994,10 @@ class OwnerToken(Stack):
 
     def test_konbini_health_full_view_for_the_owner(self):
         full = dict(KONBINI, boards={"wip": 7, "done": 3})
-        limited = {"ok": True, "version": "0.11.6", "head": KURA["head"], "cards": 78, "auth": "hister"}
+        limited = {"ok": True, "version": "0.11.6", "head": KURA["head"], "cards": 78, "auth": "nogon"}
         fake = self.fakes["konbini"]
         fake.routes["/api/health"] = lambda: full if fake.seen[-1]["headers"].get("x-access-token") == "owner-secret" else limited
-        snap = self.landing(LANDING_HISTER_TOKEN_FILE=self.path).poll()
+        snap = self.landing(LANDING_NOGON_TOKEN_FILE=self.path).poll()
         self.assertEqual(snap["apps"]["konbini"]["facts"], ["7 in WIP", "78 cards"])
         self.assertTrue({r["key"]: r for r in snap["sync"]}["board"]["at"])          # LiveSync's cycle is back
         cards_calls = [x for x in fake.seen if x["path"] == "/api/cards"]
@@ -979,7 +1011,7 @@ class OwnerToken(Stack):
         fake = self.fakes["konbini"]
         fake.routes["/api/health"] = lambda: (401, "bad token", "text/plain") if fake.seen[-1]["headers"].get("x-access-token") \
             else {"ok": True, "version": "0.11.6", "head": KURA["head"], "cards": 78}
-        snap = self.landing(LANDING_HISTER_TOKEN_FILE=self.path).poll()
+        snap = self.landing(LANDING_NOGON_TOKEN_FILE=self.path).poll()
         self.assertEqual((snap["apps"]["konbini"]["state"], snap["apps"]["konbini"]["facts"]), ("up", ["3 in WIP", "78 cards"]))   # cards still take it
         tried = [bool(x["headers"].get("x-access-token")) for x in fake.seen if x["path"] == "/api/health"]
         self.assertEqual(tried, [True, False])
@@ -988,7 +1020,7 @@ class OwnerToken(Stack):
         elsewhere = Fake({"/api/cards": CARDS})
         self.addCleanup(elsewhere.close)
         self.fakes["konbini"].routes["/api/cards"] = (302, "", "text/plain", {"Location": elsewhere.url + "/api/cards"})
-        t = self.landing(LANDING_HISTER_TOKEN_FILE=self.path).poll()["today"]
+        t = self.landing(LANDING_NOGON_TOKEN_FILE=self.path).poll()["today"]
         self.assertIsNone(t["working"])
         self.assertEqual(elsewhere.seen, [])
 
@@ -998,17 +1030,17 @@ class OwnerToken(Stack):
         self.assertEqual(owner_headers("kura", "https://kura.example.ts.net", "", secret), {"X-Access-Token": "owner-secret"})
         self.assertEqual(owner_headers("kura", "http://127.0.0.1:8080", "", secret), {"X-Access-Token": "owner-secret"})
         self.assertEqual(owner_headers("kura", "http://kura:8080", "", secret), {})                 # plain http: never
-        for key in ("hister", "searxng", "shiori", "machiya-mcp", "smallweb"):
+        for key in ("nogon", "searxng", "shiori", "machiya-mcp", "smallweb"):
             self.assertEqual(owner_headers(key, "https://%s.example.ts.net" % key, "", secret), {}, key)
         self.assertEqual(owner_headers("kura", "https://kura.example.ts.net", "", None), {})
-        # 0.5.0: a room token in LANDING_TOKEN_FILE goes instead, and Hister's token never reaches a room then
+        # 0.5.0: a room token in LANDING_TOKEN_FILE goes instead, and Nogon's token never reaches a room then
         room = "mht_" + "L" * 43
         self.assertEqual(owner_headers("kura", "https://kura.example.ts.net", room, secret),
                          {"Authorization": "Bearer " + room})
         self.assertEqual(owner_headers("konbini", "http://127.0.0.1:8081", room, secret),
                          {"Authorization": "Bearer " + room})
         self.assertEqual(owner_headers("kura", "http://kura:8080", room, secret), {})
-        self.assertEqual(owner_headers("hister", "https://hister.example.ts.net", room, secret), {})
+        self.assertEqual(owner_headers("nogon", "https://nogon.example.ts.net", room, secret), {})
         with self.assertRaises(probes.FetchError):
             owner_url("https://kura.example.ts.net", "//evil.example/x")
         self.assertEqual(owner_url("https://kura.example.ts.net/", "/api/vaults"), "https://kura.example.ts.net/api/vaults")
@@ -1022,7 +1054,7 @@ class Launcher(Stack):
         self.fakes["konbini"].routes["/api/cards"] = CARDS
         self.fakes["kura"].routes["/api/recent"] = RECENT
         self.fakes["niwa"].routes["/feed.xml"] = FEED
-        self.fakes["hister"].routes["/search"] = PAGES
+        self.fakes["nogon"].routes["/search"] = PAGES
 
     def today(self, **env):
         l = self.landing(**env)
@@ -1045,7 +1077,7 @@ class Launcher(Stack):
         docs = [{"url": u, "title": "T " + u[:12], "domain": "x", "updated": NOW - 60, "metadata": {}}
                 for u in ("javascript:alert(1)", " JavaScript:alert(2)", "data:text/html,x", "vbscript:x", "file:///etc/passwd",
                           "gemini://capsule.example/", "gopher://hole.example/1", "HTTPS://example.com/a")]
-        self.fakes["hister"].routes["/search"] = {"total": len(docs), "documents": docs}
+        self.fakes["nogon"].routes["/search"] = {"total": len(docs), "documents": docs}
         l, _, t = self.today()
         self.assertEqual([p["url"] for p in t["pages"]],
                          ["gemini://capsule.example/", "gopher://hole.example/1", "HTTPS://example.com/a"])
@@ -1080,7 +1112,7 @@ class Launcher(Stack):
         self.assertIn("2 days overdue", html)
         self.assertIn("Read in NewsBlur", html)
         self.assertIn("Starred in NewsBlur", html)
-        self.assertIn('Saved &amp; Read<a class="more" href="%s/">Nogon ›</a>' % l.config.links["hister"], html)   # 0.7.7: not Shiori
+        self.assertIn('Saved &amp; Read<a class="more" href="%s/">Nogon ›</a>' % l.config.links["nogon"], html)   # 0.7.7: not Shiori
         self.assertNotIn("form class=\"search launch\"", render.home_html(snap, l.config.links, l.config.targets, "", NOW))
 
     def test_techo_tile(self):
@@ -1123,8 +1155,8 @@ class Launcher(Stack):
         l, snap, _ = self.today()
         plain = render.home_html(snap, l.config.links, l.config.targets, "", NOW)
         self.assertIn('<nav class="minis" data-n="6" aria-label="Rooms">', plain)   # 4 rooms, Nogon, SearXNG
-        self.assertLess(plain.index('data-app="kura"'), plain.index('data-app="hister"'))
-        self.assertLess(plain.index('data-app="hister"'), plain.index('data-app="searxng"'))
+        self.assertLess(plain.index('data-app="kura"'), plain.index('data-app="nogon"'))
+        self.assertLess(plain.index('data-app="nogon"'), plain.index('data-app="searxng"'))
         rooms = ("techo|Tech\u014d|\u5e33|https://techo.example.ts.net|https://techo.example.ts.net/i.svg|agents;"
                  "bare|Bare Room||https://bare.example.ts.net")
         with mock.patch.dict(os.environ, {"MACHIYA_EXTRA_ROOMS": rooms}):
@@ -1135,8 +1167,8 @@ class Launcher(Stack):
                       '<span class="mname">Tech\u014d</span><span class="mcount">agents</span></a>', html)
         self.assertIn('data-app="bare"', html)
         self.assertLess(html.index('data-app="kura"'), html.index('data-app="techo"'))
-        self.assertNotIn('class="dot"', html[html.index('data-app="techo"'):html.index('data-app="hister"')])   # not checked
-        self.assertLess(html.index('data-app="bare"'), html.index('data-app="hister"'))     # extra rooms, then engines
+        self.assertNotIn('class="dot"', html[html.index('data-app="techo"'):html.index('data-app="nogon"')])   # not checked
+        self.assertLess(html.index('data-app="bare"'), html.index('data-app="nogon"'))     # extra rooms, then engines
         with mock.patch.dict(os.environ, {"MACHIYA_EXTRA_ROOMS": rooms}):                    # 0.7.3: Settings, Rooms
             off = render.home_html(snap, l.config.links, l.config.targets, "", NOW,
                                    shown={"kura": False, "techo": False, "searxng": False})
@@ -1144,7 +1176,7 @@ class Launcher(Stack):
         self.assertIn('data-n="5"', nav)
         for key in ("kura", "techo", "searxng"):
             self.assertNotIn('data-app="%s"' % key, nav)
-        for key in ("shiori", "niwa", "bare", "hister"):
+        for key in ("shiori", "niwa", "bare", "nogon"):
             self.assertIn('data-app="%s"' % key, nav)
 
     def test_outside_links(self):
@@ -1234,7 +1266,7 @@ class ZeroThree(Stack):
 
 
 class CodeImport(Stack):
-    """0.3.4: the owner's repos searchable as code: Hister's "N repos", the code-import row and Repos indexed."""
+    """0.3.4: the owner's repos searchable as code: Nogon's "N repos", the code-import row and Repos indexed."""
 
     STATUS = {"version": "0.1.0", "ok": True, "running": False, "started": NOW - 200, "last_success": NOW - 100,
               "failures_in_a_row": 0, "error": None, "last_full": NOW - 3600, "last_run": {},
@@ -1246,19 +1278,19 @@ class CodeImport(Stack):
             json.dump(dict(self.STATUS, **kw), f)
 
     def repos_route(self, answer):
-        hister = self.fakes["hister"]
-        hister.routes["/search"] = lambda: answer if "code_kind" in hister.seen[-1]["query"] else HISTER["/search"]
+        nogon = self.fakes["nogon"]
+        nogon.routes["/search"] = lambda: answer if "code_kind" in nogon.seen[-1]["query"] else NOGON["/search"]
 
-    def test_hister_counts_repos(self):
+    def test_nogon_counts_repos(self):
         self.repos_route({"total": 1234, "documents": []})
-        a = self.landing().poll()["apps"]["hister"]
+        a = self.landing().poll()["apps"]["nogon"]
         self.assertEqual(a["facts"], ["1.9k pages", "1.2k repos"])
-        q = [x["query"] for x in self.fakes["hister"].seen if "code_kind" in x["query"]][0]
+        q = [x["query"] for x in self.fakes["nogon"].seen if "code_kind" in x["query"]][0]
         self.assertIn("metadata.source%3Acode%20metadata.code_kind%3Arepo", q)
         self.repos_route({"total": 0, "documents": []})
-        self.assertEqual(self.landing().poll()["apps"]["hister"]["facts"], ["1.9k pages"])     # 0: hidden
+        self.assertEqual(self.landing().poll()["apps"]["nogon"]["facts"], ["1.9k pages"])     # 0: hidden
         self.repos_route((500, "x", "text/plain"))
-        self.assertEqual(self.landing().poll()["apps"]["hister"]["facts"], ["1.9k pages"])     # unavailable: hidden
+        self.assertEqual(self.landing().poll()["apps"]["nogon"]["facts"], ["1.9k pages"])     # unavailable: hidden
 
     def test_code_import_row_and_sync(self):
         path = os.path.join(self.tmp, "code.json")
@@ -1292,15 +1324,15 @@ class CodeImport(Stack):
         self.assertEqual(l.poll()["apps"]["code-import"]["state"], "down")
 
 
-class HisterSignIn(Server):
-    """0.3.0: LANDING_AUTH=hister, like Konbini and Niwa: the helper decides, the tailnet is the fallback."""
+class NogonSignIn(Server):
+    """0.3.0: LANDING_AUTH=nogon, like Konbini and Niwa: the helper decides, the tailnet is the fallback."""
 
     def setUp(self):
         super().setUp()
         self.helper = Fake({"/healthz": {"ok": True},
                             "/v1/check": lambda: {"username": "owner", "user_id": 1}
                             if self.helper.seen[-1]["headers"].get("x-machiya-session") == SID
-                            or self.helper.seen[-1]["headers"].get("x-access-token") == "owner-hister-token"
+                            or self.helper.seen[-1]["headers"].get("x-access-token") == "owner-nogon-token"
                             else (401, "{}", "application/json"),
                             "POST /v1/signout": (204, "", "text/plain"),
                             "/v1/prefs": self.account_prefs, "PUT /v1/prefs": self.account_prefs})
@@ -1320,14 +1352,14 @@ class HisterSignIn(Server):
         return {"v": 1, "rev": self.account["rev"], "prefs": dict(self.account["prefs"]),
                 "updated": {k: 1 for k in self.account["prefs"]}}
 
-    def hister_env(self, **kw):
-        return dict({"LANDING_AUTH": "hister", "LANDING_AUTH_URL": self.helper.url, "LANDING_BIND": "127.0.0.1",
-                     "LANDING_AUTH_SIGNIN_URL": "https://hister.example.ts.net/machiya/signin",
-                     "LANDING_HISTER_USERS": "owner", "LANDING_USERS": "owner@example.com",
+    def nogon_env(self, **kw):
+        return dict({"LANDING_AUTH": "nogon", "LANDING_AUTH_URL": self.helper.url, "LANDING_BIND": "127.0.0.1",
+                     "LANDING_AUTH_SIGNIN_URL": "https://nogon.example.ts.net/machiya/signin",
+                     "LANDING_NOGON_USERS": "owner", "LANDING_USERS": "owner@example.com",
                      "LANDING_PUBLIC_URL": "https://machiya.example.ts.net"}, **kw)
 
     def test_signed_in_page_settings_and_meta(self):
-        base = self.serve(**self.hister_env())
+        base = self.serve(**self.nogon_env())
         cookie = {"Cookie": "machiya_sso=" + SID, "Accept": "text/html"}
         code, _, body = self.get(base + "/", cookie)
         self.assertEqual(code, 200)
@@ -1341,14 +1373,14 @@ class HisterSignIn(Server):
         self.assertEqual(self.get(base + "/status", cookie)[0], 200)
 
     def test_signed_out_goes_to_sign_in(self):
-        base = self.serve(**self.hister_env())
+        base = self.serve(**self.nogon_env())
         import http.client
         conn = http.client.HTTPConnection(urlsplit(base).netloc, timeout=10)
         conn.request("GET", "/status", headers={"Accept": "text/html"})
         r = conn.getresponse()
         r.read()
         self.assertEqual(r.status, 302)
-        self.assertTrue(r.getheader("Location").startswith("https://hister.example.ts.net/machiya/signin"))
+        self.assertTrue(r.getheader("Location").startswith("https://nogon.example.ts.net/machiya/signin"))
         self.assertIn("machiya.example.ts.net%2Fstatus", r.getheader("Location"))
         conn.close()
         code, _, body = self.get(base + "/api/status")
@@ -1359,7 +1391,7 @@ class HisterSignIn(Server):
     def test_fallback_when_sign_in_is_down(self):
         self.helper.close()
         self.helper = Fake({})                       # replaced so tearDown can close it
-        base = self.serve(**self.hister_env(LANDING_AUTH_URL="http://127.0.0.1:9"))
+        base = self.serve(**self.nogon_env(LANDING_AUTH_URL="http://127.0.0.1:9"))
         code, _, body = self.get(base + "/", {"Tailscale-User-Login": "owner@example.com", "Accept": "text/html"})
         self.assertEqual(code, 200)
         self.assertIn("machiya-banner", body)                              # signed in through the tailnet
@@ -1369,7 +1401,7 @@ class HisterSignIn(Server):
         self.assertEqual(self.get(base + "/", {"Tailscale-User-Login": "someone@example.com"})[0], 403)
 
     def test_signout(self):
-        base = self.serve(**self.hister_env())
+        base = self.serve(**self.nogon_env())
         import http.client
 
         def post(origin):
@@ -1401,14 +1433,14 @@ class HisterSignIn(Server):
 
     def test_keep_alive_never_reuses_an_answer(self):
         """0.3.1: an answer kept on the handler decided the next request on the same connection."""
-        base = self.serve(**self.hister_env())
+        base = self.serve(**self.nogon_env())
         page = {"Accept": "text/html"}
         got = self.one_connection(base, [
             ("/status", page),                                                         # signed out: to sign in
             ("/status", dict(page, Cookie="machiya_sso=" + SID)),                      # signed in: the page
             ("/status", page),                                                         # signed out again
-            ("/api/status", {"X-Access-Token": "owner-hister-token"}),                 # the owner's Hister token
-            ("/api/status", {"Authorization": "Bearer owner-hister-token"}),           # ... or as a Bearer
+            ("/api/status", {"X-Access-Token": "owner-nogon-token"}),                 # the owner's Nogon token
+            ("/api/status", {"Authorization": "Bearer owner-nogon-token"}),           # ... or as a Bearer
             ("/api/status", {}),                                                       # nobody: 401
         ])
         self.assertEqual([g[0] for g in got], [302, 200, 302, 200, 200, 401])
@@ -1417,14 +1449,14 @@ class HisterSignIn(Server):
     def test_helper_unreachable_by_name(self):
         """0.3.1: the helper's name doesn't resolve (its container is gone): the tailnet owner gets the page with the
         banner, nobody else gets in, and never a trip to sign in."""
-        base = self.serve(**self.hister_env(LANDING_AUTH_URL="http://hister-login.invalid:8081"))
+        base = self.serve(**self.nogon_env(LANDING_AUTH_URL="http://nogon-login.invalid:8081"))
         page = {"Accept": "text/html"}
         got = self.one_connection(base, [
             ("/status", page),                                                         # no login: 503
             ("/status", dict(page, **{"Tailscale-User-Login": "owner@example.com"})),  # the owner: the page, banner
             ("/status", dict(page, Cookie="machiya_sso=" + SID, **{"Tailscale-User-Login": "owner@example.com"})),
             ("/status", dict(page, **{"Tailscale-User-Login": "someone@example.com"})),
-            ("/api/status", {"X-Access-Token": "owner-hister-token"}),                 # can't be checked, no login: 503
+            ("/api/status", {"X-Access-Token": "owner-nogon-token"}),                 # can't be checked, no login: 503
         ])
         self.assertEqual([g[0] for g in got], [503, 200, 200, 403, 503])
         self.assertTrue(all(g[1] is None for g in got))                                # never sent to sign in
@@ -1432,16 +1464,16 @@ class HisterSignIn(Server):
         self.assertIn("machiya-banner", got[2][2])
 
     def test_setup_refusals(self):
-        for drop in ("LANDING_AUTH_SIGNIN_URL", "LANDING_HISTER_USERS", "LANDING_PUBLIC_URL"):
-            env = self.hister_env()
+        for drop in ("LANDING_AUTH_SIGNIN_URL", "LANDING_NOGON_USERS", "LANDING_PUBLIC_URL"):
+            env = self.nogon_env()
             del env[drop]
             with self.assertRaises(SystemExit, msg=drop):
                 landing.Config(env)
         with self.assertRaises(SystemExit):                                # the fallback trusts a header: a proxy only
-            landing.Config(self.hister_env(LANDING_BIND="0.0.0.0"))
-        landing.Config(self.hister_env(LANDING_BIND="0.0.0.0", LANDING_BIND_BEHIND_PROXY="1"))
+            landing.Config(self.nogon_env(LANDING_BIND="0.0.0.0"))
+        landing.Config(self.nogon_env(LANDING_BIND="0.0.0.0", LANDING_BIND_BEHIND_PROXY="1"))
         with self.assertRaises(SystemExit):
-            landing.Config(self.hister_env(LANDING_HISTER_USERS="*"))
+            landing.Config(self.nogon_env(LANDING_NOGON_USERS="*"))
 
     def put_prefs(self, base, prefs, headers):
         import http.client
@@ -1454,9 +1486,9 @@ class HisterSignIn(Server):
         return r.status, json.loads(out or b"null")
 
     def test_prefs_follow_the_person(self):
-        """0.4.0: in hister mode /api/prefs is the account's, forwarded to the helper's /v1/prefs with the caller's
+        """0.4.0: in nogon mode /api/prefs is the account's, forwarded to the helper's /v1/prefs with the caller's
         own credential (no local file involved)."""
-        base = self.serve(**self.hister_env())
+        base = self.serve(**self.nogon_env())
         cookie = {"Cookie": "machiya_sso=" + SID}
         code, _, body = self.get(base + "/api/prefs", cookie)
         self.assertEqual((code, json.loads(body)["prefs"], json.loads(body)["rev"]), (200, {}, 0))
@@ -1473,7 +1505,7 @@ class HisterSignIn(Server):
         forwarded with its own credential or refused; a refused PUT's unread body never becomes a request."""
         import http.client
         import socket
-        base = self.serve(**self.hister_env())
+        base = self.serve(**self.nogon_env())
         conn = http.client.HTTPConnection(urlsplit(base).netloc, timeout=10)
         body = json.dumps({"prefs": {"palette": "ayu"}}).encode()
         got = []
@@ -1511,7 +1543,7 @@ class HisterSignIn(Server):
         self.assertNotIn(b"ayu", out)
 
     def test_settings_shared_section_first(self):
-        base = self.serve(**self.hister_env())
+        base = self.serve(**self.nogon_env())
         cookie = {"Cookie": "machiya_sso=" + SID, "Accept": "text/html"}
         code, _, body = self.get(base + "/settings", cookie)
         heads = re.findall(r'<h2 id="([a-z-]+)">', body)
@@ -1524,7 +1556,7 @@ class HisterSignIn(Server):
     def test_fallback_has_no_account_prefs(self):
         self.helper.close()
         self.helper = Fake({})
-        base = self.serve(**self.hister_env(LANDING_AUTH_URL="http://127.0.0.1:9"))
+        base = self.serve(**self.nogon_env(LANDING_AUTH_URL="http://127.0.0.1:9"))
         who = {"Tailscale-User-Login": "owner@example.com"}
         code, _, body = self.get(base + "/api/prefs", who)
         self.assertEqual(code, 503)
@@ -1536,7 +1568,7 @@ class HisterSignIn(Server):
         """MACHIYA_SIGNIN_PROVIDER: signed out, a page goes through the provider; a deliberate sign-out sets this page's
         own marker (vaultkit 0.22: host-only; the helper remembers the ended session itself), so Sign Out doesn't
         bounce straight back in."""
-        base = self.serve(**self.hister_env(MACHIYA_SIGNIN_PROVIDER="oidc"))
+        base = self.serve(**self.nogon_env(MACHIYA_SIGNIN_PROVIDER="oidc"))
         import http.client
         conn = http.client.HTTPConnection(urlsplit(base).netloc, timeout=10)
         conn.request("GET", "/status", headers={"Accept": "text/html"})

@@ -2,7 +2,7 @@
 
 The whole stack's front door, in two pages:
 - **`/`**, a launcher that searches everything and shows what's going on today;
-- **`/status`**, which links every app and shows how each is doing: the rooms ([Shiori](https://github.com/machiya-kobo/shiori), [Konbini](https://github.com/machiya-kobo/konbini), [Niwa](https://github.com/machiya-kobo/niwa), [Kura](https://github.com/machiya-kobo/kura)), the engines (Hister, SearXNG) and the stack's own services ([machiya-mcp](mcp.md), [smallweb](../../stack/smallweb), [vault-mirror](../../stack/vault-mirror), [feed-import](../../stack/feed-import), [code-import](code-import.md)).
+- **`/status`**, which links every app and shows how each is doing: the rooms ([Shiori](https://github.com/machiya-kobo/shiori), [Konbini](https://github.com/machiya-kobo/konbini), [Niwa](https://github.com/machiya-kobo/niwa), [Kura](https://github.com/machiya-kobo/kura)), the engines (Nogon, SearXNG) and the stack's own services ([machiya-mcp](mcp.md), [smallweb](../../stack/smallweb), [vault-mirror](../../stack/vault-mirror), [feed-import](../../stack/feed-import), [code-import](code-import.md)).
 
 Code: [stack/landing/](../../stack/landing/) (settings in its README). It shares the other apps' look ([vaultkit](../vaultkit.md)'s shell, phone tab bar, Rooms menu, Settings, themes and palettes), with the Machiya icon as its mark.
 
@@ -27,7 +27,7 @@ Code: [stack/landing/](../../stack/landing/) (settings in its README). It shares
 | Section | What it shows |
 |---|---|
 | **Rooms**, **Engines**, **Stack Services** | each app's state (up, behind, starting, error, down, or *Not in this stack*), its version and vendored vaultkit, and a fact or two (notes, cards, pages, tools) |
-| **Sync** | the vault's last pull (Kura; the mirror), the board's commit against the vault's head and its LiveSync cycle (Konbini), unpushed garden writes (Niwa), the notes' last push into Hister (Kura), Hister's newest page, **Feeds read** (feed-import: its last good run, pages added in the last day from the page's own samples, failed runs) and **Repos indexed** (code-import: the same, for code documents) |
+| **Sync** | the vault's last pull (Kura; the mirror), the board's commit against the vault's head and its LiveSync cycle (Konbini), unpushed garden writes (Niwa), the notes' last push into Nogon (Kura), Nogon's newest page, **Feeds read** (feed-import: its last good run, pages added in the last day from the page's own samples, failed runs) and **Repos indexed** (code-import: the same, for code documents) |
 | **Recent Deploys** | version changes the page saw itself ([below](#recent-deploys-where-they-come-from)), with the changelog lines that came with them |
 
 Where each app's state comes from:
@@ -38,13 +38,13 @@ Where each app's state comes from:
 | Konbini | `/api/health` | cards in WIP: its per-board counts when it reports them, else from `/api/cards` |
 | Niwa | `/api/status` | its published count |
 | Shiori | its hosted page (`/`) | the version and build from `/_shiori/status.json`, else the assets' build hash; "AI on · N left today" from `/shiori/ai/status` ("AI down" when that isn't JSON); "feed ok" from `/shiori/healthz`; "Searches 112 today · 3.4k mo · 41.2k yr" from the deployment's counts file (`LANDING_SEARCH_COUNTS`) |
-| Hister | `/health` | its version from its MCP `initialize`, its page count and newest page, and "N repos" (below) |
+| Nogon | `/health` | its version from its MCP `initialize`, its page count and newest page, and "N repos" (below) |
 | SearXNG | `/healthz` and `/config` | |
 | machiya-mcp, smallweb | `/api/status` | |
 | vault-mirror, feed-import, code-import | their `status.json` (read-only mounts) | code-import's comes from `LANDING_CODE_STATUS`, and is quiet when missing |
 
 - **Shiori:** none of its extras makes Shiori down. Its version shows only on its card. A rebuild of the same version is still a deploy ("0.1.0 (build a → b)"), and what changed comes from `/_shiori/CHANGELOG.md`.
-- **Hister's "N repos"** is the total of `metadata.source:code metadata.code_kind:repo`, code-import's repo cards. Hidden when 0. Needs `LANDING_HISTER_TOKEN_FILE` once Hister has users.
+- **Nogon's "N repos"** is the total of `metadata.source:code metadata.code_kind:repo`, code-import's repo cards. Hidden when 0. Needs `LANDING_NOGON_TOKEN_FILE` once Nogon has users.
 
 **Freshness.** A green dot is fine. A yellow dot is *behind* and stays calm. Only *error* and *down* get red text and a red edge.
 
@@ -52,10 +52,10 @@ Where each app's state comes from:
 |---|---|---|
 | the vault's pull | 15 minutes | 6 hours |
 | Konbini's LiveSync cycle | 15 minutes | 2 hours |
-| the notes' push into Hister | an hour | a day |
+| the notes' push into Nogon | an hour | a day |
 | Konbini's commit differs from Kura's | 15 minutes | |
 | a writer has commits it hasn't pushed | at once | |
-| Hister's newest page | three days (red only when Hister itself is down) | |
+| Nogon's newest page | three days (red only when Nogon itself is down) | |
 | feed-import without a good run | an hour | when it says `ok: false` |
 
 An app that doesn't answer within 3 seconds is down.
@@ -67,12 +67,12 @@ An app that doesn't answer within 3 seconds is down.
 - **Every app is optional.** Only apps with an address are polled. The others show *Not in this stack*. The page needs no app, and no app needs the page (principle 4).
 - **Server-side, cached.** A background thread polls every app in parallel every minute, Today's reads included: a 3 second timeout, no redirects followed, at most 4 MB read. Both pages are served from the last answers.
 - The browser refreshes `<main>` every minute while a page is visible, never under a half-typed search.
-- **GETs, and one POST.** Hister's version comes from its MCP `initialize` (`POST /mcp`, which changes nothing; [contracts/hister.md](../contracts/hister.md)), at most every 15 minutes. Everything else is a GET.
-- **Hister** gets `Origin: hister://` on every GET (the MCP needs none). Its newest-page search leaves the vault notes out.
+- **GETs, and one POST.** Nogon's version comes from its MCP `initialize` (`POST /mcp`, which changes nothing; [contracts/nogon.md](../contracts/nogon.md)), at most every 15 minutes. Everything else is a GET.
+- **Nogon** gets `Origin: nogon://` on every GET (the MCP needs none). Its newest-page search leaves the vault notes out.
 
 ### Tokens
 
-**Your Hister token** (`LANDING_HISTER_TOKEN_FILE`, re-read when it changes) goes to Hister. When the rooms run `AUTH=hister`, it also goes to their reads that need you:
+**Your Nogon token** (`LANDING_NOGON_TOKEN_FILE`, re-read when it changes) goes to Nogon. When the rooms run `AUTH=nogon`, it also goes to their reads that need you:
 - Konbini's `/api/health` (the full view, with sync, LiveSync and per-board counts) and its cards;
 - Kura's vaults and recent notes;
 - Niwa's feed.
@@ -84,7 +84,7 @@ It goes only to Kura, Konbini and Niwa at their configured https address, and ne
 - Without the token, or when refused, the WIP and vault counts and Today's room sections are left out quietly. Kura's open `vault_count` still shows.
 
 **Other tokens.** None by default.
-- `LANDING_TOKEN_FILE` goes to Kura, Niwa and Konbini over https only. Use a room token from [nogon-login](nogon-login.md) (`mht_…`, [identity.md](../identity.md#room-tokens)) for your reads, and Hister's token then goes to Hister only. Or, for rooms with an identity file, that file's token.
+- `LANDING_TOKEN_FILE` goes to Kura, Niwa and Konbini over https only. Use a room token from [nogon-login](nogon-login.md) (`mht_…`, [identity.md](../identity.md#room-tokens)) for your reads, and Nogon's token then goes to Nogon only. Or, for rooms with an identity file, that file's token.
 - `LANDING_CHANGELOG_TOKEN_FILE` goes only to the changelog URLs.
 
 ## Recent deploys: where they come from
@@ -102,7 +102,7 @@ What a version brought comes from the app itself. Every app serves its `CHANGELO
 - It also asks at once when an app answers with a version its copy doesn't have.
 - A jump of several versions lists each one's first line.
 - An app that answers 404, or anything but markdown, shows its versions only. `LANDING_CHANGELOGS` can point one elsewhere.
-- The engines (Hister, SearXNG) and Shiori's hosted page have no endpoint. vault-mirror, feed-import and code-import have no HTTP at all.
+- The engines (Nogon, SearXNG) and Shiori's hosted page have no endpoint. vault-mirror, feed-import and code-import have no HTTP at all.
 
 ## Auth
 
@@ -112,11 +112,13 @@ Only you can open it, as with the rooms.
 |---|---|
 | `tailscale` (default) | a `Tailscale-User-Login` in `LANDING_USERS` |
 | `open` | anyone; for localhost, with a `Host` allow-list |
-| `hister` | Hister's users, exactly as for Konbini and Niwa ([nogon-login](nogon-login.md), vaultkit's `histerauth`) |
+| `nogon` | Nogon's users, exactly as for Konbini and Niwa ([nogon-login](nogon-login.md), vaultkit's `nogonauth`) |
 | `header` | with the identity file: a proxy's login header |
 
-With `hister`:
-- The Tailscale fallback applies, so the status page still opens (with the banner) when Hister or the helper is down.
+Formerly `hister` (before 0.8.0, which refuses it at start, as it does the old `LANDING_HISTER_*` names).
+
+With `nogon`:
+- The Tailscale fallback applies, so the status page still opens (with the banner) when Nogon or the helper is down.
 - A signed-out page goes to sign in, and `POST /signout` ends the session.
 - Settings shows Shared first, then This Device and the Account.
 - The Shared settings follow you: `/api/prefs` is the account's, forwarded to the helper ([contracts/prefs.md](../contracts/prefs.md)).

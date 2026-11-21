@@ -16,7 +16,7 @@ import urllib.request
 from urllib.parse import quote, urlsplit
 
 LIMIT = 4 << 20
-HISTER_ORIGIN = "hister://"      # contracts/hister.md: every Hister call says who it is
+NOGON_ORIGIN = "nogon://"        # contracts/nogon.md: every Nogon call says who it is (0.8.0: was hister://)
 USER_AGENT = "machiya-landing"
 
 # (key, name, group, what it is) in the order the page shows them: the rooms front to back (as the Rooms menu), the
@@ -26,7 +26,7 @@ APPS = [
     ("konbini", "Konbini", "rooms", "board"),
     ("niwa", "Niwa", "rooms", "garden"),
     ("kura", "Kura", "rooms", "notes"),
-    ("hister", "Nogon", "engines", "pages"),
+    ("nogon", "Nogon", "engines", "pages"),
     ("searxng", "SearXNG", "engines", "the web"),
     ("machiya-mcp", "machiya-mcp", "services", "MCP for agents"),
     ("smallweb", "smallweb", "services", "Gemini and Gopher"),
@@ -36,15 +36,15 @@ APPS = [
 ]
 NAMES = {k: n for k, n, _, _ in APPS}
 ROOMS_WITH_TOKEN = ("kura", "niwa", "konbini")
-ROOM_TOKEN_RE = re.compile(r"mht_[A-Za-z0-9_-]{43}\Z")      # a room token from hister-login (0.5.0)     # LANDING_TOKEN_FILE goes to these only (never Hister or SearXNG)
+ROOM_TOKEN_RE = re.compile(r"mht_[A-Za-z0-9_-]{43}\Z")      # a room token from nogon-login (0.5.0)     # LANDING_TOKEN_FILE goes to these only (never Nogon or SearXNG)
 
 # Freshness, in seconds: (behind, broken). "Behind" is drawn calm (a yellow dot); only "broken" is drawn as an alert.
 FRESH = {
     "pull": (15 * 60, 6 * 3600),        # the vault's last pull (Kura, the mirror): they poll every minute
     "livesync": (15 * 60, 2 * 3600),    # Konbini's LiveSync cycle
-    "push": (60 * 60, 24 * 3600),       # Kura's last push of the notes into Hister
+    "push": (60 * 60, 24 * 3600),       # Kura's last push of the notes into Nogon
     "board": (15 * 60, None),           # Konbini's commit differs from Kura's for this long
-    "pages": (3 * 86400, None),         # Hister's newest page (0.2.0: judged; red only when Hister is down)
+    "pages": (3 * 86400, None),         # Nogon's newest page (0.2.0: judged; red only when Nogon is down)
     "feeds": (60 * 60, None),           # feed-import's last good run (it runs every 10 min; ok=false is broken)
     "code": (60 * 60, None),            # code-import's last good run (every 15 min; ok=false is broken)
 }
@@ -57,7 +57,7 @@ TOKEN_RE = re.compile(r"[\x21-\x7e]{1,4096}")
 
 
 class SecretFile:
-    """LANDING_HISTER_TOKEN_FILE: a token kept in a file (its first line), re-read when the file changes (inode, mtime,
+    """LANDING_NOGON_TOKEN_FILE: a token kept in a file (its first line), re-read when the file changes (inode, mtime,
     size), so a rotated token needs no restart; a file that vanishes or holds no token keeps the last good value.
     Never in repr() or a log line."""
 
@@ -141,7 +141,7 @@ def fetch_text(url, headers=None, timeout=3.0):
 
 
 def post_json(url, payload, headers=None, timeout=3.0):
-    """POST a JSON body -> the JSON answer (a dict). Only for Hister's MCP `initialize`, which changes nothing."""
+    """POST a JSON body -> the JSON answer (a dict). Only for Nogon's MCP `initialize`, which changes nothing."""
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=body, method="POST", headers=dict(
         {"User-Agent": USER_AGENT, "Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
@@ -250,7 +250,7 @@ def result(state="up", version="", vaultkit="", facts=(), error="", data=None):
 
 def kura(base, now, timeout, headers, owner=None):
     """GET /api/status (open, sent without the owner's token; contracts/kura-api.md): the vault's head and last pull,
-    the note count, the Hister push, `vault_count`. Then, with the owner's credential (`owner`), GET /api/vaults for the
+    the note count, the Nogon push, `vault_count`. Then, with the owner's credential (`owner`), GET /api/vaults for the
     notes across every vault; refused (401/403), the open `vault_count` and the default vault's count stand."""
     d = fetch_json(base + "/api/status", headers, timeout)
     synced, notes = num(d.get("synced_at")), num(d.get("notes"))
@@ -280,7 +280,7 @@ def kura(base, now, timeout, headers, owner=None):
 
 def konbini(base, now, timeout, headers, owner=None):
     """GET /api/health (contracts/konbini-api.md): cards, the vault head, sync, LiveSync and per-board counts. With
-    AUTH=hister Konbini answers anyone a limited view (ok, version, head, cards) and the owner the full one, so it is
+    AUTH=nogon Konbini answers anyone a limited view (ok, version, head, cards) and the owner the full one, so it is
     asked with the owner's credential (`owner`, the lead's decision for 0.2.3); refused (401/403), it is asked again
     without it and the limited view stands."""
     try:
@@ -366,16 +366,16 @@ def shiori(base, now, timeout, headers):
     return out                  # 0.3.0: the version only on the card; the build stays in data (Recent Deploys)
 
 
-REPOS_QUERY = "metadata.source:code metadata.code_kind:repo"   # docs/contracts/hister.md, code documents: repo cards
-HISTER_VERSION = {}             # base -> (when asked, version): Hister's MCP is asked at most every 15 minutes
-HISTER_VERSION_TTL = 15 * 60
+REPOS_QUERY = "metadata.source:code metadata.code_kind:repo"   # docs/contracts/nogon.md, code documents: repo cards
+NOGON_VERSION = {}              # base -> (when asked, version): Nogon's MCP is asked at most every 15 minutes
+NOGON_VERSION_TTL = 15 * 60
 
 
-def hister_version(base, now, timeout, headers):
-    """Hister's version from its MCP `initialize` (result.serverInfo.version, "v0.20.0"): open without users, the
+def nogon_version(base, now, timeout, headers):
+    """Nogon's version from its MCP `initialize` (result.serverInfo.version, "v0.20.0"): open without users, the
     owner's token with them. A POST, but it changes nothing; cached for 15 minutes; "" when it can't be read."""
-    cached = HISTER_VERSION.get(base)
-    if cached and now - cached[0] < HISTER_VERSION_TTL:
+    cached = NOGON_VERSION.get(base)
+    if cached and now - cached[0] < NOGON_VERSION_TTL:
         return cached[1]
     version = ""
     try:
@@ -386,7 +386,7 @@ def hister_version(base, now, timeout, headers):
         version = vk(info.get("version"))
     except FetchError:
         pass
-    HISTER_VERSION[base] = (now, version)
+    NOGON_VERSION[base] = (now, version)
     return version
 
 
@@ -394,7 +394,7 @@ LINK_SCHEMES = ("http", "https", "gemini", "gopher")
 
 
 def page_entry(doc):
-    """One Hister document for Today's Saved & Read: plain values only; None when its address isn't an http(s), gemini
+    """One Nogon document for Today's Saved & Read: plain values only; None when its address isn't an http(s), gemini
     or gopher link."""
     meta = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
     source = text(meta.get("via") or meta.get("source"), 40).lower()
@@ -405,22 +405,22 @@ def page_entry(doc):
     if url.split(":", 1)[0].lower() not in LINK_SCHEMES or ":" not in url:
         return None                     # 0.4.1 (sweep LEAD-5): javascript:, data:, file: … never become a link
     return {"title": text(doc.get("title"), 200) or text(doc.get("domain"), 100) or url, "url": url,
-            "domain": text(doc.get("domain"), 100), "at": num(doc.get("updated")) or num(doc.get("added")),   # Hister's order
+            "domain": text(doc.get("domain"), 100), "at": num(doc.get("updated")) or num(doc.get("added")),   # Nogon's order
             "reader": reader, "starred": bool(starred), "label": text(doc.get("label"), 40)}
 
 
-def hister(base, now, timeout, headers, token=None):
-    """Up or down from GET /health (open, even with Hister's user handling on: contracts/hister.md); then, best
+def nogon(base, now, timeout, headers, token=None):
+    """Up or down from GET /health (open, even with Nogon's user handling on: contracts/nogon.md); then, best
     effort, the page count (GET /api/stats) and the newest page by date (a search; vault notes left out: Kura's push
-    covers them), with the owner's token (LANDING_HISTER_TOKEN_FILE) as X-Access-Token when set. With users on and no
-    token (or a refused one) those answer 403: Hister is still up, only the count is missing. 0.2.0: its version from
-    its MCP `initialize` (hister_version), and the newest pages for Today."""
-    h = dict(headers, Origin=HISTER_ORIGIN)            # every Hister call says who it is, /health too
-    fetch(base + "/health", dict(h, Accept="text/plain"), timeout)      # any 2xx is up: Hister's /health is 200, empty body
+    covers them), with the owner's token (LANDING_NOGON_TOKEN_FILE) as X-Access-Token when set. With users on and no
+    token (or a refused one) those answer 403: Nogon is still up, only the count is missing. 0.2.0: its version from
+    its MCP `initialize` (nogon_version), and the newest pages for Today."""
+    h = dict(headers, Origin=NOGON_ORIGIN)             # every Nogon call says who it is, /health too
+    fetch(base + "/health", dict(h, Accept="text/plain"), timeout)      # any 2xx is up: Nogon's /health is 200, empty body
     value = token.get() if hasattr(token, "get") else (token or "")
     if value:
         h["X-Access-Token"] = value
-    version = hister_version(base, now, timeout, {"X-Access-Token": value} if value else {})
+    version = nogon_version(base, now, timeout, {"X-Access-Token": value} if value else {})
     docs = newest = None
     pages = []
     note = ""
@@ -433,7 +433,7 @@ def hister(base, now, timeout, headers, token=None):
         pages = [p for p in (page_entry(d) for d in found) if p][:8]
     except FetchError as e:
         if str(e) in ("HTTP 401", "HTTP 403"):          # users on: the count needs the owner's token
-            note = "page count: the token was refused" if value else "page count needs LANDING_HISTER_TOKEN_FILE"
+            note = "page count: the token was refused" if value else "page count needs LANDING_NOGON_TOKEN_FILE"
     repos = None
     if docs is not None:                                # 0.3.4: the owner's repos, searchable as code (code-import)
         try:
@@ -486,9 +486,10 @@ def machiya_mcp(base, now, timeout, headers):
 
 
 def smallweb(base, now, timeout, headers):
-    """GET /api/status (open; contracts/smallweb-api.md): ready, error, pages saved to Hister."""
+    """GET /api/status (open; contracts/smallweb-api.md): ready, error, pages saved to Nogon ("nogon"; 0.8.0: smallweb
+    0.6.0 and later, which no longer sends "hister")."""
     d = fetch_json(base + "/api/status", headers, timeout)
-    h = d.get("nogon", d.get("hister"))                  # nogon since smallweb's rename release, hister before
+    h = d.get("nogon")
     h = h if isinstance(h, dict) else {}
     saved = num(h.get("saved"))
     err = text(d.get("error"))
@@ -608,7 +609,7 @@ def search_counts(path):
     return ("Searches " + " · ".join(bits)) if bits else ""        # 0.3.0: "Searches 112 today · 3.4k mo · 41.2k yr"
 
 
-READERS = {"kura": kura, "konbini": konbini, "niwa": niwa, "shiori": shiori, "hister": hister, "searxng": searxng,
+READERS = {"kura": kura, "konbini": konbini, "niwa": niwa, "shiori": shiori, "nogon": nogon, "searxng": searxng,
            "machiya-mcp": machiya_mcp, "smallweb": smallweb}
 
 
@@ -626,14 +627,14 @@ def is_loopback_host(host):
 
 
 def owner_headers(key, target, token="", secret=None):
-    """The owner's credential for a room's owner-only reads (0.2.3: the rooms run AUTH=hister), ONLY for Kura, Konbini
+    """The owner's credential for a room's owner-only reads (0.2.3: the rooms run AUTH=nogon), ONLY for Kura, Konbini
     and Niwa at their configured address (`target`, from MACHIYA_ROOMS, LANDING_APPS or LANDING_PROBES), over https (or
     loopback, for tests and a local stack):
-      - 0.5.0: when LANDING_TOKEN_FILE holds a room token (`mht_…`, from hister-login, scoped to those rooms) it goes as
-        `Authorization: Bearer`, and Hister's token never goes to a room (the owner's 2026-10-05 decision: rooms stop
-        taking Hister's raw token);
-      - otherwise (until the switch): LANDING_TOKEN_FILE's Bearer as auth_headers says, plus the owner's Hister token
-        (LANDING_HISTER_TOKEN_FILE, re-read when it changes) as X-Access-Token.
+      - 0.5.0: when LANDING_TOKEN_FILE holds a room token (`mht_…`, from nogon-login, scoped to those rooms) it goes as
+        `Authorization: Bearer`, and Nogon's token never goes to a room (the owner's 2026-10-05 decision: rooms stop
+        taking Nogon's raw token);
+      - otherwise (until the switch): LANDING_TOKEN_FILE's Bearer as auth_headers says, plus the owner's Nogon token
+        (LANDING_NOGON_TOKEN_FILE, re-read when it changes) as X-Access-Token.
     Callers send it only to URLs under `target` (owner_url), and fetch never follows a redirect, so it can't leave that
     origin. The open reads (/api/status, /api/health, /api/changelog) never get it."""
     parts = urlsplit(target or "")
@@ -657,9 +658,9 @@ def owner_url(target, path):
     return url
 
 
-def probe(key, target, now, timeout=3.0, token="", hister_token=None):
+def probe(key, target, now, timeout=3.0, token="", nogon_token=None):
     """One app's result (never raises). target: its base URL, or for vault-mirror a file path; "" = absent.
-    hister_token: LANDING_HISTER_TOKEN_FILE's SecretFile, for Hister only."""
+    nogon_token: LANDING_NOGON_TOKEN_FILE's SecretFile, for Nogon only."""
     if not target:
         return dict(result("absent"), ms=0)
     started = time.monotonic()
@@ -670,13 +671,13 @@ def probe(key, target, now, timeout=3.0, token="", hister_token=None):
             out = feed_import(target, now)
         elif key == "code-import":
             out = code_import(target, now)
-        elif key == "hister":
-            out = hister(target.rstrip("/"), now, timeout, auth_headers(key, target, token), hister_token)
+        elif key == "nogon":
+            out = nogon(target.rstrip("/"), now, timeout, auth_headers(key, target, token), nogon_token)
         else:
             open_headers = auth_headers(key, target, token)          # the open probes: no owner's token
             if key in ("kura", "konbini"):
                 out = READERS[key](target.rstrip("/"), now, timeout, open_headers,
-                                   owner=owner_headers(key, target, token, hister_token))
+                                   owner=owner_headers(key, target, token, nogon_token))
             else:
                 out = READERS[key](target.rstrip("/"), now, timeout, open_headers)
     except FetchError as e:
@@ -693,7 +694,7 @@ def sync_rows(apps, now, board_behind_since=None):
     """[{key, label, state, text, at, source}] for the Sync section; rows whose app is absent are left out.
     board_behind_since: when Konbini's commit first differed from Kura's (the poller keeps it)."""
     rows = []
-    k, b, n, h, m = (apps.get(x) or {} for x in ("kura", "konbini", "niwa", "hister", "vault-mirror"))
+    k, b, n, h, m = (apps.get(x) or {} for x in ("kura", "konbini", "niwa", "nogon", "vault-mirror"))
     kd, bd, nd, hd, md = (x.get("data") or {} for x in (k, b, n, h, m))
     if k.get("state") not in (None, "absent", "down") and kd:
         st = "error" if k.get("state") == "error" else (age_state(kd.get("synced_at"), now, "pull") or "starting")
@@ -756,7 +757,7 @@ def sync_rows(apps, now, board_behind_since=None):
                      "at": fd.get("last_success"), "text": " · ".join(bits), "error": fd.get("error", "")})
     ci = apps.get("code-import") or {}
     cd = ci.get("data") or {}
-    if ci.get("state") not in (None, "absent", "down") and cd:          # 0.3.4: the owner's repos into Hister
+    if ci.get("state") not in (None, "absent", "down") and cd:          # 0.3.4: the owner's repos into Nogon
         bits = []
         if cd.get("added_day") is not None:
             bits.append("%s added %s" % (count(cd["added_day"]), "in the last day" if not cd.get("added_since")
@@ -781,7 +782,7 @@ def writes(d):
     return ", ".join(bits) or "all pushed"
 
 
-ROW_APP = {"pull": "kura", "mirror": "vault-mirror", "board": "konbini", "garden": "niwa", "push": "kura", "pages": "hister",
+ROW_APP = {"pull": "kura", "mirror": "vault-mirror", "board": "konbini", "garden": "niwa", "push": "kura", "pages": "nogon",
            "feeds": "feed-import", "code": "code-import"}
 
 

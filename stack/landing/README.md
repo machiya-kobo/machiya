@@ -15,11 +15,13 @@ Every app is optional. The page polls only what has an address; anything else sh
 
 ## Settings
 
+Hister is now Nogon: since 0.8.0 the old names (`LANDING_HISTER_TOKEN_FILE`, `LANDING_HISTER_USERS`, `LANDING_AUTH=hister`) stop the page at start, naming the new one. A stored `hister=` in `MACHIYA_ROOMS` or `LANDING_PROBES` still reads as `nogon`.
+
 | Setting | Default | Meaning |
 |---|---|---|
-| `MACHIYA_ROOMS` | none | the rooms' and engines' public addresses (`shiori=…,konbini=…,niwa=…,kura=…,hister=…,searxng=…,machiya=…`), as in every room: the links, the Rooms menu, and where each is polled; `machiya=` is this page's own address (the rooms' Rooms menu and footer link here) |
+| `MACHIYA_ROOMS` | none | the rooms' and engines' public addresses (`shiori=…,konbini=…,niwa=…,kura=…,nogon=…,searxng=…,machiya=…`), as in every room: the links, the Rooms menu, and where each is polled; `machiya=` is this page's own address (the rooms' Rooms menu and footer link here) |
 | `LANDING_APPS` | none | the stack's services, `machiya-mcp=https://…,smallweb=https://…` |
-| `LANDING_PROBES` | none | a different address to poll than to link, per app (`hister=http://hister:4433`) |
+| `LANDING_PROBES` | none | a different address to poll than to link, per app (`nogon=http://nogon:4433`) |
 | `LANDING_MIRROR_STATUS` | none | vault-mirror's `status.json` (its volume, mounted read-only) |
 | `LANDING_CODE_STATUS` | none | code-import's `status.json` (a read-only copy): the code-import row and Sync's Repos indexed; missing: quiet |
 | `LANDING_FEED_STATUS` | none | feed-import's `status.json` (its data volume, mounted read-only): the feed-import row and Sync's Feeds read |
@@ -28,20 +30,20 @@ Every app is optional. The page polls only what has an address; anything else sh
 | `LANDING_TECHO_STATUS` | none | Techō's `/api/status` (e.g. `http://techo:8095/api/status`): its Home tile then shows what's waiting (or who's online) and a dot when it's down (0.7.8). Unset: the tile only says what Techō is |
 | `LANDING_TECHO_TOKEN_FILE` | none | the token Techō's `TECHO_STATUS_TOKEN_FILE` holds, sent as a Bearer to that one endpoint (its own credential, not the room token) |
 | `LANDING_SEARCH_URL` | none | Shiori's search page, `https://search.example.ts.net/`: the launcher's Search everything pill GETs `<url>?q=…` (unset: no pill) |
-| `LANDING_HISTER_TOKEN_FILE` | none | the owner's Hister token (`X-Access-Token`, re-read on change). Hister: the page count, the newest pages, Saved & Read and its version once Hister has users. The rooms with `AUTH=hister` (0.2.3): their owner-only reads (Konbini's health and cards, Kura's vaults and recent notes, Niwa's feed), sent only to their configured https address, never across a redirect; the open status reads never get it. Set but missing or empty stops the start; without it Hister is still shown up or down (from its open `/health`), just without the counts ([contracts/hister.md](../../docs/contracts/hister.md)) |
-| `LANDING_AUTH` | `tailscale` | `tailscale`: only a `Tailscale-User-Login` in `LANDING_USERS` (`*` = anyone the tailnet lets through; empty = nobody); `open`: no check, localhost only; `hister`: Hister's users through the nogon-login helper (below); with the identity file also `header` (`LANDING_AUTH_HEADER`) |
-| `LANDING_AUTH_SIGNIN_URL` | none | `hister`: the helper's public sign-in (`https://hister.example.ts.net/machiya/signin`); required |
-| `LANDING_HISTER_USERS` | none | `hister`: the Hister usernames admitted (the owner's); required, never `*` |
-| `LANDING_AUTH_URL` | none | `hister`: the helper's internal address (`http://nogon-login:8081`); unset: the Tailscale identity only |
-| `LANDING_AUTH_FALLBACK` | `tailscale` | `hister`: when sign-in is unavailable, a `LANDING_USERS` login is let in with a banner (`none` refuses everyone: not advised for a status page) |
-| `MACHIYA_SIGNIN_PROVIDER` | none | `hister`: sign a page in automatically through that provider of the helper's (`oidc`: tsidp), as the rooms do (0.4.0); empty: the helper's page. A deliberate sign-out shows the page until the next sign-in |
-| `LANDING_PUBLIC_URL` | none | this page's address (`https://machiya.example.ts.net`): the way back after sign-in, and the origin a sign-out or prefs write must come from; required with `hister` |
-| `LANDING_PREFS` | `prefs.sqlite3` beside `LANDING_STATE` | the page's own preferences store (`/api/prefs`) when there is no account: not used in `hister` mode with the helper (0.4.0), which keeps them |
+| `LANDING_NOGON_TOKEN_FILE` | none | the owner's Nogon token (`X-Access-Token`, re-read on change). Nogon: the page count, the newest pages, Saved & Read and its version once Nogon has users. The rooms with `AUTH=nogon` (0.2.3): their owner-only reads (Konbini's health and cards, Kura's vaults and recent notes, Niwa's feed), sent only to their configured https address, never across a redirect; the open status reads never get it. Set but missing or empty stops the start; without it Nogon is still shown up or down (from its open `/health`), just without the counts ([contracts/nogon.md](../../docs/contracts/nogon.md)) |
+| `LANDING_AUTH` | `tailscale` | `tailscale`: only a `Tailscale-User-Login` in `LANDING_USERS` (`*` = anyone the tailnet lets through; empty = nobody); `open`: no check, localhost only; `nogon`: Nogon's users through the nogon-login helper (below); with the identity file also `header` (`LANDING_AUTH_HEADER`) |
+| `LANDING_AUTH_SIGNIN_URL` | none | `nogon`: the helper's public sign-in (`https://nogon.example.ts.net/machiya/signin`); required |
+| `LANDING_NOGON_USERS` | none | `nogon`: the Nogon usernames admitted (the owner's); required, never `*` |
+| `LANDING_AUTH_URL` | none | `nogon`: the helper's internal address (`http://nogon-login:8081`); unset: the Tailscale identity only |
+| `LANDING_AUTH_FALLBACK` | `tailscale` | `nogon`: when sign-in is unavailable, a `LANDING_USERS` login is let in with a banner (`none` refuses everyone: not advised for a status page) |
+| `MACHIYA_SIGNIN_PROVIDER` | none | `nogon`: sign a page in automatically through that provider of the helper's (`oidc`: tsidp), as the rooms do (0.4.0); empty: the helper's page. A deliberate sign-out shows the page until the next sign-in |
+| `LANDING_PUBLIC_URL` | none | this page's address (`https://machiya.example.ts.net`): the way back after sign-in, and the origin a sign-out or prefs write must come from; required with `nogon` |
+| `LANDING_PREFS` | `prefs.sqlite3` beside `LANDING_STATE` | the page's own preferences store (`/api/prefs`) when there is no account: not used in `nogon` mode with the helper (0.4.0), which keeps them |
 | `LANDING_USERS` | none | the Tailscale logins allowed in |
 | `LANDING_BIND`, `LANDING_PORT` | `0.0.0.0`, `8080` | the listener; `tailscale` mode refuses a non-loopback bind unless `LANDING_BIND_BEHIND_PROXY=1` (the proxy is the only way in) |
 | `LANDING_ALLOWED_HOSTS` | `localhost,127.0.0.1,[::1]` | `open` mode answers only these `Host` names |
 | `LANDING_POLL`, `LANDING_TIMEOUT` | `60`, `3` | seconds between polls (15 at least), and per request |
-| `LANDING_TOKEN_FILE` | none | a token sent as `Authorization: Bearer` to Kura, Niwa and Konbini over https only, never to the engines or services: a room token from nogon-login (`mht_…`, 0.5.0) for the owner's reads (Hister's token then never goes to a room; loopback http allowed too), or an identity-file token for their status and changelog |
+| `LANDING_TOKEN_FILE` | none | a token sent as `Authorization: Bearer` to Kura, Niwa and Konbini over https only, never to the engines or services: a room token from nogon-login (`mht_…`, 0.5.0) for the owner's reads (Nogon's token then never goes to a room; loopback http allowed too), or an identity-file token for their status and changelog |
 | `LANDING_CHANGELOG_POLL` | `900` | seconds between asking each app for its changelog (`GET /api/changelog`); a new version is asked for at once |
 | `LANDING_CHANGELOGS` | none | an override per app, `kura=https://…/CHANGELOG.md,…`, for an app that doesn't serve `/api/changelog` |
 | `LANDING_CHANGELOG_TOKEN_FILE` | none | a read token for the override URLs only (`Authorization: token …`, https only) |
@@ -51,7 +53,7 @@ Every app is optional. The page polls only what has an address; anything else sh
 | `MACHIYA_COOKIE_DOMAIN` | none | shared theme and text size with the rooms, as in every room |
 | `MACHIYA_SOURCE_URL` | none | the AGPL source link in the footer and About |
 
-`AUTH=hister` comes through vaultkit (`histerauth`), as for the rooms.
+`AUTH=nogon` comes through vaultkit (`nogonauth`), as for the rooms.
 
 ## Endpoints
 
@@ -60,9 +62,9 @@ Every app is optional. The page polls only what has an address; anything else sh
 - `GET /api/today`: Today as JSON (owner-only).
 - `GET /api/status`: the status page as JSON (`overall`, `apps`, `sync`, `deploys`); owner-only, since it names every app's version.
 - `GET /api/changelog`: this page's own `CHANGELOG.md` (`vaultkit.changelog`), open like every app's.
-- `GET`/`PUT /api/prefs`: the signed-in person's settings ([contracts/prefs.md](../../docs/contracts/prefs.md); owner-only; a PUT with the cookie same-origin). In `hister` mode with the helper it is the account's, forwarded to the helper's `/v1/prefs` with the caller's own credential; 503 in the Tailscale fallback.
-- `POST /signout` (`hister` mode): ends the Hister session (same-origin only), then `/`.
+- `GET`/`PUT /api/prefs`: the signed-in person's settings ([contracts/prefs.md](../../docs/contracts/prefs.md); owner-only; a PUT with the cookie same-origin). In `nogon` mode with the helper it is the account's, forwarded to the helper's `/v1/prefs` with the caller's own credential; 503 in the Tailscale fallback.
+- `POST /signout` (`nogon` mode): ends the Nogon session (same-origin only), then `/`.
 - `GET /healthz`: `{"ok": true, "version": …}` for the container's health check and the monitoring probe; no identity, no data.
 - `/settings`, `/theme`, `/manifest.webmanifest`, `/static/…`: as in the rooms.
 
-The page sends GETs, plus one POST: Hister's MCP `initialize` (it changes nothing), at most every 15 minutes, for Hister's version. It follows no redirect and reads at most 4 MB from an app. It asks Kura, Konbini, Niwa, machiya-mcp and smallweb for `GET /api/changelog`; an app that answers 404 (or anything but markdown) shows its versions only.
+The page sends GETs, plus one POST: Nogon's MCP `initialize` (it changes nothing), at most every 15 minutes, for Nogon's version. It follows no redirect and reads at most 4 MB from an app. It asks Kura, Konbini, Niwa, machiya-mcp and smallweb for `GET /api/changelog`; an app that answers 404 (or anything but markdown) shows its versions only.

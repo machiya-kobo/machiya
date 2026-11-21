@@ -344,7 +344,7 @@ def not_modified(rev):
 
 def parse_put(headers, body):
     """A prefs PUT's body -> (the validated changes, None) or (None, an error answer). Shared by the rooms' own store
-    and the account store (hister-login), so both refuse the same things the same way."""
+    and the account store (nogon-login), so both refuse the same things the same way."""
     if body is None or len(body) > MAX_PREFS:
         return None, _json(413, {"error": "request body too large"})
     if _media(headers) != "application/json":
@@ -367,8 +367,8 @@ def handle_prefs(prefs, principal, method, headers, body=b"", secure=True, origi
     removes; the schema in vaultkit.prefs decides what is accepted, else 400) and answers like GET.
     `principal` is what the room's resolve gave (None: 401). A PUT not made with a token must be same-origin (403);
     `secure` is the room's (identity.secure). The room calls this only after its own gate (the principal's read grant
-    in the room): a principal with no grants here stores nothing. In AUTH=hister mode with the helper the room
-    forwards instead (histerauth.HisterAuth.forward_prefs)."""
+    in the room): a principal with no grants here stores nothing. In AUTH=nogon mode with the helper the room
+    forwards instead (nogonauth.NogonAuth.forward_prefs)."""
     if principal is None:
         return _json(401, {"error": "sign in first"})
     if method == "GET":

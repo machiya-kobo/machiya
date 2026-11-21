@@ -1,5 +1,17 @@
 # Changelog: machiya-landing
 
+## 0.8.0
+
+- The rename's stage 3 (Hister is now Nogon):
+  - **The old settings stop the start.** `LANDING_HISTER_TOKEN_FILE` and `LANDING_HISTER_USERS` are no longer read; one set without its `LANDING_NOGON_*` twin stops the page with a message naming the new one (beside its twin it is ignored, and said once). `LANDING_AUTH=hister` stops it too: use `LANDING_AUTH=nogon`.
+  - **Nogon's probe sends `Origin: nogon://`** (Nogon v0.22 and later), not `hister://`.
+  - **smallweb's saves are read from `nogon` only**: smallweb 0.6.0 no longer sends the `hister` copy.
+  - **The app's key is `nogon`** (the tiles' and rows' `data-app`, the status JSON's `apps`, `LANDING_PROBES` and `LANDING_CHANGELOGS`). A stored `hister=` in `MACHIYA_ROOMS` or `LANDING_PROBES` still reads as `nogon`, and so does a deploy history kept under `hister`.
+  - A browser signed in by its cookie is `via` `nogon`: Settings still shows the account and Sign Out.
+  - The code's own names say Nogon (`nogonauth`, `nogon_auth`, `nogon_token`, `probes.nogon`, `NOGON_ORIGIN`, …).
+- vaultkit 0.40.0 → 0.41.0.
+- Unchanged: 0.7.8's Techō tile and 0.7.7's Saved & Read link to Nogon.
+
 ## 0.7.8
 
 - Home: Techō's tile shows what's waiting on you ("2 waiting"), or who's online, from Techō's `/api/status`, with a dot when it isn't up (owner, 2026-11-20: a Techō tile next to the rooms). Set `LANDING_TECHO_STATUS` and `LANDING_TECHO_TOKEN_FILE` (Techō 0.7.0's status token); unset, the tile stays as it was.

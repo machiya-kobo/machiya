@@ -14,6 +14,7 @@ import re
 import threading
 
 KEEP = 100                      # events kept in the file
+OLD_KEYS = {"hister": "nogon"}  # 0.8.0 (Hister is now Nogon): an app key a history saved before is read as the new one
 VERSION_RE = re.compile(r"^##\s+\[?v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\]?(?:\s|$)")
 
 
@@ -34,8 +35,9 @@ class History:
             try:
                 with open(path, encoding="utf-8") as f:
                     data = json.load(f)
-                self.seen = {k: v for k, v in (data.get("seen") or {}).items() if isinstance(v, dict)}
-                self.events = [e for e in (data.get("events") or []) if isinstance(e, dict)][:KEEP]
+                self.seen = {OLD_KEYS.get(k, k): v for k, v in (data.get("seen") or {}).items() if isinstance(v, dict)}
+                self.events = [dict(e, app=OLD_KEYS[e["app"]]) if e.get("app") in OLD_KEYS else e
+                               for e in (data.get("events") or []) if isinstance(e, dict)][:KEEP]
                 self.since = data.get("since")
                 self.samples = {k: [p for p in v if isinstance(p, list) and len(p) == 2]
                                 for k, v in (data.get("samples") or {}).items() if isinstance(v, list)}
