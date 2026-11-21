@@ -9,7 +9,7 @@ x-room: &room
   depends_on: [nogon-login]
 x-common: &common
   MACHIYA_COOKIE_DOMAIN: machiya.test
-  MACHIYA_ROOMS: "shiori=https://shiori.machiya.test:19043,konbini=https://konbini.machiya.test:19043,niwa=https://niwa.machiya.test:19043,kura=https://kura.machiya.test:19043,hister=https://hister.machiya.test:19043"
+  MACHIYA_ROOMS: "shiori=https://shiori.machiya.test:19043,konbini=https://konbini.machiya.test:19043,niwa=https://niwa.machiya.test:19043,kura=https://kura.machiya.test:19043,nogon=https://hister.machiya.test:19043"
 services:
   hister:
     image: ghcr.io/asciimoo/hister:v0.20.0
@@ -30,7 +30,7 @@ services:
       NOGON_LOGIN_NOGON_URL: http://hister:4433
       NOGON_LOGIN_PUBLIC_URL: https://hister.machiya.test:19043
       NOGON_LOGIN_PROVIDERS: oidc
-      NOGON_LOGIN_LEGACY: domain-cookie,hister-token    # gate 0 is the shared-cookie design (the default before 0.5.0)
+      NOGON_LOGIN_LEGACY: domain-cookie,nogon-token     # gate 0 is the shared-cookie design (the default before 0.5.0)
       MACHIYA_COOKIE_DOMAIN: ${HELPER_COOKIE_DOMAIN-machiya.test}   # gate0's loop guard check empties it
     volumes: [login-data:/data]
     depends_on: [hister]
@@ -39,10 +39,10 @@ services:
     environment:
       <<: *common
       ROOM: kura
-      KURA_AUTH: hister
+      KURA_AUTH: nogon
       KURA_AUTH_URL: http://nogon-login:8081
       KURA_AUTH_SIGNIN_URL: https://hister.machiya.test:19043/machiya/signin
-      KURA_HISTER_USERS: owner
+      KURA_NOGON_USERS: owner
       KURA_AUTH_FALLBACK: none
       KURA_PUBLIC_URL: https://kura.machiya.test:19043
   room-niwa:
@@ -50,10 +50,10 @@ services:
     environment:
       <<: *common
       ROOM: niwa
-      NIWA_AUTH: hister
+      NIWA_AUTH: nogon
       NIWA_AUTH_URL: http://nogon-login:8081
       NIWA_AUTH_SIGNIN_URL: https://hister.machiya.test:19043/machiya/signin
-      NIWA_HISTER_USERS: owner
+      NIWA_NOGON_USERS: owner
       NIWA_AUTH_FALLBACK: tailscale
       NIWA_USERS: owner@passkey
       NIWA_BIND_BEHIND_PROXY: "1"
@@ -63,10 +63,10 @@ services:
     environment:
       <<: *common
       ROOM: konbini
-      KANBAN_AUTH: hister
+      KANBAN_AUTH: nogon
       KANBAN_AUTH_URL: http://nogon-login:8081
       KANBAN_AUTH_SIGNIN_URL: https://hister.machiya.test:19043/machiya/signin
-      KANBAN_HISTER_USERS: owner
+      KANBAN_NOGON_USERS: owner
       KANBAN_TAILNET_USERS: owner@passkey
       KANBAN_BIND_BEHIND_PROXY: "1"
       KANBAN_BOARD_URL: https://konbini.machiya.test:19043

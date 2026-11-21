@@ -1,45 +1,55 @@
-"""Hister is now Nogon (owner, 2026-11-19: rename everything Machiya calls Hister): the names Machiya reads in both
-spellings while the rename is under way (docs/contracts/hister.md "Names").
+"""Hister is now Nogon (owner, 2026-11-19: rename everything Machiya calls Hister): Machiya's own names, and what is
+left of the old ones (docs/contracts/hister.md "Names").
 
-Stage 1 (vaultkit 0.38): readers accept the new names next to the old ones, and nothing that is written changes:
-  - setting(): a setting spelled with NOGON (KURA_NOGON_URL, NOGON_LOGIN_DB, …), else its HISTER twin;
-  - room_key(): the room id `nogon` (MACHIYA_ROOMS, apps_hidden) is read as `hister`, the id the house still keeps;
-  - auth_mode(): `<P>_AUTH=nogon` is read as `hister`.
-Stage 3 flips the house's own id to `nogon` and reads `hister` as the alias; then the old names go.
+Stage 3 (vaultkit 0.41): the house's names are Nogon's.
+  - setting(): a setting spelled with NOGON (KURA_NOGON_URL, NOGON_LOGIN_DB, …). Its old HISTER twin is no longer
+    read: set on its own, it stops the app (OldName, naming the new variable), so nothing is quietly ignored;
+  - room_key(): the house's room id is `nogon`. A stored `hister` (an account's apps_hidden, a machiya_show_hister
+    cookie, MACHIYA_ROOMS) is still read as `nogon`, since people's saved settings hold it;
+  - auth_mode(): `<P>_AUTH=nogon`. `hister` stops the app (OldName: use AUTH=nogon).
 Upstream Nogon's own names (its `hister` session cookie, X-Access-Token, HISTER__* in its config) are not Machiya's
 and are never touched here.
 """
 import os
 import sys
 
-ROOM_ALIASES = {"nogon": "hister"}      # the new room id -> the id the house keeps until stage 3
-AUTH_ALIASES = {"nogon": "hister"}      # <P>_AUTH=nogon -> the mode's current name
+ROOM_ALIASES = {"hister": "nogon"}      # a stored old room id -> the house's id (0.41: what people saved still reads)
+OLD_AUTH = {"hister": "nogon"}          # <P>_AUTH values that are refused, with the one to use instead
 _warned = set()
 
 
+class OldName(ValueError):
+    """A setting under its old Hister name, which Machiya no longer reads: the app must not start. The message names
+    the new variable (or value)."""
+
+
 def setting(name, env=None, default=None):
-    """The value of the setting `name` (spelled with NOGON), else of its HISTER twin, else `default`. A NOGON setting
-    that is present wins, even when it is empty, as upstream Nogon does with its own variables. Reading the old name
-    logs one line per name, so a deployment sees what is left to rename."""
+    """The value of the setting `name` (spelled with NOGON), else `default`. A present setting wins even when empty, as
+    upstream Nogon does with its own variables. Its old HISTER twin is not read (0.41): set without the new name it
+    raises OldName, naming the new one; set beside it, it is ignored and said once on stderr."""
     env = os.environ if env is None else env
-    if name in env:
-        return env[name]
     old = name.replace("NOGON", "HISTER")
-    if old != name and old in env:
-        if old not in _warned:
+    if name in env:
+        if old != name and old in env and old not in _warned:
             _warned.add(old)
-            print("%s: an old name, read as %s (Hister is now Nogon; rename it before the old names go)" % (old, name),
+            print("%s: an old name, ignored (%s is set; Hister is now Nogon): remove it" % (old, name),
                   file=sys.stderr, flush=True)
-        return env[old]
+        return env[name]
+    if old != name and old in env:
+        raise OldName("%s is an old name and is no longer read: rename it %s (Hister is now Nogon)" % (old, name))
     return default
 
 
 def room_key(key):
-    """A room id as the house keeps it: `nogon` -> `hister` (stage 1); anything else unchanged."""
+    """A room id as the house keeps it: `hister` (a stored or old id) -> `nogon`; anything else unchanged."""
     return ROOM_ALIASES.get(key, key)
 
 
-def auth_mode(value):
-    """A <P>_AUTH value as the house keeps it, lowercased and trimmed: `nogon` -> `hister` (stage 1)."""
+def auth_mode(value, name="AUTH"):
+    """A <P>_AUTH value, lowercased and trimmed. `hister` raises OldName ("use AUTH=nogon"); `name` is the variable,
+    for the message (KURA_AUTH)."""
     v = (value or "").strip().lower()
-    return AUTH_ALIASES.get(v, v)
+    if v in OLD_AUTH:
+        raise OldName("%s=%s is an old name and is no longer read: use %s=%s (Hister is now Nogon)"
+                      % (name, v, name, OLD_AUTH[v]))
+    return v

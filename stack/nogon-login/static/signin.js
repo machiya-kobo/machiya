@@ -1,6 +1,6 @@
-// nogon-login's sign-in page: the password goes straight to Hister's own /api/login on this origin (the helper never
-// sees it); Hister sets its host-only session cookie, and the page then goes back to /machiya/signin, which finds that
-// session, issues machiya_sso and sends the browser where it started. There is no <form>, as on Hister's own sign-in
+// nogon-login's sign-in page: the password goes straight to Nogon's own /api/login on this origin (the helper never
+// sees it); Nogon sets its host-only session cookie, and the page then goes back to /machiya/signin, which finds that
+// session, issues machiya_sso and sends the browser where it started. There is no <form>, as on Nogon's own sign-in
 // page: the button's click or Enter in a field signs in, and nothing on the page can post to the helper.
 const box = document.getElementById("hister-signin");
 const alertBox = document.querySelector("[data-error]");

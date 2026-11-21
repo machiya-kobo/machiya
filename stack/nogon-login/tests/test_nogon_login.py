@@ -19,16 +19,16 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
 
 import nogon_login as hl                      # noqa: E402
-from fake_hister import FakeHister             # noqa: E402
+from fake_nogon import FakeNogon               # noqa: E402
 
 PUBLIC = "https://hister.example.test"
 KURA = "https://kura.example.test/n/Note?x=1"
 ENV = {"NOGON_LOGIN_PUBLIC_URL": PUBLIC, "MACHIYA_COOKIE_DOMAIN": "example.test",
        "MACHIYA_ROOMS": "kura=https://kura.example.test,niwa=https://niwa.example.test,"
-                        "searxng=https://searxng.example.test,hister=https://hister.example.test",
+                        "searxng=https://searxng.example.test,nogon=https://hister.example.test",
        "NOGON_LOGIN_PROVIDERS": "oidc",
        # 0.5.0: legacy is off by default; most tests here still cover the opted-in old ways (LegacyDefaultTest: none)
-       "NOGON_LOGIN_LEGACY": "domain-cookie,hister-token"}
+       "NOGON_LOGIN_LEGACY": "domain-cookie,nogon-token"}
 
 
 def cookies_of(headers):
@@ -46,7 +46,7 @@ def cookie_value(headers, name):
 class HelperBase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
-        self.fake = FakeHister()
+        self.fake = FakeNogon()
         env = dict(ENV, NOGON_LOGIN_NOGON_URL=self.fake.url, NOGON_LOGIN_DB=os.path.join(self.tmp, "d", "hl.db"),
                    **getattr(self, "EXTRA", {}))
         env = {k: v for k, v in env.items() if v is not None}          # EXTRA's None: the setting left unset
@@ -54,7 +54,7 @@ class HelperBase(unittest.TestCase):
         with redirect_stderr(self.err):
             self.settings = hl.Settings(env)
             self.login = hl.Login(self.settings)
-        self.login.hister.health_at = 0
+        self.login.nogon.health_at = 0
         self._stderr = sys.stderr
         sys.stderr = self.err
         self.servers = hl.serve(self.login, "127.0.0.1", 0, 0, 0 if self.settings.oauth_port is not None else None)
@@ -228,7 +228,7 @@ class HelperTest(HelperBase):
         self.assertIn(b"Sign-In Is Unavailable", body)
         self.fake.fail = False
         self.fake.user_handling = False
-        self.login.hister.health_at = 0
+        self.login.nogon.health_at = 0
         status, _, body = self.public("GET", "/machiya/signin")
         self.assertEqual(status, 503)
         self.assertIn(b"switched off", body)
@@ -279,20 +279,22 @@ class HelperTest(HelperBase):
         self.assertEqual(self.check(sid), (503, {"reason": "hister-unavailable"}))
         self.assertEqual(self.login.store.count(), 1)                    # unavailable never deletes
         status, _, body = self.internal("GET", "/healthz")
-        self.assertEqual((status, json.loads(body)["hister"]), (503, "down"))
+        self.assertEqual((status, json.loads(body)["nogon"]), (503, "down"))
+        self.assertNotIn("hister", json.loads(body))                     # 0.9.0: no old twin
         self.fake.fail = False
         self.fake.user_handling = False
-        self.login.hister.health_at = 0
+        self.login.nogon.health_at = 0
         self.assertEqual(self.check(sid), (503, {"reason": "user-handling-off"}))
         self.assertEqual(self.check(token="tok-owner"), (503, {"reason": "user-handling-off"}))
         status, _, body = self.public("GET", "/machiya/healthz")             # the probe's: the helper works
-        self.assertEqual((status, json.loads(body)["ok"], json.loads(body)["hister"]), (200, True, "user-handling-off"))
-        self.assertIn("HISTER USER HANDLING IS OFF", self.err.getvalue())
+        self.assertEqual((status, json.loads(body)["ok"], json.loads(body)["nogon"]), (200, True, "user-handling-off"))
+        self.assertIn("NOGON USER HANDLING IS OFF", self.err.getvalue())
 
     def test_public_healthz_is_the_helpers_own(self):
         self.fake.fail = True                                                # Hister down: still 200, degraded
         status, _, body = self.public("GET", "/machiya/healthz")
-        self.assertEqual((status, json.loads(body)["ok"], json.loads(body)["hister"]), (200, True, "down"))
+        self.assertEqual((status, json.loads(body)["ok"], json.loads(body)["nogon"]), (200, True, "down"))
+        self.assertNotIn("hister", json.loads(body))                     # 0.9.0: no old twin
         status, _, _ = self.internal("GET", "/healthz")                      # the rooms' flag: 503
         self.assertEqual(status, 503)
         self.login.store.db.close()                                          # the helper's own state fails: 503
@@ -302,7 +304,8 @@ class HelperTest(HelperBase):
     def test_healthz_ok(self):
         status, _, body = self.internal("GET", "/healthz")
         data = json.loads(body)
-        self.assertEqual((status, data["ok"], data["hister"], data["nogon"]), (200, True, "ok", "ok"))
+        self.assertEqual((status, data["ok"], data["nogon"]), (200, True, "ok"))
+        self.assertNotIn("hister", data)                                 # 0.9.0: the old twin is gone
         self.assertEqual(self.fake.calls["/api/profile"], 1)            # anonymous: 403 means users are on
         self.internal("GET", "/healthz")
         self.assertEqual(self.fake.calls["/health"], 1)                  # cached 10 s
@@ -359,6 +362,7 @@ class HelperTest(HelperBase):
         self.assertTrue(any(c.startswith("hister=;") for c in cs))
         self.assertNotIn(session, self.fake.sessions)
         self.assertEqual(self.check(sid)[0], 401)
+        self.assertEqual(self.fake.origins[-1], "nogon://")              # 0.9.0: Nogon's logout, as Nogon
 
     def test_app_session_takes_nogon(self):
         """0.8.0: the app-session body names the session `nogon` (still `hister` from older apps)."""
@@ -371,7 +375,7 @@ class HelperTest(HelperBase):
     def test_app_signout_by_bearer(self):
         session = self.fake.signed_in()
         _, _, body = self.public("POST", "/machiya/api/app-session", {"Content-Type": "application/json"},
-                                 json.dumps({"hister": session, "label": "iPhone"}))
+                                 json.dumps({"hister": session, "label": "iPhone"}))   # the old spelling, until 3c
         sid = json.loads(body)["sid"]
         status, _, _ = self.public("POST", "/machiya/signout", {"Authorization": "Bearer " + sid,
                                                                 "Content-Length": "0"})
@@ -390,7 +394,7 @@ class HelperTest(HelperBase):
                   {"X-Machiya-Session": ""}, {}):
             status, headers, _ = self.internal("GET", "/v1/nginx", h)
             self.assertEqual(status, 401, h)
-            self.assertNotIn("X-Hister-Cookie", dict(headers), h)
+            self.assertNotIn("X-Nogon-Cookie", dict(headers), h)
 
     def test_internal_paths_not_public(self):
         session, sid, _ = self.sign_in()
@@ -436,7 +440,8 @@ class HelperTest(HelperBase):
         self.assertEqual((loc.scheme, loc.netloc), ("shiori", "signed-in"))
         frag = {k: v[0] for k, v in parse_qs(loc.fragment).items()}
         self.assertEqual(self.check(frag["sid"])[1]["kind"], "app")
-        self.assertIn(frag["hister"], self.fake.sessions)
+        self.assertIn(frag["nogon"], self.fake.sessions)
+        self.assertEqual(frag["hister"], frag["nogon"])                  # 0.9.0: both, until the rename's stage 3c
         self.assertIsNone(cookie_value(headers, "machiya_sso"))          # the app holds the id, not a cookie
 
     # -- the automatic sign-in (MACHIYA_SIGNIN_PROVIDER in the rooms: provider=oidc&auto=1)
@@ -613,16 +618,17 @@ class HelperTest(HelperBase):
         session = self.fake.signed_in()
         h = {"Content-Type": "application/json"}
         status, _, body = self.public("POST", "/machiya/api/app-session", h,
-                                      json.dumps({"hister": session, "label": "Mac\x00 app"}))
+                                      json.dumps({"nogon": session, "label": "Mac\x00 app"}))
         data = json.loads(body)
         self.assertEqual((status, data["username"]), (200, "owner"))
         self.assertEqual(self.check(data["sid"])[1]["kind"], "app")
         self.assertEqual(self.login.store.q("SELECT label FROM sessions")[0][0], "Mac app")
         self.assertEqual(self.public("POST", "/machiya/api/app-session", h,
-                                     json.dumps({"hister": "A" * 43}))[0], 401)
+                                     json.dumps({"nogon": "A" * 43}))[0], 401)
+        self.assertEqual(self.public("POST", "/machiya/api/app-session", h, json.dumps({"nogon": "x"}))[0], 400)
         self.assertEqual(self.public("POST", "/machiya/api/app-session", h, json.dumps({"hister": "x"}))[0], 400)
         self.assertEqual(self.public("POST", "/machiya/api/app-session", {"Content-Type": "text/plain"},
-                                     json.dumps({"hister": session}))[0], 415)
+                                     json.dumps({"nogon": session}))[0], 415)
         self.assertEqual(self.public("POST", "/machiya/api/app-session", h, "{" * 5000)[0], 413)
 
     # -- the sessions page
@@ -711,7 +717,7 @@ class HelperTest(HelperBase):
         self.assertEqual([g[0] for g in got], [400, 200, 401, 200, 200, 401, 200, 400, 401, 401, 401, 401])
         names = [json.loads(g[2]).get("username") if g[2] else None for g in got[:8]]
         self.assertEqual(names, [None, "owner", None, "other", "owner", None, "other", None])
-        self.assertTrue(all("X-Hister-Cookie" not in g[1] and "X-Hister-User" not in g[1] for g in got[8:]))
+        self.assertTrue(all("X-Nogon-Cookie" not in g[1] and "X-Nogon-User" not in g[1] for g in got[8:]))
 
     def test_keep_alive_public_pages_answer_each_request_alone(self):
         _, sid, _ = self.sign_in()
@@ -744,7 +750,7 @@ class HelperTest(HelperBase):
             self.assertEqual(out.count(b"HTTP/1.1 "), 1, head)
             self.assertTrue(closed, head)
             self.assertIn(b"\r\nConnection: close\r\n", out)
-            self.assertNotIn(b"X-Hister-Cookie", out)
+            self.assertNotIn(b"X-Nogon-Cookie", out)
         # a body that was read keeps the connection
         got = self.one_connection(self.int, [("POST", "/v1/signout", {"X-Machiya-Session": "x"}, b"{}"),
                                              ("GET", "/v1/check", {"X-Machiya-Session": sid})])
@@ -766,7 +772,7 @@ class RoomSessionTest(HelperBase):
         nonce = nonce or hl.b64e(os.urandom(32))
         cookie = "hister=" + session + ("; __Host-machiya_sso=" + own if own else "")
         status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode(
-            {"return": ret, "state": hl.histerauth.state_hash(nonce)}), {"Cookie": cookie})
+            {"return": ret, "state": hl.nogonauth.state_hash(nonce)}), {"Cookie": cookie})
         self.assertEqual(status, 303)
         loc = urlsplit(dict(headers)["Location"])
         code = parse_qs(loc.query).get("code", [None])[0]
@@ -799,11 +805,11 @@ class RoomSessionTest(HelperBase):
         _, sid, nonce, code, headers = self.trip()
         loc = urlsplit(dict(headers)["Location"])
         self.assertEqual((loc.scheme, loc.netloc, loc.path), ("https", "kura.example.test", "/machiya/callback"))
-        self.assertTrue(hl.histerauth.CODE_RE.match(code))
+        self.assertTrue(hl.nogonauth.CODE_RE.match(code))
         self.assertNotIn(nonce, dict(headers)["Location"])
         status, data = self.redeem(code, nonce=nonce)
         self.assertEqual((status, data["return"], data["username"]), (200, KURA, "owner"))
-        self.assertTrue(hl.histerauth.RSID_RE.match(data["session"]))
+        self.assertTrue(hl.nogonauth.RSID_RE.match(data["session"]))
         self.assertTrue(86400 * 170 < data["max_age"] <= 86400 * 180)
         self.assertEqual(self.redeem(code, nonce=nonce), (401, {"reason": "bad-code"}))       # once
         status, info = self.room_check(data["session"])
@@ -827,7 +833,7 @@ class RoomSessionTest(HelperBase):
         self.login.store.q("UPDATE codes SET expires_at = ?", (hl.now() - 1,))
         self.assertEqual(self.redeem(code, nonce=nonce)[0], 401)                        # 60 s
         session, sid, nonce, code, _ = self.trip()
-        self.login.end_hister(session)                                                  # signed out meanwhile
+        self.login.end_nogon(session)                                                  # signed out meanwhile
         self.assertEqual(self.redeem(code, nonce=nonce)[0], 401)
         for bad in ({"X-Machiya-Room": "junk"}, {"X-Machiya-Room": KURA_O + ", " + NIWA_O}):
             _, _, nonce, code, _ = self.trip()
@@ -845,7 +851,7 @@ class RoomSessionTest(HelperBase):
         _, sid, _, _, _ = self.trip()
         nonce = "z" * 43
         status, headers, _ = self.public("GET", "/machiya/signin?" + urlencode(
-            {"return": KURA, "state": hl.histerauth.state_hash(nonce)}), {"Cookie": "__Host-machiya_sso=" + sid})
+            {"return": KURA, "state": hl.nogonauth.state_hash(nonce)}), {"Cookie": "__Host-machiya_sso=" + sid})
         self.assertEqual(status, 303)
         code = parse_qs(urlsplit(dict(headers)["Location"]).query)["code"][0]
         self.assertEqual(self.redeem(code, nonce=nonce)[0], 200)
@@ -901,7 +907,7 @@ class RoomSessionTest(HelperBase):
         status, _, body = self.public("POST", "/machiya/sessions", post, form)
         self.assertEqual(status, 200)
         value = body.split(b'<code class="token-value">')[1].split(b"<")[0].decode()
-        self.assertTrue(hl.histerauth.RTOKEN_RE.match(value))
+        self.assertTrue(hl.nogonauth.RTOKEN_RE.match(value))
         self.assertEqual(self.room_check(value, NIWA_O)[0], 200)
         self.assertEqual(self.room_check(value, KURA_O), (401, {"reason": "wrong-room"}))
         status, _, body = self.public("GET", "/machiya/sessions", c)
@@ -1035,7 +1041,7 @@ class RoomSessionTest(HelperBase):
         loc = urlsplit(dict(headers)["Location"])
         q = parse_qs(loc.query)
         self.assertEqual((PUBLIC + loc.path, q["return"], q["state"], q["provider"]),
-                         (PUBLIC + "/machiya/signin", [page], [hl.histerauth.state_hash(nonce)], ["oidc"]))
+                         (PUBLIC + "/machiya/signin", [page], [hl.nogonauth.state_hash(nonce)], ["oidc"]))
         # 3. the sign-in (already signed in) sends a code to search.*'s callback
         status, headers, _ = self.public("GET", loc.path + "?" + loc.query,
                                          {"Cookie": "hister=%s; __Host-machiya_sso=%s" % (session, sid)})
@@ -1046,15 +1052,15 @@ class RoomSessionTest(HelperBase):
                                          dict(host, Cookie="__Host-machiya_sso_shiori_state=" + nonce))
         self.assertEqual((status, dict(headers)["Location"]), (302, page))
         rs = cookie_value(headers, "__Host-machiya_sso_shiori")
-        self.assertTrue(hl.histerauth.RSID_RE.match(rs))
+        self.assertTrue(hl.nogonauth.RSID_RE.match(rs))
         # 5. nginx's auth_request: the session (or the cookie itself) and the host's origin
         for h in ({"X-Machiya-Session": rs, "X-Machiya-Room": SEARCH_O},
                   {"Cookie": "a=b; __Host-machiya_sso_shiori=" + rs, "X-Machiya-Room": SEARCH_O}):
             status, headers, _ = self.internal("GET", "/v1/nginx", h)
-            self.assertEqual((status, dict(headers).get("X-Hister-Cookie")), (200, "hister=" + session))
-            # 0.8.0: the same under the new names, until the rename's stage 3 drops X-Hister-*
-            self.assertEqual(dict(headers).get("X-Nogon-Cookie"), "hister=" + session)
-            self.assertEqual(dict(headers).get("X-Nogon-User"), dict(headers).get("X-Hister-User"))
+            self.assertEqual((status, dict(headers).get("X-Nogon-Cookie")), (200, "hister=" + session))
+            self.assertEqual(dict(headers).get("X-Nogon-User"), "owner")
+            # 0.9.0: the old X-Hister-* twins are gone (shiori-web reads X-Nogon-Cookie since 1.29.1)
+            self.assertFalse([k for k, _ in headers if k.lower().startswith("x-hister-")])
         self.assertEqual(self.internal("GET", "/v1/nginx", {"X-Machiya-Session": rs, "X-Machiya-Room": KURA_O})[0],
                          401)
         # prefs on search.* with its cookie; a PUT from another origin is refused
@@ -1130,7 +1136,7 @@ class RoomSessionTest(HelperBase):
         rs = jar["search.example.test"]["__Host-machiya_sso_shiori"]
         status, headers, _ = self.internal("GET", "/v1/nginx", {"X-Machiya-Session": rs, "X-Machiya-Room": SEARCH_O})
         self.assertEqual(status, 200)
-        self.assertEqual(dict(headers)["X-Hister-Cookie"], "hister=" + jar["hister.example.test"]["hister"])
+        self.assertEqual(dict(headers)["X-Nogon-Cookie"], "hister=" + jar["hister.example.test"]["hister"])
         self.assertNotIn("__Host-machiya_sso_shiori_state", jar["search.example.test"])
 
     def test_signin_page_has_no_password_path_to_the_helper(self):
@@ -1150,9 +1156,9 @@ class RoomSessionTest(HelperBase):
             self.assertNotIn(gone, script)
 
     def test_nginx_only_for_a_proxied_origin_and_its_own_session(self):
-        """0.5.0: X-Hister-Cookie (the raw Hister session) only for an origin in NOGON_LOGIN_PROXIED_ORIGINS and a
-        room session made for that same origin; the internal port can't tell who asks, so X-Machiya-Room alone
-        proves nothing. Anything else is answered as signed out."""
+        """0.5.0: X-Nogon-Cookie (the raw Nogon session; X-Hister-Cookie before 0.9.0) only for an origin in
+        NOGON_LOGIN_PROXIED_ORIGINS and a room session made for that same origin; the internal port can't tell who
+        asks, so X-Machiya-Room alone proves nothing. Anything else is answered as signed out."""
         session, _, nonce, code, _ = self.trip(ret=SEARCH_O + "/search?q=x")
         search = self.redeem(code, room=SEARCH_O, nonce=nonce)[1]["session"]
         _, _, nonce, code, _ = self.trip(session=session)
@@ -1165,7 +1171,7 @@ class RoomSessionTest(HelperBase):
             if room is not None:
                 h["X-Machiya-Room"] = room
             status, headers, _ = self.internal("GET", "/v1/nginx", h)
-            return status, dict(headers).get("X-Hister-Cookie")
+            return status, dict(headers).get("X-Nogon-Cookie")
 
         # the right origin and its own session
         self.assertEqual(nginx(search, SEARCH_O), (200, "hister=" + session))
@@ -1226,12 +1232,12 @@ class RoomSessionTest(HelperBase):
             out, closed = self.raw(port, head + b"Content-Length: %d\r\n\r\n" % len(smuggled) + smuggled)
             self.assertEqual(out.count(b"HTTP/1.1 "), 1, head)
             self.assertTrue(closed, head)
-            self.assertNotIn(b"X-Hister-Cookie", out)
+            self.assertNotIn(b"X-Nogon-Cookie", out)
         # a redeem's body, when read, is only a body: one answer, never a second request
         out, _ = self.raw(self.int, b"POST /v1/redeem HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n"
                           % len(smuggled) + smuggled)
         self.assertEqual(out.count(b"HTTP/1.1 "), 1)
-        self.assertNotIn(b"X-Hister-Cookie", out)
+        self.assertNotIn(b"X-Nogon-Cookie", out)
 
 
 class LegacyOffTest(HelperBase):
@@ -1263,8 +1269,12 @@ class LegacyOffTest(HelperBase):
     def test_settings(self):
         with self.assertRaises(SystemExit):
             hl.Settings(dict(ENV, NOGON_LOGIN_LEGACY="cookies"))
-        self.assertEqual(hl.Settings(dict(ENV, NOGON_LOGIN_LEGACY="hister-token")).legacy, {"hister-token"})
-        self.assertEqual(hl.Settings(dict(ENV)).legacy, {"domain-cookie", "hister-token"})
+        self.assertEqual(hl.Settings(dict(ENV, NOGON_LOGIN_LEGACY="nogon-token")).legacy, {"nogon-token"})
+        # 0.9.0: hister-token, the old spelling in deployments' settings, is still read, as nogon-token
+        self.assertEqual(hl.Settings(dict(ENV, NOGON_LOGIN_LEGACY="hister-token")).legacy, {"nogon-token"})
+        self.assertEqual(hl.Settings(dict(ENV, NOGON_LOGIN_LEGACY="Domain-Cookie, HISTER-TOKEN")).legacy,
+                         {"domain-cookie", "nogon-token"})
+        self.assertEqual(hl.Settings(dict(ENV)).legacy, {"domain-cookie", "nogon-token"})
         unset = {k: v for k, v in ENV.items() if k != "NOGON_LOGIN_LEGACY"}
         self.assertEqual(hl.Settings(unset).legacy, set())                                  # 0.5.0: the default
         for raw in ("", " ", "none", "NONE"):
@@ -1290,7 +1300,7 @@ class LegacyOptInTest(HelperBase):
                                          {"Cookie": "hister=" + session})
         sid = cookie_value(headers, "__Host-machiya_sso")
         self.assertTrue(sid)
-        cookie_on, token_on = self.MODE == "domain-cookie", self.MODE == "hister-token"
+        cookie_on, token_on = self.MODE == "domain-cookie", self.MODE in ("nogon-token", "hister-token")
         self.assertEqual(cookie_value(headers, "machiya_sso") == sid, cookie_on)         # the shared-domain copy
         room = {"X-Machiya-Room": KURA_O}
         status, _, body = self.internal("GET", "/v1/check", {"X-Machiya-Session": sid, **room})
@@ -1304,6 +1314,12 @@ class LegacyOptInTest(HelperBase):
 
 
 class LegacyTokenOptInTest(LegacyOptInTest):
+    MODE = "nogon-token"
+    EXTRA = {"NOGON_LOGIN_LEGACY": MODE}
+
+
+class LegacyOldTokenOptInTest(LegacyOptInTest):
+    """0.9.0: the old spelling hister-token still opts in (it is stored in deployments' settings)."""
     MODE = "hister-token"
     EXTRA = {"NOGON_LOGIN_LEGACY": MODE}
 
@@ -1365,7 +1381,7 @@ class OAuthTest(HelperBase):
         status, headers, _ = self.o("GET", back.path + "?" + back.query, {"Cookie": OSTATE + "=" + nonce})
         self.assertEqual(status, 302)
         room = cookie_value(headers, OCOOKIE)
-        self.assertTrue(hl.histerauth.RSID_RE.match(room))
+        self.assertTrue(hl.nogonauth.RSID_RE.match(room))
         again = urlsplit(dict(headers)["Location"])
         self.assertEqual(again.path, "/oauth/authorize")
         status, _, body = self.o("GET", again.path + "?" + again.query, {"Cookie": OCOOKIE + "=" + room})
@@ -1845,7 +1861,7 @@ class PrefsTest(unittest.TestCase):
             out, closed = self.raw(port, head + b"Content-Length: %d\r\n\r\n" % len(smuggled) + smuggled)
             self.assertEqual(out.count(b"HTTP/1.1 "), 1, head)
             self.assertTrue(closed, head)
-            self.assertNotIn(b"X-Hister-Cookie", out)
+            self.assertNotIn(b"X-Nogon-Cookie", out)
         # a PUT whose body was read keeps the connection
         body = b'{"prefs": {"theme": "night"}}'
         got = self.one_connection(self.int, [
@@ -2016,24 +2032,28 @@ class JournalTest(unittest.TestCase):
         self.assertEqual(self.mode("haiku1"), "delete")
 
 
-class LegacyEnvTest(unittest.TestCase):
-    """0.8.0: HISTER_LOGIN_<X> is read as NOGON_LOGIN_<X> until the rename's stage 3; a set NOGON_LOGIN_<X> wins."""
+class OldNamesTest(unittest.TestCase):
+    """0.9.0, the rename's stage 3: HISTER_LOGIN_<X> is no longer read. On its own it stops the helper, naming the
+    new variable (as vaultkit.names.setting() does in the rooms); beside its NOGON_LOGIN_<X> it is ignored."""
 
-    def test_old_names_fill_in_and_new_names_win(self):
-        env = {"HISTER_LOGIN_DB": "/old.db", "HISTER_LOGIN_PORT": "9", "NOGON_LOGIN_PORT": "",
-               "HISTER_LOGIN_HISTER_URL": "http://h:1"}
+    def test_an_old_name_alone_refuses_naming_the_new_one(self):
+        for old, new in (("HISTER_LOGIN_DB", "NOGON_LOGIN_DB"), ("HISTER_LOGIN_PORT", "NOGON_LOGIN_PORT"),
+                         ("HISTER_LOGIN_HISTER_URL", "NOGON_LOGIN_NOGON_URL"),
+                         ("NOGON_LOGIN_HISTER_URL", "NOGON_LOGIN_NOGON_URL")):
+            with self.assertRaises(SystemExit) as cm:
+                hl.Settings(dict(ENV, **{old: "x"}))
+            self.assertIn(old, str(cm.exception))
+            self.assertIn(new, str(cm.exception))
+            with self.assertRaises(SystemExit):
+                hl.old_names(dict(ENV, **{old: "x"}))                     # the CLI commands check the same way
+
+    def test_an_old_name_beside_the_new_one_is_ignored(self):
+        env = dict(ENV, HISTER_LOGIN_PORT="9", NOGON_LOGIN_PORT="", HISTER_LOGIN_HISTER_URL="http://old:1",
+                   NOGON_LOGIN_NOGON_URL="http://new:1")
         with redirect_stderr(io.StringIO()) as err:
-            hl.legacy_env(env)
-            hl.legacy_env(env)
-        self.assertEqual(env["NOGON_LOGIN_DB"], "/old.db")
-        self.assertEqual(env["NOGON_LOGIN_PORT"], "")                       # set, even empty: it wins
-        self.assertEqual(env["NOGON_LOGIN_HISTER_URL"], "http://h:1")       # Settings reads it as the Nogon URL
-        self.assertLessEqual(err.getvalue().count("HISTER_LOGIN_DB"), 1)
+            s = hl.Settings(env)
+        self.assertEqual((s.port, s.nogon_url), (8080, "http://new:1"))   # an empty new name wins (the default)
+        self.assertIn("HISTER_LOGIN_PORT", err.getvalue())
 
-    def test_settings_from_old_names(self):
-        old = {k.replace("NOGON_LOGIN_", "HISTER_LOGIN_"): v for k, v in ENV.items()}
-        old["HISTER_LOGIN_HISTER_URL"] = "http://h:1"
-        with redirect_stderr(io.StringIO()):
-            s = hl.Settings(old)
-        self.assertEqual(s.hister_url, "http://h:1")
-        self.assertEqual(s.public_url, ENV["NOGON_LOGIN_PUBLIC_URL"].rstrip("/"))
+    def test_the_default_nogon_url(self):
+        self.assertEqual(hl.Settings(dict(ENV)).nogon_url, "http://nogon:4433")

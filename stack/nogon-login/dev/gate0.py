@@ -51,7 +51,7 @@ def wait_http(url, want=200, timeout=40, ctx=None):
     while time.time() - t < timeout:
         try:
             r = ctx.get(url)
-            if r.status == want and (not url.endswith("/machiya/healthz") or r.json().get("hister") == "ok"):
+            if r.status == want and (not url.endswith("/machiya/healthz") or r.json().get("nogon") == "ok"):
                 return True
         except Exception:
             pass
@@ -410,7 +410,7 @@ def c8_user_handling_off(browser, engine):
     compose("up", "-d", "hister", HISTER_USER_HANDLING="true")
     wait_http(HISTER + "/machiya/healthz", 200, 60, fresh.request)
     ok = all(v == (503, 503) for v in res.values()) and r.status == 503 and health[0] == 200 \
-        and health[1].get("hister") == "user-handling-off" and with_ts[0] == 200 and with_ts[1].get("banner")
+        and health[1].get("nogon") == "user-handling-off" and with_ts[0] == 200 and with_ts[1].get("banner")
     record("[%s] with user_handling off nobody is admitted through Hister" % engine, ok,
            "rooms (session, owner token) without a Tailscale identity: %s\nhelper sign-in page: %s %r\n"
            "healthz: %s\nNiwa with the owner's Tailscale identity: %s (the tailnet fallback, by design)"
@@ -427,7 +427,7 @@ def c9_app_flow(browser, engine):
     s = next((c["value"] for c in ctx.cookies() if c["name"] == "hister"), None)
     ctx.clear_cookies()
     r2 = ctx.request.post(HISTER + "/machiya/api/app-session", headers={"Content-Type": "application/json"},
-                          data=json.dumps({"hister": s, "label": "Dev iPhone"}))
+                          data=json.dumps({"nogon": s, "label": "Dev iPhone"}))
     sid = r2.json().get("sid") if r2.status == 200 else None
     bearer = {"Authorization": "Bearer %s" % sid}
     who_app = api(ctx, KURA + "/api/whoami", bearer)

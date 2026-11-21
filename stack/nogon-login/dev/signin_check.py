@@ -34,7 +34,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [os.path.join(HERE, ".."), os.path.join(HERE, "..", "tests")]
 
 import nogon_login as hl                      # noqa: E402
-from fake_hister import FakeHister             # noqa: E402
+from fake_nogon import FakeNogon               # noqa: E402
 from playwright.sync_api import sync_playwright   # noqa: E402
 
 WORK = os.environ.get("WORK", "/var/tmp/machiya-login")
@@ -80,7 +80,7 @@ def run(tmp):
         for name, text in EXTENSION.items():
             with open(os.path.join(tmp, mode, name), "w") as f:
                 f.write(text % mode if name == "fill.js" else text)
-    fake = FakeHister()
+    fake = FakeNogon()
     env = {"NOGON_LOGIN_PUBLIC_URL": "https://" + HISTER, "NOGON_LOGIN_NOGON_URL": fake.url,
            "NOGON_LOGIN_DB": tmp + "/hl.db", "NOGON_LOGIN_PROVIDERS": "oidc", "NOGON_LOGIN_LEGACY": "none",
            "NOGON_LOGIN_PROXIED_ORIGINS": "https://" + SEARCH, "NOGON_LOGIN_RETURN_HOSTS": SEARCH,

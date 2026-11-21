@@ -4,9 +4,9 @@ A rootless podman stack that proves the Hister sign-in end to end on dummy data,
 
 | Piece | What it stands for |
 |---|---|
-| `hister` | Hister v0.20.0 (the pinned upstream image), users on, the OIDC config in `hister-config.yml`, the client secret from an env file |
+| `hister` | Hister v0.20.0 (the pinned upstream image; not yet moved to Nogon v0.22, whose CLI dropped `create-user` and `show-user`: since nogon-login 0.9.0 sends `Origin: nogon://`, which v0.22 takes, the sign-out steps want that move first), users on, the OIDC config in `hister-config.yml`, the client secret from an env file |
 | `nogon-login` | the helper, built from `..` |
-| `room-kura`, `room-niwa`, `room-konbini` (`room.py`) | the smallest rooms using `vaultkit.histerauth`: Kura with `KURA_AUTH_FALLBACK=none`, Niwa and Konbini with the Tailscale fallback |
+| `room-kura`, `room-niwa`, `room-konbini` (`room.py`) | the smallest rooms using `vaultkit.nogonauth`: Kura with `KURA_AUTH_FALLBACK=none`, Niwa and Konbini with the Tailscale fallback |
 | `stub-idp` (`stub_idp.py`) | tsidp's shape: discovery, PKCE S256, `client_secret_post`, userinfo with `email` = `<login>.<idp host>` and no `preferred_username` |
 | `front` (`front.conf`) | Tailscale Serve (TLS for `*.machiya.test` on 127.0.0.1:19043; `/machiya/` and `/api/oauth/callback` on Hister's host go to the helper) and the hosted pages' nginx (`shiori.machiya.test`: `auth_request` to `/v1/nginx`) |
 

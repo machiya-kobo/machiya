@@ -1,15 +1,15 @@
 # nogon-login
 
-Hister's users as the one sign-in for every Machiya room. Hister keeps its session cookie (`hister`) on its own host; this
-helper sits on that host too and turns a Hister session into an opaque id, its own host-only cookie
-`__Host-machiya_sso=mhs_…` (0.3.0). Each room (`<P>_AUTH=hister`, `vaultkit.histerauth`) keeps a host-only cookie of its own,
+Nogon's users as the one sign-in for every Machiya room. Nogon keeps its session cookie (`hister`) on its own host; this
+helper sits on that host too and turns a Nogon session into an opaque id, its own host-only cookie
+`__Host-machiya_sso=mhs_…` (0.3.0). Each room (`<P>_AUTH=nogon`, `vaultkit.nogonauth`) keeps a host-only cookie of its own,
 made from a one-time code the helper sends back with the browser; rooms ask the helper about their cookie (or an app's id,
-or a room token) over the internal network; the helper asks Hister's `GET /api/profile` and caches the answer for 30 s.
-Signing out anywhere ends the Hister session, every id on it and every room's cookie made from them. Hister itself is not
+or a room token) over the internal network; the helper asks Nogon's `GET /api/profile` and caches the answer for 30 s.
+Signing out anywhere ends the Nogon session, every id on it and every room's cookie made from them. Nogon itself is not
 patched. The design: [docs/identity.md](../../docs/identity.md#one-cookie-per-room).
 
 ```
-NOGON_LOGIN_PUBLIC_URL=https://hister.example.ts.net NOGON_LOGIN_NOGON_URL=http://hister:4433 \
+NOGON_LOGIN_PUBLIC_URL=https://nogon.example.ts.net NOGON_LOGIN_NOGON_URL=http://nogon:4433 \
   MACHIYA_COOKIE_DOMAIN=example.ts.net NOGON_LOGIN_DB=/tmp/hl.sqlite3 python3 nogon_login.py
 python3 -m unittest discover -s tests      # from this directory; needs markdown and pyyaml (vaultkit's dependencies)
 podman build -t nogon-login:dev .         # or docker build
@@ -20,45 +20,45 @@ dev/gate0.sh                               # the phase-0 proof: a dev stack, Pla
 
 | Port | Reached by | Paths |
 |---|---|---|
-| `NOGON_LOGIN_PORT` (8080), public | browsers and apps, through the proxy on Hister's host (Tailscale Serve sends it `/machiya/` and the single path `/api/oauth/callback`; everything else goes to Hister) | `GET /machiya/signin?return=…[&state=…][&app=1][&provider=oidc[&auto=1]]`, `GET /api/oauth/callback` (a shim: Hister's own callback, then an id and the way back), `POST /machiya/signout`, `GET`/`POST /machiya/sessions` (sessions, the rooms each browser opened, room tokens), `POST /machiya/api/app-session`, `GET /machiya/healthz`, `GET`/`PUT /machiya/api/prefs` (0.2.0), `/machiya/static/…` |
+| `NOGON_LOGIN_PORT` (8080), public | browsers and apps, through the proxy on Nogon's host (Tailscale Serve sends it `/machiya/` and the single path `/api/oauth/callback`; everything else goes to Nogon) | `GET /machiya/signin?return=…[&state=…][&app=1][&provider=oidc[&auto=1]]`, `GET /api/oauth/callback` (a shim: Nogon's own callback, then an id and the way back), `POST /machiya/signout`, `GET`/`POST /machiya/sessions` (sessions, the rooms each browser opened, room tokens), `POST /machiya/api/app-session`, `GET /machiya/healthz`, `GET`/`PUT /machiya/api/prefs` (0.2.0), `/machiya/static/…` |
 | the same port, for a host in `NOGON_LOGIN_PROXIED_ORIGINS` (0.3.0) | the hosted pages (`search.*`, `shiori.*`), through their nginx, which passes `Host` on | only `GET /machiya/start`, `GET /machiya/callback`, `GET /machiya/signed-out`, `GET`/`PUT /machiya/api/prefs`, `/machiya/static/…`, `POST /machiya/signout`: the helper is that host's room (`__Host-machiya_sso_shiori`) |
 | `NOGON_LOGIN_INTERNAL_PORT` (8081), internal only, never routed by the proxy | the rooms and the hosted pages' nginx | `GET /v1/check`, `POST /v1/redeem` (0.3.0), `POST /v1/signout`, `GET /v1/nginx`, `GET /healthz`, `GET`/`PUT /v1/prefs` (0.2.0) |
 | `NOGON_LOGIN_OAUTH_PORT` (0.7.0; off when unset), public | an MCP connector's client and your browser, through the connector's own host (Funnel sends it `/oauth/` and the metadata) | `GET /.well-known/oauth-authorization-server`, `POST /oauth/register`, `GET`/`POST /oauth/authorize`, `GET /oauth/callback`, `POST /oauth/token`, `POST /oauth/revoke`, `/oauth/static/…`; everything else 404 |
 
-`GET /v1/check` takes one credential, `X-Machiya-Session: mhs_…|mhr_…|mht_…` or `X-Access-Token: <Hister token>`, and
+`GET /v1/check` takes one credential, `X-Machiya-Session: mhs_…|mhr_…|mht_…` or `X-Access-Token: <Nogon token>`, and
 (0.3.0) the asking room's origins, `X-Machiya-Room: https://kura.example.ts.net[, <origin it also accepts>…]`:
 
 | Credential | 200 when |
 |---|---|
-| `mhr_…` (a room session) | it was made for one of those origins, and its helper session is alive (checked with Hister as below) |
+| `mhr_…` (a room session) | it was made for one of those origins, and its helper session is alive (checked with Nogon as below) |
 | `mht_…` (a room token) | it names the room's own origin (the first), and isn't revoked or expired |
 | `mhs_…` of an app | the session is alive (every room) |
 | `mhs_…` of a browser (the old shared-domain cookie) | `domain-cookie` is in `NOGON_LOGIN_LEGACY`, and the session is alive |
-| Hister's token | `hister-token` is in `NOGON_LOGIN_LEGACY`, and Hister says so |
-| `mho_…` (an OAuth access token, 0.7.0) | `X-Machiya-Room` is exactly `mcp-public` (the connector), and it isn't revoked or expired; the answer is `200 {"username", "user_id", "via": "oauth", "kind": "oauth", "scopes": "pages:read notes:read", "resource", "client_id"}`. It never goes to Hister, and `mcp-public` gets nothing else |
+| Nogon's token | `nogon-token` (or its old spelling `hister-token`) is in `NOGON_LOGIN_LEGACY`, and Nogon says so |
+| `mho_…` (an OAuth access token, 0.7.0) | `X-Machiya-Room` is exactly `mcp-public` (the connector), and it isn't revoked or expired; the answer is `200 {"username", "user_id", "via": "oauth", "kind": "oauth", "scopes": "pages:read notes:read", "resource", "client_id"}`. It never goes to Nogon, and `mcp-public` gets nothing else |
 
-| Hister said | Answer |
+| Nogon said | Answer |
 |---|---|
 | 200 with a JSON `username` | `200 {"username", "user_id", "via": "session"\|"token", "kind": "room"\|"token"\|"app"\|"browser"\|"hister-token", "room", "prefs"}` (the row's expiry slides; `prefs`: the account's Shared settings, 0.2.0) |
-| 401/403, or the id is unknown or expired | `401 {"reason": "signed-out"}`; every id on that Hister session is deleted, with the room sessions made from them |
+| 401/403, or the id is unknown or expired | `401 {"reason": "signed-out"}`; every id on that Nogon session is deleted, with the room sessions made from them |
 | (the helper itself) another room's session, or a token for other rooms | `401 {"reason": "wrong-room"}` |
 | (the helper itself) a legacy credential after the switch | `401 {"reason": "legacy-off"}` |
 | 200 with no JSON user (`user_handling` is off) | `503 {"reason": "user-handling-off"}`, logged loudly |
 | timeout, connection error, 5xx | `503 {"reason": "hister-unavailable"}` |
 
-Two health answers: the internal `GET /healthz` is the rooms' (503 unless the helper **and** Hister are fine; a room uses it
+Two health answers: the internal `GET /healthz` is the rooms' (503 unless the helper **and** Nogon are fine; a room uses it
 to know sign-in is unavailable before anyone signs in); the public `GET /machiya/healthz` is the probe's (200 while the
-helper and its state work, with Hister's state as `"hister": "ok"|"down"|"user-handling-off"`; 503 only when the
-helper's own state fails), so a Hister outage alerts once, from Hister's own `/health` probe.
+helper and its state work, with Nogon's state as `"nogon": "ok"|"down"|"user-handling-off"` (0.8.x also sent it as `"hister"`); 503 only when the
+helper's own state fails), so a Nogon outage alerts once, from Nogon's own `/health` probe.
 
 **Preferences** (0.2.0, [docs/contracts/prefs.md](../../docs/contracts/prefs.md)):
 - `GET`/`PUT /v1/prefs` takes the same one credential as `/v1/check`: the rooms forward their `/api/prefs` with the caller's own.
-- `GET`/`PUT /machiya/api/prefs` takes `Authorization: Bearer mhs_…` or a Hister token (`X-Access-Token`, `Bearer`), or the sign-in cookie. A cookie `PUT` needs an `Origin` among the return hosts: the hosted pages, through their nginx. There is no CORS.
+- `GET`/`PUT /machiya/api/prefs` takes `Authorization: Bearer mhs_…` or a Nogon token (`X-Access-Token`, `Bearer`), or the sign-in cookie. A cookie `PUT` needs an `Origin` among the return hosts: the hosted pages, through their nginx. There is no CORS.
 - Both answer `{"v": 1, "rev", "prefs", "updated"}` with `ETag: "<rev>"` (304 on `If-None-Match`), and a `PUT` merges only the keys sent.
 - Errors: 400 (the schema), 401 `{"error": "sign in", "signin"}`, 403, 413, 415, 503.
 
 **A room's cookie** (0.3.0). A room sends a browser here with `return=<its page>&state=<SHA-256 of a nonce>`; the nonce
-stays in the room's own host-only cookie. Once the helper knows the browser (Hister's cookie, its own `__Host-machiya_sso`,
+stays in the room's own host-only cookie. Once the helper knows the browser (Nogon's cookie, its own `__Host-machiya_sso`,
 the automatic provider or the page), it sends the browser to `<the room's origin>/machiya/callback?code=mhc_…`. The room
 trades the code at `POST /v1/redeem` (`X-Machiya-Code`, `X-Machiya-Room: <its origin>`, `X-Machiya-State: <the nonce>`):
 the code works once, within 60 s, only for that origin and that nonce, and only while its helper session lives. The answer
@@ -66,24 +66,25 @@ is `200 {"session": "mhr_…", "return", "username", "user_id", "max_age", "pref
 `return` without a state gets no code: the browser goes back to it as it is (the room then makes its own trip; a proxied
 origin goes through its `/machiya/start`).
 
-**Sign-out** (`/v1/signout` from a room with its `mhr_…`, `/machiya/signout`, the sessions page) ends the Hister session, the
+**Sign-out** (`/v1/signout` from a room with its `mhr_…`, `/machiya/signout`, the sessions page) ends the Nogon session, the
 browser's helper id, every room session and unused code made from it, and remembers the id as ended for 30 days, so
 whichever room the browser opens next shows the page instead of an automatic sign-in.
 
 **Room tokens** (0.3.0): `mht_…`, for headless callers (pm, machiya-mcp, landing, Niwa→Konbini, scripts, an extension).
-Each acts as one Hister user, opens only the rooms (origins) it names, and is kept as a SHA-256 only. Make one on the
+Each acts as one Nogon user, opens only the rooms (origins) it names, and is kept as a SHA-256 only. Make one on the
 sessions page (Room Tokens: a name and the rooms; shown once) or here: `token mint --user NAME --label L --rooms
 kura,konbini [--days N] [--out FILE]`; `token add … --from-file FILE` registers a value made elsewhere; `token list`;
 `token revoke ID`. Revoke one on the sessions page.
 
-**Automatic sign-in** (0.2.0): `/machiya/signin?…&provider=oidc&auto=1` (a room's, with `MACHIYA_SIGNIN_PROVIDER=oidc`) goes straight to Hister's `/api/oauth?provider=oidc`, unless the browser holds the marker `__Host-machiya_sso_out` (0.3.0: host-only; the rooms keep their own), or its cookie names an id that was signed out on purpose. A deliberate sign-out sets the marker for 30 days, a round trip that failed for 10 minutes; with it the page shows. The next sign-in clears it.
+**Automatic sign-in** (0.2.0): `/machiya/signin?…&provider=oidc&auto=1` (a room's, with `MACHIYA_SIGNIN_PROVIDER=oidc`) goes straight to Nogon's `/api/oauth?provider=oidc`, unless the browser holds the marker `__Host-machiya_sso_out` (0.3.0: host-only; the rooms keep their own), or its cookie names an id that was signed out on purpose. A deliberate sign-out sets the marker for 30 days, a round trip that failed for 10 minutes; with it the page shows. The next sign-in clears it.
 
 `GET /v1/nginx` (for `auth_request`) takes the hosted pages' room session (`X-Machiya-Session`, or their
 `__Host-machiya_sso_shiori` cookie in `Cookie`) with `X-Machiya-Room: https://$host`, and answers 200 with
-`X-Hister-Cookie: hister=<session>` for nginx's hop to Hister, 401, or 503. Since 0.5.0 it answers 200 only when that
+`X-Nogon-Cookie: hister=<session>` and `X-Nogon-User` for nginx's hop to Nogon (whose cookie is still named `hister`),
+401, or 503. 0.9.0 no longer sends the old `X-Hister-*` twins; shiori-web reads `X-Nogon-Cookie` since 1.29.1. Since 0.5.0 it answers 200 only when that
 origin is in `NOGON_LOGIN_PROXIED_ORIGINS` and the session was made for that same origin; another room's session, an
-app's or a browser's `mhs_…`, or any other origin gets the 401 of a signed-out browser. Hister re-sends its cookie on every signed-in
-answer, so that nginx location must also have `proxy_hide_header Set-Cookie;`, or the raw Hister session reaches the
+app's or a browser's `mhs_…`, or any other origin gets the 401 of a signed-out browser. Nogon re-sends its cookie on every signed-in
+answer, so that nginx location must also have `proxy_hide_header Set-Cookie;`, or the raw Nogon session reaches the
 browser on the hosted pages' host. The nginx side: [docs/services/nogon-login.md](../../docs/services/nogon-login.md).
 
 **The OAuth server** (0.7.0, [docs/services/nogon-login.md](../../docs/services/nogon-login.md#the-oauth-server)):
@@ -103,36 +104,38 @@ OAuth 2.1 for public clients, for one MCP connector on a host of its own.
 
 ## Settings
 
+Since 0.9.0 the old `HISTER_LOGIN_*` names are not read: one set without its `NOGON_LOGIN_*` twin stops the helper, naming the new variable (`HISTER_LOGIN_HISTER_URL` and `NOGON_LOGIN_HISTER_URL` → `NOGON_LOGIN_NOGON_URL`); beside it, it is ignored and said once.
+
 | Setting | Default | Meaning |
 |---|---|---|
-| `NOGON_LOGIN_PUBLIC_URL` | required | Hister's public address, `https://hister.example.ts.net` (no path): cookies get `Secure` when it is https; same-origin checks use it |
-| `NOGON_LOGIN_NOGON_URL` | `http://hister:4433` | Nogon on the internal network (`NOGON_LOGIN_NOGON_URL` still read until the rename's stage 3) |
-| `NOGON_LOGIN_LEGACY` | `none` | the old ways, each an opt-in (0.5.0; before, both were on by default): `domain-cookie` sets the old `machiya_sso` on `MACHIYA_COOKIE_DOMAIN` beside the host-only cookie and lets rooms take a browser's helper id; `hister-token` lets rooms take Hister's raw token. Set one or both (comma-separated) only while an old room or client still needs it |
+| `NOGON_LOGIN_PUBLIC_URL` | required | Nogon's public address, `https://nogon.example.ts.net` (no path): cookies get `Secure` when it is https; same-origin checks use it |
+| `NOGON_LOGIN_NOGON_URL` | `http://nogon:4433` | Nogon on the internal network |
+| `NOGON_LOGIN_LEGACY` | `none` | the old ways, each an opt-in (0.5.0; before, both were on by default): `domain-cookie` sets the old `machiya_sso` on `MACHIYA_COOKIE_DOMAIN` beside the host-only cookie and lets rooms take a browser's helper id; `nogon-token` lets rooms take Nogon's raw token (`hister-token`, its old spelling, is still read). Set one or both (comma-separated) only while an old room or client still needs it |
 | `NOGON_LOGIN_PROXIED_ORIGINS` | none | the hosted pages' origins (`https://search.…,https://shiori.…`), whose nginx sends `/machiya/start`, `/machiya/callback`, `/machiya/signout`, `/machiya/api/prefs` and `/machiya/static/` here with their `Host`; added to the return hosts |
 | `NOGON_LOGIN_TOKEN_SERVICES` | none | services with a gate of their own that also take room tokens, `name=url` comma-separated (`machiya-mcp=https://mcp.example.ts.net,smallweb=https://smallweb.example.ts.net`): offered beside the rooms of `MACHIYA_ROOMS` on the sessions page and to `token mint --rooms` |
 | `MACHIYA_SIGNIN_PROVIDER` | none | for a proxied origin's `/machiya/start`: sign in automatically through that provider, as the rooms do |
 | `MACHIYA_COOKIE_DOMAIN` | none | the shared domain of the legacy `machiya_sso` (set and cleared only while `domain-cookie` is on; always cleared at sign-out) |
-| `MACHIYA_SSO_COOKIE` | `machiya_sso` | the sign-in cookie's base name (letters, digits, `_`, `-`): the helper's own is `__Host-<it>`, a room's `__Host-<it>_<room>`, the hosted pages' `__Host-<it>_shiori`; the rooms and landing must use the same (vaultkit's `histerauth` reads the same setting) |
+| `MACHIYA_SSO_COOKIE` | `machiya_sso` | the sign-in cookie's base name (letters, digits, `_`, `-`): the helper's own is `__Host-<it>`, a room's `__Host-<it>_<room>`, the hosted pages' `__Host-<it>_shiori`; the rooms and landing must use the same (vaultkit's `nogonauth` reads the same setting) |
 | `NOGON_LOGIN_RETURN_HOSTS` | the https hosts in `MACHIYA_ROOMS`, minus searxng | where a browser may be sent back to (`host` or `host:port`, exact); the helper's own host is always allowed |
 | `NOGON_LOGIN_APP_SCHEMES` | `shiori` | URL schemes the app flow (`app=1`) may return to |
-| `NOGON_LOGIN_PROVIDERS` | none | `oidc` shows "Sign in with …" (Hister's `/api/oauth?provider=oidc`) |
+| `NOGON_LOGIN_PROVIDERS` | none | `oidc` shows "Sign in with …" (Nogon's `/api/oauth?provider=oidc`) |
 | `NOGON_LOGIN_OIDC_LABEL` | `Tailscale` | its label |
 | `NOGON_LOGIN_DB` | `/data/hister-login.sqlite3` | the state (0600, WAL) |
 | `NOGON_LOGIN_PREFS_DB` | `prefs.sqlite3` beside `NOGON_LOGIN_DB` | each user's settings (0600; 0.2.0). Back it up with the state |
 | `NOGON_LOGIN_BIND`, `NOGON_LOGIN_PORT`, `NOGON_LOGIN_INTERNAL_PORT` | `0.0.0.0`, 8080, 8081 | |
 | `NOGON_LOGIN_OAUTH_PORT` | none (off) | the OAuth server's port (0.7.0). With it, the four below are checked, and a bad one refuses to start |
-| `NOGON_LOGIN_OAUTH_ISSUER` | required with the port | the connector's own origin, `https://mcp-public.example.ts.net` (no path; never http, since the sign-in trip returns only to https addresses; a dev stack uses an https name for it too). Not Hister's, a room's or the hosted pages'. Added to the return hosts |
+| `NOGON_LOGIN_OAUTH_ISSUER` | required with the port | the connector's own origin, `https://mcp-public.example.ts.net` (no path; never http, since the sign-in trip returns only to https addresses; a dev stack uses an https name for it too). Not Nogon's, a room's or the hosted pages'. Added to the return hosts |
 | `NOGON_LOGIN_OAUTH_RESOURCE` | required with the port | the MCP address on that host, `https://mcp-public.example.ts.net/mcp`: every token is bound to it |
 | `NOGON_LOGIN_OAUTH_REDIRECTS` | none (every registration refused) | the exact https return addresses a client may register, comma-separated. For Claude: `https://claude.ai/api/mcp/auth_callback,https://claude.com/api/mcp/auth_callback` |
-| `NOGON_LOGIN_OAUTH_USERS` | required with the port | Hister usernames who may allow a connector (never `*`); checked again on every token and check |
+| `NOGON_LOGIN_OAUTH_USERS` | required with the port | Nogon usernames who may allow a connector (never `*`); checked again on every token and check |
 
 ## State
 
-One SQLite file. `sessions` holds, per id, its SHA-256 (the id itself is never stored), the raw Hister session it maps to
-(the helper must present it to Hister), that session's hash (so every id on one Hister session goes at once), the user,
+One SQLite file. `sessions` holds, per id, its SHA-256 (the id itself is never stored), the raw Nogon session it maps to
+(the helper must present it to Nogon), that session's hash (so every id on one Nogon session goes at once), the user,
 `browser` or `app`, a short label, and the times. Expiry slides 30 days with each successful check, never past 180 days
-from sign-in. `pending_logout` holds Hister sign-outs that couldn't be made while Hister was down; they are retried every
-minute. Expired rows go hourly. Lose the file and browsers sign in again silently (one bounce, while Hister's own cookie
+from sign-in. `pending_logout` holds Nogon sign-outs that couldn't be made while Nogon was down; they are retried every
+minute. Expired rows go hourly. Lose the file and browsers sign in again silently (one bounce, while Nogon's own cookie
 holds); apps sign in again, and room tokens must be made again.
 
 0.3.0 adds to the same file: `room_sessions` (a room session's SHA-256, its helper id's hash, the room's origin, the times;
@@ -158,4 +161,4 @@ python3 nogon_login.py prefs delete --user owner
 ```
 
 Layout: `nogon_login.py` (everything), `static/` (the sign-in page's script, the icon), `vaultkit/` (vendored, never
-edited here), `tests/` (a fake Hister on a local port), `dev/` (the phase-0 dev stack and its Playwright checks).
+edited here), `tests/` (a fake Nogon on a local port), `dev/` (the phase-0 dev stack and its Playwright checks).

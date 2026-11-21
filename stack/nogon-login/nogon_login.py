@@ -1,29 +1,29 @@
-"""nogon-login (machiya-kobo/machiya stack/nogon-login): Hister's users as the one sign-in for every Machiya room.
+"""nogon-login (machiya-kobo/machiya stack/nogon-login): Nogon's users as the one sign-in for every Machiya room.
 
-Hister keeps its session cookie (`hister`) on its own host. This helper sits on that host too (Tailscale Serve sends
-it /machiya/… and /api/oauth/callback; everything else goes to Hister) and turns a Hister session into an opaque id,
+Nogon keeps its session cookie (`hister`) on its own host. This helper sits on that host too (Tailscale Serve sends
+it /machiya/… and /api/oauth/callback; everything else goes to Nogon) and turns a Nogon session into an opaque id,
 its own host-only cookie `__Host-machiya_sso=mhs_…` (0.3.0; before, `machiya_sso` on the tailnet's shared domain,
 which NOGON_LOGIN_LEGACY=domain-cookie still sets, an opt-in since 0.5.0). Each room gets a cookie of its own: the room sends the browser
 here with a state, the helper sends it back to the room's /machiya/callback with a one-time code (60 s, one use,
 bound to that room's origin and the browser's state), and the room trades it at POST /v1/redeem for a room session
 (`mhr_…`) that only that room accepts. The rooms ask about a credential over the internal network (/v1/check, naming
-themselves in X-Machiya-Room); the helper asks Hister's GET /api/profile and caches the answer for 30 s. Signing out
-anywhere ends the Hister session, every id on it and every room session made from them. Headless callers get room
-tokens (`mht_…`, scoped to rooms; the sessions page or `token mint`) instead of Hister's raw token. Hister itself is
+themselves in X-Machiya-Room); the helper asks Nogon's GET /api/profile and caches the answer for 30 s. Signing out
+anywhere ends the Nogon session, every id on it and every room session made from them. Headless callers get room
+tokens (`mht_…`, scoped to rooms; the sessions page or `token mint`) instead of Nogon's raw token. Nogon itself is
 not patched.
 
 Two ports:
   public   (NOGON_LOGIN_PORT, 8080): GET /machiya/signin, GET /api/oauth/callback (a pass-through shim),
            POST /machiya/signout, GET/POST /machiya/sessions (sessions, the rooms each opened, room tokens),
            POST /machiya/api/app-session, GET /machiya/healthz
-           (the probe's: 200 while the helper and its state work, with Hister's state as "hister"; 503 only when the
+           (the probe's: 200 while the helper and its state work, with Nogon's state as "nogon"; 503 only when the
            helper's own state fails), GET/PUT /machiya/api/prefs (0.2.0: the account's settings, for Shiori's apps,
            extensions and hosted pages), /machiya/static/…; on a NOGON_LOGIN_PROXIED_ORIGINS host (the hosted pages,
            through their nginx with their Host) only GET /machiya/start, /machiya/callback, /machiya/signed-out,
            /machiya/api/prefs, /machiya/static/… and POST /machiya/signout, as that host's room
   internal (NOGON_LOGIN_INTERNAL_PORT, 8081; never routed by Serve): GET /v1/check, POST /v1/redeem (0.3.0),
            POST /v1/signout,
-           GET /v1/nginx (nginx auth_request), GET /healthz (the rooms': 503 unless the helper AND Hister are fine),
+           GET /v1/nginx (nginx auth_request), GET /healthz (the rooms': 503 unless the helper AND Nogon are fine),
            GET/PUT /v1/prefs (0.2.0: a room's /api/prefs, forwarded with the caller's own credential)
   oauth    (NOGON_LOGIN_OAUTH_PORT, off when unset; 0.7.0): an OAuth 2.1 server for one public MCP connector, on the
            connector's own host (NOGON_LOGIN_OAUTH_ISSUER, Tailscale Funnel sends it /oauth/… and the metadata):
@@ -33,8 +33,8 @@ Two ports:
            (S256 PKCE; mho_ access tokens for 1 h, mhf_ refresh tokens that rotate), POST /oauth/revoke,
            /oauth/static/…; nothing else. The connector asks /v1/check about an mho_, naming itself in X-Machiya-Room
 
-State: one SQLite file (NOGON_LOGIN_DB). An id is stored only as its SHA-256; the Hister session it maps to is
-stored raw (the helper must present it to Hister). The settings that follow each Hister user are a second file
+State: one SQLite file (NOGON_LOGIN_DB). An id is stored only as its SHA-256; the Nogon session it maps to is
+stored raw (the helper must present it to Nogon). The settings that follow each Nogon user are a second file
 (NOGON_LOGIN_PREFS_DB, prefs.sqlite3 beside it; docs/contracts/prefs.md), keyed by hi:<sha256(username)>, so the
 sessions file stays as small and as sensitive as it is. Standard library only, plus the vendored vaultkit.
 
@@ -67,38 +67,40 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from vaultkit import histerauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
+from vaultkit import names as vnames, nogonauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.8.1"
-SID_PREFIX = histerauth.SID_PREFIX
-SID_RE = histerauth.SID_RE
-HISTER_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")        # Hister's: 32 random bytes, base64url
-SSO, RETURN_COOKIE, HISTER_COOKIE = histerauth.SSO_COOKIE, "machiya_return", "hister"    # SSO: the default name
+VERSION = "0.9.0"
+SID_PREFIX = nogonauth.SID_PREFIX
+SID_RE = nogonauth.SID_RE
+NOGON_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")         # Nogon's: 32 random bytes, base64url
+# NOGON_COOKIE: upstream Nogon's own session cookie, still named hister (its storeName); SSO: the default name
+SSO, RETURN_COOKIE, NOGON_COOKIE = nogonauth.SSO_COOKIE, "machiya_return", "hister"
 COOKIE_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,60}\Z")
-VERIFY_TTL = 30                 # an id checked with Hister this recently is answered from the row
+VERIFY_TTL = 30                 # an id checked with Nogon this recently is answered from the row
 TOKEN_TTL_OK, TOKEN_TTL_OUT = 30, 5
 SESSION_DAYS, CAP_DAYS = 30, 180
-OUT_MAX_AGE = histerauth.OUT_MAX_AGE    # the signed-out marker (<sign-in cookie>_out): until the next sign-in
+OUT_MAX_AGE = nogonauth.OUT_MAX_AGE    # the signed-out marker (<sign-in cookie>_out): until the next sign-in
 FAILED_MAX_AGE = 600                    # after a failed automatic round trip: the page, not another try
 HEALTH_TTL = 10
-HISTER_TIMEOUT = 2.0
+NOGON_TIMEOUT = 2.0
 MAX_BODY = 4096
 RETURN_MAX_AGE = 600
 LOG = lambda *a: print(*a, file=sys.stderr, flush=True)        # noqa: E731
-_legacy_seen = set()
 
 
-def legacy_env(env):
-    """0.8.0, the rename (Hister is now Nogon; docs/contracts/hister.md "Names"): a deployment's HISTER_LOGIN_<X> is
-    read as NOGON_LOGIN_<X> when that isn't set (a NOGON_LOGIN_<X> that is set wins, even empty). Fills `env` in place
-    and logs each old name once. -> env."""
-    for old in [k for k in env if k.startswith("HISTER_LOGIN_")]:
-        new = "NOGON_LOGIN_" + old[len("HISTER_LOGIN_"):]
-        if new not in env:
-            env[new] = env[old]
-            if old not in _legacy_seen:
-                _legacy_seen.add(old)
-                LOG("nogon-login: %s is an old name, read as %s (rename it before the old names go)" % (old, new))
+def old_names(env):
+    """0.9.0, the rename's stage 3 (Hister is now Nogon; docs/contracts/nogon.md "Names"): the HISTER_LOGIN_<X> names
+    are no longer read. One set without its NOGON_LOGIN_<X> stops the helper, naming the new variable, as vaultkit's
+    vaultkit.names.setting() does in the rooms; beside it, it is ignored and said once. NOGON_LOGIN_HISTER_URL (0.8.0 read it
+    as the Nogon URL) is NOGON_LOGIN_NOGON_URL. -> env."""
+    for old in sorted(k for k in env if k.startswith("HISTER_LOGIN_")):
+        try:
+            vnames.setting(old.replace("HISTER", "NOGON"), env)     # HISTER_LOGIN_HISTER_URL -> NOGON_LOGIN_NOGON_URL
+        except vnames.OldName as e:
+            raise SystemExit("nogon-login: %s" % e)
+    if "NOGON_LOGIN_HISTER_URL" in env and "NOGON_LOGIN_NOGON_URL" not in env:
+        raise SystemExit("nogon-login: NOGON_LOGIN_HISTER_URL is an old name and is no longer read: rename it "
+                         "NOGON_LOGIN_NOGON_URL (Hister is now Nogon)")
     return env
 
 
@@ -122,41 +124,43 @@ def b64d(text):
 
 class Settings:
     def __init__(self, env=None):
-        env = legacy_env(os.environ if env is None else env)
-        self.hister_url = (env.get("NOGON_LOGIN_NOGON_URL") or env.get("NOGON_LOGIN_HISTER_URL") or "http://hister:4433").strip().rstrip("/")
+        env = old_names(os.environ if env is None else env)
+        self.nogon_url = (env.get("NOGON_LOGIN_NOGON_URL") or "http://nogon:4433").strip().rstrip("/")
         self.public_url = (env.get("NOGON_LOGIN_PUBLIC_URL") or "").strip().rstrip("/")
         if not re.fullmatch(r"https?://[A-Za-z0-9.-]+(:[0-9]+)?", self.public_url):
-            raise SystemExit("nogon-login: NOGON_LOGIN_PUBLIC_URL must be Hister's public address, "
-                             "https://hister.example.ts.net (no path)")
+            raise SystemExit("nogon-login: NOGON_LOGIN_PUBLIC_URL must be Nogon's public address, "
+                             "https://nogon.example.ts.net (no path)")
         self.secure = self.public_url.startswith("https://")
-        # MACHIYA_SSO_COOKIE: the sign-in cookie's name (vaultkit.histerauth reads the same setting in the rooms)
+        # MACHIYA_SSO_COOKIE: the sign-in cookie's name (vaultkit.nogonauth reads the same setting in the rooms)
         self.sso = (env.get("MACHIYA_SSO_COOKIE") or "").strip() or SSO
         if not COOKIE_NAME_RE.match(self.sso):
             raise SystemExit("nogon-login: MACHIYA_SSO_COOKIE must be a cookie name (letters, digits, _ and -)")
-        # 0.3.0: the helper's own cookies are host-only (__Host- over https): its session never leaves Hister's host
-        self.prefix = histerauth.HOST_PREFIX if self.secure else ""
+        # 0.3.0: the helper's own cookies are host-only (__Host- over https): its session never leaves Nogon's host
+        self.prefix = nogonauth.HOST_PREFIX if self.secure else ""
         self.own = self.prefix + self.sso               # the helper's browser session (__Host-machiya_sso)
         self.out = self.prefix + self.sso + "_out"      # the signed-out marker: no automatic sign-in
         self.legacy_out = self.sso + "_out"             # (0.2.x) the marker on the shared domain
         self.return_cookie = self.prefix + RETURN_COOKIE
-        self.origin = histerauth.origin_of(self.public_url)
-        # 0.5.0: none by default; each legacy credential is an explicit opt-in (domain-cookie, hister-token)
+        self.origin = nogonauth.origin_of(self.public_url)
+        # 0.5.0: none by default; each legacy credential is an explicit opt-in (domain-cookie, nogon-token). 0.9.0:
+        # nogon-token is Nogon's raw token, formerly hister-token, which is still read (it is in deployments' settings)
         raw = env.get("NOGON_LOGIN_LEGACY") or ""
         legacy = {x.strip().lower() for x in raw.split(",") if x.strip()} - {"none"}
-        if legacy - {"domain-cookie", "hister-token"}:
-            raise SystemExit("nogon-login: NOGON_LOGIN_LEGACY is a list of domain-cookie and hister-token, or none")
+        legacy = {"nogon-token" if x == "hister-token" else x for x in legacy}
+        if legacy - {"domain-cookie", "nogon-token"}:
+            raise SystemExit("nogon-login: NOGON_LOGIN_LEGACY is a list of domain-cookie and nogon-token, or none")
         self.legacy = legacy
         self.proxied = []                               # Shiori's hosted pages: their nginx sends /machiya/… here
         for o in (env.get("NOGON_LOGIN_PROXIED_ORIGINS") or "").split(","):
             if o.strip():
-                norm = histerauth.origin_of(o.strip())
+                norm = nogonauth.origin_of(o.strip())
                 if not norm or urlsplit(o.strip()).path not in ("", "/") or norm == self.origin:
                     raise SystemExit("nogon-login: NOGON_LOGIN_PROXIED_ORIGINS is a list of https://host[:port], "
                                      "not %r" % o)
                 self.proxied.append(norm)
         self.proxied_cookie = self.prefix + self.sso + "_shiori"   # the hosted pages' room cookie, on their hosts
         provider = (env.get("MACHIYA_SIGNIN_PROVIDER") or "").strip().lower()
-        self.auto_provider = provider if histerauth.PROVIDER_RE.match(provider or "-") else ""
+        self.auto_provider = provider if nogonauth.PROVIDER_RE.match(provider or "-") else ""
         u = urlsplit(self.public_url)
         own = u.hostname + ("" if u.port in (None, 443) else ":%d" % u.port)
         hosts = env.get("NOGON_LOGIN_RETURN_HOSTS")
@@ -193,7 +197,7 @@ class Settings:
     def oauth(self, env):
         """0.7.0: the OAuth server's settings. Off (oauth_port None) without NOGON_LOGIN_OAUTH_PORT; with it, a bad
         setting refuses to start: the issuer is the connector's own https origin (never http, even on a loopback host:
-        the sign-in trip returns only to https addresses, histerauth.safe_return), the resource an address on it, every
+        the sign-in trip returns only to https addresses, nogonauth.safe_return), the resource an address on it, every
         redirect an exact https address, and the users named."""
         self.oauth_port, self.oauth_origin, self.oauth_resource = None, None, ""
         self.oauth_redirects, self.oauth_users = [], []
@@ -203,16 +207,16 @@ class Settings:
         if not re.fullmatch(r"[0-9]{1,5}", raw):
             raise SystemExit("nogon-login: NOGON_LOGIN_OAUTH_PORT must be a port number")
         issuer = (env.get("NOGON_LOGIN_OAUTH_ISSUER") or "").strip().rstrip("/")
-        origin = histerauth.origin_of(issuer)
+        origin = nogonauth.origin_of(issuer)
         if not origin or origin != issuer.lower() or not origin.startswith("https://"):
             raise SystemExit("nogon-login: NOGON_LOGIN_OAUTH_ISSUER must be the connector's own address, "
                              "https://host[:port] (no path)")
         if origin == self.origin or origin in self.proxied or origin in self.rooms.values():
-            raise SystemExit("nogon-login: NOGON_LOGIN_OAUTH_ISSUER must be a host of its own, not Hister's, a "
+            raise SystemExit("nogon-login: NOGON_LOGIN_OAUTH_ISSUER must be a host of its own, not Nogon's, a "
                              "room's or the hosted pages'")
         resource = (env.get("NOGON_LOGIN_OAUTH_RESOURCE") or "").strip()
         u = urlsplit(resource)
-        if histerauth.origin_of(resource) != origin or not u.path.startswith("/") or u.query or u.fragment \
+        if nogonauth.origin_of(resource) != origin or not u.path.startswith("/") or u.query or u.fragment \
                 or "#" in resource or "?" in resource:
             raise SystemExit("nogon-login: NOGON_LOGIN_OAUTH_RESOURCE must be the connector's address on the "
                              "issuer's host, %s/mcp" % origin)
@@ -225,14 +229,14 @@ class Settings:
                                  "not %r" % r)
         users = [x.strip() for x in (env.get("NOGON_LOGIN_OAUTH_USERS") or "").split(",") if x.strip()]
         if not users or "*" in users:
-            raise SystemExit("nogon-login: NOGON_LOGIN_OAUTH_USERS names the Hister users who may add a connector "
+            raise SystemExit("nogon-login: NOGON_LOGIN_OAUTH_USERS names the Nogon users who may add a connector "
                              "(never *)")
         if not redirects:
             LOG("nogon-login: NOGON_LOGIN_OAUTH_REDIRECTS is empty: every registration is refused")
         self.oauth_port, self.oauth_origin, self.oauth_resource = int(raw), origin, resource
         self.oauth_redirects, self.oauth_users = redirects, users
         self.oauth_secure = True
-        name = histerauth.HOST_PREFIX + self.sso + "_oauth"
+        name = nogonauth.HOST_PREFIX + self.sso + "_oauth"
         self.oauth_cookie, self.oauth_state = name, name + "_state"
         p = urlsplit(origin)
         self.return_hosts = sorted(set(self.return_hosts) | {p.hostname + ("" if p.port in (None, 443)
@@ -240,16 +244,16 @@ class Settings:
 
 
 def token_rooms(env):
-    """{name: origin} a room token may be scoped to: MACHIYA_ROOMS (minus hister, searxng and shiori: Shiori is a
-    client) and NOGON_LOGIN_TOKEN_SERVICES (name=url, comma-separated: machiya-mcp, smallweb)."""
+    """{name: origin} a room token may be scoped to: MACHIYA_ROOMS (minus nogon, searxng and shiori: Shiori is a
+    client; vaultkit reads a stored hister= as nogon) and NOGON_LOGIN_TOKEN_SERVICES (name=url, comma-separated: machiya-mcp, smallweb)."""
     out = {}
     for key, url in shell.rooms(env).items():
-        o = histerauth.origin_of(url)
-        if o and key not in ("hister", "searxng", "shiori"):
+        o = nogonauth.origin_of(url)
+        if o and key not in ("nogon", "searxng", "shiori"):
             out[key] = o
     for item in (env.get("NOGON_LOGIN_TOKEN_SERVICES") or "").split(","):
         key, _, url = item.strip().partition("=")
-        o = histerauth.origin_of(url.strip())
+        o = nogonauth.origin_of(url.strip())
         if key.strip() and o:
             out[key.strip()] = o
     return out
@@ -263,17 +267,17 @@ def prefs_path(env):
 
 
 def user_key(username):
-    """The account's key in the prefs file: hi:<sha256(Hister username)[:32]>, the rooms' own form (histerauth's
+    """The account's key in the prefs file: hi:<sha256(Nogon username)[:32]>, the rooms' own form (nogonauth's
     uid_for without a fallback login), so Kura's old rows carry over as they are."""
     return "hi:" + hashlib.sha256(username.encode("utf-8")).hexdigest()[:32]
 
 
-# -- Hister ----------------------------------------------------------------------------------------------------------
+# -- Nogon ----------------------------------------------------------------------------------------------------------
 
-class Hister:
+class Nogon:
     """The few calls the helper makes. Every one has a 2 s timeout; OSError means "no answer"."""
 
-    def __init__(self, base, timeout=HISTER_TIMEOUT):
+    def __init__(self, base, timeout=NOGON_TIMEOUT):
         u = urlsplit(base)
         self.host, self.port, self.timeout = u.hostname, u.port, timeout
         self.cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
@@ -281,7 +285,7 @@ class Hister:
         self.lock = threading.Lock()
 
     def request(self, method, path, headers=None, body=None):
-        """-> (status, [(header, value)], body). OSError when Hister didn't answer."""
+        """-> (status, [(header, value)], body). OSError when Nogon didn't answer."""
         conn = self.cls(self.host, self.port, timeout=self.timeout)
         try:
             conn.request(method, path, body=body, headers=dict(headers or {}))
@@ -294,10 +298,10 @@ class Hister:
 
     def profile(self, session=None, token=None):
         """-> ("ok", username, user_id) | ("out",) | ("off",) | ("down",). A bare 200 is never "signed in": with
-        user_handling off Hister answers 200 with an empty body to anyone."""
+        user_handling off Nogon answers 200 with an empty body to anyone."""
         headers = {"Accept": "application/json"}
         if session is not None:
-            headers["Cookie"] = "%s=%s" % (HISTER_COOKIE, session)
+            headers["Cookie"] = "%s=%s" % (NOGON_COOKIE, session)
         if token is not None:
             headers["X-Access-Token"] = token
         try:
@@ -318,17 +322,17 @@ class Hister:
         return ("off",)
 
     def logout(self, session):
-        """POST /api/logout with that session -> (ended, Set-Cookie values). Ended is also True when Hister no longer
+        """POST /api/logout with that session -> (ended, Set-Cookie values). Ended is also True when Nogon no longer
         knows the session (403): either way it is over."""
         try:
             status, headers, _ = self.request("POST", "/api/logout", {
-                "Cookie": "%s=%s" % (HISTER_COOKIE, session), "Origin": "hister://", "Content-Length": "0"}, b"")
+                "Cookie": "%s=%s" % (NOGON_COOKIE, session), "Origin": "nogon://", "Content-Length": "0"}, b"")
         except OSError:
             return False, []
         return status in (200, 204, 401, 403), [v for k, v in headers if k.lower() == "set-cookie"]
 
     def health(self):
-        """"ok" | "user-handling-off" | "down", cached HEALTH_TTL s: Hister's /health, then an anonymous /api/profile
+        """"ok" | "user-handling-off" | "down", cached HEALTH_TTL s: Nogon's /health, then an anonymous /api/profile
         (403 when users are on, 200 to anyone when they're off; neither creates a session row)."""
         with self.lock:
             if time.monotonic() - self.health_at < HEALTH_TTL:
@@ -342,7 +346,7 @@ class Hister:
             state = "down"
         with self.lock:
             if state != self.health_state:
-                LOG("nogon-login: Hister is %s" % state)
+                LOG("nogon-login: Nogon is %s" % state)
             self.health_at, self.health_state = time.monotonic(), state
         return state
 
@@ -467,7 +471,7 @@ CHALLENGE_RE = re.compile(r"[A-Za-z0-9._~-]{43,128}\Z")    # RFC 7636: the verif
 
 
 class Store:
-    """The sessions table (an id's hash -> a Hister session) and the Hister sign-outs still to make."""
+    """The sessions table (an id's hash -> a Nogon session) and the Nogon sign-outs still to make."""
 
     def __init__(self, path):
         self.path = path
@@ -527,7 +531,7 @@ class Store:
             self.q("UPDATE sessions SET last_seen = ? WHERE sid_hash = ?", (now(), row["sid_hash"]))
 
     def drop_hister(self, hister_hash, ended=False):
-        """Delete every id on one Hister session, with every room session and unused code made from them; `ended`: a
+        """Delete every id on one Nogon session, with every room session and unused code made from them; `ended`: a
         deliberate sign-out, remembered (the ended table) so the browser isn't signed straight back in. -> how many
         ids."""
         with self.lock:
@@ -568,7 +572,7 @@ class Store:
     # room sessions (0.3.0)
 
     def create_room(self, parent, audience, ttl=0):
-        rsid = histerauth.ROOM_PREFIX + b64e(secrets.token_bytes(32))
+        rsid = nogonauth.ROOM_PREFIX + b64e(secrets.token_bytes(32))
         t = now()
         expires = parent["created_at"] + CAP_DAYS * 86400
         if ttl:
@@ -578,7 +582,7 @@ class Store:
         return rsid, max(expires - t, 60)
 
     def get_room(self, rsid):
-        if not isinstance(rsid, str) or not histerauth.RSID_RE.match(rsid):
+        if not isinstance(rsid, str) or not nogonauth.RSID_RE.match(rsid):
             return None
         rows = self.q("SELECT * FROM room_sessions WHERE rsid_hash = ?", (sha(rsid),))
         if not rows:
@@ -598,14 +602,14 @@ class Store:
     # codes (0.3.0): one use, CODE_TTL seconds
 
     def create_code(self, parent_hash, audience, state, return_url):
-        code = histerauth.CODE_PREFIX + b64e(secrets.token_bytes(32))
+        code = nogonauth.CODE_PREFIX + b64e(secrets.token_bytes(32))
         self.q("INSERT INTO codes VALUES (?,?,?,?,?,?)", (sha(code), parent_hash, audience, state, return_url,
                                                            now() + CODE_TTL))
         return code
 
     def take_code(self, code):
         """The code's row, deleted in the same breath (a second redeem finds nothing); None when unknown or expired."""
-        if not isinstance(code, str) or not histerauth.CODE_RE.match(code):
+        if not isinstance(code, str) or not nogonauth.CODE_RE.match(code):
             return None
         with self.lock:
             row = self.db.execute("SELECT * FROM codes WHERE code_hash = ?", (sha(code),)).fetchone()
@@ -625,7 +629,7 @@ class Store:
         return sha(value)[:12]
 
     def get_token(self, value):
-        if not isinstance(value, str) or not histerauth.RTOKEN_RE.match(value):
+        if not isinstance(value, str) or not nogonauth.RTOKEN_RE.match(value):
             return None
         rows = self.q("SELECT * FROM tokens WHERE token_hash = ?", (sha(value),))
         if not rows:
@@ -839,10 +843,10 @@ class Store:
 # -- the core --------------------------------------------------------------------------------------------------------
 
 class Login:
-    def __init__(self, settings, store=None, hister=None, prefs=None):
+    def __init__(self, settings, store=None, nogon=None, prefs=None):
         self.s = settings
         self.store = store or Store(settings.db)
-        self.hister = hister or Hister(settings.hister_url)
+        self.nogon = nogon or Nogon(settings.nogon_url)
         self.prefs = prefs or vprefs.Store(settings.prefs_db)
         self.tokens = {}                # sha(token) -> (expires, outcome)
         self.tokens_lock = threading.Lock()
@@ -861,19 +865,19 @@ class Login:
         (X-Machiya-Room; [] from a room too old to say), and then:
           - a room session (mhr_) must be one of those origins' (else "wrong-room"), and its helper session alive;
           - a room token (mht_) must name the room's own origin (the first);
-          - a browser's helper id (the old shared-domain cookie) and Hister's raw token only while
+          - a browser's helper id (the old shared-domain cookie) and Nogon's raw token only while
             NOGON_LOGIN_LEGACY allows them (else "legacy-off"); an app's id (mhs_, kind app) in every room;
           - an OAuth access token (mho_, 0.7.0) only from the connector itself (X-Machiya-Room: mcp-public), and
-            nothing else from it; it never goes to Hister. The OAuth server's other values (mhk_, mha_, mhf_) are never
+            nothing else from it; it never goes to Nogon. The OAuth server's other values (mhk_, mha_, mhf_) are never
             credentials.
           - a room session made for the connector's host (its sign-in, to say Allow) is good in no room."""
         if isinstance(value, str) and value.startswith(OAUTH_PREFIXES):
             return self.resolve_oauth(value, rooms) if value.startswith(ACCESS_PREFIX) else ("out", "signed-out")
         if rooms == [OAUTH_ROOM]:
             return ("out", "wrong-room")
-        if kind == "sid" and isinstance(value, str) and value.startswith(histerauth.ROOM_PREFIX):
+        if kind == "sid" and isinstance(value, str) and value.startswith(nogonauth.ROOM_PREFIX):
             kind = "room"
-        if kind == "sid" and isinstance(value, str) and value.startswith(histerauth.RTOKEN_PREFIX):
+        if kind == "sid" and isinstance(value, str) and value.startswith(nogonauth.RTOKEN_PREFIX):
             kind = "rtoken"
         if kind == "room":
             room = self.store.get_room(value)
@@ -907,13 +911,13 @@ class Login:
                 self.legacy_seen("the shared-domain cookie", rooms)
             return ("ok", {"username": row["username"], "user_id": row["user_id"], "kind": row["kind"], "row": row,
                            "via": "session"})
-        if rooms is not None and "hister-token" not in self.s.legacy:
+        if rooms is not None and "nogon-token" not in self.s.legacy:
             return ("out", "legacy-off")
         answer = self.check_token(value)
         if answer[0] != "ok":
             return (answer[0], "signed-out") if answer[0] == "out" else answer
         if rooms is not None:
-            self.legacy_seen("Hister's raw token", rooms)
+            self.legacy_seen("Nogon's raw token", rooms)
         return ("ok", {"username": answer[1], "user_id": answer[2], "kind": "hister-token", "via": "token"})
 
     def resolve_oauth(self, value, rooms):
@@ -932,7 +936,7 @@ class Login:
     def oauth_signed_in(self, headers):
         """The connector host's sign-in cookie -> ("ok", helper row) | ("out", None) | ("down"/"off", None): a room
         session made for that host only, its helper session alive and checked as every room's is."""
-        for value in histerauth.HisterAuth.cookie_values(headers.get("Cookie"), self.s.oauth_cookie)[:4]:
+        for value in nogonauth.NogonAuth.cookie_values(headers.get("Cookie"), self.s.oauth_cookie)[:4]:
             room = self.store.get_room(value)
             if room is None or room["audience"] != self.s.oauth_origin:
                 continue
@@ -973,20 +977,20 @@ class Login:
         return self.check_row(row)
 
     def check_row(self, row):
-        """A live helper session's row, checked with Hister when it was last checked VERIFY_TTL s ago or more."""
+        """A live helper session's row, checked with Nogon when it was last checked VERIFY_TTL s ago or more."""
         if now() - row["verified_at"] < VERIFY_TTL:
             self.store.seen(row)
             return "ok", row
-        answer = self.hister.profile(session=row["hister_session"])
+        answer = self.nogon.profile(session=row["hister_session"])
         if answer[0] == "ok":
             self.store.verified(row, answer[1], answer[2])
             return "ok", row
-        if answer[0] == "out":          # signed out at Hister (its UI, another sign-in, expiry): every id on it goes
+        if answer[0] == "out":          # signed out at Nogon (its UI, another sign-in, expiry): every id on it goes
             n = self.store.drop_hister(row["hister_hash"])
-            LOG("nogon-login: a Hister session ended; dropped %d id(s)" % n)
+            LOG("nogon-login: a Nogon session ended; dropped %d id(s)" % n)
             return "out", None
         if answer[0] == "off":
-            LOG("nogon-login: HISTER USER HANDLING IS OFF: /api/profile answers anyone; nobody is signed in")
+            LOG("nogon-login: NOGON USER HANDLING IS OFF: /api/profile answers anyone; nobody is signed in")
         return answer[0], None
 
     def check_token(self, token):
@@ -995,7 +999,7 @@ class Login:
             hit = self.tokens.get(key)
             if hit and hit[0] > time.monotonic():
                 return hit[1]
-        answer = self.hister.profile(token=token)
+        answer = self.nogon.profile(token=token)
         ttl = {"ok": TOKEN_TTL_OK, "out": TOKEN_TTL_OUT}.get(answer[0])
         if ttl:
             with self.tokens_lock:
@@ -1004,21 +1008,21 @@ class Login:
                 self.tokens[key] = (time.monotonic() + ttl, answer)
         return answer
 
-    def end_hister(self, hister_session, ended=True):
-        """Sign one Hister session out and drop every id on it, and every room session and code made from them; with
+    def end_nogon(self, hister_session, ended=True):
+        """Sign one Nogon session out and drop every id on it, and every room session and code made from them; with
         `ended` (a sign-out someone asked for) the ids are remembered, so a browser that comes back with one sees the
-        page, not an automatic sign-in. -> Set-Cookie values from Hister's logout. When Hister can't be reached the
+        page, not an automatic sign-in. -> Set-Cookie values from Nogon's logout. When Nogon can't be reached the
         ids still go (the rooms see 401 at once) and the logout is retried later."""
         n = self.store.drop_hister(sha(hister_session), ended=ended)
-        ended, cookies = self.hister.logout(hister_session)
+        ended, cookies = self.nogon.logout(hister_session)
         if not ended:
             self.store.pending_add(hister_session)
-            LOG("nogon-login: Hister unreachable at sign-out; dropped %d id(s), Hister's logout queued" % n)
+            LOG("nogon-login: Nogon unreachable at sign-out; dropped %d id(s), Nogon's logout queued" % n)
         return cookies
 
     def retry_pending(self):
         for p in self.store.pending():
-            ended, _ = self.hister.logout(p["hister_session"])
+            ended, _ = self.nogon.logout(p["hister_session"])
             if ended:
                 self.store.pending_done(p["hister_hash"])
 
@@ -1071,7 +1075,7 @@ class Login:
         """The browser signed out on purpose, or the last automatic round trip failed: show the page. Also when its
         own cookie names an id that was signed out on purpose (a room's Sign Out can't set this host's marker)."""
         names = [self.s.out] + ([self.s.legacy_out] if "domain-cookie" in self.s.legacy else [])
-        if any(histerauth.HisterAuth.cookie_values(headers.get("Cookie"), n) for n in names):
+        if any(nogonauth.NogonAuth.cookie_values(headers.get("Cookie"), n) for n in names):
             return True
         return self.store.was_ended(sso_value(headers, self.s.own) or sso_value(headers, self.s.sso))
 
@@ -1088,12 +1092,12 @@ class Login:
     def read_return(self, cookie_header):
         """The remembered (return, app, state) from the return cookie, checked again now; (None, False, "") if none
         holds."""
-        for value in histerauth.HisterAuth.cookie_values(cookie_header, self.s.return_cookie)[:2]:
+        for value in nogonauth.NogonAuth.cookie_values(cookie_header, self.s.return_cookie)[:2]:
             try:
                 data = json.loads(b64d(value))
                 app = data.get("a") == 1
                 ret = self.safe(data.get("r"), app)
-                state = data.get("s") if isinstance(data.get("s"), str) and histerauth.NONCE_RE.match(data["s"]) \
+                state = data.get("s") if isinstance(data.get("s"), str) and nogonauth.NONCE_RE.match(data["s"]) \
                     else ""
                 if ret:
                     return ret, app, state
@@ -1104,20 +1108,21 @@ class Login:
     def safe(self, ret, app=False):
         if app:     # 0.2.1 (sweep LEAD-3): exactly <scheme>://signed-in (HisterKit's callbackURL), no other path
             return ret if isinstance(ret, str) and ret in ("%s://signed-in" % s for s in self.s.app_schemes) else None
-        return histerauth.safe_return(ret, self.s.return_hosts, ())
+        return nogonauth.safe_return(ret, self.s.return_hosts, ())
 
     def finish(self, hister_session, answer, ret, app, headers, label="", state=""):
-        """A good Hister session: an id for it, and where to go. -> (location, cookies). For a room's address with a
+        """A good Nogon session: an id for it, and where to go. -> (location, cookies). For a room's address with a
         state (0.3.0) the way back is that room's /machiya/callback with a one-time code; without a state it is the
         address itself (the room then makes its own trip; a proxied origin goes through its /machiya/start)."""
         username, user_id = answer[1], answer[2]
         if app:
             sid = self.store.create(hister_session, username, user_id, "app", label or "Shiori app")
-            return ret + "#" + urlencode({"sid": sid, "hister": hister_session}), []
+            # 0.9.0: "nogon" beside "hister", which stays until the rename's stage 3c (Shiori apps before 1.30.0)
+            return ret + "#" + urlencode({"sid": sid, "nogon": hister_session, "hister": hister_session}), []
         cookies, row = [], None
         names = [self.s.own] + ([self.s.sso] if "domain-cookie" in self.s.legacy and self.s.own != self.s.sso
                                 else [])
-        have = {n: histerauth.HisterAuth.cookie_values(headers.get("Cookie"), n)[:4] for n in names}
+        have = {n: nogonauth.NogonAuth.cookie_values(headers.get("Cookie"), n)[:4] for n in names}
         for value in [v for n in names for v in have[n]]:
             r = self.store.get(value)
             if r and r["hister_hash"] == sha(hister_session) and r["kind"] == "browser":
@@ -1138,15 +1143,15 @@ class Login:
 
     def way_back(self, row, ret, state):
         """Where a signed-in browser goes: a room's callback with a code (a state came with it), a proxied origin's
-        start (no state: the hosted pages make their trip there), the address itself, or Hister's front page."""
+        start (no state: the hosted pages make their trip there), the address itself, or Nogon's front page."""
         if not ret:
             return self.s.public_url + "/"
-        origin = histerauth.origin_of(ret)
+        origin = nogonauth.origin_of(ret)
         if not origin or origin == self.s.origin:
             return ret
         if state:
             code = self.store.create_code(row["sid_hash"], origin, state, ret)
-            path = OAUTH_CALLBACK if origin == self.s.oauth_origin else histerauth.CALLBACK_PATH
+            path = OAUTH_CALLBACK if origin == self.s.oauth_origin else nogonauth.CALLBACK_PATH
             return origin + path + "?" + urlencode({"code": code})
         if origin in self.s.proxied:
             return origin + "/machiya/start?" + urlencode({"return": ret})
@@ -1158,8 +1163,8 @@ class Login:
         SHA-256 is the state the trip started with), and its helper session must still be alive."""
         row = self.store.take_code(code)
         if row is None or not room or row["audience"] != room or not isinstance(nonce, str) \
-                or not histerauth.NONCE_RE.match(nonce) \
-                or not secrets.compare_digest(histerauth.state_hash(nonce), row["state"]):
+                or not nogonauth.NONCE_RE.match(nonce) \
+                or not secrets.compare_digest(nogonauth.state_hash(nonce), row["state"]):
             return 401, {"reason": "bad-code"}
         parent = self.store.by_hash(row["parent"])
         if parent is None:
@@ -1183,15 +1188,15 @@ def device_label(headers):
     return browser + (" on " + device if device else "")
 
 
-def hister_cookie(headers):
-    for value in histerauth.HisterAuth.cookie_values(headers.get("Cookie"), HISTER_COOKIE)[:4]:
-        if HISTER_SESSION_RE.match(value):
+def nogon_cookie(headers):
+    for value in nogonauth.NogonAuth.cookie_values(headers.get("Cookie"), NOGON_COOKIE)[:4]:
+        if NOGON_SESSION_RE.match(value):
             return value
     return None
 
 
 def sso_value(headers, name=SSO):
-    for value in histerauth.HisterAuth.cookie_values(headers.get("Cookie"), name)[:4]:
+    for value in nogonauth.NogonAuth.cookie_values(headers.get("Cookie"), name)[:4]:
         if SID_RE.match(value):
             return value
     return None
@@ -1238,10 +1243,10 @@ def signin_page(s, headers, ret, app, error="", state=""):
     alert = '<p class="signin-error" role="alert" data-error%s>%s</p>' % ("" if error else " hidden", e(error))
     target = signin_target(s, ret, app)
     heading = "Sign In to %s" % target if target else "Sign In"
-    # No <form>, as Hister's own sign-in page: the script reads the fields (ids, no names) on the button's click or
-    # Enter and sends the password to Hister's /api/login, so nothing on this page can post anything to the helper,
+    # No <form>, as Nogon's own sign-in page: the script reads the fields (ids, no names) on the button's click or
+    # Enter and sends the password to Nogon's /api/login, so nothing on this page can post anything to the helper,
     # and a password manager's auto-submit (a form.submit() from its own script world, which no page script sees)
-    # has no form to submit: it clicks the button or presses Enter, as on Hister's page.
+    # has no form to submit: it clicks the button or presses Enter, as on Nogon's page.
     body = (
         '<main class="signin"><h1>%s</h1>%s'
         '<div class="group" id="hister-signin" data-next="%s">'
@@ -1265,7 +1270,7 @@ def signin_target(s, ret, app):
         return ""
     if app:
         return "Shiori"
-    origin = histerauth.origin_of(ret)
+    origin = nogonauth.origin_of(ret)
     if not origin:
         return ""
     for key, o in s.rooms.items():
@@ -1563,7 +1568,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif cookie:
             via = "browser cookie"
         else:
-            via = {"sid": "app session", "rtoken": "room token"}.get(kind, "hister token")
+            via = {"sid": "app session", "rtoken": "room token"}.get(kind, "nogon token")
         changed = sorted(k for k in changes if before[1].get(k) != after[1].get(k))
         ua = "".join(c for c in (self.headers.get("User-Agent") or "-") if " " <= c <= "~")[:100]
         LOG("nogon-login: prefs write via %s keys=%s changed=%s rev %s->%s ua=%s"
@@ -1594,10 +1599,10 @@ class Internal(Handler):
         values = self.headers.get_all("X-Machiya-Room") or []
         if len(values) == 1 and values[0].strip() == OAUTH_ROOM:
             return [OAUTH_ROOM]                     # the connector (0.7.0): by name, it has no origin of its own here
-        return histerauth.origins_header(values[0]) if len(values) == 1 else []
+        return nogonauth.origins_header(values[0]) if len(values) == 1 else []
 
     def one_credential(self):
-        """Exactly one of X-Machiya-Session (mhs_, mhr_, mht_) and X-Access-Token (Hister's), once: (kind, value), or
+        """Exactly one of X-Machiya-Session (mhs_, mhr_, mht_) and X-Access-Token (Nogon's), once: (kind, value), or
         None (the caller answers 400)."""
         sid = self.headers.get_all("X-Machiya-Session") or []
         token = self.headers.get_all("X-Access-Token") or []
@@ -1619,9 +1624,9 @@ class Internal(Handler):
         lg = self.login
         path = urlsplit(self.path).path
         if path == "/healthz":
-            state = lg.hister.health()
+            state = lg.nogon.health()
             ok = state == "ok"
-            return self.json(200 if ok else 503, {"ok": ok, "nogon": state, "hister": state, "version": VERSION,
+            return self.json(200 if ok else 503, {"ok": ok, "nogon": state, "version": VERSION,
                                                   "sessions": lg.store.count()})
         if path == "/v1/check":
             cred = self.one_credential()
@@ -1647,10 +1652,11 @@ class Internal(Handler):
 
     def nginx(self):
         """GET /v1/nginx (auth_request for the hosted pages): the hosted pages' room session (X-Machiya-Session, or
-        their room cookie in Cookie) with X-Machiya-Room (their origin) -> 200 and X-Hister-Cookie for nginx's own
-        hop to Hister. 0.5.0: only for an origin in NOGON_LOGIN_PROXIED_ORIGINS (that nginx is the one caller) and a
-        room session made for that same origin; anything else (another room's session, an app's or a browser's
-        helper id, an origin not in the list, none) is answered as signed out, 401."""
+        their room cookie in Cookie) with X-Machiya-Room (their origin) -> 200 and X-Nogon-Cookie (and X-Nogon-User)
+        for nginx's own hop to Nogon (0.9.0: no X-Nogon-* twins; shiori-web reads X-Nogon-Cookie since 1.29.1).
+        0.5.0: only for an origin in NOGON_LOGIN_PROXIED_ORIGINS (that nginx is the one caller) and a room session
+        made for that same origin; anything else (another room's session, an app's or a browser's helper id, an origin
+        not in the list, none) is answered as signed out, 401."""
         lg = self.login
         rooms = self.rooms()
         origin = rooms[0] if rooms else None
@@ -1658,18 +1664,17 @@ class Internal(Handler):
             return self.send(401, [("Cache-Control", "no-store")])
         sid = (self.headers.get("X-Machiya-Session") or "").strip()
         if not sid:
-            sid = next((v for v in histerauth.HisterAuth.cookie_values(self.headers.get("Cookie"),
+            sid = next((v for v in nogonauth.NogonAuth.cookie_values(self.headers.get("Cookie"),
                                                                        lg.s.proxied_cookie)[:4]
-                        if histerauth.RSID_RE.match(v)), "")
-        if not histerauth.RSID_RE.match(sid):
+                        if nogonauth.RSID_RE.match(v)), "")
+        if not nogonauth.RSID_RE.match(sid):
             return self.send(401, [("Cache-Control", "no-store")])
         answer = lg.resolve("room", sid, [origin])
         info = answer[1] if answer[0] == "ok" else {}
         row = info.get("row") if info.get("room") == origin else None
         if row is not None:
-            cookie = "%s=%s" % (HISTER_COOKIE, row["hister_session"])   # Nogon's own cookie is still named hister
+            cookie = "%s=%s" % (NOGON_COOKIE, row["hister_session"])   # Nogon's own cookie is still named hister
             return self.send(200, [("X-Nogon-Cookie", cookie), ("X-Nogon-User", row["username"]),
-                                   ("X-Hister-Cookie", cookie), ("X-Hister-User", row["username"]),   # until stage 3
                                    ("Cache-Control", "no-store")])
         return self.send(401 if answer[0] in ("out", "ok") else 503, [("Cache-Control", "no-store")])
 
@@ -1682,14 +1687,14 @@ class Internal(Handler):
         self.body()
         lg = self.login
         value = (self.headers.get("X-Machiya-Session") or "").strip()
-        if value.startswith(histerauth.ROOM_PREFIX):
+        if value.startswith(nogonauth.ROOM_PREFIX):
             room = lg.store.get_room(value)
             rooms = self.rooms()
             row = lg.store.by_hash(room["parent"]) if room and (not rooms or room["audience"] in rooms) else None
         else:
             row = lg.store.get(value)
         if row:
-            lg.end_hister(row["hister_session"])
+            lg.end_nogon(row["hister_session"])
         self.send(204, [("Cache-Control", "no-store")])
 
     def redeem(self):
@@ -1759,15 +1764,15 @@ class Public(Handler):
         ret = q.get("return") or "/"
         if ret.startswith("/") and not ret.startswith(("//", "/\\")):
             ret = origin + ret
-        if histerauth.origin_of(ret) != origin or not lg.safe(ret):
+        if nogonauth.origin_of(ret) != origin or not lg.safe(ret):
             ret = origin + "/"
-        nonce = histerauth.new_nonce()
-        params = [("return", ret), ("state", histerauth.state_hash(nonce))]
-        marked = bool(histerauth.HisterAuth.cookie_values(self.headers.get("Cookie"), out_name))
+        nonce = nogonauth.new_nonce()
+        params = [("return", ret), ("state", nogonauth.state_hash(nonce))]
+        marked = bool(nogonauth.NogonAuth.cookie_values(self.headers.get("Cookie"), out_name))
         if lg.s.auto_provider and lg.s.auto_provider in lg.s.providers and not marked:
             params += [("provider", lg.s.auto_provider), ("auto", "1")]
         self.redirect(lg.s.public_url + "/machiya/signin?" + urlencode(params),
-                      [lg.cookie(state_name, nonce, histerauth.STATE_MAX_AGE)], status=302)
+                      [lg.cookie(state_name, nonce, nogonauth.STATE_MAX_AGE)], status=302)
 
     def proxied_callback(self, origin):
         """GET /machiya/callback?code=… on a hosted pages' host: the code traded here (as a room would at
@@ -1775,12 +1780,12 @@ class Public(Handler):
         lg = self.login
         name, state_name, out_name = self.proxied_names()
         code = self.query().get("code") or ""
-        nonce = next((v for v in histerauth.HisterAuth.cookie_values(self.headers.get("Cookie"), state_name)[:4]
-                      if histerauth.NONCE_RE.match(v)), "")
+        nonce = next((v for v in nogonauth.NogonAuth.cookie_values(self.headers.get("Cookie"), state_name)[:4]
+                      if nogonauth.NONCE_RE.match(v)), "")
         status, data = lg.redeem(code, origin, nonce) if code and nonce else (401, {})
         done = [lg.cookie(state_name, "", 0)]
         if status == 200:
-            ret = data["return"] if histerauth.origin_of(data["return"]) == origin else origin + "/"
+            ret = data["return"] if nogonauth.origin_of(data["return"]) == origin else origin + "/"
             cookies = [lg.cookie(name, data["session"], data["max_age"])] + done + [lg.cookie(out_name, "", 0)]
             return self.send(302, [("Location", ret), ("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer")]
                              + [("Set-Cookie", c) for c in cookies])
@@ -1793,8 +1798,8 @@ class Public(Handler):
 
     def proxied_prefs(self, origin):
         name, _, _ = self.proxied_names()
-        sid = next((v for v in histerauth.HisterAuth.cookie_values(self.headers.get("Cookie"), name)[:4]
-                    if histerauth.RSID_RE.match(v)), "")
+        sid = next((v for v in nogonauth.NogonAuth.cookie_values(self.headers.get("Cookie"), name)[:4]
+                    if nogonauth.RSID_RE.match(v)), "")
         if not sid:
             if self.command == "PUT":
                 self.body()
@@ -1802,7 +1807,7 @@ class Public(Handler):
         return self.prefs_for("room", sid, cookie=True, rooms=[origin], origins=[origin])
 
     def proxied_post(self, origin, path):
-        """POST /machiya/signout on a hosted pages' host (same-origin): the browser's helper session ends (Hister's,
+        """POST /machiya/signout on a hosted pages' host (same-origin): the browser's helper session ends (Nogon's,
         every room's), this host's cookie goes, and its marker stops the automatic sign-in from here."""
         lg = self.login
         if self.body() is None:
@@ -1812,17 +1817,17 @@ class Public(Handler):
         if not vsignin.same_origin(self.headers, lg.s.secure, (origin,)):
             return self.page(403, message_page(self.headers, "Refused", "A sign-out must come from this page."))
         name, state_name, out_name = self.proxied_names()
-        for value in histerauth.HisterAuth.cookie_values(self.headers.get("Cookie"), name)[:4]:
+        for value in nogonauth.NogonAuth.cookie_values(self.headers.get("Cookie"), name)[:4]:
             room = lg.store.get_room(value)
             parent = lg.store.by_hash(room["parent"]) if room and room["audience"] == origin else None
             if parent:
-                lg.end_hister(parent["hister_session"])
+                lg.end_nogon(parent["hister_session"])
         self.redirect("/machiya/signed-out", [lg.cookie(name, "", 0), lg.cookie(state_name, "", 0),
                                               lg.cookie(out_name, "1", OUT_MAX_AGE)])
 
     def public_prefs(self):
         """GET/PUT /machiya/api/prefs: Shiori's apps (Authorization: Bearer mhs_…), extensions and scripts (a room
-        token, Bearer mht_…, or a Hister token: X-Access-Token or Bearer; this is Hister's own host), the browser's
+        token, Bearer mht_…, or a Nogon token: X-Access-Token or Bearer; this is Nogon's own host), the browser's
         own sign-in cookie (a PUT then needs an Origin among the return hosts), and the hosted pages through their
         nginx (proxied(): their room cookie). No CORS: no other site's page may read or write it."""
         auth = self.headers.get_all("Authorization") or []
@@ -1834,15 +1839,15 @@ class Public(Handler):
         refused = {"error": "sign in", "signin": self.login.s.public_url + "/machiya/signin"}
         if tok:
             value = tok[0].strip()
-            if not histerauth.TOKEN_RE.match(value):
+            if not nogonauth.TOKEN_RE.match(value):
                 return self.json(401, refused)
             return self.prefs_for("token", value)
         if auth:
             scheme, _, value = auth[0].strip().partition(" ")
             value = value.strip()
-            if scheme.lower() != "bearer" or not histerauth.TOKEN_RE.match(value or " "):
+            if scheme.lower() != "bearer" or not nogonauth.TOKEN_RE.match(value or " "):
                 return self.json(401, refused)
-            if value.startswith((SID_PREFIX, histerauth.RTOKEN_PREFIX)):
+            if value.startswith((SID_PREFIX, nogonauth.RTOKEN_PREFIX)):
                 return self.prefs_for("sid" if value.startswith(SID_PREFIX) else "rtoken", value)
             return self.prefs_for("token", value)
         sid = self.login.own_sid(self.headers)
@@ -1859,7 +1864,7 @@ class Public(Handler):
         """The origin this request was made to, from Host: a proxied origin (the hosted pages, through their nginx,
         which passes Host on) or anything else (the helper's own host)."""
         host = (self.headers.get("Host") or "").strip()
-        return histerauth.origin_of(("https://" if self.login.s.secure else "http://") + host) if host else None
+        return nogonauth.origin_of(("https://" if self.login.s.secure else "http://") + host) if host else None
 
     def _get(self):
         lg, s = self.login, self.login.s
@@ -1869,14 +1874,14 @@ class Public(Handler):
             return self.proxied_get(origin, path)
         if path in ("/machiya", "/machiya/"):
             return self.redirect("/machiya/sessions")
-        if path == "/machiya/healthz":         # the probe's: the helper's own health; Hister's is its own probe's
+        if path == "/machiya/healthz":         # the probe's: the helper's own health; Nogon's is its own probe's
             try:
                 sessions = lg.store.count()
             except (sqlite3.Error, OSError) as ex:
                 LOG("nogon-login: the state file failed: %s" % type(ex).__name__)
                 return self.json(503, {"ok": False, "state": "error", "version": VERSION})
-            health = lg.hister.health()                 # "nogon" since 0.8.0; "hister" until the rename's stage 3
-            return self.json(200, {"ok": True, "nogon": health, "hister": health, "sessions": sessions,
+            health = lg.nogon.health()                 # "nogon" since 0.8.0; 0.9.0: no "hister" twin
+            return self.json(200, {"ok": True, "nogon": health, "sessions": sessions,
                                    "version": VERSION})
         if path.startswith("/machiya/static/"):
             return self.static(path[len("/machiya/static/"):])
@@ -1913,7 +1918,7 @@ class Public(Handler):
         app = q.get("app") == "1"
         ret = lg.safe(q.get("return"), app)
         state = q.get("state") or ""
-        state = state if not app and histerauth.NONCE_RE.match(state) else ""   # a room's trip: a code goes back
+        state = state if not app and nogonauth.NONCE_RE.match(state) else ""   # a room's trip: a code goes back
         if q.get("return") and not ret:
             LOG("nogon-login: refused a return address (not an allowed host)")
         if app and not ret:
@@ -1924,10 +1929,10 @@ class Public(Handler):
             # not the app's own web session, nor this page: a cross-site link must never hand the app's scheme a
             # session (LEAD-3); confirm with a same-origin POST, creating and remembering nothing until then
             return self.page(200, confirm_page(self.headers, ret, (q.get("provider") or "").strip().lower()[:20]))
-        session = hister_cookie(self.headers)
-        answer = lg.hister.profile(session=session) if session else None
+        session = nogon_cookie(self.headers)
+        answer = lg.nogon.profile(session=session) if session else None
         if answer is None or answer[0] == "out":
-            own = lg.own_sid(self.headers)          # this browser's helper id, when Hister's own cookie is gone
+            own = lg.own_sid(self.headers)          # this browser's helper id, when Nogon's own cookie is gone
             outcome, row = lg.check_sid(own) if own else ("out", None)
             if outcome == "ok" and row["kind"] == "browser":
                 session, answer = row["hister_session"], ("ok", row["username"], row["user_id"])
@@ -1939,8 +1944,8 @@ class Public(Handler):
             return self.redirect(location, cookies)
         if answer is not None and answer[0] in ("down", "off"):
             return self.unavailable(answer[0])
-        if answer is None and lg.hister.health() != "ok":
-            return self.unavailable(lg.hister.health_state)
+        if answer is None and lg.nogon.health() != "ok":
+            return self.unavailable(lg.nogon.health_state)
         cookies = [lg.return_cookie(ret, app, state)] if ret else [lg.return_clear()]
         marked = lg.marked(self.headers)
         if marked and lg.store.was_ended(lg.own_sid(self.headers) or sso_value(self.headers, lg.s.sso)):
@@ -1967,17 +1972,17 @@ class Public(Handler):
         return path + ("?" + u.query if u.query else "")
 
     def callback(self):
-        """The OAuth callback shim: Hister's own callback, unchanged, then an id for the new session and the way back
-        to where the sign-in started (Hister itself always goes to /)."""
+        """The OAuth callback shim: Nogon's own callback, unchanged, then an id for the new session and the way back
+        to where the sign-in started (Nogon itself always goes to /)."""
         lg = self.login
         forward = {k: v for k, v in self.headers.items() if k.lower() in (
             "user-agent", "accept", "accept-language", "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host",
             "sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest")}
-        session = hister_cookie(self.headers)
+        session = nogon_cookie(self.headers)
         if session:
-            forward["Cookie"] = "%s=%s" % (HISTER_COOKIE, session)
+            forward["Cookie"] = "%s=%s" % (NOGON_COOKIE, session)
         try:
-            status, headers, body = lg.hister.request("GET", self.path, forward)
+            status, headers, body = lg.nogon.request("GET", self.path, forward)
         except OSError:
             return self.unavailable("down")
         out = [(k, v) for k, v in headers if k.lower() not in ("content-length", "connection", "transfer-encoding",
@@ -1987,10 +1992,10 @@ class Public(Handler):
             if k.lower() == "set-cookie":
                 name, _, rest = v.partition("=")
                 value = rest.split(";", 1)[0].strip()
-                if name.strip() == HISTER_COOKIE and HISTER_SESSION_RE.match(value) and "max-age=0" not in v.lower():
+                if name.strip() == NOGON_COOKIE and NOGON_SESSION_RE.match(value) and "max-age=0" not in v.lower():
                     new = value
         if status in (302, 303) and new:
-            answer = lg.hister.profile(session=new)
+            answer = lg.nogon.profile(session=new)
             if answer[0] == "ok":
                 ret, app, state = lg.read_return(self.headers.get("Cookie"))
                 location, cookies = lg.finish(new, answer, ret, app, self.headers, state=state)
@@ -2001,8 +2006,8 @@ class Public(Handler):
                 return self.send(status, out, body)
         ret, app, state = lg.read_return(self.headers.get("Cookie"))
         if ret:     # a sign-in this helper started (a room's automatic one, a tap) that didn't finish: the page, with
-            LOG("nogon-login: a sign-in through the provider didn't finish (Hister answered %s)" % status)
-            cookies = [v for k, v in out if k.lower() == "set-cookie"]          # Hister's own, for its host
+            LOG("nogon-login: a sign-in through the provider didn't finish (Nogon answered %s)" % status)
+            cookies = [v for k, v in out if k.lower() == "set-cookie"]          # Nogon's own, for its host
             cookies += [lg.return_clear(), lg.cookie(lg.s.out, "failed", FAILED_MAX_AGE)]
             return self.page(401, signin_page(lg.s, self.headers, ret, app, error="Sign in with %s didn't work. Try "
                                               "again, or sign in with your password." % lg.s.oidc_label, state=state),
@@ -2059,14 +2064,14 @@ class Public(Handler):
             q = self.query()
             ret = self.login.safe(q.get("return"), False)
             state = q.get("state") or ""
-            state = state if histerauth.NONCE_RE.match(state) else ""
+            state = state if nogonauth.NONCE_RE.match(state) else ""
             return self.page(200, signin_page(self.login.s, self.headers, ret, False, state=state,
                                               error="Press Sign In to finish signing in."))
         return self.signin(form)
 
     def signout(self):
         """POST /machiya/signout: a browser (same-origin, its machiya_sso and hister cookies) or an app
-        (Authorization: Bearer mhs_…): Hister's logout for the session, and every id on it gone."""
+        (Authorization: Bearer mhs_…): Nogon's logout for the session, and every id on it gone."""
         lg = self.login
         data = self.body()
         if data is None:
@@ -2075,20 +2080,20 @@ class Public(Handler):
         if auth.lower().startswith("bearer "):
             row = lg.store.get(auth[7:].strip())
             if row:
-                lg.end_hister(row["hister_session"])
+                lg.end_nogon(row["hister_session"])
             return self.send(204, [("Cache-Control", "no-store")])
         if not self.same_origin():
             return self.page(403, message_page(self.headers, "Refused", "A sign-out must come from this page."))
         cookies, ended = [], set()
         row = lg.store.get(lg.own_sid(self.headers))
         if row:
-            cookies += lg.end_hister(row["hister_session"])
+            cookies += lg.end_nogon(row["hister_session"])
             ended.add(row["hister_hash"])
-        own = hister_cookie(self.headers)
+        own = nogon_cookie(self.headers)
         if own and sha(own) not in ended:
-            cookies += lg.end_hister(own)
-        cookies = [c for c in cookies if c.split("=", 1)[0].strip() == HISTER_COOKIE][:1] \
-            or [lg.cookie(HISTER_COOKIE, "", 0)]
+            cookies += lg.end_nogon(own)
+        cookies = [c for c in cookies if c.split("=", 1)[0].strip() == NOGON_COOKIE][:1] \
+            or [lg.cookie(NOGON_COOKIE, "", 0)]
         self.redirect("/machiya/signed-out", lg.sso_clear() + lg.signed_out() + cookies)
 
     def revoke(self):
@@ -2116,7 +2121,7 @@ class Public(Handler):
                 LOG("nogon-login: oauth: a connector was revoked on the sessions page")
             return self.redirect("/machiya/sessions?done=connector")
         if form.get("do") == "idle":
-            # every session folded under Idle: not this device's, and not one whose Hister session another, live id
+            # every session folded under Idle: not this device's, and not one whose Nogon session another, live id
             # still uses
             rows = lg.store.of_user(me["user_id"])
             live = {r["hister_hash"] for r in rows if not idle_session(r, me)}
@@ -2124,25 +2129,25 @@ class Public(Handler):
             for r in rows:
                 if r["hister_hash"] not in live and r["hister_hash"] not in ended:
                     ended.add(r["hister_hash"])
-                    lg.end_hister(r["hister_session"])
+                    lg.end_nogon(r["hister_session"])
             return self.redirect("/machiya/sessions?done=idle")
         if form.get("do") == "all":
             seen = set()
             for r in lg.store.of_user(me["user_id"]):
                 if r["hister_hash"] not in seen:
                     seen.add(r["hister_hash"])
-                    lg.end_hister(r["hister_session"])
+                    lg.end_nogon(r["hister_session"])
             return self.redirect("/machiya/signed-out", lg.sso_clear() + lg.signed_out()
-                                 + [lg.cookie(HISTER_COOKIE, "", 0)])
+                                 + [lg.cookie(NOGON_COOKIE, "", 0)])
         try:
             target = lg.store.by_rowid(int(form.get("id", "")), me["user_id"])
         except ValueError:
             target = None
         if target:
-            lg.end_hister(target["hister_session"])
+            lg.end_nogon(target["hister_session"])
             if target["hister_hash"] == me["hister_hash"]:
                 return self.redirect("/machiya/signed-out", lg.sso_clear() + lg.signed_out()
-                                     + [lg.cookie(HISTER_COOKIE, "", 0)])
+                                     + [lg.cookie(NOGON_COOKIE, "", 0)])
         self.redirect("/machiya/sessions?done=one")
 
     def token_new(self, me, label, rooms):
@@ -2152,14 +2157,15 @@ class Public(Handler):
         audiences = [lg.s.rooms[r] for r in rooms if r in lg.s.rooms]
         if not label or not audiences:
             return self.sessions(new_token={"error": "Name the token and tick at least one room."}, status=400)
-        value = histerauth.RTOKEN_PREFIX + b64e(secrets.token_bytes(32))
+        value = nogonauth.RTOKEN_PREFIX + b64e(secrets.token_bytes(32))
         lg.store.add_token(value, me["username"], label, sorted(set(audiences)), user_id=me["user_id"])
         LOG("nogon-login: a room token was made on the sessions page (%s)" % ", ".join(sorted(set(rooms))))
         self.sessions(new_token={"value": value, "label": label})
 
     def app_session(self):
-        """POST /machiya/api/app-session {"hister": S, "label": "iPhone"}: an app that signed in to Hister with a
-        password trades its own Hister session for an id (kind app). No cookie is involved."""
+        """POST /machiya/api/app-session {"nogon": S, "label": "iPhone"}: an app that signed in to Nogon with a
+        password trades its own Nogon session for an id (kind app). No cookie is involved. {"hister": S}, the old
+        spelling, is still taken until the rename's stage 3c."""
         lg = self.login
         data = self.body()
         if data is None:
@@ -2168,12 +2174,12 @@ class Public(Handler):
             return self.json(415, {"error": "send JSON"})
         try:
             req = json.loads(data)
-            session, label = req.get("nogon", req.get("hister")), req.get("label", "")     # nogon since 0.8.0
+            session, label = req.get("nogon", req.get("hister")), req.get("label", "")     # nogon since 0.8.0; hister until 3c
         except (ValueError, AttributeError):
             return self.json(400, {"error": "unreadable JSON"})
-        if not isinstance(session, str) or not HISTER_SESSION_RE.match(session) or not isinstance(label, str):
-            return self.json(400, {"error": "hister must be a Hister session"})
-        answer = lg.hister.profile(session=session)
+        if not isinstance(session, str) or not NOGON_SESSION_RE.match(session) or not isinstance(label, str):
+            return self.json(400, {"error": "nogon must be a Nogon session"})
+        answer = lg.nogon.profile(session=session)
         if answer[0] == "out":
             return self.json(401, {"error": "signed out"})
         if answer[0] != "ok":
@@ -2221,7 +2227,7 @@ def clean_name(value):
 
 class OAuth(Handler):
     """The OAuth listener (NOGON_LOGIN_OAUTH_PORT): Funnel sends it /oauth/… and the metadata from the public
-    internet. It answers only its own routes, and hands out nothing but its own codes and tokens: never a Hister
+    internet. It answers only its own routes, and hands out nothing but its own codes and tokens: never a Nogon
     session or token, never a room session or room token."""
 
     def do_GET(self):
@@ -2382,7 +2388,7 @@ class OAuth(Handler):
 
     def authorize(self, q):
         """GET /oauth/authorize: the request checked, then the owner: signed in on this host (its own room cookie)
-        or sent on the usual room trip to the helper's sign-in, on Hister's host. That host is tailnet-only, so only
+        or sent on the usual room trip to the helper's sign-in, on Nogon's host. That host is tailnet-only, so only
         a tailnet device can finish it. Then Allow or Deny."""
         lg = self.login
         client, req, refused = self.checked(q)
@@ -2402,28 +2408,28 @@ class OAuth(Handler):
         """To the helper's sign-in with a fresh nonce in this host's state cookie (as the hosted pages' start does);
         it comes back to /oauth/callback with a one-time code, then here again."""
         lg = self.login
-        nonce = histerauth.new_nonce()
+        nonce = nogonauth.new_nonce()
         ret = self.issuer() + "/oauth/authorize?" + urlencode([(k, req[k]) for k in (
             "client_id", "redirect_uri", "response_type", "code_challenge", "code_challenge_method", "scope", "state",
             "resource") if req.get(k)])
-        params = [("return", ret), ("state", histerauth.state_hash(nonce))]
+        params = [("return", ret), ("state", nogonauth.state_hash(nonce))]
         if lg.s.auto_provider and lg.s.auto_provider in lg.s.providers:
             params += [("provider", lg.s.auto_provider), ("auto", "1")]
         self.send(302, [("Location", lg.s.public_url + "/machiya/signin?" + urlencode(params)),
                         ("Cache-Control", "no-store"), ("Referrer-Policy", "no-referrer"),
-                        ("Set-Cookie", self.oauth_cookie(lg.s.oauth_state, nonce, histerauth.STATE_MAX_AGE))])
+                        ("Set-Cookie", self.oauth_cookie(lg.s.oauth_state, nonce, nogonauth.STATE_MAX_AGE))])
 
     def callback(self):
         """GET /oauth/callback?code=…: the helper's code traded here (as a room's /v1/redeem), this host's sign-in
         cookie set (for OAUTH_SIGNIN_TTL), then the authorization request again."""
         lg = self.login
         code = self.query().get("code") or ""
-        nonce = next((v for v in histerauth.HisterAuth.cookie_values(self.headers.get("Cookie"), lg.s.oauth_state)[:4]
-                      if histerauth.NONCE_RE.match(v)), "")
+        nonce = next((v for v in nogonauth.NogonAuth.cookie_values(self.headers.get("Cookie"), lg.s.oauth_state)[:4]
+                      if nogonauth.NONCE_RE.match(v)), "")
         status, data = lg.redeem(code, self.issuer(), nonce) if code and nonce else (401, {})
         done = [self.oauth_cookie(lg.s.oauth_state, "", 0)]
         ret = data.get("return") or ""
-        if status == 200 and histerauth.origin_of(ret) == self.issuer() and urlsplit(ret).path == "/oauth/authorize":
+        if status == 200 and nogonauth.origin_of(ret) == self.issuer() and urlsplit(ret).path == "/oauth/authorize":
             cookies = [self.oauth_cookie(lg.s.oauth_cookie, data["session"], data["max_age"])] + done
             return self.send(302, [("Location", ret), ("Cache-Control", "no-store"),
                                    ("Referrer-Policy", "no-referrer")] + [("Set-Cookie", c) for c in cookies])
@@ -2514,7 +2520,7 @@ def housekeeping(login, stop):
     last_cleanup = 0.0
     while not stop.wait(60):
         try:
-            if login.store.pending() and login.hister.health() == "ok":
+            if login.store.pending() and login.nogon.health() == "ok":
                 login.retry_pending()
             if time.monotonic() - last_cleanup >= 3600:
                 last_cleanup = time.monotonic()
@@ -2545,11 +2551,11 @@ def prefs_cli(argv, env=None, out=sys.stdout):
     second run changes nothing). A file's rows are the user's when their principal is hi:<sha256(NAME)>, the
     tailscale_uid of a --tailscale login, or a --principal given; a file with one principal and none of those is taken
     as that one (said so). -> exit code."""
-    env = legacy_env(os.environ if env is None else env)
+    env = old_names(os.environ if env is None else env)
     ap = argparse.ArgumentParser(prog="nogon_login.py prefs")
     sub = ap.add_subparsers(dest="what", required=True)
     imp = sub.add_parser("import", help="seed an account from the rooms' old prefs files")
-    imp.add_argument("--user", required=True, help="the Hister username")
+    imp.add_argument("--user", required=True, help="the Nogon username")
     imp.add_argument("--tailscale", action="append", default=[], help="a Tailscale login the rooms keyed it by")
     imp.add_argument("--principal", action="append", default=[], help="a principal key to take as the user's")
     imp.add_argument("--dry-run", action="store_true")
@@ -2613,13 +2619,13 @@ def token_cli(argv, env=None, out=sys.stdout):
     """`token mint|add|list|revoke`, run where the helper runs (its sessions file, NOGON_LOGIN_DB). A token's value
     never goes in argv: mint prints it once (or writes it to --out, 0600), add reads it from --from-file.
     --rooms takes room names from MACHIYA_ROOMS (machiya = landing) or origins (https://host[:port]). -> exit code."""
-    env = legacy_env(os.environ if env is None else env)
+    env = old_names(os.environ if env is None else env)
     ap = argparse.ArgumentParser(prog="nogon_login.py token")
     sub = ap.add_subparsers(dest="what", required=True)
     for name, text in (("mint", "make a room token (printed once, or --out FILE)"),
                        ("add", "register a token made elsewhere (--from-file FILE)")):
         p = sub.add_parser(name, help=text)
-        p.add_argument("--user", required=True, help="the Hister username the token acts as")
+        p.add_argument("--user", required=True, help="the Nogon username the token acts as")
         p.add_argument("--label", required=True, help="who holds it (pm on the laptop, machiya-mcp, …)")
         p.add_argument("--rooms", required=True, help="kura,niwa,konbini,machiya or origins, comma-separated")
         p.add_argument("--days", type=int, default=0, help="expire after N days (default: never)")
@@ -2648,7 +2654,7 @@ def token_cli(argv, env=None, out=sys.stdout):
         return 0 if n else 1
     audiences = []
     for r in [x.strip() for x in a.rooms.split(",") if x.strip()]:
-        o = named.get(r) if r in named else histerauth.origin_of(r) if "://" in r else None
+        o = named.get(r) if r in named else nogonauth.origin_of(r) if "://" in r else None
         if not o or (r not in named and urlsplit(r).path not in ("", "/")):
             say("%s: not a room in MACHIYA_ROOMS (%s) nor an origin" % (r, ", ".join(sorted(named)) or "none"))
             return 1
@@ -2663,14 +2669,14 @@ def token_cli(argv, env=None, out=sys.stdout):
         except OSError as ex:
             say("%s: %s" % (a.src, ex.strerror))
             return 1
-        if not histerauth.RTOKEN_RE.match(value):
+        if not nogonauth.RTOKEN_RE.match(value):
             say("%s: not a room token (mht_ and 43 characters)" % a.src)
             return 1
         if store.get_token(value) is not None:
             say("already registered (%s)" % sha(value)[:12])
             return 0
     else:
-        value = histerauth.RTOKEN_PREFIX + b64e(secrets.token_bytes(32))
+        value = nogonauth.RTOKEN_PREFIX + b64e(secrets.token_bytes(32))
     tid = store.add_token(value, a.user.strip(), a.label.strip(), sorted(set(audiences)), days=max(a.days, 0))
     if a.what == "mint":
         if a.out:
@@ -2698,8 +2704,8 @@ def main():
     os.umask(0o077)
     s = Settings()
     login = Login(s)
-    LOG("nogon-login %s: public :%d, internal :%d, Hister %s, return hosts %s, cookie %s, domain %s"
-        % (VERSION, s.port, s.internal_port, s.hister_url, ",".join(s.return_hosts), s.sso,
+    LOG("nogon-login %s: public :%d, internal :%d, Nogon %s, return hosts %s, cookie %s, domain %s"
+        % (VERSION, s.port, s.internal_port, s.nogon_url, ",".join(s.return_hosts), s.sso,
            s.cookie_domain or "(none)"))
     if s.oauth_port is not None:
         LOG("nogon-login: OAuth server :%d for %s (%d redirect(s) allowed, users %s)"

@@ -1,5 +1,16 @@
 # Changelog: nogon-login (hister-login until 0.7.3)
 
+## 0.9.0
+
+- The rename's stage 3b (Hister is now Nogon): `/v1/nginx` sends only `X-Nogon-Cookie` and `X-Nogon-User` (shiori-web reads them since 1.29.1). `/healthz` and `/machiya/healthz` report `nogon` only.
+- The old `HISTER_LOGIN_*` settings (and `NOGON_LOGIN_HISTER_URL`) are no longer read: one set alone stops the helper, naming the new variable; beside its new name it is ignored.
+- Logout at Nogon sends `Origin: nogon://` (Nogon v0.22). `NOGON_LOGIN_NOGON_URL` defaults to `http://nogon:4433`.
+- The app sign-in's fragment carries `"nogon"` beside `"hister"`, and `/machiya/api/app-session` still takes `{"hister": S}`, until stage 3c (Shiori apps before 1.30.0).
+- `NOGON_LOGIN_LEGACY` takes `nogon-token`; `hister-token` is still read as it.
+- The start-up errors and log lines say Nogon; the code's own names too (`nogonauth`, `NOGON_COOKIE`, `end_nogon`, the tests' `fake_nogon.py`).
+- The gate-0 dev stack's rooms use `nogonauth` and `AUTH=nogon`, its checks read `/machiya/healthz`'s `nogon`, and its nginx takes `X-Nogon-Cookie`. Its engine is still Hister v0.20.0 (moving it to v0.22's CLI is separate work).
+- vaultkit 0.40.0 → 0.41.0 (`nogonauth`). Unchanged: Nogon's `hister` cookie, the database's columns, its file name and the data dir, the `/v1/check` kind `hister-token` and the 503 reason `hister-unavailable`.
+
 ## 0.8.1
 
 - vaultkit 0.38.0 → 0.40.0: an extra room in the Rooms menu can say what it is (MACHIYA_EXTRA_ROOMS' sixth field; Techō: "agents", owner 2026-11-20).

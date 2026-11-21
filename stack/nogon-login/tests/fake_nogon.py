@@ -1,5 +1,7 @@
-"""A small Hister v0.20.0 for the helper's tests: users with passwords and tokens, host-only `hister` session cookies
-(32 random bytes, base64url), /api/login, /api/logout (CSRF: Origin hister:// or Sec-Fetch-Site same-origin), /api/profile
+"""A small Nogon v0.22 (formerly Hister; fake_hister.py before nogon-login 0.9.0) for the helper's tests: users with
+passwords and tokens, host-only `hister` session cookies (upstream's name, still), (32 random bytes, base64url),
+/api/login, /api/logout (CSRF: Origin nogon:// or hister://, or Sec-Fetch-Site same-origin; `origins` keeps what each
+POST sent), /api/profile
 (403 with an empty body when nobody is signed in; 200 with an EMPTY body to anyone when user handling is off), /health,
 and /api/oauth/callback (state kept in the session; a consumed-flow Set-Cookie first, then the rotated one, then a 302
 to "/", as the real one does). `fail` makes every answer a 502; `calls` counts requests by path."""
@@ -16,7 +18,7 @@ def new_session():
     return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
 
 
-class FakeHister:
+class FakeNogon:
     def __init__(self):
         self.users = {"owner": {"id": 1, "password": "correct horse", "token": "tok-owner"},
                       "other": {"id": 2, "password": "other pass", "token": "tok-other"}}
@@ -24,6 +26,7 @@ class FakeHister:
         self.user_handling = True
         self.fail = False
         self.calls = Counter()
+        self.origins = []               # the Origin of each POST (logout, login), in order
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -98,7 +101,10 @@ class FakeHister:
                 body = self.rfile.read(length) if length else b""
                 if fake.fail:
                     return self.answer(502, b"bad gateway")
-                if self.headers.get("Origin") != "hister://" and self.headers.get("Sec-Fetch-Site") != "same-origin":
+                if self.command == "POST":
+                    fake.origins.append(self.headers.get("Origin"))
+                if self.headers.get("Origin") not in ("nogon://", "hister://") \
+                        and self.headers.get("Sec-Fetch-Site") != "same-origin":
                     return self.answer(403, b"CSRF token mismatch")
                 if path == "/api/login":
                     req = json.loads(body or b"{}")
