@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mcp                                  # noqa: E402  (puts the vendored vaultkit on the path)
-from backend import HISTER_ORIGIN, Backend, BackendError   # noqa: E402
+from backend import NOGON_ORIGIN, Backend, BackendError   # noqa: E402
 from test_mcp import Fake, call, make_server, rooms        # noqa: E402
 from vaultkit import identity               # noqa: E402
 
@@ -143,7 +143,7 @@ class Inbound(WithFile):
         self.assertIsNone(mcp.Server.rate("board_write", caller))
         self.assertIsNone(mcp.Server.rate("read", "owner"))           # a login without the file: the defaults
         self.assertEqual(set(mcp.LIMIT_KEYS.values()), {"read", "board_write", "board_write_day", "garden_day",
-                                                         "notes_write", "notes_write_day", "hister_write", "bulk_hour"})
+                                                         "notes_write", "notes_write_day", "nogon_write", "bulk_hour"})
 
     def test_apply_tokens_belong_to_the_principal(self):
         server, _ = self.serve()
@@ -286,7 +286,7 @@ class Startup(WithFile):
 
 
 class Outbound(unittest.TestCase):
-    """MCP_TOKEN_FILE: the `mcp` principal's token goes to Kura, Konbini and Niwa as Authorization, never to Hister,
+    """MCP_TOKEN_FILE: the `mcp` principal's token goes to Kura, Konbini and Niwa as Authorization, never to Nogon,
     never through a redirect, never into a log; X-Agent stays the label and no Origin or Referer reaches the rooms."""
 
     TOKEN = "mch_abcd_" + "s" * 43
@@ -300,7 +300,7 @@ class Outbound(unittest.TestCase):
         self.fakes = rooms()
         self.addCleanup(lambda: [f.close() for f in self.fakes.values()])
 
-    def test_the_token_reaches_the_rooms_and_never_hister(self):
+    def test_the_token_reaches_the_rooms_and_never_nogon(self):
         server = make_server(self.fakes, MCP_TOKEN_FILE=self.file)
         self.addCleanup(os.unlink, server.log_path)
         for name, args in (("machiya_status", {}), ("machiya_search", {"q": "x"}), ("notes_read", {"path": "Projects/Alpha.md"}),
@@ -315,10 +315,10 @@ class Outbound(unittest.TestCase):
                 self.assertEqual(req["headers"]["x-agent"], "mcp:t")
                 self.assertFalse({"origin", "referer"} & set(req["headers"]), room)
         self.assertTrue(self.fakes["niwa"].writes() and self.fakes["konbini"].writes())
-        self.assertTrue(self.fakes["hister"].seen)
-        for req in self.fakes["hister"].seen:
+        self.assertTrue(self.fakes["nogon"].seen)
+        for req in self.fakes["nogon"].seen:
             self.assertNotIn("authorization", req["headers"])
-            self.assertEqual(req["headers"]["origin"], HISTER_ORIGIN)
+            self.assertEqual(req["headers"]["origin"], NOGON_ORIGIN)
         with open(server.log_path) as f:
             self.assertNotIn(self.TOKEN[9:], f.read())
         self.assertNotIn(self.TOKEN[9:], repr(server.backends) + repr(vars(server.backends["kura"]).get("base")))
@@ -369,9 +369,9 @@ class Outbound(unittest.TestCase):
         self.assertEqual(Backend("kura", url).get("/api/status"), {"ok": True})    # without a token, as before
         self.assertEqual(len(elsewhere.seen), 1)
 
-    def test_hister_can_never_carry_the_token(self):
+    def test_nogon_can_never_carry_the_token(self):
         with self.assertRaises(ValueError):
-            Backend("hister", "http://127.0.0.1:1", origin=HISTER_ORIGIN, token=self.TOKEN)
+            Backend("nogon", "http://127.0.0.1:1", origin=NOGON_ORIGIN, token=self.TOKEN)
 
 
 class NoFile(unittest.TestCase):

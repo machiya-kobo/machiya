@@ -1,10 +1,10 @@
 # machiya-mcp
 
-Machiya's MCP server: read tools for the board and notes, board and garden writes, notes write tools, page labels and collections, prompts. Saved pages are searched and read here too (`pages_search`, `pages_read`: pages only, never notes or code documents); AI clients get no Hister MCP. Full description, tools, safety rules and configuration: [docs/services/mcp.md](../../docs/services/mcp.md).
+Machiya's MCP server: read tools for the board and notes, board and garden writes, notes write tools, page labels and collections, prompts. Saved pages are searched and read here too (`pages_search`, `pages_read`: pages only, never notes or code documents); AI clients get no Nogon MCP. Full description, tools, safety rules and configuration: [docs/services/mcp.md](../../docs/services/mcp.md).
 
 ```
 MCP_AUTH=open MCP_BIND=127.0.0.1 MCP_LOG=/tmp/mcp.log \
-  KURA_URL=https://kura.example KONBINI_URL=https://konbini.example HISTER_URL=http://hister:4433 python3 mcp.py
+  KURA_URL=https://kura.example KONBINI_URL=https://konbini.example NOGON_URL=http://nogon:4433 python3 mcp.py
 python3 -m unittest discover -s tests      # from this directory; needs markdown and pyyaml (vaultkit's dependencies)
 podman build -t machiya-mcp:dev .          # or docker build; run it with --init
 ```
@@ -13,13 +13,13 @@ Settings that describe a particular vault or routine are optional and neutral by
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `MCP_AUTH_URL` | none | nogon-login's internal address (`http://nogon-login:8081`): callers may also send a **room token** (`Authorization: Bearer mht_…`) made for this server, beside the Tailscale header (0.8.0); an agent on a tagged machine has no Tailscale login. Needs `MCP_PUBLIC_URL` (the address the token names) and `MCP_HISTER_USERS` |
-| `MCP_PUBLIC_URL`, `MCP_HISTER_USERS` | none | with `MCP_AUTH_URL`: this server's public address, and the Hister usernames a room token may act as (never `*`) |
-| `MCP_AUTH=oauth` | | the public, read-only connector (0.10.0): only an OAuth access token from nogon-login (`Bearer mho_…`) gets in, and only the tools in `MCP_TOOLS` (some of `pages_search`, `pages_read`, `notes_search`, `notes_read`) exist. Needs `MCP_PUBLIC_URL` (`https://host`), `MCP_OAUTH_ISSUER`, `MCP_AUTH_URL` and `MCP_HISTER_USERS`; refuses to start with a write room or the notes clone ([docs](../../docs/services/mcp.md#the-public-connector)) |
+| `MCP_AUTH_URL` | none | nogon-login's internal address (`http://nogon-login:8081`): callers may also send a **room token** (`Authorization: Bearer mht_…`) made for this server, beside the Tailscale header (0.8.0); an agent on a tagged machine has no Tailscale login. Needs `MCP_PUBLIC_URL` (the address the token names) and `MCP_NOGON_USERS` |
+| `MCP_PUBLIC_URL`, `MCP_NOGON_USERS` | none | with `MCP_AUTH_URL`: this server's public address, and the Nogon usernames a room token may act as (never `*`) |
+| `MCP_AUTH=oauth` | | the public, read-only connector (0.10.0): only an OAuth access token from nogon-login (`Bearer mho_…`) gets in, and only the tools in `MCP_TOOLS` (some of `pages_search`, `pages_read`, `notes_search`, `notes_read`) exist. Needs `MCP_PUBLIC_URL` (`https://host`), `MCP_OAUTH_ISSUER`, `MCP_AUTH_URL` and `MCP_NOGON_USERS`; refuses to start with a write room or the notes clone ([docs](../../docs/services/mcp.md#the-public-connector)) |
 | `MCP_TOOLS` | all | only these tools exist (any mode) |
 | `MCP_ALLOW_CIDRS`, `MCP_CLIENT_ADDR_HEADER` | none | `/mcp` only from these client addresses, read from the header, believed only from `MCP_TRUSTED_PROXIES` |
 | `MCP_TZ` | `UTC` | time zone of the notes' dates and of the backup window (`MCP_NOTES_TZ` overrides the notes' only) |
-| `MCP_HISTER_BACKUP_WINDOW` | none | a weekly slot, `Sat 03:10-03:40` (local time, within one day), when Hister is stopped for its backup: Hister writes pause |
+| `MCP_NOGON_BACKUP_WINDOW` | none | a weekly slot, `Sat 03:10-03:40` (local time, within one day), when Nogon is stopped for its backup: Nogon writes pause |
 | `MCP_NOTES_NEVER_WRITE` | `Templates/,Archive/` | paths the notes write tools never create or change |
 | `MCP_NOTES_NEVER_CREATE` | none | paths where a new note may not be made (existing notes there can still be updated) |
 | `MCP_NOTES_DEFAULT_FOLDER` | `Inbox/` | the folder `notes_create` uses when given a title only |

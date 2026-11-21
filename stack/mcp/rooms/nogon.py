@@ -1,13 +1,13 @@
-"""Hister reads: pages_search, pages_read, collections_list, and the page rules the label and collection tools
-(hister_write) share.
+"""Nogon reads: pages_search, pages_read, collections_list, and the page rules the label and collection tools
+(nogon_write) share.
 
 Page search and page text are served here again since 0.8.0 (decided 2026-10-05: "code and notes stay out of AI" is
-enforced, not a prompt rule): AI clients no longer get Hister's own MCP, whose `search` and `get_preview` return vault
+enforced, not a prompt rule): AI clients no longer get Nogon's own MCP, whose `search` and `get_preview` return vault
 notes and code documents to anyone who asks. Pages only, twice over: every query this server sends carries
 ` -label:vault -metadata.source:vault -metadata.source:code`, and every document that comes back is checked again
 (`readable`) before any of it reaches the model. A document on a room's own host, a note, a card or a code document
-(code-import's, docs/contracts/hister.md) is never a page, and one whose shape this server doesn't recognise is dropped
-(fail closed: a Hister upgrade that renames a field hides pages, it never shows notes)."""
+(code-import's, docs/contracts/nogon.md) is never a page, and one whose shape this server doesn't recognise is dropped
+(fail closed: a Nogon upgrade that renames a field hides pages, it never shows notes)."""
 import re
 from urllib.parse import urlsplit
 
@@ -16,7 +16,7 @@ from . import ToolError, arg_int, arg_str, n, s, tool
 
 ROOM_HOSTS = re.compile(r"^(kura|konbini|niwa)\.")
 EXCLUDE = " -label:vault -metadata.source:vault -metadata.source:code"
-BUILTIN = ("notes", "pages", "code")        # Hister's own aliases (@notes, @pages, @code): never collections
+BUILTIN = ("notes", "pages", "code")        # Nogon's own aliases (@notes, @pages, @code): never collections
 WORD = re.compile(r"^[a-z0-9][a-z0-9_-]{0,40}$")
 
 
@@ -32,7 +32,7 @@ SCHEMES = ("http", "https", "gemini", "gopher")
 
 def readable(doc):
     """May this document's title, address or text reach the model? Only a page, and only one whose shape is known: a
-    dict with a page URL, a string label (not vault or konbini) and the `metadata` field Hister always sends (an object
+    dict with a page URL, a string label (not vault or konbini) and the `metadata` field Nogon always sends (an object
     or null) whose source is not vault or code. Anything else is dropped."""
     if not isinstance(doc, dict) or "metadata" not in doc or not isinstance(doc.get("label", ""), (str, type(None))):
         return False
@@ -74,7 +74,7 @@ def pages_search(ctx, args):
         raise ToolError("give q, label or collection")
     query = " ".join(x for x in (q or "*", "label:" + label if label else "", "@" + collection if collection else "") if x)
     limit = arg_int(args, "limit", 20, 1, 50)
-    d = ctx.get("hister", "/search", {"q": query + EXCLUDE + " -label:konbini", "format": "json", "limit": limit})
+    d = ctx.get("nogon", "/search", {"q": query + EXCLUDE + " -label:konbini", "format": "json", "limit": limit})
     docs = d.get("documents") if isinstance(d, dict) else None
     shown = [x for x in docs or [] if readable(x)][:limit] if isinstance(docs, list) else []
     total = d.get("total") if isinstance(d, dict) and isinstance(d.get("total"), int) else None
@@ -93,7 +93,7 @@ def pages_read(ctx, args):
         raise ToolError("url must be a page URL Nogon has saved")
     if ROOM_HOSTS.match(host):
         raise ToolError("notes and cards are read with notes_read and board_get_card, not as pages")
-    d = ctx.get("hister", "/api/document", {"url": url})
+    d = ctx.get("nogon", "/api/document", {"url": url})
     if not readable(d) or d.get("url") != url:
         raise ToolError("that document is not a saved page (vault notes, cards and code documents stay out of AI context)")
     text = d.get("text")
@@ -104,7 +104,7 @@ def pages_read(ctx, args):
 
 
 def collections_list(ctx, args):
-    aliases = ctx.get("hister", "/api/rules").get("aliases") or {}
+    aliases = ctx.get("nogon", "/api/rules").get("aliases") or {}
     out = {}
     for name, expansion in sorted(aliases.items()):
         bare = name.lstrip("@")

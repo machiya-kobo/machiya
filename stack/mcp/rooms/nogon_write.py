@@ -1,10 +1,10 @@
-"""Page labels and collections (Hister). Reads: pages_labels, collections_audit. Writes: pages_set_label, pages_relabel (a
+"""Page labels and collections (Nogon). Reads: pages_labels, collections_audit. Writes: pages_set_label, pages_relabel (a
 dry run that mints a token, then an apply), collections_set, collections_remove (same two steps).
 
 The rules: labels are flat, lowercase topics, one per page; vault notes and the reserved (import) labels are never touched; a
 NEW label is the owner's; a collection is an `@name` alias whose value is purely `label:a` or `label:(a|b)` and every other
 alias is the owner's; at most 200 pages per apply, after a dry run, with a rollback file (a JSON map of url -> old label)
-first; no writes inside MCP_HISTER_BACKUP_WINDOW, when set (Hister is stopped for its backup). Every query ends with the
+first; no writes inside MCP_NOGON_BACKUP_WINDOW, when set (Nogon is stopped for its backup). Every query ends with the
 notes exclusion, whatever the caller wrote."""
 import collections
 import hashlib
@@ -15,14 +15,14 @@ import secrets
 import time
 
 from . import IDEMPOTENT, READ, WRITE, ToolError, arg_int, arg_list, arg_str, n, s, tool
-from .hister import BUILTIN, EXCLUDE, WORD, is_page
+from .nogon import BUILTIN, EXCLUDE, WORD, is_page
 
 EXCL = EXCLUDE + " -label:konbini"
 LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,40}$")
 EDITABLE = re.compile(r"^label:(?:\(([A-Za-z0-9_|-]+)\)|([A-Za-z0-9_-]+))$")
 CENSUS_TTL = 300
 DESTRUCTIVE = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}
-WRITE_LIMITS = ("hister_write",)
+WRITE_LIMITS = ("nogon_write",)
 
 
 # -- helpers ---------------------------------------------------------------------------------------------------------
@@ -31,15 +31,15 @@ MAX_BATCHES = 2000          # 200,000 documents: past this a census says it is i
 
 
 def all_docs(ctx, query, cap=None):
-    """(pages, complete): every page matching `query`, or the first `cap` and more (Hister pages 100 at a time with
+    """(pages, complete): every page matching `query`, or the first `cap` and more (Nogon pages 100 at a time with
     page_key; the last page still carries a key). `complete` is False when the paging stopped before the end: the safety
-    limit, or a page_key Hister repeats (sweep MACH-M-7: an 8000-page cap made larger libraries miscount silently)."""
+    limit, or a page_key Nogon repeats (sweep MACH-M-7: an 8000-page cap made larger libraries miscount silently)."""
     docs, key, fetched, seen = [], None, 0, set()
     for _ in range(MAX_BATCHES):
         params = {"q": query, "format": "json", "limit": 100}
         if key:
             params["page_key"] = key
-        d = ctx.get("hister", "/search", params)
+        d = ctx.get("nogon", "/search", params)
         batch = d.get("documents") or []
         fetched += len(batch)
         docs += [x for x in batch if is_page(x) and x.get("label") != "konbini"]
@@ -53,7 +53,7 @@ def all_docs(ctx, query, cap=None):
 
 
 def census(ctx):
-    """{label: count} over every page (never a note); cached five minutes, dropped after any write. When Hister's
+    """{label: count} over every page (never a note); cached five minutes, dropped after any write. When Nogon's
     paging stopped early, ctx.server.census_complete is False and the counts are a lower bound."""
     stamp, data = ctx.server.census
     if data is not None and ctx.server.clock() - stamp < CENSUS_TTL:
@@ -70,12 +70,12 @@ def complete(ctx):
 
 
 def label_exists(ctx, label):
-    """Is `label` on at least one page? From the census, or, when the census is incomplete, by asking Hister for it."""
+    """Is `label` on at least one page? From the census, or, when the census is incomplete, by asking Nogon for it."""
     if label in topics(ctx):
         return True
     if complete(ctx):
         return False
-    d = ctx.get("hister", "/search", {"q": "label:%s%s" % (label, EXCL), "format": "json", "limit": 5})
+    d = ctx.get("nogon", "/search", {"q": "label:%s%s" % (label, EXCL), "format": "json", "limit": 5})
     return any(is_page(x) and x.get("label") == label for x in d.get("documents") or [])
 
 
@@ -119,7 +119,7 @@ def url_query(url):
 
 
 def aliases(ctx):
-    return ctx.get("hister", "/api/rules").get("aliases") or {}
+    return ctx.get("nogon", "/api/rules").get("aliases") or {}
 
 
 def alias_labels(value):
@@ -205,11 +205,11 @@ def collections_audit(ctx, args):
 
 def page_doc(ctx, url):
     from urllib.parse import urlsplit
-    from .hister import ROOM_HOSTS
+    from .nogon import ROOM_HOSTS
     u = urlsplit(url)
     if u.scheme not in ("http", "https", "gemini", "gopher") or not u.hostname or ROOM_HOSTS.match(u.hostname):
         raise ToolError("url must be a saved page's URL (vault notes and cards are not pages)")
-    d = ctx.get("hister", "/api/document", {"url": url})
+    d = ctx.get("nogon", "/api/document", {"url": url})
     if not is_page(d) or d.get("label") == "konbini":
         raise ToolError("that document is a vault note, a card or a code document, not a page")
     return d
@@ -228,7 +228,7 @@ def pages_set_label(ctx, args):
     if old == label:
         return {"url": url, "label": label, "changed": False}
     guard_write(ctx)
-    ctx.write("hister", "POST", "/api/label", {"url": url, "label": label})
+    ctx.write("nogon", "POST", "/api/label", {"url": url, "label": label})
     forget(ctx)
     return {"url": url, "old_label": old, "label": label, "changed": True}
 
@@ -270,7 +270,7 @@ def pages_relabel(ctx, args):
     rollback = log_rollback(ctx, "relabel", {d["url"]: (d.get("label") or "") for d in todo})
     problems, done = [], 0
     for d in todo:
-        r = ctx.write("hister", "POST", "/api/update", {"query": url_query(d["url"]), "changes": {"label": label}})
+        r = ctx.write("nogon", "POST", "/api/update", {"query": url_query(d["url"]), "changes": {"label": label}})
         if isinstance(r, dict) and r.get("matched") == 1:
             done += 1
         else:
@@ -298,7 +298,7 @@ def collections_set(ctx, args):
         return {"name": name, "value": value, "changed": False}
     guard_write(ctx)
     rollback = log_rollback(ctx, "alias-set", {name: before})
-    ctx.write("hister", "POST", "/api/add_alias", {"alias-keyword": name, "alias-value": value}, form=True)
+    ctx.write("nogon", "POST", "/api/add_alias", {"alias-keyword": name, "alias-value": value}, form=True)
     return {"name": name, "before": before, "after": value, "changed": True, "rollback_file": rollback,
             "pages": sum(topics(ctx).get(l, 0) for l in labels)}
 
@@ -322,7 +322,7 @@ def collections_remove(ctx, args):
         raise ToolError("the collection changed since the dry run: run it again", code="stale_plan")
     guard_write(ctx)
     rollback = log_rollback(ctx, "alias-remove", {name: al[name]})
-    ctx.write("hister", "POST", "/api/delete_alias", {"alias": name}, form=True)
+    ctx.write("nogon", "POST", "/api/delete_alias", {"alias": name}, form=True)
     return {"removed": name, "value": al[name], "rollback_file": rollback,
             "restore": "collections_set with the same labels"}
 

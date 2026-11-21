@@ -1,5 +1,15 @@
 # Changelog: machiya-mcp
 
+## 0.12.0
+
+- The rename's stage 3 (Hister is now Nogon):
+  - **The old settings stop the start.** `HISTER_URL`, `HISTER_PUBLIC_URL`, `HISTER_TOKEN_FILE`, `MCP_HISTER_USERS`, `MCP_HISTER_BACKUP_WINDOW` and `MCP_HISTER_WRITES_PER_MIN` are no longer read; one set without its `NOGON` twin stops the server with a message naming the new one (beside its twin it is ignored, and said once).
+  - **Calls to Nogon send `Origin: nogon://`** (Nogon v0.22 and later), not `hister://`.
+  - **The room is `nogon`**: `/api/status`'s `rooms`, `machiya_status`'s keys and a prompt's `requires`. `/api/status` says `nogon_token`, not `hister_token`. **The tools' names don't change.**
+  - An identity file's `limits` take `nogon_writes_per_min`; `hister_writes_per_min`, which files already hold, is still read (the new name wins).
+  - The code's own names say Nogon: `rooms/nogon.py` and `rooms/nogon_write.py` (were `hister*.py`), `NOGON_ORIGIN`, the `nogon_write` bucket, `nogonauth`.
+- vaultkit 0.38.0 → 0.41.0.
+
 ## 0.11.0
 
 - Says Nogon, upstream Hister's new name (owner, 2026-11-19): the pages and collections tools' descriptions, their errors and notes, and the server's instructions.

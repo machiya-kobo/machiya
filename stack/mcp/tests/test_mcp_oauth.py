@@ -1,5 +1,5 @@
 """MCP_AUTH=oauth (0.10.0, docs/services/mcp.md, The public connector): the read-only connector for a cloud agent on a
-Funnel host. Only a Bearer mho_… access token that hister-login's /v1/check vouches for (this server's resource, an
+Funnel host. Only a Bearer mho_… access token that nogon-login's /v1/check vouches for (this server's resource, an
 admitted user) gets in; only the allowed read tools exist; nothing that writes can be configured; the server says
 nothing about itself. Run: python3 -m unittest discover -s stack/mcp/tests"""
 import json
@@ -21,7 +21,7 @@ RESOURCE = PUBLIC + "/mcp"
 GOOD = "mho_" + "G" * 43                    # both scopes
 PAGES = "mho_" + "P" * 43                   # pages:read only
 OTHER_RES = "mho_" + "R" * 43               # another server's resource
-OTHER_USER = "mho_" + "U" * 43              # a Hister user this server doesn't admit
+OTHER_USER = "mho_" + "U" * 43              # a Nogon user this server doesn't admit
 ROOMISH = "mho_" + "K" * 43                 # the helper calls it a room token, not an OAuth one
 PING = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
 
@@ -35,7 +35,7 @@ def tool(name, args=None):
 
 
 class Helper:
-    """hister-login's internal /v1/check, as the OAuth server answers it for the room mcp-public."""
+    """nogon-login's internal /v1/check, as the OAuth server answers it for the room mcp-public."""
     ANSWERS = {GOOD: {"username": "owner", "kind": "oauth", "scopes": "pages:read notes:read", "resource": RESOURCE,
                       "client_id": "mhc_duet1"},
                PAGES: {"username": "owner", "kind": "oauth", "scopes": "pages:read", "resource": RESOURCE},
@@ -79,15 +79,15 @@ class OAuth(unittest.TestCase):
 
     def env(self, **extra):
         e = {"MCP_AUTH": "oauth", "MCP_TOOLS": ",".join(mcp.OAUTH_TOOLS), "MCP_PUBLIC_URL": PUBLIC,
-             "MCP_OAUTH_ISSUER": PUBLIC, "MCP_AUTH_URL": self.helper.url, "MCP_HISTER_USERS": "owner",
-             "MCP_LOG": os.devnull, "KURA_URL": self.fakes["kura"].url, "HISTER_URL": self.fakes["hister"].url}
+             "MCP_OAUTH_ISSUER": PUBLIC, "MCP_AUTH_URL": self.helper.url, "MCP_NOGON_USERS": "owner",
+             "MCP_LOG": os.devnull, "KURA_URL": self.fakes["kura"].url, "NOGON_URL": self.fakes["nogon"].url}
         e.update(extra)
         return {k: v for k, v in e.items() if v is not None}
 
     def serve(self, **extra):
         env = self.env(**extra)
         env.pop("MCP_LOG")
-        server = make_server({k: self.fakes[k] for k in ("kura", "hister")}, **env)
+        server = make_server({k: self.fakes[k] for k in ("kura", "nogon")}, **env)
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), mcp.make_handler(server))
         threading.Thread(target=httpd.serve_forever, args=(0.02,), daemon=True).start()
         self.addCleanup(lambda: (httpd.shutdown(), httpd.server_close(), os.unlink(server.log_path)))
@@ -117,7 +117,7 @@ class OAuth(unittest.TestCase):
                     {"NIWA_URL": "http://niwa:8080"}, {"MACHIYA_IDENTITY_FILE": "/etc/identity.toml"},
                     {"MCP_PUBLIC_URL": None}, {"MCP_PUBLIC_URL": RESOURCE}, {"MCP_PUBLIC_URL": "http://mcp.example"},
                     {"MCP_OAUTH_ISSUER": None}, {"MCP_AUTH_URL": None}, {"MCP_AUTH_URL": "ftp://h"},
-                    {"MCP_HISTER_USERS": None}, {"MCP_HISTER_USERS": "*"},
+                    {"MCP_NOGON_USERS": None}, {"MCP_NOGON_USERS": "*"},
                     {"MCP_ALLOW_CIDRS": "160.79.104.0/21"},
                     {"MCP_ALLOW_CIDRS": "160.79.104.0/21", "MCP_CLIENT_ADDR_HEADER": "X-Forwarded-For"},
                     {"MCP_ALLOW_CIDRS": "nonsense", "MCP_CLIENT_ADDR_HEADER": "X-Forwarded-For",
@@ -159,10 +159,10 @@ class OAuth(unittest.TestCase):
         _, base = self.serve(MCP_BIND="127.0.0.1", MCP_USERS="me@x", MCP_TRUSTED_PROXIES="127.0.0.1")
         ts = {"Tailscale-User-Login": "me@x"}
         self.assertEqual(self.post(base, PING, token=None, **ts)[0], 401)
-        for cred in ("mht_" + "R" * 43, "mch_abc.def", "tok-owner-hister", ROOMISH):
+        for cred in ("mht_" + "R" * 43, "mch_abc.def", "tok-owner-nogon", ROOMISH):
             self.assertEqual(self.post(base, PING, token=cred, **ts)[0], 401, cred)
         self.assertEqual(self.post(base, PING, token=None, **ts, **{"X-Machiya-Token": "mht_" + "R" * 43})[0], 401)
-        self.assertEqual(self.post(base, PING, token=None, **{"X-Access-Token": "tok-owner-hister"})[0], 401)
+        self.assertEqual(self.post(base, PING, token=None, **{"X-Access-Token": "tok-owner-nogon"})[0], 401)
         self.assertEqual(self.request(base + "/mcp", PING, {"Authorization": "Basic b3duZXI6eA=="})[0], 401)
         self.assertEqual(self.post(base, PING)[0], 200)
         self.assertNotIn(("mht_" + "R" * 43, mcp.OAUTH_ROOM), self.helper.seen)   # never even asked about
@@ -213,7 +213,7 @@ class OAuth(unittest.TestCase):
                            ("machiya_status", {})):
             _, body, _ = self.post(base, tool(name, args))
             self.assertIn("Unknown tool", body["error"]["message"], name)
-        self.assertEqual(self.fakes["hister"].writes(), [])
+        self.assertEqual(self.fakes["nogon"].writes(), [])
 
     def test_the_reads_work_with_their_guards(self):
         server, base = self.serve()
@@ -221,7 +221,7 @@ class OAuth(unittest.TestCase):
         result = body["result"]
         self.assertFalse(result.get("isError"))
         self.assertEqual(result["structuredContent"]["trust"], "untrusted")
-        self.assertTrue(self.fakes["hister"].seen[-1]["query"]["q"].endswith("-label:vault -metadata.source:vault "
+        self.assertTrue(self.fakes["nogon"].seen[-1]["query"]["q"].endswith("-label:vault -metadata.source:vault "
                                                                              "-metadata.source:code -label:konbini"))
         _, body, _ = self.post(base, tool("notes_search", {"q": "alpha"}))
         notes = body["result"]["structuredContent"]["untrusted_content"]

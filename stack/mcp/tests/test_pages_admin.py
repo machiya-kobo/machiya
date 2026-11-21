@@ -1,4 +1,4 @@
-"""Page labels and collections (rooms/hister_write.py) against a stateful fake Hister."""
+"""Page labels and collections (rooms/nogon_write.py) against a stateful fake Nogon."""
 import json
 import os
 import shutil
@@ -12,14 +12,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mcp                      # noqa: E402
 import test_mcp as T            # noqa: E402
-from fake_hister import FakeHister   # noqa: E402
+from fake_nogon import FakeNogon   # noqa: E402
 
 TECH = "https://tech.example/p/000"
 
 
 ZONE = "Europe/Berlin"
 # The settings of a deployment with a weekly backup, import labels and a hand-kept collection (none of them is a default).
-SETTINGS = {"MCP_TZ": ZONE, "MCP_HISTER_BACKUP_WINDOW": "Sat 03:10-03:40", "MCP_RESERVED_LABELS": "feedreader,importer",
+SETTINGS = {"MCP_TZ": ZONE, "MCP_NOGON_BACKUP_WINDOW": "Sat 03:10-03:40", "MCP_RESERVED_LABELS": "feedreader,importer",
             "MCP_RESERVED_COLLECTIONS": "everything"}
 
 
@@ -35,7 +35,7 @@ class Base(unittest.TestCase):
     SETTINGS = SETTINGS
 
     def setUp(self):
-        self.h = FakeHister()
+        self.h = FakeNogon()
         self.addCleanup(self.h.close)
         self.tmp = tempfile.mkdtemp(prefix="pages-test-")
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -44,7 +44,7 @@ class Base(unittest.TestCase):
         self.server.clock = lambda: self.now[0]
 
     def make(self, **env):
-        server = T.make_server({"hister": self.h}, MCP_ROLLBACK_DIR=os.path.join(self.tmp, "rb"), **dict(self.SETTINGS, **env))
+        server = T.make_server({"nogon": self.h}, MCP_ROLLBACK_DIR=os.path.join(self.tmp, "rb"), **dict(self.SETTINGS, **env))
         self.addCleanup(os.unlink, server.log_path)
         return server
 
@@ -86,7 +86,7 @@ class Reads(Base):
         self.assertGreaterEqual(len(searches), 3)                   # 244 pages are more than one 100-page
         for _, _, q, headers in searches:
             self.assertTrue(q["q"].endswith(" -label:vault -metadata.source:vault -metadata.source:code -label:konbini"), q["q"])
-            self.assertEqual(headers.get("Origin"), "hister://")
+            self.assertEqual(headers.get("Origin"), "nogon://")
 
     def test_census_counts_past_8000_pages(self):
         # sweep MACH-M-7: the census stopped at 8000 pages, so a label whose pages all sat past it was refused as new
@@ -103,7 +103,7 @@ class Reads(Base):
         self.ok("pages_set_label", url=TECH, label="zzlate")
 
     def test_an_incomplete_census_says_so_and_never_calls_a_label_new(self):
-        import rooms.hister_write as hw
+        import rooms.nogon_write as hw
         self.addCleanup(setattr, hw, "MAX_BATCHES", hw.MAX_BATCHES)
         hw.MAX_BATCHES = 1                                          # stop after the first 100 (sorted by URL: no tech page)
         d = self.ok("pages_labels")
@@ -111,7 +111,7 @@ class Reads(Base):
         self.assertNotIn("tech", {x["label"] for x in d["labels"]})
         self.assertTrue(self.ok("collections_audit")["truncated"])
         music = "https://music.example/p/000"
-        self.ok("pages_set_label", url=music, label="tech")          # exists past the cut: asked of Hister, not refused
+        self.ok("pages_set_label", url=music, label="tech")          # exists past the cut: asked of Nogon, not refused
         self.assertEqual(self.label_of(music), "tech")
         self.server.census = (0.0, None)
         self.err("pages_set_label", "not an existing label", owner=True, url=music, label="nosuchlabel")
@@ -153,7 +153,7 @@ class SetLabel(Base):
         self.assertEqual(self.label_of(TECH), "music")
         w = self.posts()[-1]
         self.assertEqual((w["path"], w["body"]), ("/api/label", {"url": TECH, "label": "music"}))
-        self.assertEqual(w["headers"]["Origin"], "hister://")
+        self.assertEqual(w["headers"]["Origin"], "nogon://")
         self.assertEqual(w["headers"]["X-Agent"], "mcp:t")
 
     def test_clearing_and_no_change(self):
@@ -287,14 +287,14 @@ class Relabel(Base):
         self.assertEqual(self.err("pages_relabel", apply_token=tok)["code"], "backup_window")
 
     def test_a_route_can_only_change_a_label(self):
-        for room, path, body in (("hister", "/api/update", {"query": "x", "changes": {"title": "t"}}),
-                                 ("hister", "/api/update", {"query": "x", "changes": {"label": "a", "metadata": {}}}),
-                                 ("hister", "/api/update", {"query": "x"}), ("hister", "/api/delete", {"query": "x"}),
-                                 ("hister", "/api/add", {"url": "x"}), ("hister", "/api/label", {"url": "u", "label": "l", "extra": 1}),
-                                 ("hister", "/api/add_alias", {"alias-keyword": "a", "alias-value": "b", "x": 1})):
+        for room, path, body in (("nogon", "/api/update", {"query": "x", "changes": {"title": "t"}}),
+                                 ("nogon", "/api/update", {"query": "x", "changes": {"label": "a", "metadata": {}}}),
+                                 ("nogon", "/api/update", {"query": "x"}), ("nogon", "/api/delete", {"query": "x"}),
+                                 ("nogon", "/api/add", {"url": "x"}), ("nogon", "/api/label", {"url": "u", "label": "l", "extra": 1}),
+                                 ("nogon", "/api/add_alias", {"alias-keyword": "a", "alias-value": "b", "x": 1})):
             with self.assertRaises(RuntimeError):
                 mcp.check_route(room, "POST", path, body)
-        mcp.check_route("hister", "POST", "/api/update", {"query": "x", "changes": {"label": "a"}})
+        mcp.check_route("nogon", "POST", "/api/update", {"query": "x", "changes": {"label": "a"}})
 
 
 class Collections(Base):
@@ -305,7 +305,7 @@ class Collections(Base):
         w = self.posts()[-1]
         self.assertEqual((w["path"], w["body"], w["ctype"]), ("/api/add_alias", {"alias-keyword": "@music-stuff", "alias-value": "label:(music|tech)"},
                                                               "application/x-www-form-urlencoded"))
-        self.assertEqual(w["headers"]["Origin"], "hister://")
+        self.assertEqual(w["headers"]["Origin"], "nogon://")
         d = self.ok("collections_set", name="music-stuff", labels=["music"])
         self.assertEqual((d["before"], d["after"]), ("label:(music|tech)", "label:music"))
         self.assertFalse(self.ok("collections_set", name="music-stuff", labels=["music"])["changed"])
@@ -414,7 +414,7 @@ class Settings(Base):
         self.assertFalse(self.server.in_backup_window())
 
     def test_another_window_replaces_the_first(self):
-        server = self.make(MCP_HISTER_BACKUP_WINDOW="Wed 23:00-23:30")
+        server = self.make(MCP_NOGON_BACKUP_WINDOW="Wed 23:00-23:30")
         server.clock = lambda: self.now[0]
         for when, paused in ((at(2026, 10, 7, 23, 10), True), (at(2026, 10, 7, 22, 59), False), (at(2026, 10, 7, 23, 30), False),
                              (at(2026, 10, 3, 3, 20), False)):
@@ -429,10 +429,10 @@ class Settings(Base):
         for text, want in (("Sat 03:10-03:40", (5, (3, 10), (3, 40))), ("saturday 3:10 - 3:40", (5, (3, 10), (3, 40))),
                            ("Mon 00:00-23:59", (0, (0, 0), (23, 59))), ("", None), ("  ", None)):
             self.assertEqual(mcp.backup_window(text), want, text)
-        self.assertIsNone(mcp.Config({"MCP_HISTER_BACKUP_WINDOW": ""}).backup_window)
+        self.assertIsNone(mcp.Config({"MCP_NOGON_BACKUP_WINDOW": ""}).backup_window)
         for bad in ("03:10-03:40", "Funday 03:10-03:40", "Sat 03:40-03:10", "Sat 03:10-03:10", "Sat 22:00-02:00", "Sat 25:00-26:00", "Sat 03:10"):
             with self.assertRaises(SystemExit, msg=bad):
-                mcp.Config({"MCP_HISTER_BACKUP_WINDOW": bad})
+                mcp.Config({"MCP_NOGON_BACKUP_WINDOW": bad})
 
     def test_reserved_labels_add_to_vault_and_konbini(self):
         self.assertEqual(self.server.config.reserved_labels, {"vault", "konbini", "feedreader", "importer"})
@@ -462,11 +462,11 @@ class Tools(Base):
             self.assertTrue(t[name]["annotations"]["destructiveHint"], name)
         for name in ("pages_set_label", "pages_relabel", "collections_set", "collections_remove"):
             self.assertFalse(t[name]["annotations"]["readOnlyHint"], name)
-            self.assertEqual(t[name]["limits"], ("hister_write",))
+            self.assertEqual(t[name]["limits"], ("nogon_write",))
         self.assertIn("tidy_collections", [p["name"] for p in self.server.prompts])
 
-    def test_hister_write_rate_limit_and_audit_has_no_label_text(self):
-        server = self.make(MCP_HISTER_WRITES_PER_MIN="2")
+    def test_nogon_write_rate_limit_and_audit_has_no_label_text(self):
+        server = self.make(MCP_NOGON_WRITES_PER_MIN="2")
         server.clock = lambda: self.now[0]
         rs = [T.call(server, "pages_set_label", {"url": "https://tech.example/p/00%d" % i, "label": "music"}) for i in range(3)]
         self.assertEqual([bool(r.get("isError")) for r in rs], [False, False, True])

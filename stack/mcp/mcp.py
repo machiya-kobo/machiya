@@ -3,7 +3,7 @@
 
 A legacy Streamable HTTP server (POST /mcp, JSON responses, no session, no SSE): initialize, tools/*, resources/*.
 It is a client of the rooms' HTTP APIs and changes none of them; a room's tools appear only when its URL is set
-(KONBINI_URL, KURA_URL, NIWA_URL, HISTER_URL).
+(KONBINI_URL, KURA_URL, NIWA_URL, NOGON_URL).
 
 Owner-only, in Machiya's auth shape: MCP_AUTH=tailscale (default: Tailscale-User-Login must be in MCP_USERS, an
 empty list admits nobody) | open (no check, a startup warning; localhost or a trusted LAN only), MCP_BIND.
@@ -11,15 +11,15 @@ Every call reaches the rooms as the owner's machine, so this gate is the fence: 
 work vaults never pass (rooms/kura.py).
 
 MCP_AUTH=oauth (0.10.0) is the public, read-only connector for a cloud agent (Claude Duet, on a Tailscale Funnel host):
-only `Authorization: Bearer mho_…`, an OAuth access token hister-login issued for this server's resource, checked at
+only `Authorization: Bearer mho_…`, an OAuth access token nogon-login issued for this server's resource, checked at
 MCP_AUTH_URL; no login header, room token or identity file. Only the read tools named in MCP_TOOLS (saved pages and
 default-vault notes) exist, and it refuses to start with anything that writes (docs/services/mcp.md, The public connector).
 
 With Machiya's identity file (MACHIYA_IDENTITY_FILE, vaultkit.identity) each request names a principal instead (a
 token, a Tailscale login or tagged node, or with MCP_AUTH=header a trusted proxy's header); it needs the `mcp` `use`
 grant, and its `limits` replace the buckets' defaults. The rooms see only this server: it calls them as the principal
-`mcp` with its own token (MCP_TOKEN_FILE), the caller's name in X-Agent as a label, never on anyone's behalf. Hister
-(with user handling on) gets the owner's token from HISTER_TOKEN_FILE as X-Access-Token on every call; the token is
+`mcp` with its own token (MCP_TOKEN_FILE), the caller's name in X-Agent as a label, never on anyone's behalf. Nogon
+(with user handling on) gets the owner's token from NOGON_TOKEN_FILE as X-Access-Token on every call; the token is
 admin, so no write may change a page's owner (check_route)."""
 import hashlib
 import ipaddress
@@ -36,10 +36,10 @@ from urllib.parse import unquote, urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import envelope                                   # noqa: E402
-from backend import HISTER_ORIGIN, Backend, BackendError, SecretFile   # noqa: E402
-from rooms import ToolError, cross, hister, hister_write, konbini, kura, niwa, prompts, vault  # noqa: E402
+from backend import NOGON_ORIGIN, Backend, BackendError, SecretFile   # noqa: E402
+from rooms import ToolError, cross, nogon, nogon_write, konbini, kura, niwa, prompts, vault  # noqa: E402
 
-VERSION = "0.11.0"
+VERSION = "0.12.0"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHANGELOG = os.path.join(HERE, "CHANGELOG.md")    # /app/CHANGELOG.md in the image; GET /api/changelog serves it
 PROTOCOLS = ("2025-11-25", "2025-06-18", "2025-03-26")
@@ -49,16 +49,20 @@ _old_names = set()
 
 
 def setting(env, name, default=None):
-    """0.11.0, the rename (Hister is now Nogon): `name` (spelled NOGON), else its HISTER twin (logged once) until the
-    rename's stage 3. A NOGON name that is set wins, even empty, as upstream Nogon does with its own."""
-    if name in env:
-        return env[name]
+    """`name` (spelled NOGON: NOGON_URL, MCP_NOGON_USERS, ...), as vaultkit's names.setting() reads one. A NOGON name
+    that is set wins, even empty, as upstream Nogon does with its own. 0.12.0, the rename's stage 3 (Hister is now
+    Nogon): its old HISTER twin is no longer read. Set on its own it stops the start, naming the new one, so nothing is
+    quietly ignored; set beside it, it is ignored and said once."""
     old = name.replace("NOGON", "HISTER")
-    if old in env:
-        if old not in _old_names:
+    if name in env:
+        if old != name and old in env and old not in _old_names:
             _old_names.add(old)
-            print("machiya-mcp: %s is an old name, read as %s" % (old, name), file=sys.stderr, flush=True)
-        return env[old]
+            print("machiya-mcp: %s: an old name, ignored (%s is set; Hister is now Nogon): remove it" % (old, name),
+                  file=sys.stderr, flush=True)
+        return env[name]
+    if old != name and old in env:
+        raise SystemExit("machiya-mcp: %s is an old name and is no longer read: rename it %s (Hister is now Nogon)"
+                         % (old, name))
     return default
 
 
@@ -149,24 +153,24 @@ def load_identity(env, bind):
 
 
 def load_token_gate(env):
-    """MCP_AUTH_URL (hister-login's internal address; 0.8.0) turns on room tokens beside the Tailscale header: an agent
-    on a tagged machine (no Tailscale login) sends `Authorization: Bearer mht_…`, a room token hister-login issued for
-    MCP_PUBLIC_URL's origin, acting as one of MCP_HISTER_USERS. Never Hister's raw token. None without the setting."""
+    """MCP_AUTH_URL (nogon-login's internal address; 0.8.0) turns on room tokens beside the Tailscale header: an agent
+    on a tagged machine (no Tailscale login) sends `Authorization: Bearer mht_…`, a room token nogon-login issued for
+    MCP_PUBLIC_URL's origin, acting as one of MCP_NOGON_USERS. Never Nogon's raw token. None without the setting."""
     if not (env.get("MCP_AUTH_URL") or "").strip():
         return None
-    from vaultkit import histerauth, identity      # vendored beside this file
+    from vaultkit import identity, nogonauth       # vendored beside this file
     try:
-        return histerauth.token_gate_for("machiya-mcp", "MCP", env)
+        return nogonauth.token_gate_for("machiya-mcp", "MCP", env)
     except identity.IdentityError as e:
         raise SystemExit("machiya-mcp: room tokens: %s" % e)
 
 
-# MCP_AUTH=oauth (0.10.0): the only tools there may be, and the scope each one needs (hister-login's OAuth server grants
-# them; docs/services/hister-login.md). Anything that writes, or reads the board, never runs on the public connector.
+# MCP_AUTH=oauth (0.10.0): the only tools there may be, and the scope each one needs (nogon-login's OAuth server grants
+# them; docs/services/nogon-login.md). Anything that writes, or reads the board, never runs on the public connector.
 OAUTH_TOOLS = ("pages_search", "pages_read", "notes_search", "notes_read")
 SCOPES = {"pages": "pages:read", "notes": "notes:read"}
-OAUTH_ROOM = "mcp-public"                  # how this server names itself to hister-login's /v1/check
-OTOKEN_RE = re.compile(r"mho_[A-Za-z0-9_-]{20,200}\Z")   # an OAuth access token from hister-login
+OAUTH_ROOM = "mcp-public"                  # how this server names itself to nogon-login's /v1/check
+OTOKEN_RE = re.compile(r"mho_[A-Za-z0-9_-]{20,200}\Z")   # an OAuth access token from nogon-login
 CLIENT_RE = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 
 
@@ -180,18 +184,18 @@ def public_origin(url, setting):
 
 
 class OAuthGate:
-    """MCP_AUTH=oauth: `Authorization: Bearer mho_…` and nothing else. hister-login's internal /v1/check (MCP_AUTH_URL)
+    """MCP_AUTH=oauth: `Authorization: Bearer mho_…` and nothing else. nogon-login's internal /v1/check (MCP_AUTH_URL)
     answers {"username", "kind": "oauth", "scopes": "pages:read notes:read", "resource", "client_id"} for a live token
     asked about by the room `mcp-public`; the resource must be this server's (MCP_PUBLIC_URL + /mcp) and the user one of
-    MCP_HISTER_USERS. resolve(headers) -> (status, Caller or None, error): 200, 401 (no token, a bad one, or someone
-    else's resource), 403 (another Hister user) or 503 (the helper unreachable). Answers are cached by the token's hash,
+    MCP_NOGON_USERS. resolve(headers) -> (status, Caller or None, error): 200, 401 (no token, a bad one, or someone
+    else's resource), 403 (another Nogon user) or 503 (the helper unreachable). Answers are cached by the token's hash,
     30 s good and 5 s refused or down, as the room tokens' are. The token is never logged or kept in clear."""
     TTL_OK, TTL_OUT, CACHE_MAX = 30, 5, 1024
 
     def __init__(self, auth_url, resource, users, fetch=None, clock=time.monotonic):
-        from vaultkit import histerauth             # vendored beside this file: the same no-redirect fetch as room tokens
+        from vaultkit import nogonauth              # vendored beside this file: the same no-redirect fetch as room tokens
         self.resource, self.users = resource, frozenset(users)
-        self.fetch = fetch or histerauth._http_fetch(auth_url)
+        self.fetch = fetch or nogonauth._http_fetch(auth_url)
         self.clock, self.cache, self.lock = clock, {}, threading.Lock()
 
     def resolve(self, headers):
@@ -202,7 +206,7 @@ class OAuthGate:
         scheme, _, value = (values[0] or "").strip().partition(" ")
         value = value.strip()
         if len(values) > 1 or scheme.lower() != "bearer" or not OTOKEN_RE.match(value):
-            return 401, None, "invalid_token"       # a room token, Hister's token, mch_… or junk: never a fallback
+            return 401, None, "invalid_token"       # a room token, Nogon's token, mch_… or junk: never a fallback
         key = hashlib.sha256(value.encode("ascii")).hexdigest()
         with self.lock:
             hit = self.cache.get(key)
@@ -250,7 +254,7 @@ def oauth_config(config, env):
     auth_url = (env.get("MCP_AUTH_URL") or "").strip().rstrip("/")
     users = csv_list(setting(env, "MCP_NOGON_USERS"))
     if not auth_url:
-        raise SystemExit("machiya-mcp: MCP_AUTH=oauth needs MCP_AUTH_URL (hister-login's internal address)")
+        raise SystemExit("machiya-mcp: MCP_AUTH=oauth needs MCP_AUTH_URL (nogon-login's internal address)")
     if not users or "*" in users:
         raise SystemExit("machiya-mcp: MCP_AUTH=oauth needs MCP_NOGON_USERS, the Nogon usernames it admits (never *)")
     from vaultkit import identity
@@ -262,7 +266,7 @@ def oauth_config(config, env):
 
 def room_token(path):
     """MCP_TOKEN_FILE: the `mcp` principal's own token, sent to Kura, Konbini and Niwa as Authorization (never to
-    Hister). Unset: no token, as before. Set but missing, empty or not a token: refuse to start. Never logged."""
+    Nogon). Unset: no token, as before. Set but missing, empty or not a token: refuse to start. Never logged."""
     path = (path or "").strip()
     if not path:
         return ""
@@ -275,9 +279,9 @@ def room_token(path):
     return token
 
 
-def hister_token(path):
-    """HISTER_TOKEN_FILE: the owner's Hister token (docs/contracts/hister.md), sent as X-Access-Token on every Hister
-    call and to nothing else. Unset: none, as before (a Hister without users ignores it anyway). Set but missing, empty
+def nogon_token(path):
+    """NOGON_TOKEN_FILE: the owner's Nogon token (docs/contracts/nogon.md), sent as X-Access-Token on every Nogon
+    call and to nothing else. Unset: none, as before (a Nogon without users ignores it anyway). Set but missing, empty
     or not a token: refuse to start. Re-read when the file changes. Never logged."""
     path = (path or "").strip()
     if not path:
@@ -294,7 +298,9 @@ def hister_token(path):
 # Other names are ignored (the file is shared by every room).
 LIMIT_KEYS = {"reads_per_min": "read", "writes_per_min": "board_write", "writes_per_day": "board_write_day",
               "suggests_per_day": "garden_day", "notes_per_min": "notes_write", "notes_per_day": "notes_write_day",
-              "hister_writes_per_min": "hister_write", "bulk_per_hour": "bulk_hour"}
+              "nogon_writes_per_min": "nogon_write", "bulk_per_hour": "bulk_hour"}
+# 0.12.0 (Hister is now Nogon): an identity file's limits are stored settings, so the old name is still read, after the new
+OLD_LIMIT_KEYS = {"nogon_writes_per_min": "hister_writes_per_min"}
 BUCKET_LIMIT = {bucket: key for key, bucket in LIMIT_KEYS.items()}
 
 
@@ -369,7 +375,7 @@ class Config:
         self.bind = env.get("MCP_BIND", "0.0.0.0").strip() or "0.0.0.0"
         self.behind_proxy = (env.get("MCP_BIND_BEHIND_PROXY") or "").strip().lower() in ("1", "on", "true", "yes")
         # 0.8.0: MCP_TRUSTED_PROXIES, the sidecar's address(es): the header counts only from there (a server that must
-        # share a network with others, e.g. Hister's, still can't be driven by a neighbour's forged header)
+        # share a network with others, e.g. Nogon's, still can't be driven by a neighbour's forged header)
         self.trusted = trusted_proxies(env.get("MCP_TRUSTED_PROXIES"))
         self.header_trusted = is_loopback(self.bind) or self.behind_proxy or bool(self.trusted)   # may the header be believed?
         self.identity = load_identity(env, self.bind)        # None: the MCP_USERS gate, as before
@@ -386,7 +392,7 @@ class Config:
             raise SystemExit("machiya-mcp: MCP_ALLOW_CIDRS needs MCP_CLIENT_ADDR_HEADER and MCP_TRUSTED_PROXIES "
                              "(the proxy that sets the header)")
         self.token = room_token(env.get("MCP_TOKEN_FILE"))   # the `mcp` principal's token for the rooms; "" without one
-        self.hister_token = hister_token(setting(env, "NOGON_TOKEN_FILE"))   # the owner's, for Hister only; None without
+        self.nogon_token = nogon_token(setting(env, "NOGON_TOKEN_FILE"))   # the owner's, for Nogon only; None without
         self.port = int(env.get("MCP_PORT", "8080"))
         self.users = csv(env.get("MCP_USERS"))
         self.log = env.get("MCP_LOG", "/data/mcp.log")
@@ -422,10 +428,10 @@ class Config:
             "status_locked": csv_list(env.get("MCP_NOTES_STATUS_LOCKED")),
             "managed_markers": csv_list(env.get("MCP_NOTES_MANAGED_MARKERS"))}
         self.garden_skip = tuple(csv_list(env.get("MCP_GARDEN_SKIP", "Templates/,Archive/")))
-        # Hister writes: labels and collections.
+        # Nogon writes: labels and collections.
         self.backup_window = backup_window(setting(env, "MCP_NOGON_BACKUP_WINDOW"))
         self.backup_window_text = (setting(env, "MCP_NOGON_BACKUP_WINDOW") or "").strip()
-        self.hister_writes_per_min = int(setting(env, "MCP_NOGON_WRITES_PER_MIN", "60"))
+        self.nogon_writes_per_min = int(setting(env, "MCP_NOGON_WRITES_PER_MIN", "60"))
         self.bulk_per_hour = int(env.get("MCP_BULK_PER_HOUR", "5"))
         self.relabel_max = int(env.get("MCP_RELABEL_MAX", "200"))
         self.rollback_dir = env.get("MCP_ROLLBACK_DIR", "/data/rollback")
@@ -434,9 +440,9 @@ class Config:
         # Collection (alias) names that are never created, changed or removed here, besides notes and pages.
         self.reserved_collections = {x.lower().lstrip("@") for x in csv(env.get("MCP_RESERVED_COLLECTIONS"))}
         self.urls = {r: env.get(r.upper() + "_URL", "").rstrip("/") for r in ("konbini", "kura", "niwa")}
-        self.urls["hister"] = (setting(env, "NOGON_URL") or "").rstrip("/")          # HISTER_URL until stage 3
+        self.urls["nogon"] = (setting(env, "NOGON_URL") or "").rstrip("/")
         self.public = {r: (env.get(r.upper() + "_PUBLIC_URL") or u).rstrip("/") for r, u in self.urls.items()}
-        self.public["hister"] = (setting(env, "NOGON_PUBLIC_URL") or self.urls["hister"]).rstrip("/")
+        self.public["nogon"] = (setting(env, "NOGON_PUBLIC_URL") or self.urls["nogon"]).rstrip("/")
 
 
 class Limiter:
@@ -476,17 +482,17 @@ class Server:
     def __init__(self, config, backends=None, clock=time.time):
         self.config, self.clock = config, clock
         self.changelog = CHANGELOG   # what GET /api/changelog serves (tests point it elsewhere)
-        # Kura, Konbini and Niwa get the `mcp` principal's token (MCP_TOKEN_FILE); Hister never does. Hister gets the
-        # owner's (HISTER_TOKEN_FILE) and nobody else does.
+        # Kura, Konbini and Niwa get the `mcp` principal's token (MCP_TOKEN_FILE); Nogon never does. Nogon gets the
+        # owner's (NOGON_TOKEN_FILE) and nobody else does.
         self.backends = backends if backends is not None else {
-            r: Backend(r, u, origin=HISTER_ORIGIN, access_token=config.hister_token) if r == "hister"
+            r: Backend(r, u, origin=NOGON_ORIGIN, access_token=config.nogon_token) if r == "nogon"
             else Backend(r, u, token=config.token)
             for r, u in config.urls.items() if u}
         self.limits = {"read": Limiter(config.reads_per_min), "board_write": Limiter(config.writes_per_min),
                        "board_write_day": Limiter(config.writes_per_day, per=86400.0),
                        "garden_day": Limiter(config.suggests_per_day, per=86400.0),
                        "notes_write": Limiter(config.notes_per_min), "notes_write_day": Limiter(config.notes_per_day, per=86400.0),
-                       "hister_write": Limiter(config.hister_writes_per_min), "bulk_hour": Limiter(config.bulk_per_hour, per=3600.0)}
+                       "nogon_write": Limiter(config.nogon_writes_per_min), "bulk_hour": Limiter(config.bulk_per_hour, per=3600.0)}
         self.tokens = {}          # apply tokens: token -> (kind, caller, payload, expires); one use, ten minutes
         self.token_lock = threading.Lock()
         self.census = (0.0, None)   # (when, label counts) for pages_labels and the audits
@@ -503,7 +509,7 @@ class Server:
         self.rate_lock = threading.Lock()
         self.log_seen = {}        # (login, slug) -> when board_log last wrote (one log per card per 10 minutes)
         self.tools = {}
-        for module, room in ((konbini, "konbini"), (kura, "kura"), (hister, "hister"), (niwa, "niwa"), (vault, None), (hister_write, "hister"), (cross, None)):
+        for module, room in ((konbini, "konbini"), (kura, "kura"), (nogon, "nogon"), (niwa, "niwa"), (vault, None), (nogon_write, "nogon"), (cross, None)):
             for t in module.TOOLS:
                 need = t.get("requires") or ((room,) if room else ())
                 if all(r in self.backends or r in self.features for r in need):
@@ -512,7 +518,7 @@ class Server:
             del self.tools["machiya_search"]
         allow = getattr(config, "tool_allow", None)
         if allow:                  # MCP_TOOLS (0.10.0): only these, of the ones the rooms allow; a misspelt name refuses
-            known = {t["name"] for m in (konbini, kura, hister, niwa, vault, hister_write, cross) for t in m.TOOLS}
+            known = {t["name"] for m in (konbini, kura, nogon, niwa, vault, nogon_write, cross) for t in m.TOOLS}
             if set(allow) - known:
                 raise SystemExit("machiya-mcp: MCP_TOOLS: no such tool: %s" % ", ".join(sorted(set(allow) - known)))
             self.tools = {n: t for n, t in self.tools.items() if n in allow}
@@ -538,7 +544,8 @@ class Server:
     @staticmethod
     def rate(bucket, login):
         """The caller's own rate for a bucket (a principal's `limits`), or None for the default."""
-        return (getattr(login, "limits", None) or {}).get(BUCKET_LIMIT.get(bucket))
+        limits, key = getattr(login, "limits", None) or {}, BUCKET_LIMIT.get(bucket)
+        return limits.get(key, limits.get(OLD_LIMIT_KEYS.get(key)))
 
     def allow(self, names, login):
         """Take one token from each named bucket, or none of them: a refused call costs nothing."""
@@ -566,8 +573,8 @@ class Server:
         return entry[2]
 
     def in_backup_window(self):
-        """True inside MCP_HISTER_BACKUP_WINDOW (a weekly slot in MCP_TZ time during which Hister is stopped for its
-        backup): Hister writes pause. Without the setting there is no window."""
+        """True inside MCP_NOGON_BACKUP_WINDOW (a weekly slot in MCP_TZ time during which Nogon is stopped for its
+        backup): Nogon writes pause. Without the setting there is no window."""
         window = self.config.backup_window
         if window is None:
             return False
@@ -761,7 +768,7 @@ class Ctx:
         return room in self.server.backends
 
     def rooms(self):
-        return [r for r in ("konbini", "kura", "niwa", "hister") if r in self.server.backends]
+        return [r for r in ("konbini", "kura", "niwa", "nogon") if r in self.server.backends]
 
     def public(self, room):
         return self.server.config.public[room]
@@ -817,10 +824,10 @@ ROUTES = (("konbini", "PATCH", r"/api/cards/[^/]+", PATCH_KEYS),
           ("konbini", "POST", r"/api/cards/[^/]+/claim", set()),
           ("konbini", "DELETE", r"/api/cards/[^/]+/claim", set()),
           ("niwa", "POST", r"/api/suggest", {"path", "reason"}),
-          ("hister", "POST", r"/api/label", {"url", "label"}),
-          ("hister", "POST", r"/api/update", {"query", "changes"}),
-          ("hister", "POST", r"/api/add_alias", {"alias-keyword", "alias-value"}),
-          ("hister", "POST", r"/api/delete_alias", {"alias"}))
+          ("nogon", "POST", r"/api/label", {"url", "label"}),
+          ("nogon", "POST", r"/api/update", {"query", "changes"}),
+          ("nogon", "POST", r"/api/add_alias", {"alias-keyword", "alias-value"}),
+          ("nogon", "POST", r"/api/delete_alias", {"alias"}))
 NEVER = {"publish", "growth", "confidence", "garden_pin", "confirm_new_tags", "new_label"}
 
 
@@ -833,9 +840,9 @@ def check_route(room, method, path, body):
                 raise RuntimeError("route %s %s carries only %s" % (method, path, sorted(keys)))
             changes = body.get("changes") if isinstance(body.get("changes"), dict) else {}
             if path == "/api/update" and "user_id" in changes:
-                raise RuntimeError("never a page's owner: Hister updates don't carry changes.user_id")
+                raise RuntimeError("never a page's owner: Nogon updates don't carry changes.user_id")
             if path == "/api/update" and set(changes) != {"label"}:
-                raise RuntimeError("Hister updates change a label and nothing else")
+                raise RuntimeError("Nogon updates change a label and nothing else")
             return
     raise RuntimeError("no write route for %s %s %s" % (room, method, path))
 
@@ -930,7 +937,7 @@ def make_handler(server):
             if path in ("/healthz", "/api/status"):
                 return self.json(200, {"ok": True, "version": VERSION, "vaultkit": VAULTKIT, "auth": server.config.auth,
                                        "rooms": sorted(server.backends), "tools": len(server.tools),
-                                       "hister_token": getattr(server.config, "hister_token", None) is not None,
+                                       "nogon_token": getattr(server.config, "nogon_token", None) is not None,
                                        "room_tokens": getattr(server.config, "token_gate", None) is not None})
             if path == "/api/changelog":                # open, like /api/status: this server's own CHANGELOG.md
                 from vaultkit import changelog          # vendored beside this file (imported here, like identity)
@@ -1029,7 +1036,7 @@ def main():
         sys.stderr.write("machiya-mcp: MCP_AUTH=oauth for %s/mcp (issuer %s, as %s): read-only, tools %s\n" % (
             config.public_url, config.issuer, ",".join(sorted(config.oauth.users)), ",".join(config.tool_allow)))
     if config.token_gate is not None:
-        sys.stderr.write("machiya-mcp: room tokens from hister-login for %s (as %s) beside the Tailscale header\n" % (
+        sys.stderr.write("machiya-mcp: room tokens from nogon-login for %s (as %s) beside the Tailscale header\n" % (
             config.token_gate.origin, ",".join(sorted(config.token_gate.users))))
     if config.token:
         sys.stderr.write("machiya-mcp: calling Kura, Konbini and Niwa with MCP_TOKEN_FILE's token\n")

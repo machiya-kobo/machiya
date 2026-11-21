@@ -1,11 +1,11 @@
 """HTTP client for the rooms: a fixed base URL per backend, JSON in and out, stdlib only.
 
 Invariants (tests guard them): no Origin or Referer ever goes to Konbini, Kura or Niwa (a same-origin header is
-what makes Konbini and Niwa treat a caller as "web", the owner's powers); Hister calls always carry
-`Origin: hister://`; every call names the caller with X-Agent; there's no way to reach a URL the operator didn't
+what makes Konbini and Niwa treat a caller as "web", the owner's powers); Nogon calls always carry
+`Origin: nogon://`; every call names the caller with X-Agent; there's no way to reach a URL the operator didn't
 configure (callers pass a path, never a URL). With a token (MCP_TOKEN_FILE, the `mcp` principal's, for Kura, Konbini
-and Niwa only) every call sends `Authorization: Bearer`; with Hister's token (HISTER_TOKEN_FILE, the owner's, for Hister
-only) every Hister call sends `X-Access-Token`. With either, a redirect is an error, never followed: urllib would carry
+and Niwa only) every call sends `Authorization: Bearer`; with Nogon's token (NOGON_TOKEN_FILE, the owner's, for Nogon
+only) every Nogon call sends `X-Access-Token`. With either, a redirect is an error, never followed: urllib would carry
 the header to wherever it points."""
 import json
 import os
@@ -15,7 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-HISTER_ORIGIN = "hister://"
+NOGON_ORIGIN = "nogon://"
 FORBIDDEN_HEADERS = {"origin", "referer"}
 TOKEN_RE = re.compile(r"[\x21-\x7e]{1,4096}")
 
@@ -68,11 +68,11 @@ class Backend:
     def __init__(self, room, base, origin=None, timeout=15, opener=None, token="", access_token=None):
         if token and origin:
             raise ValueError("the rooms' token never goes to %s" % room)
-        if access_token is not None and origin != HISTER_ORIGIN:
-            raise ValueError("Hister's token never goes to %s" % room)
+        if access_token is not None and origin != NOGON_ORIGIN:
+            raise ValueError("Nogon's token never goes to %s" % room)
         self.room, self.base, self.origin, self.timeout = room, base.rstrip("/"), origin, timeout
         self.token = token
-        self.access_token = access_token        # a SecretFile (HISTER_TOKEN_FILE), Hister only; None without one
+        self.access_token = access_token        # a SecretFile (NOGON_TOKEN_FILE), Nogon only; None without one
         guarded = bool(token) or access_token is not None
         self.opener = opener or (urllib.request.build_opener(NoRedirect) if guarded else urllib.request.build_opener())
 
@@ -101,7 +101,7 @@ class Backend:
         query = urllib.parse.urlencode([(k, v) for k, v in (params or {}).items() if v not in (None, "")], doseq=True)
         headers = self.headers(agent)
         data = None
-        if body is not None and form:          # Hister's alias calls are form posts
+        if body is not None and form:          # Nogon's alias calls are form posts
             data = urllib.parse.urlencode(body).encode()
             headers["Content-Type"] = "application/x-www-form-urlencoded"
         elif body is not None:

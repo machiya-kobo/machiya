@@ -1,7 +1,7 @@
-"""A small stateful Hister for the label and collection tests: documents, the query language the tools use (words, label:, label:(a|b),
+"""A small stateful Nogon for the label and collection tests: documents, the query language the tools use (words, label:, label:(a|b),
 -label:, -metadata.source:, domain:, url:"…", @alias, *), 100-per-page search with page_key (present even on the last page,
 as the real one does), /api/document, /api/label, /api/update (matched/updated), aliases (form posts; deleting a missing one
-is a 500), and Origin: hister:// required on every POST. Every write is recorded in `writes`."""
+is a 500), and Origin: nogon:// required on every POST. Every write is recorded in `writes`."""
 import json
 import re
 import threading
@@ -36,7 +36,7 @@ def make_docs():
     return docs
 
 
-class FakeHister:
+class FakeNogon:
     def __init__(self, aliases=None):
         self.docs = make_docs()
         self.aliases = dict(aliases if aliases is not None else {
@@ -78,7 +78,7 @@ class FakeHister:
             def do_POST(self):
                 u = urlsplit(self.path)
                 raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-                if self.headers.get("Origin") != "hister://":
+                if self.headers.get("Origin") != "nogon://":
                     return self.send_json(403, "forbidden")
                 ctype = self.headers.get("Content-Type", "")
                 body = json.loads(raw) if "json" in ctype and raw else {k: v[0] for k, v in parse_qs(raw.decode()).items()}

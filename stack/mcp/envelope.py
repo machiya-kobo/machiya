@@ -1,6 +1,6 @@
 """What leaves the server: tool results wrapped so a model treats vault and web text as data.
 
-Hister's own MCP puts source values under structuredContent.untrusted_content with trust "untrusted" and a
+Nogon's own MCP puts source values under structuredContent.untrusted_content with trust "untrusted" and a
 notice; this is the same shape. Invisible control characters are stripped from every string."""
 import json
 import re

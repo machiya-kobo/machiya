@@ -69,7 +69,7 @@ NOTE = {"path": "Projects/Alpha.md", "vault": "personal", "title": "Alpha", "url
         "summary": "s", "tags": ["type/project"], "created": 1, "changed": 2, "published": False, "card_url": None}
 WORK = {"path": "Secret.md", "vault": "work", "title": "Work note", "url": "https://kura.test/v/work/n/Secret",
         "summary": "work", "tags": [], "created": 1, "changed": 2, "published": False, "card_url": None}
-CARD = {"slug": "alpha", "path": "Projects/Alpha.md", "areas": ["tools"], "topics": ["hister"], "title": "Alpha", "board": "wip", "priority": 1, "area": "tools", "next": "n", "waiting": "",
+CARD = {"slug": "alpha", "path": "Projects/Alpha.md", "areas": ["tools"], "topics": ["nogon"], "title": "Alpha", "board": "wip", "priority": 1, "area": "tools", "next": "n", "waiting": "",
         "stream": "Platform", "dependsOn": [], "due": "", "updated": "2026-01-15", "summary": "x"}
 DOC = {"url": "https://example.com/a", "title": "A page", "domain": "example.com", "label": "python", "added": 5,
        "score": 0.5, "text": "hello world " * 10, "metadata": {"client": "alpha"}}
@@ -112,7 +112,7 @@ def rooms():
     niwa = Fake({"/api/status": {"version": "0.1.0", "head": "abc"},
                  "/api/suggestions": {"suggestions": [{"path": "Projects/Open.md", "reason": "r", "agent": "x", "date": "2026-01-15"}], "days": 60},
                  "POST /api/suggest": lambda b: (409, {"error": "already in the garden"}) if "Garden" in b["path"] else (201, {"id": 7, "path": b["path"]})})
-    hister = Fake({
+    nogon = Fake({
         "/search": {"total": 3, "documents": [DOC, VAULT_DOC, dict(DOC, url="https://konbini.test/p/x", domain="konbini.test")]},
         "/api/document": lambda q: VAULT_DOC if "kura" in q["url"] else DOC,
         "/api/stats": {"doc_count": 9},
@@ -120,7 +120,7 @@ def rooms():
                                    "@sneaky": "x metadata.source:vault", "@tools": "label:(tech)",
                                    "@code": "metadata.source:code", "@repos": "metadata.source:code metadata.code_kind:repo"}},
     })
-    return {"kura": kura, "konbini": konbini, "niwa": niwa, "hister": hister}
+    return {"kura": kura, "konbini": konbini, "niwa": niwa, "nogon": nogon}
 
 
 def make_server(fakes, **env):
@@ -223,7 +223,7 @@ class Headers(Base):
                 self.assertNotIn("referer", req["headers"], room)
                 self.assertEqual(req["headers"]["x-agent"], "mcp:t")
 
-    def test_hister_always_has_origin_and_pages_exclude_vault(self):
+    def test_nogon_always_has_origin_and_pages_exclude_vault(self):
         call(self.server, "pages_search", {"q": "tailscale"})
         call(self.server, "pages_search", {"label": "python"})
         call(self.server, "pages_read", {"url": "https://example.com/a"})
@@ -233,11 +233,11 @@ class Headers(Base):
         call(self.server, "pages_set_label", {"url": "https://example.com/a", "label": "python"})
         call(self.server, "collections_list")
         call(self.server, "machiya_status")
-        self.assertEqual({r["path"] for r in self.fakes["hister"].seen}, {"/search", "/api/document", "/api/rules", "/api/stats"})
-        for req in self.fakes["hister"].seen:
-            self.assertEqual(req["headers"]["origin"], "hister://")
+        self.assertEqual({r["path"] for r in self.fakes["nogon"].seen}, {"/search", "/api/document", "/api/rules", "/api/stats"})
+        for req in self.fakes["nogon"].seen:
+            self.assertEqual(req["headers"]["origin"], "nogon://")
             self.assertEqual(req["headers"]["x-agent"], "mcp:t")
-        searches = [r for r in self.fakes["hister"].seen if r["path"] == "/search"]
+        searches = [r for r in self.fakes["nogon"].seen if r["path"] == "/search"]
         self.assertTrue(len(searches) >= 3)
         for r in searches:
             self.assertTrue(r["query"]["q"].endswith(" -label:vault -metadata.source:vault -metadata.source:code -label:konbini"), r["query"]["q"])
@@ -250,7 +250,7 @@ class Headers(Base):
             with self.assertRaises(ValueError):
                 b.get(bad)
         self.assertNotIn("Origin", b.headers("a"))
-        self.assertEqual(Backend("hister", "http://h", origin="hister://").headers("a")["Origin"], "hister://")
+        self.assertEqual(Backend("nogon", "http://h", origin="nogon://").headers("a")["Origin"], "nogon://")
 
     def test_agent_from_header_is_sanitised_by_context(self):
         call(self.server, "board_review", agent="x" * 200)
@@ -413,30 +413,30 @@ CODE_DOC = dict(DOC, url="https://forge.example/o/r/issues/1", label="", metadat
 
 class Pages(Base):
     """Code and notes stay out of AI (decided 2026-10-05; sweep MACH-M-4, MACH-F-10): page search and text come from this
-    server again, and nothing but a page ever reaches the model, whatever Hister answers."""
+    server again, and nothing but a page ever reaches the model, whatever Nogon answers."""
 
     def test_vault_code_and_room_documents_never_come_back(self):
-        self.fakes["hister"].routes["/search"] = {"total": 9, "documents": [
+        self.fakes["nogon"].routes["/search"] = {"total": 9, "documents": [
             DOC, VAULT_DOC, CODE_DOC, dict(DOC, url="https://konbini.test/p/x", domain="konbini.test"),
             dict(DOC, url="https://example.com/c", label="konbini"), dict(DOC, url="https://example.com/v", label="Vault"),
             dict(DOC, url="https://example.com/s", metadata={"source": "VAULT"})]}
         d = data(call(self.server, "pages_search", {"q": "x"}))
         self.assertEqual([r["url"] for r in d["results"]], [DOC["url"]])
         self.assertEqual(d["withheld"], 6)
-        q = self.fakes["hister"].seen[-1]["query"]["q"]
+        q = self.fakes["nogon"].seen[-1]["query"]["q"]
         self.assertTrue(q.endswith(" -label:vault -metadata.source:vault -metadata.source:code -label:konbini"), q)
 
     def test_unknown_shapes_fail_closed(self):
-        # a Hister that stops sending `metadata` (or sends a list, or a non-page URL) shows nothing rather than everything
+        # a Nogon that stops sending `metadata` (or sends a list, or a non-page URL) shows nothing rather than everything
         no_meta = {k: v for k, v in DOC.items() if k != "metadata"}
         for odd in (no_meta, dict(DOC, metadata=["source", "code"]), dict(DOC, url="javascript:alert(1)"), dict(DOC, url=None),
                     dict(DOC, label=["x"]), "a string", None):
-            self.fakes["hister"].routes["/search"] = {"total": 1, "documents": [odd]}
+            self.fakes["nogon"].routes["/search"] = {"total": 1, "documents": [odd]}
             self.assertEqual(data(call(self.server, "pages_search", {"q": "x"}))["results"], [], odd)
         for reply in ({"total": 1}, {"documents": "x"}, []):
-            self.fakes["hister"].routes["/search"] = reply
+            self.fakes["nogon"].routes["/search"] = reply
             self.assertEqual(data(call(self.server, "pages_search", {"q": "x"}))["results"], [], reply)
-        self.fakes["hister"].routes["/api/document"] = no_meta
+        self.fakes["nogon"].routes["/api/document"] = no_meta
         self.assertTrue(call(self.server, "pages_read", {"url": DOC["url"]})["isError"])
 
     def test_read_refuses_room_hosts_notes_and_code(self):
@@ -445,11 +445,11 @@ class Pages(Base):
             self.assertTrue(call(self.server, "pages_read", {"url": url})["isError"], url)
         for doc in (VAULT_DOC | {"url": "https://example.com/disguised"}, CODE_DOC | {"url": "https://example.com/disguised"},
                     DOC | {"url": "https://example.com/other"}):            # a lookup that answers for another URL
-            self.fakes["hister"].routes["/api/document"] = doc
+            self.fakes["nogon"].routes["/api/document"] = doc
             r = call(self.server, "pages_read", {"url": "https://example.com/disguised"})
             self.assertTrue(r["isError"], doc)
             self.assertNotIn("hello", json.dumps(r))
-        self.fakes["hister"].routes["/api/document"] = (404, {"error": "not found"})
+        self.fakes["nogon"].routes["/api/document"] = (404, {"error": "not found"})
         self.assertTrue(call(self.server, "pages_read", {"url": DOC["url"]})["isError"])
 
     def test_read_pages_text(self):
@@ -465,15 +465,15 @@ class Pages(Base):
     def test_label_and_collection_queries(self):
         call(self.server, "pages_search", {"label": "python"})
         call(self.server, "pages_search", {"collection": "@travel", "q": "x"})
-        searches = [r["query"]["q"] for r in self.fakes["hister"].seen if r["path"] == "/search"]
+        searches = [r["query"]["q"] for r in self.fakes["nogon"].seen if r["path"] == "/search"]
         self.assertIn("label:python", searches[0])
         self.assertIn("@travel", searches[1])
 
     def test_query_injection_cannot_drop_the_exclusion(self):
         call(self.server, "pages_search", {"q": "label:vault"})
-        self.assertTrue(self.fakes["hister"].seen[-1]["query"]["q"].endswith(" -metadata.source:code -label:konbini"))
+        self.assertTrue(self.fakes["nogon"].seen[-1]["query"]["q"].endswith(" -metadata.source:code -label:konbini"))
         call(self.server, "pages_relabel", {"query": "label:vault", "label": "python"})
-        searches = [r for r in self.fakes["hister"].seen if r["path"] == "/search"]
+        searches = [r for r in self.fakes["nogon"].seen if r["path"] == "/search"]
         self.assertTrue(searches)
         self.assertTrue(searches[-1]["query"]["q"].endswith(" -label:vault -metadata.source:vault -metadata.source:code -label:konbini"))
 
@@ -634,20 +634,20 @@ class AddBacklog(Base):
         self.assertEqual(len(self.fakes["konbini"].writes()), 1)          # no topics: no tag PATCH
 
     def test_topics_are_added_after_creation(self):
-        call(self.server, "board_add_backlog", dict(self.ARGS, topics=["hister", "topic/hister"]))
+        call(self.server, "board_add_backlog", dict(self.ARGS, topics=["nogon", "topic/nogon"]))
         last = self.fakes["konbini"].writes()[-1]
-        self.assertEqual((last["method"], last["path"], last["body"]), ("PATCH", "/api/cards/new-idea", {"tags_add": ["topic/hister", "topic/hister"]}))
+        self.assertEqual((last["method"], last["path"], last["body"]), ("PATCH", "/api/cards/new-idea", {"tags_add": ["topic/nogon", "topic/nogon"]}))
 
     def test_a_new_topic_the_owner_approved_is_made_with_the_card(self):
-        r = data(call(self.server, "board_add_backlog", dict(self.ARGS, topics=["brandnew", "hister"], new_topics=["brandnew"])))
+        r = data(call(self.server, "board_add_backlog", dict(self.ARGS, topics=["brandnew", "nogon"], new_topics=["brandnew"])))
         self.assertTrue(r["created"])
         last = self.fakes["konbini"].writes()[-1]
         self.assertEqual((last["method"], last["path"], last["body"]),
-                         ("PATCH", "/api/cards/new-idea", {"tags_add": ["topic/brandnew", "topic/hister"], "new_topics": ["brandnew"]}))
+                         ("PATCH", "/api/cards/new-idea", {"tags_add": ["topic/brandnew", "topic/nogon"], "new_topics": ["brandnew"]}))
 
     def test_new_topics_that_the_card_does_not_use_or_that_exist_are_not_sent(self):
-        call(self.server, "board_add_backlog", dict(self.ARGS, topics=["hister"], new_topics=["hister", "unused"]))
-        self.assertEqual(self.fakes["konbini"].writes()[-1]["body"], {"tags_add": ["topic/hister"]})
+        call(self.server, "board_add_backlog", dict(self.ARGS, topics=["nogon"], new_topics=["nogon", "unused"]))
+        self.assertEqual(self.fakes["konbini"].writes()[-1]["body"], {"tags_add": ["topic/nogon"]})
 
     def test_only_the_listed_topic_is_new_the_other_is_still_the_owners(self):
         r = call(self.server, "board_add_backlog", dict(self.ARGS, topics=["brandnew", "other"], new_topics=["brandnew"]))
@@ -717,7 +717,7 @@ class RouteTable(unittest.TestCase):
                                       ("konbini", "POST", "/api/order", {}), ("konbini", "DELETE", "/api/cards/alpha", {}),
                                       ("konbini", "PATCH", "/api/cards/a/b", {}), ("niwa", "POST", "/api/publish", {}),
                                       ("niwa", "POST", "/api/suggest", {"path": "a", "reason": "b", "publish": True}),
-                                      ("kura", "POST", "/api/anything", {}), ("hister", "POST", "/api/delete", {})):
+                                      ("kura", "POST", "/api/anything", {}), ("nogon", "POST", "/api/delete", {})):
             with self.assertRaises(RuntimeError):
                 mcp.check_route(room, method, path, b)
         mcp.check_route("konbini", "PATCH", "/api/cards/alpha", {"next": "x", "tags_add": []})
@@ -908,8 +908,8 @@ class Gate(Base):
         self.assertEqual(self.post(base, self.PING, {"Tailscale-User-Login": "you@x"})[0], 200)
 
     def test_room_tokens_beside_the_header(self):
-        """0.8.0: an agent on a tagged machine (no Tailscale login) sends a room token hister-login issued for this
-        service; it decides (a bad one is never passed over for the header); Hister's raw token is no room token."""
+        """0.8.0: an agent on a tagged machine (no Tailscale login) sends a room token nogon-login issued for this
+        service; it decides (a bad one is never passed over for the header); Nogon's raw token is no room token."""
         from http.server import BaseHTTPRequestHandler
         good, other = "mht_" + "G" * 43, "mht_" + "O" * 43
         seen = []
@@ -932,13 +932,13 @@ class Gate(Base):
         self.addCleanup(lambda: (helper.shutdown(), helper.server_close()))
         _, base = self.serve(MCP_AUTH="tailscale", MCP_USERS="me@x", MCP_AUTH_URL="http://127.0.0.1:%d"
                              % helper.server_address[1], MCP_PUBLIC_URL="https://mcp.example.ts.net/mcp",
-                             MCP_HISTER_USERS="owner")
+                             MCP_NOGON_USERS="owner")
         self.assertEqual(self.post(base, self.PING, {"Authorization": "Bearer " + good})[0], 200)
         self.assertEqual(seen[-1], (good, "https://mcp.example.ts.net"))
         self.assertEqual(self.post(base, self.PING, {"Authorization": "Bearer " + other})[0], 401)
         self.assertEqual(self.post(base, self.PING, {"Authorization": "Bearer " + other,
                                                      "Tailscale-User-Login": "me@x"})[0], 401)     # never passed over
-        self.assertEqual(self.post(base, self.PING, {"Authorization": "Bearer tok-owner-hister"})[0], 403)
+        self.assertEqual(self.post(base, self.PING, {"Authorization": "Bearer tok-owner-nogon"})[0], 403)
         self.assertEqual(self.post(base, self.PING, {"Tailscale-User-Login": "me@x"})[0], 200)       # the header still
         with self.assertRaises(SystemExit):
             mcp.Config({"MCP_AUTH": "tailscale", "MCP_AUTH_URL": "http://h:8081", "MCP_LOG": os.devnull})
@@ -960,7 +960,7 @@ class Gate(Base):
         self.assertEqual(self.post(base, self.PING, {"Tailscale-User-Login": "me@x"})[0], 200)
 
     def test_the_header_counts_only_from_the_trusted_proxy(self):
-        # on a network shared with others (Hister's), only the sidecar's address may send the header
+        # on a network shared with others (Nogon's), only the sidecar's address may send the header
         env = {"MCP_AUTH": "tailscale", "MCP_USERS": "me@x", "MCP_LOG": os.devnull, "MCP_BIND": "0.0.0.0"}
         mcp.check_bind(mcp.Config(dict(env, MCP_TRUSTED_PROXIES="172.31.250.10/32")))
         with self.assertRaises(SystemExit):
@@ -1142,13 +1142,42 @@ if __name__ == "__main__":
 
 
 class NogonNames(unittest.TestCase):
-    """0.11.0, the rename's stage 1: NOGON_* first, HISTER_* still read."""
+    """0.12.0, the rename's stage 3 (Hister is now Nogon): the NOGON names only. An old HISTER name on its own stops the
+    start, naming the new one; beside its new name it is ignored and said once. The room key is nogon."""
 
-    def test_setting(self):
+    def quiet(self):
         import contextlib
         import io
-        with contextlib.redirect_stderr(io.StringIO()):
-            self.assertEqual(mcp.setting({"HISTER_URL": "http://h:1"}, "NOGON_URL"), "http://h:1")
-            self.assertEqual(mcp.setting({"HISTER_URL": "http://h:1", "NOGON_URL": ""}, "NOGON_URL"), "")
-            self.assertEqual(mcp.setting({"MCP_HISTER_USERS": "owner"}, "MCP_NOGON_USERS"), "owner")
+        return contextlib.redirect_stderr(io.StringIO())
+
+    def test_setting(self):
+        self.assertEqual(mcp.setting({"NOGON_URL": "http://h:1"}, "NOGON_URL"), "http://h:1")
+        self.assertEqual(mcp.setting({"NOGON_URL": ""}, "NOGON_URL", "d"), "")          # set wins, even empty
+        self.assertEqual(mcp.setting({"MCP_NOGON_USERS": "owner"}, "MCP_NOGON_USERS"), "owner")
         self.assertEqual(mcp.setting({}, "NOGON_URL", "d"), "d")
+        with self.quiet():
+            self.assertEqual(mcp.setting({"NOGON_URL": "http://n:1", "HISTER_URL": "http://h:1"}, "NOGON_URL"), "http://n:1")
+
+    def test_an_old_name_alone_stops_the_start(self):
+        for old, new in (("HISTER_URL", "NOGON_URL"), ("HISTER_PUBLIC_URL", "NOGON_PUBLIC_URL"),
+                         ("HISTER_TOKEN_FILE", "NOGON_TOKEN_FILE"), ("MCP_HISTER_WRITES_PER_MIN", "MCP_NOGON_WRITES_PER_MIN"),
+                         ("MCP_HISTER_BACKUP_WINDOW", "MCP_NOGON_BACKUP_WINDOW")):
+            with self.assertRaises(SystemExit) as cm:
+                mcp.Config({"MCP_AUTH": "open", "MCP_LOG": os.devnull, old: "x"})
+            self.assertIn("rename it %s" % new, str(cm.exception), old)
+            self.assertTrue(str(cm.exception).startswith("machiya-mcp: "), old)
+
+    def test_the_room_key_and_origin(self):
+        with self.quiet():
+            c = mcp.Config({"MCP_AUTH": "open", "MCP_LOG": os.devnull, "NOGON_URL": "http://127.0.0.1:1/"})
+        self.assertEqual(c.urls["nogon"], "http://127.0.0.1:1")
+        self.assertNotIn("hister", c.urls)
+        self.assertEqual(mcp.NOGON_ORIGIN, "nogon://")
+
+    def test_an_identity_files_old_limit_name_is_still_read(self):
+        login = type("L", (), {"limits": {"hister_writes_per_min": 7}})()
+        self.assertEqual(mcp.Server.rate("nogon_write", login), 7)
+        login.limits = {"hister_writes_per_min": 7, "nogon_writes_per_min": 9}
+        self.assertEqual(mcp.Server.rate("nogon_write", login), 9)            # the new name wins
+        login.limits = {}
+        self.assertIsNone(mcp.Server.rate("nogon_write", login))

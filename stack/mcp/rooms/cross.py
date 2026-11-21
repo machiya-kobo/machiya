@@ -5,7 +5,7 @@ import time
 from . import arg_int, arg_str, n, s, tool, ToolError
 from . import konbini, kura
 
-STATUS_PATHS = {"konbini": "/api/status", "kura": "/api/status", "niwa": "/api/status", "hister": "/api/stats"}
+STATUS_PATHS = {"konbini": "/api/status", "kura": "/api/status", "niwa": "/api/status", "nogon": "/api/stats"}
 
 
 def machiya_search(ctx, args):

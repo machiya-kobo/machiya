@@ -64,7 +64,7 @@ PROMPTS = [
     {"name": "capture", "description": "Turn an idea or URL into a de-duplicated backlog card.",
      "arguments": [arg("text", "The idea or a URL", True)], "requires": ("konbini",), "text": capture},
     {"name": "tidy_collections", "description": "Audit labels and collections and propose tidy-ups (dry run, then apply with a token).",
-     "arguments": [], "requires": ("hister",), "text": tidy_collections},
+     "arguments": [], "requires": ("nogon",), "text": tidy_collections},
     {"name": "garden_candidates", "description": "Find notes ready for the garden and suggest them with reasons (never publishes).",
      "arguments": [arg("folder", "Only this folder")], "requires": ("kura", "niwa"), "text": garden_candidates},
 ]

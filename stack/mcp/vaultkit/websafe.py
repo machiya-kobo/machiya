@@ -201,7 +201,7 @@ def public_opener(allow=(), context=None):
 
 
 def token_opener(context=None):
-    """An opener for a call that carries a token (to Hister, a room, the board): any redirect is an HTTPError."""
+    """An opener for a call that carries a token (to Nogon, a room, the board): any redirect is an HTTPError."""
     handlers = [_NoRedirects()]
     if context is not None:
         handlers.append(urllib.request.HTTPSHandler(context=context))
