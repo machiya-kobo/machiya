@@ -123,7 +123,8 @@ check)
 import json, os, sys, urllib.request
 url, agent, settings = sys.argv[1:4]
 try:
-    tok = (json.load(open(settings)).get("env") or {}).get("MACHIYA_MCP_TOKEN", "")
+    tok = ((json.load(open(settings)).get("env") or {}).get("MACHIYA_MCP_TOKEN", "")
+           or os.environ.get("MACHIYA_MCP_TOKEN", ""))   # 0.4.3: a launcher may put it in the environment, not the settings
 except (OSError, ValueError):
     tok = ""
 h = {"X-Machiya-Token": tok} if tok else {}                 # what the plugin sends (its .mcp.json)
