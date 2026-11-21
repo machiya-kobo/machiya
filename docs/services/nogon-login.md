@@ -121,8 +121,8 @@ Room tokens (`mht_…`, [identity.md](../identity.md#room-tokens)) are for pm, [
 ### Apps
 
 Shiori's apps get an id in one of two ways:
-- they sign in to Nogon themselves and trade their own Nogon session for an id (`POST /machiya/api/app-session` with `{"nogon": S}`; the old body `{"hister": S}` is taken until the rename's stage 3c);
-- or they open `/machiya/signin?app=1&return=shiori://signed-in` in an ephemeral web session and get `#sid=…&nogon=…&hister=…` back (`hister` is the same session, for apps before Shiori 1.30.0; it goes in the rename's stage 3c).
+- they sign in to Nogon themselves and trade their own Nogon session for an id (`POST /machiya/api/app-session` with `{"nogon": S}`; the old body `{"hister": S}` is refused since 0.10.0, the rename's stage 3c);
+- or they open `/machiya/signin?app=1&return=shiori://signed-in` in an ephemeral web session and get `#sid=…&nogon=…` back (0.9.0 also sent `hister`, the same session, for apps before Shiori 1.30.0; it went in 0.10.0).
 
 Rules for the second way:
 - The return is exactly `<scheme>://signed-in` (`NOGON_LOGIN_APP_SCHEMES`, default `shiori`).

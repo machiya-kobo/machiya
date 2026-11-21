@@ -375,7 +375,7 @@ class HelperTest(HelperBase):
     def test_app_signout_by_bearer(self):
         session = self.fake.signed_in()
         _, _, body = self.public("POST", "/machiya/api/app-session", {"Content-Type": "application/json"},
-                                 json.dumps({"hister": session, "label": "iPhone"}))   # the old spelling, until 3c
+                                 json.dumps({"nogon": session, "label": "iPhone"}))
         sid = json.loads(body)["sid"]
         status, _, _ = self.public("POST", "/machiya/signout", {"Authorization": "Bearer " + sid,
                                                                 "Content-Length": "0"})
@@ -441,7 +441,7 @@ class HelperTest(HelperBase):
         frag = {k: v[0] for k, v in parse_qs(loc.fragment).items()}
         self.assertEqual(self.check(frag["sid"])[1]["kind"], "app")
         self.assertIn(frag["nogon"], self.fake.sessions)
-        self.assertEqual(frag["hister"], frag["nogon"])                  # 0.9.0: both, until the rename's stage 3c
+        self.assertNotIn("hister", frag)                                  # 0.10.0: "nogon" only (stage 3c)
         self.assertIsNone(cookie_value(headers, "machiya_sso"))          # the app holds the id, not a cookie
 
     # -- the automatic sign-in (MACHIYA_SIGNIN_PROVIDER in the rooms: provider=oidc&auto=1)
@@ -626,7 +626,7 @@ class HelperTest(HelperBase):
         self.assertEqual(self.public("POST", "/machiya/api/app-session", h,
                                      json.dumps({"nogon": "A" * 43}))[0], 401)
         self.assertEqual(self.public("POST", "/machiya/api/app-session", h, json.dumps({"nogon": "x"}))[0], 400)
-        self.assertEqual(self.public("POST", "/machiya/api/app-session", h, json.dumps({"hister": "x"}))[0], 400)
+        self.assertEqual(self.public("POST", "/machiya/api/app-session", h, json.dumps({"hister": self.fake.signed_in()}))[0], 400)   # 0.10.0: the old spelling is refused
         self.assertEqual(self.public("POST", "/machiya/api/app-session", {"Content-Type": "text/plain"},
                                      json.dumps({"nogon": session}))[0], 415)
         self.assertEqual(self.public("POST", "/machiya/api/app-session", h, "{" * 5000)[0], 413)
@@ -640,7 +640,7 @@ class HelperTest(HelperBase):
         session, sid, _ = self.sign_in()
         other = self.fake.signed_in()
         self.public("POST", "/machiya/api/app-session", {"Content-Type": "application/json"},
-                    json.dumps({"hister": other, "label": "iPhone app"}))
+                    json.dumps({"nogon": other, "label": "iPhone app"}))
         cookie = {"Cookie": "machiya_sso=" + sid}
         status, _, body = self.public("GET", "/machiya/sessions", cookie)
         self.assertEqual(status, 200)
@@ -924,7 +924,7 @@ class RoomSessionTest(HelperBase):
         session, sid, _ = self.sign_in()
         old = self.fake.signed_in()
         self.public("POST", "/machiya/api/app-session", {"Content-Type": "application/json"},
-                    json.dumps({"hister": old, "label": "Old iPad app"}))
+                    json.dumps({"nogon": old, "label": "Old iPad app"}))
         week = hl.IDLE_AFTER + 60
         self.login.store.q("UPDATE sessions SET last_seen = last_seen - ? WHERE label = 'Old iPad app'", (week,))
         self.login.store.add_token("mht_" + "a" * 43, "owner", "never used", ["https://kura.example.test"], user_id=1)

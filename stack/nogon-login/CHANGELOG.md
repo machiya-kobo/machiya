@@ -1,5 +1,9 @@
 # Changelog: nogon-login (hister-login until 0.7.3)
 
+## 0.10.0
+
+- **The rename's stage 3c (owner, 2026-11-21):** the app sign-in fragment carries only `nogon`, and `/machiya/api/app-session` takes only `{"nogon": S}`; the old `hister` spelling is refused with a 400. Shiori's apps send and read `nogon` since 1.30.0.
+
 ## 0.9.0
 
 - The rename's stage 3b (Hister is now Nogon): `/v1/nginx` sends only `X-Nogon-Cookie` and `X-Nogon-User` (shiori-web reads them since 1.29.1). `/healthz` and `/machiya/healthz` report `nogon` only.

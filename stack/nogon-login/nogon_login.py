@@ -69,7 +69,7 @@ sys.path.insert(0, HERE)
 
 from vaultkit import names as vnames, nogonauth, prefs as vprefs, shell, signin as vsignin   # noqa: E402
 
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 SID_PREFIX = nogonauth.SID_PREFIX
 SID_RE = nogonauth.SID_RE
 NOGON_SESSION_RE = re.compile(r"[A-Za-z0-9_-]{43}\Z")         # Nogon's: 32 random bytes, base64url
@@ -1117,8 +1117,8 @@ class Login:
         username, user_id = answer[1], answer[2]
         if app:
             sid = self.store.create(hister_session, username, user_id, "app", label or "Shiori app")
-            # 0.9.0: "nogon" beside "hister", which stays until the rename's stage 3c (Shiori apps before 1.30.0)
-            return ret + "#" + urlencode({"sid": sid, "nogon": hister_session, "hister": hister_session}), []
+            # 0.10.0: "nogon" only (the rename's stage 3c; Shiori apps read it since 1.30.0)
+            return ret + "#" + urlencode({"sid": sid, "nogon": hister_session}), []
         cookies, row = [], None
         names = [self.s.own] + ([self.s.sso] if "domain-cookie" in self.s.legacy and self.s.own != self.s.sso
                                 else [])
@@ -2164,8 +2164,8 @@ class Public(Handler):
 
     def app_session(self):
         """POST /machiya/api/app-session {"nogon": S, "label": "iPhone"}: an app that signed in to Nogon with a
-        password trades its own Nogon session for an id (kind app). No cookie is involved. {"hister": S}, the old
-        spelling, is still taken until the rename's stage 3c."""
+        password trades its own Nogon session for an id (kind app). No cookie is involved. The old spelling
+        {"hister": S} is no longer taken (0.10.0, the rename's stage 3c): Shiori sends "nogon" since 1.30.0."""
         lg = self.login
         data = self.body()
         if data is None:
@@ -2174,7 +2174,7 @@ class Public(Handler):
             return self.json(415, {"error": "send JSON"})
         try:
             req = json.loads(data)
-            session, label = req.get("nogon", req.get("hister")), req.get("label", "")     # nogon since 0.8.0; hister until 3c
+            session, label = req.get("nogon"), req.get("label", "")     # 0.10.0: nogon only (stage 3c)
         except (ValueError, AttributeError):
             return self.json(400, {"error": "unreadable JSON"})
         if not isinstance(session, str) or not NOGON_SESSION_RE.match(session) or not isinstance(label, str):
