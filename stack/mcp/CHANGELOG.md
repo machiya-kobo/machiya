@@ -1,5 +1,13 @@
 # Changelog: machiya-mcp
 
+## 0.13.0
+
+- Stage 2 of Konbini's Now page: repos on cards (owner, 2026-11-21). A repo matches as the frontmatter schema says: case-insensitive, a bare name or a URL's last segment with `.git` dropped.
+  - **`board_list_cards`**: each row has `repos`, Konbini's merged list (`[]` when Konbini doesn't send it). New `repo=` filter, a name or a URL; it combines with the others and is never written to the audit log.
+  - **`board_now`** (read): Konbini's `GET /api/now` as it comes (`days`, `since`, `working`, `quiet`, `uncarded`, `live`), wrapped like the other board reads. The day window stays Konbini's. A `session_url` in `live` is dropped. Needs Konbini 0.29.0.
+  - **`board_set_repos(slug, repos)`** (write): replaces a card's repos with `PATCH {"repos": [...]}`; `[]` clears them. The board writes' rate limits and X-Agent. Needs Konbini 0.31.0: a 400/422, or a 200 whose card doesn't carry the list (an older Konbini drops the field), is an error naming the version, never a silent success.
+  - Every board write's returned row now has `repos` too.
+
 ## 0.12.0
 
 - The rename's stage 3 (Hister is now Nogon):

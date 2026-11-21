@@ -29,7 +29,7 @@ Each room is an optional URL: `KONBINI_URL`, `KURA_URL`, `NIWA_URL`, `NOGON_URL`
 
 | Area | Reads | Writes |
 |---|---|---|
-| Board (Konbini) | `board_list_cards` (filters: board, area, machine, topic, tag, stream, text), `board_get_card` (+ events), `board_review`, `board_roundup` | `board_add_backlog`, `board_move`, `board_set_next`, `board_block`, `board_set_priority`, `board_set_stream`, `board_set_goal`, `board_set_due`, `board_set_dependencies`, `board_tag`, `board_log`, `board_claim`, `board_release` |
+| Board (Konbini) | `board_list_cards` (filters: board, area, machine, topic, tag, stream, text, repo; each row has `repos`), `board_get_card` (+ events), `board_now`, `board_review`, `board_roundup` | `board_add_backlog`, `board_move`, `board_set_next`, `board_block`, `board_set_priority`, `board_set_stream`, `board_set_goal`, `board_set_due`, `board_set_repos`, `board_set_dependencies`, `board_tag`, `board_log`, `board_claim`, `board_release` |
 | Notes (Kura) | `notes_search`, `notes_read` (markdown, paged, backlinks and outlinks, and a `version`), `notes_recent`, `notes_lookup`, `notes_tags`, `notes_folders` | `notes_create`, `notes_update` (through the server's own write clone of the vault, not Kura: Kura stays read-only; listed only when `MCP_NOTES_DIR` is set) |
 | Pages, labels and collections (Nogon) | `pages_search` (words, a label, a collection), `pages_read` (text, paged), `collections_list`, `pages_labels`, `collections_audit` | `pages_set_label`, `pages_relabel`, `collections_set`, `collections_remove` |
 | Garden (Niwa) | `garden_candidates` (needs Kura and Niwa) | `garden_suggest` |
@@ -44,6 +44,10 @@ Each room is an optional URL: `KONBINI_URL`, `KURA_URL`, `NIWA_URL`, `NOGON_URL`
 - **`board_move`** to `archived` needs `confirm: true`. The model should set it only after you agree. `log` adds a one-line event in the same call (for `done`: what shipped).
 - **`board_tag`** changes `topic/<name>` and `machine/<name>` tags. A topic that does not exist yet is created only when you said yes and the model lists it in `new_topics`; the board logs a `topic_created` event on the card. `area/*`, `status/*` and `type/*` are yours to set.
 - **`board_log`**: one line per card per 10 minutes. Milestones, not steps.
+- **Repos** (0.13.0, stage 2 of Konbini's Now page). A card's `repos` is Konbini's merged list (`repos:`, else `[repo]`, else `[]`; the [frontmatter schema](../frontmatter.md)). A repo matches as the schema says: case-insensitive, a bare name or a URL's last segment with `.git` dropped.
+  - **`board_list_cards`**: every row has `repos` (`[]` when Konbini doesn't send it). `repo=` keeps the cards whose repos include that repo (a name or a URL); it combines with the other filters. The repo is never written to the audit log (a URL can carry a password).
+  - **`board_now`** returns Konbini's `GET /api/now` as it comes, wrapped like the other board reads: `days`, `since`, `working`, `quiet`, `uncarded`, `live` ([the contract](../contracts/konbini-api.md)). The "active in the last N days" rule is Konbini's (`NOW_DAYS`): never recomputed here. A `session_url` in `live` is dropped even if a Konbini sent one. Needs Konbini 0.29.0; an older one is a clear error.
+  - **`board_set_repos(slug, repos)`** replaces the card's list: `PATCH /api/cards/<slug>` with `{"repos": [...]}`. Each entry is a name or a URL cut to its last segment, 1-100 characters of `[A-Za-z0-9._-]`, deduplicated case-insensitively (first spelling kept). `[]` clears it; leaving `repos` out is refused. A board write (rate limits, X-Agent). Needs Konbini 0.31.0: a 400 or 422, or a 200 whose card doesn't carry the list sent (an older Konbini drops a field it doesn't know), is an error that says so and names the running version.
 
 ### Notes
 
@@ -297,12 +301,12 @@ Tools appear as `mcp__machiya__<tool>`. Suggested permissions (small writes run 
 
 ```json
 {"permissions": {
-  "allow": ["mcp__machiya__board_list_cards", "mcp__machiya__board_get_card", "mcp__machiya__board_review", "mcp__machiya__board_roundup",
+  "allow": ["mcp__machiya__board_list_cards", "mcp__machiya__board_get_card", "mcp__machiya__board_now", "mcp__machiya__board_review", "mcp__machiya__board_roundup",
             "mcp__machiya__notes_*", "mcp__machiya__collections_list",
             "mcp__machiya__garden_candidates", "mcp__machiya__pages_labels", "mcp__machiya__collections_audit", "mcp__machiya__machiya_*",
             "mcp__machiya__board_set_next", "mcp__machiya__board_log", "mcp__machiya__board_claim", "mcp__machiya__board_release"],
   "ask": ["mcp__machiya__board_add_backlog", "mcp__machiya__board_move", "mcp__machiya__board_block", "mcp__machiya__board_set_priority",
-          "mcp__machiya__board_set_stream", "mcp__machiya__board_set_goal", "mcp__machiya__board_set_due", "mcp__machiya__board_set_dependencies", "mcp__machiya__board_tag", "mcp__machiya__garden_suggest",
+          "mcp__machiya__board_set_stream", "mcp__machiya__board_set_goal", "mcp__machiya__board_set_due", "mcp__machiya__board_set_repos", "mcp__machiya__board_set_dependencies", "mcp__machiya__board_tag", "mcp__machiya__garden_suggest",
           "mcp__machiya__notes_create", "mcp__machiya__notes_update",
           "mcp__machiya__pages_set_label", "mcp__machiya__pages_relabel", "mcp__machiya__collections_set", "mcp__machiya__collections_remove"]}}
 ```

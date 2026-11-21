@@ -71,6 +71,13 @@ WORK = {"path": "Secret.md", "vault": "work", "title": "Work note", "url": "http
         "summary": "work", "tags": [], "created": 1, "changed": 2, "published": False, "card_url": None}
 CARD = {"slug": "alpha", "path": "Projects/Alpha.md", "areas": ["tools"], "topics": ["nogon"], "title": "Alpha", "board": "wip", "priority": 1, "area": "tools", "next": "n", "waiting": "",
         "stream": "Platform", "dependsOn": [], "due": "", "updated": "2026-01-15", "summary": "x"}
+NOW = {"days": 7, "since": "2026-11-13T00:00:00-08:00",
+       "working": [{"slug": "alpha", "title": "Alpha", "path": "Projects/Alpha.md", "board": "wip", "at": "2026-11-20T10:00:00-08:00",
+                    "line": "kura: ship it", "source": "commit", "live": []}],
+       "quiet": [{"slug": "kura", "title": "Kura", "path": "Projects/Kura.md", "last_at": None}],
+       "uncarded": [{"host": "claude", "rows": [{"date": "2026-11-19", "change": "disk cleanup", "path": "Systems/Change Logs/claude 2026-11.md"}]}],
+       "live": [{"agent": "kura", "state": "working", "since": "2026-11-20T10:00:00-08:00", "note": "n", "card": "alpha",
+                 "card_known": True, "session_url": "https://example.invalid/session"}]}
 DOC = {"url": "https://example.com/a", "title": "A page", "domain": "example.com", "label": "python", "added": 5,
        "score": 0.5, "text": "hello world " * 10, "metadata": {"client": "alpha"}}
 VAULT_DOC = {"url": "https://kura.test/n/X", "title": "X", "domain": "kura.test", "label": "vault", "metadata": {"source": "vault"}}
@@ -91,7 +98,9 @@ def rooms():
     })
     konbini = Fake({
         "/api/status": {"ok": True, "head": "abc", "version": "0.22.0"},
-        "/api/cards": {"cards": [CARD, dict(CARD, slug="kura", title="Kura", stream="", board="ready", path="Projects/Kura.md", areas=["ops"], topics=[])]},
+        "/api/cards": {"cards": [dict(CARD, repos=["Kura", "https://forge.example/o/Dotfiles.git"]),
+                                 dict(CARD, slug="kura", title="Kura", stream="", board="ready", path="Projects/Kura.md", areas=["ops"], topics=[])]},
+        "/api/now": NOW,
         "/api/cards/alpha": dict(CARD),
         "/api/cards/alpha/events": {"events": [{"ts": "t", "type": "edit"}] * 30},
         "/api/review": {"counts": {"wip": 1}, "sections": []},
@@ -108,6 +117,9 @@ def rooms():
         "POST /api/cards/alpha/claim": {"claimed": True},
         "DELETE /api/cards/alpha/claim": {"released": True},
         "PATCH /api/cards/readonly": (405, {"error": "read-only"}),
+        "PATCH /api/cards/repocard": lambda b: dict(CARD, slug="repocard", repos=b.get("repos")),
+        "PATCH /api/cards/oldboard": lambda b: dict(CARD, slug="oldboard"),               # a Konbini before 0.31.0: the field dropped
+        "PATCH /api/cards/strictboard": (400, {"error": "unknown field: repos"}),
     })
     niwa = Fake({"/api/status": {"version": "0.1.0", "head": "abc"},
                  "/api/suggestions": {"suggestions": [{"path": "Projects/Open.md", "reason": "r", "agent": "x", "date": "2026-01-15"}], "days": 60},
@@ -180,12 +192,12 @@ class Protocol(Base):
         for t in self.rpc("tools/list")["result"]["tools"]:
             self.assertEqual(t["inputSchema"]["type"], "object")
 
-    READS = {"board_list_cards", "board_get_card", "board_review", "board_roundup", "notes_search", "notes_read", "notes_recent",
+    READS = {"board_list_cards", "board_get_card", "board_now", "board_review", "board_roundup", "notes_search", "notes_read", "notes_recent",
              "notes_lookup", "notes_tags", "notes_folders", "pages_search", "pages_read", "collections_list", "machiya_search",
              "machiya_status", "garden_candidates", "pages_labels", "collections_audit"}
     WRITES = {"board_add_backlog", "board_move", "board_set_next", "board_block", "board_set_priority", "board_set_stream",
               "board_set_dependencies", "board_tag", "board_log", "board_claim", "board_release", "garden_suggest",
-              "board_set_goal", "board_set_due", "pages_set_label", "pages_relabel", "collections_set", "collections_remove"}
+              "board_set_goal", "board_set_due", "board_set_repos", "pages_set_label", "pages_relabel", "collections_set", "collections_remove"}
 
     def test_exactly_the_planned_tools_and_no_publish_or_label_writes(self):
         self.assertEqual(set(self.server.tools), self.READS | self.WRITES)
@@ -615,6 +627,103 @@ class BoardWrites(Base):
         self.assertEqual(len([w for w in self.konbini_writes() if w["path"].endswith("/events")]), 1)
         now[0] += 601
         self.assertFalse(call(self.server, "board_log", {"slug": "alpha", "message": "three"}).get("isError"))
+
+
+class BoardRepos(Base):
+    """0.13.0, stage 2 of Konbini's Now page: repos on board_list_cards, the repo= filter, board_now, board_set_repos."""
+
+    def test_rows_carry_repos_and_a_missing_field_is_empty(self):
+        d = data(call(self.server, "board_list_cards", {}))
+        self.assertEqual({c["slug"]: c["repos"] for c in d["cards"]},
+                         {"alpha": ["Kura", "https://forge.example/o/Dotfiles.git"], "kura": []})
+
+    def test_repo_filter_takes_a_name_or_a_url_in_any_case(self):
+        for repo in ("kura", "KURA", "https://github.com/machiya-kobo/kura.git", "git@forge:machiya/kura", "dotfiles",
+                     "ssh://forge.example/o/dotfiles.GIT/"):
+            d = data(call(self.server, "board_list_cards", {"repo": repo}))
+            self.assertEqual([c["slug"] for c in d["cards"]], ["alpha"], repo)
+            self.assertEqual(d["total"], 1)
+        self.assertEqual(data(call(self.server, "board_list_cards", {"repo": "niwa"}))["cards"], [])
+        self.assertEqual(data(call(self.server, "board_list_cards", {"repo": "kur"}))["cards"], [])    # whole names only
+        self.assertEqual(self.fakes["konbini"].seen[-1]["query"], {})          # filtered here: Konbini takes no repo param
+
+    def test_repo_filter_combines_with_the_others(self):
+        self.assertEqual(data(call(self.server, "board_list_cards", {"repo": "kura", "text": "alpha"}))["total"], 1)
+        self.assertEqual(data(call(self.server, "board_list_cards", {"repo": "kura", "stream": "nope"}))["total"], 0)
+        call(self.server, "board_list_cards", {"repo": "kura", "board": "wip"})
+        self.assertEqual(self.fakes["konbini"].seen[-1]["query"], {"board": "wip"})
+
+    def test_a_bad_repo_is_an_error(self):
+        for bad in ("a b", "https://", "kura!", "x" * 101, "/"):
+            self.assertTrue(call(self.server, "board_list_cards", {"repo": bad})["isError"], bad)
+
+    def test_the_repo_argument_is_not_logged(self):
+        call(self.server, "board_list_cards", {"repo": "https://user:secret@forge.example/o/kura.git"})
+        with open(self.server.log_path) as f:
+            self.assertNotIn("secret", f.read())
+
+    def test_now_passes_konbini_through_wrapped_and_drops_session_urls(self):
+        r = call(self.server, "board_now")
+        self.assertEqual(r["structuredContent"]["trust"], "untrusted")
+        d = data(r)
+        self.assertEqual((d["days"], d["since"]), (7, NOW["since"]))
+        self.assertEqual(d["working"], NOW["working"])
+        self.assertEqual(d["quiet"], NOW["quiet"])
+        self.assertEqual(d["uncarded"], NOW["uncarded"])
+        self.assertEqual(d["live"], [{k: v for k, v in NOW["live"][0].items() if k != "session_url"}])
+        self.assertNotIn("session", json.dumps(r))
+        self.assertEqual(self.fakes["konbini"].seen[-1]["path"], "/api/now")
+        self.assertEqual(self.server.tools["board_now"]["inputSchema"]["properties"], {})
+
+    def test_now_on_a_konbini_without_it_says_which_version(self):
+        del self.fakes["konbini"].routes["/api/now"]
+        r = call(self.server, "board_now")
+        self.assertTrue(r["isError"])
+        self.assertIn("0.29.0", body(r)["error"])
+
+    def test_set_repos_sends_the_whole_list_and_returns_the_row(self):
+        r = call(self.server, "board_set_repos", {"slug": "repocard", "repos": ["Techo", "https://github.com/o/workshop.git",
+                                                                                 "techo", " dotfiles "]})
+        self.assertFalse(r.get("isError"), r)
+        last = self.fakes["konbini"].writes()[-1]
+        self.assertEqual((last["method"], last["path"], last["body"]),
+                         ("PATCH", "/api/cards/repocard", {"repos": ["Techo", "workshop", "dotfiles"]}))
+        self.assertEqual(last["headers"]["x-agent"], "mcp:t")
+        d = data(r)
+        self.assertEqual((d["slug"], d["repos"]), ("repocard", ["Techo", "workshop", "dotfiles"]))
+        self.assertTrue(d["url"].endswith("/p/repocard"))
+
+    def test_an_empty_list_clears_but_a_missing_one_is_refused(self):
+        self.assertFalse(call(self.server, "board_set_repos", {"slug": "repocard", "repos": []}).get("isError"))
+        self.assertEqual(self.fakes["konbini"].writes()[-1]["body"], {"repos": []})
+        n = len(self.fakes["konbini"].writes())
+        for args in ({"slug": "repocard"}, {"slug": "repocard", "repos": "kura"}, {"slug": "repocard", "repos": ["a b"]},
+                     {"slug": "repocard", "repos": ["x"] * 21}, {"slug": "../x", "repos": []}):
+            self.assertTrue(call(self.server, "board_set_repos", args)["isError"], args)
+        self.assertEqual(len(self.fakes["konbini"].writes()), n)
+
+    def test_an_older_konbini_is_a_clear_error_not_a_silent_success(self):
+        for slug in ("oldboard", "strictboard"):          # 200 without the field, and a 400 naming it
+            r = call(self.server, "board_set_repos", {"slug": slug, "repos": ["kura"]})
+            self.assertTrue(r["isError"], slug)
+            self.assertIn("Konbini 0.31.0 or later", body(r)["error"], slug)
+            self.assertIn("0.22.0", body(r)["error"], slug)        # the fake's version, read from /api/status
+            self.assertNotIn("needs_owner", body(r))
+
+    def test_set_repos_is_a_board_write(self):
+        t = self.server.tools["board_set_repos"]
+        self.assertEqual(t["limits"], ("board_write", "board_write_day"))
+        self.assertFalse(t["annotations"]["readOnlyHint"])
+        server = make_server(self.fakes, MCP_WRITES_PER_MIN="1")
+        self.assertFalse(call(server, "board_set_repos", {"slug": "repocard", "repos": ["a"]}).get("isError"))
+        r = call(server, "board_set_repos", {"slug": "repocard", "repos": ["b"]})
+        self.assertTrue(r["isError"])
+        self.assertEqual(body(r)["code"], "rate_limited")
+        os.unlink(server.log_path)
+
+    def test_a_refusal_stays_an_owner_question(self):
+        r = call(self.server, "board_set_repos", {"slug": "locked", "repos": ["kura"]})
+        self.assertTrue(body(r)["needs_owner"])
 
 
 class AddBacklog(Base):

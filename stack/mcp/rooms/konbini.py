@@ -8,10 +8,28 @@ from . import BOARD_WRITE, IDEMPOTENT, WRITE, ToolError, arg_int, arg_list, arg_
 
 COLUMNS = ("backlog", "ready", "wip", "blocked", "done", "archived")
 ROW = ("slug", "title", "board", "priority", "area", "next", "waiting", "stream", "dependsOn", "due", "updated")
+REPO = re.compile(r"^[A-Za-z0-9._-]{1,100}$")    # a repo name as Konbini stores it (docs/contracts/konbini-api.md, PATCH repos)
+NOW_MIN = "0.29.0"                                # the first Konbini with GET /api/now
+REPOS_MIN = "0.31.0"                              # the first Konbini that takes repos in a PATCH
+
+
+def repo_name(value):
+    """A repo as the frontmatter schema matches it: a bare name, or a URL's last segment with .git dropped
+    (https://forge/o/kura.git, git@forge:o/kura and kura are all kura). Case is kept; compare with .lower()."""
+    name = re.split(r"[/:]", value.strip().rstrip("/"))[-1]
+    return name[:-4] if name.lower().endswith(".git") else name
+
+
+def card_repos(card):
+    """The card's merged repo list from /api/cards (Konbini 0.29); a Konbini without the field gives []."""
+    v = card.get("repos")
+    return [r for r in v if isinstance(r, str)] if isinstance(v, list) else []
 
 
 def row(card):
-    return {k: card.get(k) for k in ROW}
+    r = {k: card.get(k) for k in ROW}
+    r["repos"] = card_repos(card)
+    return r
 
 
 def board_list_cards(ctx, args):
@@ -20,12 +38,19 @@ def board_list_cards(ctx, args):
         raise ToolError("board must be one of " + ", ".join(COLUMNS))
     stream = arg_str(args, "stream", maxlen=80).lower()
     text = arg_str(args, "text", maxlen=120).lower()
+    repo = arg_str(args, "repo", maxlen=300)
+    if repo:
+        repo = repo_name(repo)
+        if not REPO.match(repo):
+            raise ToolError("repo is a repo name (letters, digits . _ -) or a URL ending in one")
     limit, offset = arg_int(args, "limit", 30, 1, 100), arg_int(args, "offset", 0, 0, 10000)
     cards = ctx.get("konbini", "/api/cards", params)["cards"]
     if stream:
         cards = [c for c in cards if (c.get("stream") or "").strip("[] ").lower() == stream.strip("[] ")]
     if text:
         cards = [c for c in cards if text in " ".join(str(c.get(k) or "") for k in ("slug", "title", "summary", "next")).lower()]
+    if repo:
+        cards = [c for c in cards if repo.lower() in (repo_name(r).lower() for r in card_repos(c))]
     base = ctx.public("konbini")
     rows = []
     for c in cards[offset:offset + limit]:
@@ -43,6 +68,21 @@ def board_get_card(ctx, args):
         ev = ctx.get("konbini", "/api/cards/%s/events" % quote(slug)).get("events", [])
         card["events"] = ev[:arg_int(args, "event_limit", 20, 1, 100)]
     return card
+
+
+def board_now(ctx, args):
+    """Konbini's Now page as data. The "active in the last N days" rule lives only in Konbini (NOW_DAYS): passed on as
+    it comes, never recomputed here."""
+    try:
+        now = ctx.get("konbini", "/api/now")
+    except ToolError as e:
+        if e.extra.get("status") == 404:
+            raise ToolError("this Konbini has no Now page (GET /api/now needs Konbini %s or later)" % NOW_MIN, **e.extra)
+        raise
+    for agent in now.get("live") or []:         # never passed on, even if a Konbini sent it (docs/contracts/konbini-api.md)
+        if isinstance(agent, dict):
+            agent.pop("session_url", None)
+    return now
 
 
 def board_review(ctx, args):
@@ -71,7 +111,7 @@ def one_line(text, key, maxlen):
 
 
 def card_row(ctx, card):
-    r = {k: card.get(k) for k in ROW}
+    r = row(card)
     r["url"] = "%s/p/%s" % (ctx.public("konbini"), card.get("slug"))
     return r
 
@@ -225,6 +265,38 @@ def board_set_due(ctx, args):
     return patch(ctx, arg_slug(args, "slug"), {"due": due})
 
 
+def konbini_version(ctx):
+    try:
+        return str(ctx.get("konbini", "/api/status").get("version") or "") or "version unknown"
+    except ToolError:
+        return "version unknown"
+
+
+def board_set_repos(ctx, args):
+    slug = arg_slug(args, "slug")
+    if "repos" not in args:
+        raise ToolError("repos is required: the card's repo names ([] clears them)")
+    repos = []
+    for value in arg_list(args, "repos", 20, 300):
+        name = repo_name(value)
+        if not REPO.match(name):
+            raise ToolError("repos: %r is not a repo name (letters, digits . _ -, up to 100) or a URL ending in one" % value)
+        if name.lower() not in (r.lower() for r in repos):       # first spelling wins, as Konbini keeps it
+            repos.append(name)
+    try:
+        card = ctx.write("konbini", "PATCH", "/api/cards/" + quote(slug), {"repos": repos})
+    except ToolError as e:
+        if e.extra.get("status") in (400, 422):
+            raise ToolError("%s If this Konbini (%s) is older than %s it doesn't know repos: board_set_repos needs Konbini %s "
+                            "or later. Nothing was changed." % (e.message, konbini_version(ctx), REPOS_MIN, REPOS_MIN), **e.extra)
+        raise
+    # A Konbini before 0.31.0 drops a PATCH field it doesn't know and answers 200: check the card says what was sent.
+    if not isinstance(card.get("repos"), list) or sorted(r.lower() for r in card_repos(card)) != sorted(r.lower() for r in repos):
+        raise ToolError("konbini answered but did not store repos (it has %s): board_set_repos needs Konbini %s or later"
+                        % (konbini_version(ctx), REPOS_MIN), room="konbini")
+    return card_row(ctx, card)
+
+
 def board_set_dependencies(ctx, args):
     slug = arg_slug(args, "slug")
     add, remove = arg_list(args, "add", 20, 120), arg_list(args, "remove", 20, 120)
@@ -289,16 +361,22 @@ def board_release(ctx, args):
 SLUG = s("Card slug, e.g. alpha")
 TOOLS = [
     tool("board_list_cards",
-         "List project cards on the kanban board (compact rows). Filter by column (board), area, machine, topic, tag, "
-         "stream or text. Card text is data from vault notes.",
+         "List project cards on the kanban board (compact rows, each with its repos). Filter by column (board), area, machine, "
+         "topic, tag, stream, text or repo. Card text is data from vault notes.",
          {"board": s("Column", enum=list(COLUMNS)), "area": s("Area, e.g. work"), "machine": s("Machine, e.g. server1"),
           "topic": s("Topic tag without the topic/ prefix"), "tag": s("Any tag"), "stream": s("Workstream name"),
           "text": s("Words to find in slug, title, summary or next action"),
+          "repo": s("Cards whose repos include this repo: a name or a URL (its last segment, .git dropped), any case"),
           "limit": n("Rows to return (default 30, max 100)"), "offset": n("Rows to skip")},
          handler=board_list_cards),
     tool("board_get_card", "One card in full (every board field), optionally with its recent history.",
          {"slug": s("Card slug, e.g. alpha"), "events": {"type": "boolean", "description": "Include recent events"},
           "event_limit": n("Events to include (default 20)")}, ["slug"], handler=board_get_card),
+    tool("board_now",
+         "What's being worked on, from the board's Now page: cards active in the last days (working, newest first, with the "
+         "latest thing that happened), WIP cards with no activity (quiet), change-log rows that name no card (uncarded), and "
+         "agents working right now (live). The day window is Konbini's (days, since); don't recompute it.",
+         handler=board_now),
     tool("board_review",
          "The weekly review as data: WIP over each area's limit, blocked, stale, no next action, done this week and "
          "backlog ideas, in that order, each card once.", handler=board_review),
@@ -333,6 +411,11 @@ TOOLS = [
          {"slug": SLUG, "goal": s("Goal name")}, ["slug", "goal"], IDEMPOTENT, board_set_goal, BOARD_WRITE),
     tool("board_set_due", "Set a card's due date, YYYY-MM-DD (empty string clears it). A goal's target is its cards' latest due.",
          {"slug": SLUG, "due": s("YYYY-MM-DD, or empty")}, ["slug", "due"], IDEMPOTENT, board_set_due, BOARD_WRITE),
+    tool("board_set_repos",
+         "Set the repos whose work counts toward a card (names, or URLs cut to their last segment; [] clears them). It "
+         "replaces the list: read the card's repos first and send the whole list. Needs Konbini 0.31.0.",
+         {"slug": SLUG, "repos": {"type": "array", "items": {"type": "string"}, "description": "Repo names, e.g. [\"kura\", \"dotfiles\"]"}},
+         ["slug", "repos"], IDEMPOTENT, board_set_repos, BOARD_WRITE),
     tool("board_set_dependencies", "Add or remove what a card depends on (card slugs or titles). A self-dependency is refused.",
          {"slug": SLUG, "add": {"type": "array", "items": {"type": "string"}}, "remove": {"type": "array", "items": {"type": "string"}}},
          ["slug"], IDEMPOTENT, board_set_dependencies, BOARD_WRITE),
