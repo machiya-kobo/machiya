@@ -13,7 +13,7 @@ Upstream Hister is now Nogon (v0.22.0). The owner chose on 2026-11-19 to rename 
    - The helper is renamed `nogon-login`.
 2. **The switch:** deployments move to the new names.
 3. **The old names go:** the house's own room id becomes `nogon`, and writers send `Origin: nogon://`.
-   - **vaultkit 0.41.0:** `nogonauth` (`NogonAuth`, `nogon_headers`, which sends `Origin: nogon://`); `histerauth` stays one release as an alias, until 0.42.0.
+   - **vaultkit 0.41.0:** `nogonauth` (`NogonAuth`, `nogon_headers`, which sends `Origin: nogon://`); `histerauth` stayed one release as an alias and is gone in **0.42.0**, which also drops the old-id matches (`data-room="hister"`, the `show_hister` switch) from `machiya.css`/`machiya.js`; stored values (`hister` in `apps_hidden`, a `show_hister` cookie) are still read as `nogon`.
    - The house's room id is `nogon`. A stored or old `hister` (in `MACHIYA_ROOMS`, the account's `apps_hidden`, a `show_hister` cookie) is still read as `nogon`; only `nogon` is written.
    - The old Machiya settings stop a room, naming the new one: `<P>_AUTH=hister` (use `nogon`), and a `<P>_HISTER_*` read through `names.setting()` without its `<P>_NOGON_*` twin.
    - **The lead's other services (3b)** do the same in their own stdlib code: a `<P>_HISTER_*` set without its `<P>_NOGON_*` twin stops the start and names the new one, and every call to Nogon sends `Origin: nogon://` (smallweb 0.6.0, shiori-ai 0.4.0, shiori-feed 0.4.0, feed-import 0.3.0, code-import 0.3.0; nogon-login, landing, machiya-mcp and the rooms at their own stage-3 releases). smallweb's `/api/status` reports only `nogon` since 0.6.0.
