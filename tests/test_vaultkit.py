@@ -925,8 +925,8 @@ class ShellTest(unittest.TestCase):
         css = open(os.path.join(ROOT, "ui", "machiya.css"), encoding="utf-8").read()
         for room in ("shiori", "konbini", "niwa", "kura", "nogon", "searxng", "machiya"):    # every icon is drawn
             self.assertIn('.seal.icon[data-room="%s"] { background-image: url("data:image/' % room, css)
-        # 0.41: Nogon's logo also for a page that still uses the old id (genkan, until it moves)
-        self.assertIn('.seal.icon[data-room="hister"], .seal.icon[data-room="nogon"] { background-image:', css)
+        # 0.42: the old id's selector (data-room="hister", for genkan until it moved) is gone
+        self.assertNotIn('data-room="hister"', css)
         self.assertIn('href="https://nogon.t/" data-room="nogon"', menu)
         self.assertLess(menu.index("Shiori"), menu.index("Konbini"))                          # front to back
         self.assertLess(menu.index("Niwa"), menu.index("Nogon"))                             # neighbours last

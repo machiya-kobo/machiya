@@ -1,5 +1,5 @@
 """Hister is now Nogon (owner, 2026-11-19: rename everything Machiya calls Hister): Machiya's own names, and what is
-left of the old ones (docs/contracts/hister.md "Names").
+left of the old ones (docs/contracts/nogon.md "Names").
 
 Stage 3 (vaultkit 0.41): the house's names are Nogon's.
   - setting(): a setting spelled with NOGON (KURA_NOGON_URL, NOGON_LOGIN_DB, …). Its old HISTER twin is no longer

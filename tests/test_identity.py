@@ -894,7 +894,7 @@ class NoScryptTest(unittest.TestCase):
 import hashlib, io, json, os, sys, tempfile
 del hashlib.scrypt                                           # as on OpenBSD
 sys.path.insert(0, sys.argv[1])
-from vaultkit import identity, nogonauth, histerauth, signin, shell, prefs   # must import
+from vaultkit import identity, nogonauth, signin, shell, prefs   # must import
 out = {"have": identity.HAVE_SCRYPT}
 d = tempfile.mkdtemp()
 path = os.path.join(d, "identity.toml")

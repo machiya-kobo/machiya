@@ -501,18 +501,17 @@ class MachiyaJsTest(unittest.TestCase):
         self.assertEqual(x["account"], {"apps_hidden": "kura"})
 
     def test_old_room_id_still_hides_nogon(self):
-        """vaultkit 0.41 (Hister is now Nogon): a machiya_show_hister cookie and an account row holding `hister`
-        still hide the Nogon row, on a new page (data-room="nogon") and an old one (genkan's "hister"); nothing is
-        written under the old id, and an old page's show_hister switch writes show_nogon."""
+        """vaultkit 0.41 (Hister is now Nogon), kept in 0.42: a machiya_show_hister cookie and an account row
+        holding `hister` still hide the Nogon row (data-room="nogon"); nothing is written under the old id. (0.42
+        dropped the match for a page that renders data-room="hister" or the show_hister switch.)"""
         r = self.out["renamed"]
-        self.assertEqual(r["oldCookie"], {"nogon": True, "hister": True})
+        self.assertEqual(r["oldCookie"], {"nogon": True})
         self.assertEqual((r["filled"], r["control"]), ({"apps_hidden": "nogon"}, False))
-        self.assertEqual(r["afterOn"], {"hidden": {"nogon": False, "hister": False}, "cookie": "true", "account": ""})
-        self.assertEqual(r["phone"], {"nogon": True, "hister": True, "searxng": True})   # the account's old row
+        self.assertEqual(r["afterOn"], {"hidden": {"nogon": False}, "cookie": "true", "account": ""})
+        self.assertEqual(r["phone"], {"nogon": True, "searxng": True})   # the account's old row
         self.assertEqual((r["phonePuts"], r["phoneCookie"], r["phoneOld"]), (2, "false", None))  # applied, not sent
-        self.assertEqual((r["genkanBefore"], r["genkan"]), ({"hister": True}, {"hister": False}))
-        self.assertEqual((r["genkanCookie"], r["genkanOld"]), ("true", None))
-        self.assertEqual(r["puts"], [{"apps_hidden": "nogon"}, {"apps_hidden": ""}, {"apps_hidden": "searxng"}])
+        self.assertEqual(r["puts"], [{"apps_hidden": "nogon"}, {"apps_hidden": ""}])
+        self.assertEqual(r["account"], {"apps_hidden": "hister,searxng"})   # the old row is read, never rewritten by a phone
 
     def test_account_down_nothing_breaks(self):
         d = self.out["down"]

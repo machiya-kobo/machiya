@@ -1,5 +1,5 @@
 """vaultkit.nogonauth (AUTH=nogon; formerly histerauth): python3 -m unittest tests.test_nogonauth (standard library
-only; no network: the helper is a fake fetch). The histerauth alias module (0.41 only) is tested at the end."""
+only; no network: the helper is a fake fetch). The histerauth alias module (0.41 only) went in 0.42; a test says so."""
 import io
 import json
 import os
@@ -848,34 +848,15 @@ class TokenGateTest(unittest.TestCase):
                                              "MCP_HISTER_USERS": "owner"})
 
 
-class HisterAuthAliasTest(unittest.TestCase):
-    """vaultkit 0.41: histerauth is nogonauth under its old name, for one release (it goes in 0.42.0)."""
+class HisterAuthGoneTest(unittest.TestCase):
+    """vaultkit 0.42: the histerauth alias (0.41 only) is gone; nogonauth is the one module."""
 
-    # every name the rooms, the stack's services and their tests used from histerauth (2026-11-20)
-    USED = ("HisterAuth", "hister_headers", "origin_of", "RSID_RE", "state_hash", "signin_meta", "NONCE_RE",
-            "load_for", "banner_html", "RTOKEN_PREFIX", "safe_return", "RTOKEN_RE", "ROOM_PREFIX", "TOKEN_RE",
-            "STATE_MAX_AGE", "Result", "new_nonce", "HOST_PREFIX", "CODE_RE", "token_gate_for", "SSO_COOKIE", "SID_RE",
-            "SID_PREFIX", "PROVIDER_RE", "OUT_MAX_AGE", "origins_header", "_http_fetch", "CODE_PREFIX",
-            "CALLBACK_PATH", "FALLBACK", "TokenGate")
-
-    def test_old_and_new_names_are_the_same_objects(self):
-        from vaultkit import histerauth
-        self.assertIs(histerauth.HisterAuth, ha.NogonAuth)
-        self.assertIs(histerauth.NogonAuth, ha.NogonAuth)
-        self.assertIs(histerauth.hister_headers, ha.nogon_headers)
-        self.assertIs(histerauth.nogon_headers, ha.nogon_headers)
-        for name in self.USED:
-            self.assertTrue(hasattr(histerauth, name), name)
-        for name in [n for n in vars(ha) if not n.startswith("__")]:
-            self.assertIs(getattr(histerauth, name), getattr(ha, name), name)
-        with self.assertRaises(AttributeError):
-            histerauth.no_such_name
-
-    def test_the_alias_behaves_as_nogonauth(self):
-        from vaultkit import histerauth
-        self.assertEqual(histerauth.hister_headers(""), {"Origin": "nogon://"})
-        a = histerauth.load_for("niwa", dict(LoadForTest.BASE))
-        self.assertIsInstance(a, ha.NogonAuth)
+    def test_histerauth_is_gone(self):
+        with self.assertRaises(ImportError):
+            from vaultkit import histerauth  # noqa: F401
+        self.assertFalse(hasattr(ha, "HisterAuth"))
+        self.assertFalse(hasattr(ha, "hister_headers"))
+        self.assertEqual(ha.nogon_headers(""), {"Origin": "nogon://"})
 
 
 if __name__ == "__main__":

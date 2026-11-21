@@ -205,7 +205,7 @@ _TOKENS_LOCK = threading.Lock()
 
 
 def nogon_headers(token_file=""):
-    """The headers every vaultkit-based Nogon caller sends (docs/contracts/hister.md): `Origin: nogon://` (Nogon v0.22
+    """The headers every vaultkit-based Nogon caller sends (docs/contracts/nogon.md): `Origin: nogon://` (Nogon v0.22
     and later; formerly hister_headers and `hister://`, before vaultkit 0.41) and, when
     `token_file` names a readable non-empty file, `X-Access-Token` with its contents (stripped). The file is re-read
     when it changes (inode, mtime, size), so a rotated token is picked up without a restart. The token is never

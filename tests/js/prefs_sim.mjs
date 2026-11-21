@@ -311,28 +311,24 @@ const out = {};
 }
 
 // 9. Hister is now Nogon (vaultkit 0.41): a switch this browser or the account kept under the old id still hides
-//    Nogon, a page that still uses the old id (genkan, until it moves) is matched too, and what is written is nogon
+//    Nogon, and what is written is nogon. (0.42: a page that renders the old id, data-room="hister" or the
+//    data-set="show_hister" switch, is no longer matched; no page does.)
 {
   const account = new Store("account");
-  const laptop = new Device("laptop"), phone = new Device("phone"), old = new Device("old");
+  const laptop = new Device("laptop"), phone = new Device("phone");
   laptop.shared.machiya_show_hister = "false";               // chosen before 0.41
-  const k = await visit(laptop, "kura", account, { settings: true, rooms: ["nogon", "hister"] });
+  const k = await visit(laptop, "kura", account, { settings: true, rooms: ["nogon"] });
   const oldCookie = k.hidden();
   const filled = { ...account.prefs };
   const control = k.controls.show_nogon.checked;
   await k.change("show_nogon", true);
   const afterOn = { hidden: k.hidden(), cookie: laptop.cookies().machiya_show_nogon, account: account.prefs.apps_hidden };
   account.set({ apps_hidden: "hister,searxng" });             // a row the account stored before 0.41
-  const p = await visit(phone, "niwa", account, { rooms: ["nogon", "hister", "searxng"] });
+  const p = await visit(phone, "niwa", account, { rooms: ["nogon", "searxng"] });
   const phonePuts = account.puts.length;
-  const g = await visit(old, "genkan", account, { settings: true, apps: ["hister"], rooms: ["hister"] });
-  const genkanBefore = g.hidden();
-  await g.change("show_hister", true);                        // an old page's own switch, under the old id
   out.renamed = { oldCookie, filled, control, afterOn, phone: p.hidden(), phonePuts,
                   phoneCookie: phone.cookies().machiya_show_nogon ?? null,
-                  phoneOld: phone.cookies().machiya_show_hister ?? null, genkanBefore, genkan: g.hidden(),
-                  genkanCookie: old.cookies().machiya_show_nogon ?? null,
-                  genkanOld: old.cookies().machiya_show_hister ?? null, puts: account.puts, account: account.prefs };
+                  phoneOld: phone.cookies().machiya_show_hister ?? null, puts: account.puts, account: account.prefs };
 }
 
 console.log(JSON.stringify(out));

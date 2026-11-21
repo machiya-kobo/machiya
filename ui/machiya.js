@@ -62,12 +62,12 @@ const TEXT_SIZES = ["xsmall", "small", "standard", "large", "xlarge"];
 // the switcher's rows (vaultkit/prefs.py APPS; a test checks they match): apps_hidden <-> show_<app>
 const APPS = ["shiori", "konbini", "niwa", "kura", "nogon", "searxng", "machiya"];
 // the room ids before vaultkit 0.41 (Hister is now Nogon; vaultkit/names.py ROOM_ALIASES): a show_hister cookie or
-// stored switch, or an account's apps_hidden naming hister, is read as nogon; a page that still uses the old id
-// (genkan, until it moves) is matched too. What this page writes uses the new id.
+// stored switch, or an account's apps_hidden naming hister, is read as nogon, for good (it is what people saved).
+// What this page writes uses the new id. A page that renders data-room="hister" or data-set="show_hister" is no
+// longer matched (0.42: no page does).
 const OLD_IDS = { hister: "nogon" };
 const OLD_OF = Object.fromEntries(Object.entries(OLD_IDS).map(([old, now]) => [now, old]));
 const roomId = (a) => OLD_IDS[a] || a;
-const showKey = (key) => (key.startsWith("show_") ? "show_" + roomId(key.slice(5)) : key);
 const appsList = (v) => { const set = new Set(v.split(",").map(roomId)); return APPS.filter((a) => set.has(a)).join(","); };
 // the deployment's extra rooms (shell.extra_rooms): only the page knows their keys
 const EXTRA = [...new Set([...document.querySelectorAll("[data-extra-room]")].map((el) => el.dataset.extraRoom))]
@@ -125,8 +125,7 @@ function apply(key, value) {
     b.dataset.text = value || current("textSize");
   } else if (key.startsWith("show_")) {
     const which = roomId(key.slice(5));
-    const ids = OLD_OF[which] ? [which, OLD_OF[which]] : [which];
-    for (const a of document.querySelectorAll(ids.map((i) => `.rooms .menu [data-room="${i}"]`).join(", "))) {
+    for (const a of document.querySelectorAll(`.rooms .menu [data-room="${which}"]`)) {
       a.hidden = value === false;
     }
   }
@@ -142,8 +141,7 @@ function barColour() {
   if (metas[0]) { metas[0].removeAttribute("media"); metas[0].content = colour; }
 }
 function showControl(key, value) {
-  const old = key.startsWith("show_") && OLD_OF[key.slice(5)] ? `, [data-set="show_${OLD_OF[key.slice(5)]}"]` : "";
-  for (const el of document.querySelectorAll(`[data-set="${key}"]` + old)) {
+  for (const el of document.querySelectorAll(`[data-set="${key}"]`)) {
     if (el.type === "checkbox") el.checked = !!value; else el.value = value;
   }
 }
@@ -472,7 +470,6 @@ bindDevice(document, null);
 
 // the /settings page: every [data-set] control. keep() is what a change does there, and what Save does in the sheet.
 function keep(key, value, cookie) {
-  key = showKey(key);                                 // a page's old show_hister switch keeps show_nogon (0.41)
   const all = load();
   all[key] = value;
   save(all);
@@ -489,9 +486,8 @@ function bindSettings(root, sheet) {
   for (const el of root.querySelectorAll("[data-set]")) {
     const key = el.dataset.set;
     const cookie = "cookie" in el.dataset;
-    const k = showKey(key);
-    if (k in now && !cookie) {                        // cookie-backed values come server-rendered
-      if (el.type === "checkbox") el.checked = !!now[k]; else el.value = now[k];
+    if (key in now && !cookie) {                      // cookie-backed values come server-rendered
+      if (el.type === "checkbox") el.checked = !!now[key]; else el.value = now[key];
     }
     if (sheet) sheet.shown(key, el.type === "checkbox" ? el.checked : el.value);
     el.addEventListener("change", () => {
