@@ -8,9 +8,8 @@
            403: the gate refused the caller. 429: over SHIORI_FEED_PER_MINUTE (+ Retry-After). 502: Nogon failed.
     GET /shiori/healthz -> 200 "ok" (no gate; doesn't touch Nogon)
     GET /shiori/api/status -> 200 JSON {"ok", "ready", "error", "version", "auth", "room_tokens", "nogon": {"token",
-        "last_ok", "last_error"}, "hister": the same} (no gate, like every Machiya service's): `error` is set once three
-        feeds in a row failed to reach Nogon. "hister" (the name before the rename) goes once the Shiori app on every
-        device reads "nogon" (the rename's stage 3c).
+        "last_ok", "last_error"}} (no gate, like every Machiya service's): `error` is set once three
+        feeds in a row failed to reach Nogon. Its "hister" twin (the name before the rename) went in 0.5.0.
     GET /shiori/api/changelog -> this service's CHANGELOG.md, text/markdown (no gate; at most 64 KiB, an ETag)
 
 The paths also answer without the /shiori prefix (/feed, /healthz, /api/status, /api/changelog), for a proxy that
@@ -49,7 +48,7 @@ from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from xml.sax.saxutils import escape
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 _old_names = set()
 
@@ -529,7 +528,7 @@ class Server(ThreadingHTTPServer):
         nogon = {"token": self.cfg.token is not None, "last_ok": h["last_ok"], "last_error": h["last_error"]}
         return {"ok": error is None, "ready": True, "error": error, "version": VERSION, "auth": self.cfg.auth,
                 "room_tokens": self.cfg.room_tokens is not None,
-                "nogon": nogon, "hister": nogon}     # 0.4.0: "nogon"; "hister" until the Shiori apps read "nogon" (3c)
+                "nogon": nogon}     # 0.5.0: "nogon" only (the rename's stage 3c)
 
 
 def make_server(cfg, bind=None, port=None):

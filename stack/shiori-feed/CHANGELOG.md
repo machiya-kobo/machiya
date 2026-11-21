@@ -1,5 +1,9 @@
 # Changelog: shiori-feed
 
+## 0.5.0
+
+- **The rename's stage 3c (owner, 2026-11-21):** `/shiori/api/status` has `nogon` only; its `hister` twin is gone. Shiori's apps read `nogon` since 1.30.0.
+
 ## 0.4.0
 
 - The rename's stage 3 (Hister is now Nogon):

@@ -374,7 +374,7 @@ class TestStatusAndChangelog(Base):
         st = json.loads(get(self.base, "/api/status")[2])
         self.assertTrue(st["ok"])
         self.assertIsNotNone(st["nogon"]["last_ok"])
-        self.assertEqual(st["hister"], st["nogon"])             # 0.4.0: both, until the Shiori apps read "nogon" (3c)
+        self.assertNotIn("hister", st)                           # 0.5.0: "nogon" only (stage 3c)
         self.assertNotIn("/api/status", self.err.getvalue())    # the probe isn't logged
 
     def test_changelog(self):
