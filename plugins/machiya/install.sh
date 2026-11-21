@@ -40,10 +40,10 @@ H = "mcp__plugin_machiya_hister__"
 d = json.load(open(path))
 allow = [prefix + n for n in ["board_list_cards", "board_get_card", "board_review", "board_roundup", "notes_*", "collections_list",
          "collections_audit", "pages_labels", "pages_search", "pages_read", "garden_candidates", "machiya_*", "board_set_next",
-         "board_log", "board_claim", "board_release"]]
+         "board_log", "board_claim", "board_release", "board_now"]]
 ask = [prefix + n for n in ["board_add_backlog", "board_move", "board_block", "board_set_priority", "board_set_stream", "board_set_goal",
        "board_set_due", "board_set_dependencies", "board_tag", "garden_suggest", "notes_create", "notes_update", "pages_set_label",
-       "pages_relabel", "collections_set", "collections_remove"]]
+       "pages_relabel", "collections_set", "collections_remove", "board_set_repos"]]
 # Hister's own MCP never reaches the model (plugin 0.3.0, the owner's "code and notes stay out of AI", 2026-10-05): its
 # search and get_preview return vault notes and code documents, its get_history the browsing history. Denied as the plugin
 # 0.2.x tools and as a separately added server's, whole servers and each tool by name. A deny rule removes the tool from the
@@ -67,6 +67,8 @@ perm["deny"] = cur + [x for x in deny if x not in cur]
 env = d.setdefault("env", {})
 if mode == "add":
     env["MACHIYA_AGENT"] = agent
+    for k in ("HISTER_MCP_URL", "HISTER_TOKEN_FILE"):     # plugin 0.2.x wrote these; nothing has read them since 0.3.0 (0.4.3)
+        env.pop(k, None)
     if mcp_url:
         env["MACHIYA_MCP_URL"] = mcp_url
     if token_file:      # a room token for machiya-mcp (plugin 0.4.0): only an mht_, only to https or loopback
